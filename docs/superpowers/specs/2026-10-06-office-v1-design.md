@@ -125,8 +125,10 @@ cwd = ~/.control-center/desks/<slug>
 - **Yan soru (`/btw`):** ayrı, tek seferlik bir süreç: `claude -p --resume <sessionId> --fork-session
   --setting-sources user,project,local --settings <aynı çalışan ayarları> --strict-mcp-config --tools ""`;
   soru stdin'den verilir (`--tools` kendinden sonraki argümanları yuttuğu için en sonda). Cevap panelde "yan cevap" olarak
-  görünür, asıl konuşmaya eklenmez, asıl iş bölünmez (doğrulandı, ~6 sn). Kopya oturum o an süren adımı
-  "yarıda kalmış" sanabilir; kabul edilen küçük kusur.
+  görünür, asıl konuşmaya eklenmez, asıl iş bölünmez (doğrulandı, ~6 sn). Kopya oturum o an süren aracı
+  "kesildi" görür (claude açık kalan aracı öyle kapatır) ve işin durduğunu sanır; bu yüzden çalışan çalışırken
+  sorunun önüne bir ofis notu eklenir: iş sürüyor, şu anki iş (bu turdaki mesajlar) ve çalışan araç. Kayda yalnızca
+  sahibinin sorusu yazılır.
 - **Durdur:** stdin'e `{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}` yazılır;
   tur hemen `error_during_execution` ile biter, süreç açık kalır ve sonraki mesajı alır (doğrulandı). Ardından
   süreç kapatılır, oturum korunur.

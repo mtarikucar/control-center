@@ -11,6 +11,26 @@ import type { Roster } from './roster.ts';
 
 export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam et.';
 export const CONTINUE_AFTER_RESTART = 'Ofis yeniden başladı; yarım kalan işine kaldığın yerden devam et.';
+/**
+ * Put before a side question asked while the employee works: the fork sees the open tool call cut off ("interrupted")
+ * and would otherwise answer as if the work had stopped.
+ */
+export const SIDE_QUESTION_MID_WORK =
+  '[Ofis notu — yan soru: asıl oturumun şu an çalışıyor ve işine devam ediyor. Bu kopyada son aracın "kesildi" görünmesi yalnızca bu yan soruya ait; iş durmadı. Kısaca cevap ver.]';
+
+const clip = (text: string, limit: number): string => {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+};
+
+/** "Bash — npm test" style: the tool and its most telling input field. */
+function describeTool(name: string, input: unknown): string {
+  if (typeof input !== 'object' || input === null) return name;
+  const record = input as Record<string, unknown>;
+  const key = ['command', 'file_path', 'notebook_path', 'pattern', 'url', 'query', 'description'].find((k) => typeof record[k] === 'string');
+  return key ? `${name} — ${clip(record[key] as string, 200)}` : name;
+}
+
 export const CONTINUE_AFTER_CRASH =
   'Oturumun beklenmedik şekilde kapandı ve yeniden açıldı; yarım kalan işine kaldığın yerden devam et.';
 
@@ -126,6 +146,7 @@ export class Engine {
     if (employee.lifecycle === 'archived') throw new ConflictError('Bu çalışan işten çıkarıldı.');
     if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; önce normal bir mesaj gönder.');
     this.#emit(id, { type: 'side.question', text: question });
+    const input = this.#runtime(id).turnActive ? `${this.#workNote(id)}\n\n${question}` : question;
     const atFork = this.#totals(id);
     const abort = new AbortController();
     this.#sideRuns.add(abort);
@@ -135,7 +156,7 @@ export class Engine {
       args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
       cwd: prepareDesk(this.#dataDir, employee),
       env: this.#env,
-      input: question,
+      input,
       timeoutMs: this.#sideQuestionTimeoutMs,
     }).finally(() => this.#sideRuns.delete(abort));
     // The fork's running totals start from the parent's, so only the difference is this question's cost.
@@ -143,6 +164,24 @@ export class Engine {
     const costUsd = result.sessionCostUsd >= atFork.costUsd ? result.sessionCostUsd - atFork.costUsd : result.sessionCostUsd;
     this.#emit(id, { type: 'side.answer', text: result.text, ok: result.ok, usage, costUsd });
     return { ok: result.ok, answer: result.text };
+  }
+
+  /** What the employee is doing right now, from this turn's events: the owner's asks and the tools still running. */
+  #workNote(id: string): string {
+    const after = this.#events.latest(id, 'turn.finished')?.seq ?? 0;
+    const current = this.#events.list({ after, employeeId: id, limit: 500 });
+    const asks: string[] = [];
+    const open = new Map<string, string>();
+    for (const s of current) {
+      const ev = s.event;
+      if (ev.type === 'message.user') asks.push(`«${clip(ev.text, 300)}»`);
+      else if (ev.type === 'tool.started') open.set(ev.toolUseId, describeTool(ev.name, ev.input));
+      else if (ev.type === 'tool.finished') open.delete(ev.toolUseId);
+    }
+    const lines = [SIDE_QUESTION_MID_WORK];
+    if (asks.length > 0) lines.push(`Şu anki iş: ${asks.join(' · ')}`);
+    if (open.size > 0) lines.push(`Çalışan araç: ${[...open.values()].join(' · ')}`);
+    return lines.join('\n');
   }
 
   stop(id: string): Promise<Employee> {
