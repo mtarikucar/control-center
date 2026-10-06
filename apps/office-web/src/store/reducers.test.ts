@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Employee, OfficeEvent, OfficeSnapshot, StoredEvent } from '@cc/shared';
+import type { Employee, OfficeEvent, OfficeSnapshot, Plan, StoredEvent, Task } from '@cc/shared';
 import { EMPTY_DATA, MAX_EVENTS, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
 
 const employee = (over: Partial<Employee> = {}): Employee => ({
@@ -180,5 +180,41 @@ describe('a restarted office log', () => {
     const fresh = applySnapshot(d, snapshot({ lastSeq: 3, employees: [employee({ id: 'e9', name: 'Yeni' })] }), 'live');
     expect(Object.keys(fresh.views)).toEqual(['e9']);
     expect(fresh).toMatchObject({ lastSeq: 3, usageSeq: 3, synced: true });
+  });
+});
+
+describe('company data', () => {
+  const plan = (over: Partial<Plan> = {}): Plan => ({
+    id: 'p1', title: 'Video', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '',
+    status: 'draft', version: 1, proposedBy: 'e1', createdAt: 1, updatedAt: 1, approvedAt: null, ...over,
+  });
+  const task = (over: Partial<Task> = {}): Task => ({
+    id: 't1', planId: 'p1', title: 'Senaryo', description: '', done: [], requester: 'owner', assignee: 'e1', priority: 3, dependsOn: [],
+    status: 'waiting', chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null, ...over,
+  });
+
+  it('takes plans and tasks from the snapshot, and keeps them current from events', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ tasks: [task()], plans: [plan()] }));
+    expect(d.tasks.t1?.status).toBe('waiting');
+    expect(d.plans.p1?.status).toBe('draft');
+    d = applyEvent(d, stored({ type: 'plan.changed', change: 'approved', plan: plan({ status: 'approved' }) }));
+    d = applyEvent(d, stored({ type: 'task.changed', change: 'started', task: task({ status: 'in_progress' }) }));
+    expect(d.plans.p1?.status).toBe('approved');
+    expect(d.tasks.t1?.status).toBe('in_progress');
+  });
+
+  it('keeps company events even for someone the page does not know yet', () => {
+    const d = applyEvent(EMPTY_DATA, stored({ type: 'task.changed', change: 'created', task: task({ id: 't9', assignee: 'stranger' }) }, 'stranger'));
+    expect(d.tasks.t9?.title).toBe('Senaryo');
+  });
+
+  it('refreshes when someone’s role changes', () => {
+    expect(needsRefresh(stored({ type: 'role.changed', kind: 'coordinator', title: 'K', team: '' }))).toBe(true);
+  });
+
+  it('a server without the company layer gives empty plans and tasks', () => {
+    const d = applySnapshot(EMPTY_DATA, snapshot());
+    expect(d.tasks).toEqual({});
+    expect(d.plans).toEqual({});
   });
 });

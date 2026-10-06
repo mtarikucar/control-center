@@ -3,6 +3,7 @@ import { MODEL_ALIASES, type ModelAlias } from '@cc/shared';
 import { VOXEL_CHARACTER, characterAssets } from '../assets/manifest.ts';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
+import { MODEL_LABELS } from './labels.ts';
 
 export function HireDialog() {
   const manifest = useOffice((s) => s.manifest);
@@ -51,7 +52,7 @@ export function HireDialog() {
             <select id="hire-model" value={model} onChange={(e) => setModel(e.target.value as ModelAlias)}>
               {MODEL_ALIASES.map((m) => (
                 <option key={m} value={m}>
-                  {m}
+                  {MODEL_LABELS[m]}
                 </option>
               ))}
             </select>
