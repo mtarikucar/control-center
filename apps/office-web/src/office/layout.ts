@@ -7,7 +7,8 @@ export interface Wall {
   x2: number;
   z2: number;
   height: number;
-  kind: 'solid' | 'window' | 'glass' | 'low';
+  /** `slats`: a wall clad in vertical oak slats (a feature wall or partition). */
+  kind: 'solid' | 'window' | 'glass' | 'low' | 'slats';
 }
 
 /** w/d/h are the item's own size before rotation; (x, z) is its centre on the floor, y lifts it onto a surface. */
@@ -22,12 +23,27 @@ export interface Placement {
   h: number;
   color: string;
   blocks: boolean;
+  /** A lamp: the strength of its warm light, which sits at `glowAt` of its height (0 = bottom, 1 = top). */
+  glow?: number;
+  glowAt?: number;
+  /** Leaves that move a little in the air. */
+  sway?: boolean;
 }
 
 export interface Spot {
   x: number;
   z: number;
   rotY: number;
+  /** Where to sit once at the spot (a sofa, an armchair): the spot itself is the free floor just in front of it. */
+  seat?: { x: number; z: number };
+}
+
+/** A desk's own things: monitors, keyboard, a mug. (x, z) is the desk's centre, rotY the way its person faces. */
+export interface Desk {
+  x: number;
+  z: number;
+  rotY: number;
+  monitors: 1 | 2;
 }
 
 export interface Carpet {
@@ -45,6 +61,7 @@ export interface Layout {
   walls: Wall[];
   furniture: Placement[];
   carpets: Carpet[];
+  desks: Desk[];
   seats: Spot[];
   coffeeSpots: Spot[];
   loungeSpots: Spot[];
@@ -55,96 +72,145 @@ const PI = Math.PI;
 const item = (assetId: string, x: number, z: number, rotY: number, w: number, d: number, h: number, color: string, extra: Partial<Placement> = {}): Placement => ({
   assetId, x, z, y: 0, rotY, w, d, h, color, blocks: true, ...extra,
 });
+const decor = (assetId: string, x: number, y: number, z: number, rotY: number, w: number, d: number, h: number, color: string, extra: Partial<Placement> = {}) =>
+  item(assetId, x, z, rotY, w, d, h, color, { y, blocks: false, ...extra });
+const plant = (assetId: string, x: number, z: number, h: number, size = 0.6) => item(assetId, x, z, 0, size, size, h, '#5f9a4a', { sway: true });
 
-// Open workspace: four columns of back-to-back desk pairs (row 0 faces south, row 1 faces north).
-const DESK_XS = [3.5, 6.2, 8.9, 11.6];
-const desks: Placement[] = [];
-const seats: Spot[] = [];
-for (const [row, deskZ, chairZ, rotY] of [[0, 9.6, 8.75, 0], [1, 10.4, 11.25, PI]] as const) {
-  DESK_XS.forEach((x, col) => {
-    desks.push(item('work_desk', x, deskZ, rotY, 1.5, 0.8, 0.75, '#d8a96a'));
-    desks.push(item((row + col) % 2 === 0 ? 'desktop_monitor' : 'laptop', x, deskZ + (row === 0 ? 0.15 : -0.15), rotY + PI, 0.6, 0.25, 0.45, '#2d3138', { y: 0.75, blocks: false }));
-    desks.push(item('ergonomic_chair', x, chairZ, rotY, 0.6, 0.6, 1.0, '#3a3f47', { blocks: false }));
-    seats.push({ x, z: chairZ, rotY });
+// Two clusters of four desks like the reference: pairs back to back, a planter running along the join.
+// Row 0 sits north of its desk facing south; row 1 sits south facing north.
+const furniture: Placement[] = [];
+const desks: Desk[] = [];
+const rows: Spot[][] = [[], []];
+function cluster(xs: number[], z0: number, dual: boolean[]) {
+  xs.forEach((x, col) => {
+    for (const row of [0, 1] as const) {
+      const deskZ = row === 0 ? z0 : z0 + 0.8;
+      const rotY = row === 0 ? 0 : PI;
+      const chairZ = row === 0 ? deskZ - 0.85 : deskZ + 0.85;
+      furniture.push(item('work_desk', x, deskZ, rotY, 1.4, 0.75, 0.75, '#d9b07a'));
+      furniture.push(item('ergonomic_chair', x, chairZ, rotY, 0.6, 0.6, 1.0, '#3a3f47', { blocks: false }));
+      desks.push({ x, z: deskZ, rotY, monitors: dual[col * 2 + row] ? 2 : 1 });
+      rows[row]!.push({ x, z: chairZ, rotY });
+      if ((col + row) % 2 === 0) furniture.push(decor('desk_plant', x + (row === 0 ? 0.52 : -0.52), 0.75, deskZ + (row === 0 ? -0.18 : 0.18), 0, 0.2, 0.2, 0.26, '#6a9a4a', { sway: true }));
+    }
+    furniture.push(decor('desk_planter', x, 0.75, z0 + 0.4, 0, 1.3, 0.32, 0.3, '#6a9a4a', { sway: true }));
   });
 }
+cluster([3.0, 4.5], 4.4, [true, false, false, true]);
+cluster([8.6, 10.1], 6.6, [false, true, true, false]);
+// Desk order: the four north-row seats first, so the first hires spread over both clusters.
+const seats: Spot[] = [rows[0]![0]!, rows[0]![1]!, rows[0]![2]!, rows[0]![3]!, rows[1]![0]!, rows[1]![1]!, rows[1]![2]!, rows[1]![3]!];
+
+furniture.push(
+  // By the windows: plant shelves, big plants, ivy hanging in front of the glass.
+  item('plant_shelf', 0.35, 1.9, PI / 2, 0.9, 0.4, 1.8, '#a6793f', { sway: true }),
+  item('plant_shelf', 0.35, 7.4, PI / 2, 0.9, 0.4, 1.8, '#a6793f', { sway: true }),
+  plant('large_plant_pot', 0.8, 0.8, 1.3),
+  plant('snake_plant', 0.7, 4.6, 1.0, 0.5),
+  plant('large_plant_pot', 7.3, 0.8, 1.3),
+  decor('hanging_plant', 0.5, 2.0, 3.4, 0, 0.5, 0.5, 0.9, '#5f9a4a', { sway: true }),
+  decor('hanging_plant', 0.5, 2.0, 5.8, 0, 0.5, 0.5, 0.9, '#5f9a4a', { sway: true }),
+  decor('geometric_wall_art', 5.6, 1.3, 0.16, 0, 1.0, 0.08, 1.0, '#e3a35c'),
+
+  // Glass meeting room (north, middle).
+  item('meeting_table_chairs', 10.5, 2.1, 0, 3.0, 1.8, 1.0, '#c99a5b'),
+  decor('whiteboard', 10.5, 0.9, 0.2, 0, 1.8, 0.1, 1.2, '#f5f5f2'),
+  decor('pendant_lamp', 9.9, 2.2, 2.1, 0, 0.45, 0.45, 0.55, '#2d3138', { glow: 2.4, glowAt: 0.08 }),
+  decor('pendant_lamp', 11.1, 2.2, 2.1, 0, 0.45, 0.45, 0.55, '#2d3138', { glow: 2.4, glowAt: 0.08 }),
+  plant('large_plant_pot', 12.5, 3.7, 1.1, 0.5),
+
+  // Server room (north-east corner).
+  item('server_rack', 15.3, 0.75, 0, 0.7, 0.9, 2.0, '#23262c'),
+  item('server_rack', 16.3, 0.75, 0, 0.7, 0.9, 2.0, '#23262c'),
+  item('server_rack', 17.2, 0.75, 0, 0.7, 0.9, 2.0, '#23262c'),
+
+  // Coffee bar against an oak slat wall (east).
+  item('coffee_counter_sink', 17.1, 7.3, -PI / 2, 3.0, 0.8, 1.0, '#e9e4dc'),
+  decor('espresso_machine', 17.15, 1.0, 6.4, -PI / 2, 0.5, 0.4, 0.45, '#454a52'),
+  decor('cafe_shelf', 17.55, 1.45, 7.7, -PI / 2, 1.1, 0.3, 0.62, '#c99a5b'),
+  decor('orange_bar_stool', 16.2, 0, 6.4, PI / 2, 0.45, 0.45, 0.75, '#e07a3a'),
+  decor('orange_bar_stool', 16.2, 0, 7.3, PI / 2, 0.45, 0.45, 0.75, '#e07a3a'),
+  decor('orange_bar_stool', 16.2, 0, 8.2, PI / 2, 0.45, 0.45, 0.75, '#e07a3a'),
+  decor('pendant_lamp', 16.9, 2.25, 6.5, 0, 0.45, 0.45, 0.55, '#2d3138', { glow: 2.2, glowAt: 0.08 }),
+  decor('pendant_lamp', 16.9, 2.25, 8.1, 0, 0.45, 0.45, 0.55, '#2d3138', { glow: 2.2, glowAt: 0.08 }),
+
+  // Lounge (front, west): sofa, armchair, pouf, books and a reading lamp.
+  item('bookshelf', 0.3, 10.9, PI / 2, 1.8, 0.45, 2.0, '#c99a5b'),
+  item('teal_lounge_sofa', 3.0, 13.25, PI, 2.4, 1.0, 0.85, '#3d8a8f'),
+  item('lounge_coffee_table', 3.0, 11.6, 0, 1.2, 0.7, 0.45, '#c9a06a'),
+  item('armchair', 5.1, 11.9, -PI / 2, 0.95, 0.95, 0.85, '#e07a3a'),
+  item('pouf', 1.4, 11.6, 0, 0.5, 0.5, 0.42, '#e07a3a'),
+  item('floor_lamp', 0.75, 13.35, 0, 0.4, 0.4, 1.7, '#efe7d2', { glow: 1.8, glowAt: 0.88 }),
+  plant('large_plant_pot', 6.7, 9.6, 1.3),
+  plant('snake_plant', 6.1, 13.4, 1.0, 0.5),
+
+  // Reception (front, middle) behind a low oak slat partition, and a credenza by the coffee bar.
+  item('reception_desk', 11.4, 12.0, PI, 2.6, 1.0, 1.1, '#d3a46a'),
+  decor('table_lamp', 12.4, 1.1, 11.75, 0, 0.3, 0.3, 0.42, '#efe7d2', { glow: 1.4, glowAt: 0.75 }),
+  item('low_credenza', 15.8, 13.5, PI, 1.8, 0.45, 0.7, '#cfa36d'),
+  decor('table_lamp', 16.4, 0.7, 13.5, 0, 0.3, 0.3, 0.42, '#efe7d2', { glow: 1.2, glowAt: 0.75 }),
+  plant('large_plant_pot', 8.8, 13.3, 1.2),
+  plant('large_plant_pot', 13.9, 9.7, 1.3),
+  plant('snake_plant', 17.3, 13.3, 1.0, 0.5),
+);
 
 export const LAYOUT: Layout = {
-  width: 24,
-  depth: 18,
+  width: 18,
+  depth: 14,
   cell: 0.5,
   walls: [
     // Cutaway like the reference: the far walls (north, west) are full height, the two facing the camera are low.
-    { x1: 0, z1: 0, x2: 24, z2: 0, height: 3, kind: 'window' },
-    { x1: 0, z1: 0, x2: 0, z2: 18, height: 3, kind: 'solid' },
-    { x1: 24, z1: 0, x2: 24, z2: 18, height: 0.5, kind: 'low' },
-    { x1: 0, z1: 18, x2: 24, z2: 18, height: 0.5, kind: 'low' },
-    // Server room (north-east) with a door at z 5.2–6.4.
-    { x1: 19.5, z1: 0, x2: 19.5, z2: 5.2, height: 3, kind: 'solid' },
-    { x1: 19.5, z1: 6.4, x2: 19.5, z2: 7, height: 3, kind: 'solid' },
-    { x1: 19.5, z1: 7, x2: 24, z2: 7, height: 2.6, kind: 'glass' },
-    // Glass meeting room (north) with a door at x 11.8–13.2.
-    { x1: 9, z1: 0, x2: 9, z2: 6, height: 2.6, kind: 'glass' },
-    { x1: 16, z1: 0, x2: 16, z2: 6, height: 2.6, kind: 'glass' },
-    { x1: 9, z1: 6, x2: 11.8, z2: 6, height: 2.6, kind: 'glass' },
-    { x1: 13.2, z1: 6, x2: 16, z2: 6, height: 2.6, kind: 'glass' },
+    { x1: 0, z1: 0, x2: 18, z2: 0, height: 3.2, kind: 'solid' },
+    { x1: 0, z1: 0, x2: 0, z2: 9, height: 3.2, kind: 'window' },
+    { x1: 0, z1: 9, x2: 0, z2: 14, height: 3.2, kind: 'solid' },
+    { x1: 18, z1: 0, x2: 18, z2: 14, height: 0.5, kind: 'low' },
+    { x1: 0, z1: 14, x2: 18, z2: 14, height: 0.5, kind: 'low' },
+    // Oak slats on the north wall by the desks.
+    { x1: 2.4, z1: 0.14, x2: 4.8, z2: 0.14, height: 2.6, kind: 'slats' },
+    // Glass meeting room with a door at x 9.9–11.1.
+    { x1: 8, z1: 0, x2: 8, z2: 4.2, height: 2.6, kind: 'glass' },
+    { x1: 13, z1: 0, x2: 13, z2: 4.2, height: 2.6, kind: 'glass' },
+    { x1: 8, z1: 4.2, x2: 9.9, z2: 4.2, height: 2.6, kind: 'glass' },
+    { x1: 11.1, z1: 4.2, x2: 13, z2: 4.2, height: 2.6, kind: 'glass' },
+    // Server room: a solid west wall, a glass front with a door at x 14.9–16.1.
+    { x1: 14.5, z1: 0, x2: 14.5, z2: 4.5, height: 3.2, kind: 'solid' },
+    { x1: 14.5, z1: 4.5, x2: 14.9, z2: 4.5, height: 2.6, kind: 'glass' },
+    { x1: 16.1, z1: 4.5, x2: 18, z2: 4.5, height: 2.6, kind: 'glass' },
+    // The coffee bar's oak back wall and the reception's low slat partition.
+    { x1: 17.75, z1: 5.2, x2: 17.75, z2: 9.4, height: 2.4, kind: 'slats' },
+    { x1: 9.6, z1: 10.3, x2: 13.2, z2: 10.3, height: 1.3, kind: 'slats' },
   ],
-  furniture: [
-    ...desks,
-    item('filing_pedestal', 13.2, 10.0, 0, 0.5, 0.6, 0.7, '#e7e2da'),
-    item('meeting_table_chairs', 12.5, 3.0, 0, 3.2, 2.2, 1.0, '#c99a5b'),
-    item('whiteboard', 12.5, 0.3, 0, 2.0, 0.1, 1.3, '#f5f5f2', { y: 0.8, blocks: false }),
-    item('server_rack', 23.3, 1.1, -PI / 2, 0.7, 0.9, 2.0, '#23262c'),
-    item('server_rack', 23.3, 2.5, -PI / 2, 0.7, 0.9, 2.0, '#23262c'),
-    item('server_rack', 23.3, 3.9, -PI / 2, 0.7, 0.9, 2.0, '#23262c'),
-    item('coffee_counter_sink', 22.9, 9.6, -PI / 2, 3.0, 0.9, 1.0, '#e9e4dc'),
-    item('espresso_machine', 22.9, 8.9, -PI / 2, 0.5, 0.4, 0.45, '#454a52', { y: 1.0, blocks: false }),
-    item('orange_bar_stool', 21.9, 8.6, PI / 2, 0.45, 0.45, 0.75, '#e07a3a'),
-    item('orange_bar_stool', 21.9, 9.6, PI / 2, 0.45, 0.45, 0.75, '#e07a3a'),
-    item('orange_bar_stool', 21.9, 10.6, PI / 2, 0.45, 0.45, 0.75, '#e07a3a'),
-    item('teal_lounge_sofa', 3.2, 16.8, PI, 3.0, 1.1, 0.9, '#3d8a8f'),
-    item('lounge_coffee_table', 3.2, 15.1, 0, 1.4, 0.8, 0.45, '#c9a06a'),
-    item('floor_lamp', 0.9, 16.9, 0, 0.4, 0.4, 1.7, '#efe7d2'),
-    item('reception_desk', 14.5, 16.3, PI, 2.6, 1.0, 1.1, '#d3a46a'),
-    item('low_credenza', 19.2, 17.4, PI, 2.0, 0.5, 0.7, '#cfa36d'),
-    item('geometric_wall_art', 23.85, 14.5, -PI / 2, 1.2, 0.1, 1.2, '#e3a35c', { y: 1.2, blocks: false }),
-    item('bookshelf', 0.4, 6.0, PI / 2, 2.4, 0.5, 2.0, '#c99a5b'),
-    item('large_plant_pot', 0.8, 1.2, 0, 0.6, 0.6, 1.3, '#5f9a4a'),
-    item('large_plant_pot', 8.4, 6.8, 0, 0.6, 0.6, 1.3, '#5f9a4a'),
-    item('large_plant_pot', 17.6, 7.6, 0, 0.6, 0.6, 1.3, '#5f9a4a'),
-    item('large_plant_pot', 0.8, 12.2, 0, 0.6, 0.6, 1.3, '#5f9a4a'),
-    item('large_plant_pot', 7.6, 17.3, 0, 0.6, 0.6, 1.3, '#5f9a4a'),
-    item('large_plant_pot', 18.8, 12.6, 0, 0.6, 0.6, 1.3, '#5f9a4a'),
-  ],
+  furniture,
   carpets: [
-    { x1: 0.6, z1: 13.4, x2: 6.8, z2: 17.6, color: '#eadfcd' },
-    { x1: 9.6, z1: 0.8, x2: 15.4, z2: 5.6, color: '#3f7f86' },
-    { x1: 12.2, z1: 14.6, x2: 16.8, z2: 17.6, color: '#dccdb4' },
+    { x1: 8.4, z1: 0.4, x2: 12.6, z2: 3.8, color: '#3f7f86' },
+    { x1: 0.7, z1: 10.4, x2: 5.6, z2: 13.7, color: '#e8dcc6' },
+    { x1: 9.8, z1: 11.0, x2: 13.4, z2: 13.6, color: '#dccdb4' },
   ],
+  desks,
   seats,
   // Half the desks wander to coffee and half to the lounge (behaviorOf), so each needs four places; anyone can be
   // in the server room, so it has one per desk.
   coffeeSpots: [
-    { x: 20.9, z: 8.6, rotY: PI / 2 },
-    { x: 20.9, z: 9.6, rotY: PI / 2 },
-    { x: 20.9, z: 10.6, rotY: PI / 2 },
-    { x: 21.4, z: 7.8, rotY: PI / 4 },
+    { x: 15.7, z: 6.0, rotY: PI / 2 },
+    { x: 15.7, z: 6.8, rotY: PI / 2 },
+    { x: 15.7, z: 7.6, rotY: PI / 2 },
+    { x: 15.7, z: 8.4, rotY: PI / 2 },
   ],
   loungeSpots: [
-    { x: 5.4, z: 14.6, rotY: -PI / 2 },
-    { x: 1.4, z: 14.4, rotY: PI / 2 },
-    { x: 5.4, z: 16.0, rotY: -PI / 2 },
-    { x: 1.4, z: 15.8, rotY: PI / 2 },
+    { x: 2.5, z: 12.3, rotY: PI, seat: { x: 2.5, z: 13.05 } },
+    { x: 4.2, z: 11.9, rotY: -PI / 2, seat: { x: 5.15, z: 11.9 } },
+    { x: 3.5, z: 12.3, rotY: PI, seat: { x: 3.5, z: 13.05 } },
+    { x: 1.4, z: 12.3, rotY: PI / 2, seat: { x: 1.4, z: 11.6 } },
   ],
   serverSpots: [
-    { x: 21.7, z: 1.4, rotY: PI / 2 },
-    { x: 21.7, z: 2.6, rotY: PI / 2 },
-    { x: 21.7, z: 3.8, rotY: PI / 2 },
-    { x: 21.7, z: 5.0, rotY: PI / 2 },
-    { x: 20.5, z: 1.4, rotY: PI / 2 },
-    { x: 20.5, z: 2.6, rotY: PI / 2 },
-    { x: 20.5, z: 3.8, rotY: PI / 2 },
-    { x: 20.5, z: 5.0, rotY: PI / 2 },
+    { x: 15.3, z: 2.2, rotY: PI },
+    { x: 16.0, z: 2.2, rotY: PI },
+    { x: 16.7, z: 2.2, rotY: PI },
+    { x: 17.4, z: 2.2, rotY: PI },
+    { x: 15.3, z: 3.3, rotY: PI },
+    { x: 16.0, z: 3.3, rotY: PI },
+    { x: 16.7, z: 3.3, rotY: PI },
+    { x: 17.4, z: 3.3, rotY: PI },
   ],
 };
 

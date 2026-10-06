@@ -21,18 +21,39 @@ describe('office layout', () => {
     }
   });
 
-  it('review focus: leaves the server room through its door, not its wall', () => {
-    const path = findPath(GRID, LAYOUT.serverSpots[0]!, LAYOUT.seats[0]!);
-    const pts = [LAYOUT.serverSpots[0]!, ...path];
-    for (let i = 1; i < pts.length; i += 1) {
-      const a = pts[i - 1]!;
-      const b = pts[i]!;
-      if ((a.x - 19.5) * (b.x - 19.5) < 0) {
-        const z = a.z + ((19.5 - a.x) / (b.x - a.x)) * (b.z - a.z);
-        expect(z, 'crossing the server room wall').toBeGreaterThan(5.2);
-        expect(z).toBeLessThan(6.4);
+  it('is compact like the reference: 18 × 14 m', () => {
+    expect([LAYOUT.width, LAYOUT.depth]).toEqual([18, 14]);
+  });
+
+  it('review focus: leaves the server room through its door, not its glass front', () => {
+    const door = { x1: 14.9, x2: 16.1, z: 4.5 };
+    for (const from of LAYOUT.serverSpots) {
+      const pts = [from, ...findPath(GRID, from, LAYOUT.seats[0]!)];
+      let crossings = 0;
+      for (let i = 1; i < pts.length; i += 1) {
+        const a = pts[i - 1]!;
+        const b = pts[i]!;
+        if ((a.z - door.z) * (b.z - door.z) >= 0) continue;
+        const x = a.x + ((door.z - a.z) / (b.z - a.z)) * (b.x - a.x);
+        if (x < 14.5) continue; // the line z = 4.5 outside the server room is open floor
+        crossings += 1;
+        expect(x, 'crossing the server room front').toBeGreaterThan(door.x1);
+        expect(x).toBeLessThan(door.x2);
       }
+      expect(crossings).toBe(1);
     }
+  });
+
+  it('lounge places are seats: walk to a free spot just in front, then sit on the sofa, armchair or pouf', () => {
+    for (const s of LAYOUT.loungeSpots) {
+      expect(s.seat, `${s.x},${s.z}`).toBeDefined();
+      expect(Math.hypot(s.seat!.x - s.x, s.seat!.z - s.z)).toBeLessThan(1);
+    }
+  });
+
+  it('lights the room with lamps that glow', () => {
+    const lamps = LAYOUT.furniture.filter((p) => (p.glow ?? 0) > 0);
+    expect(lamps.length).toBeGreaterThanOrEqual(4);
   });
 
   it('maps zones to spots by desk index (wanderers alternate, so each place takes every other desk)', () => {

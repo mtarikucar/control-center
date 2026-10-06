@@ -40,7 +40,7 @@ export function behaviorOf(i: BehaviorInput): Behavior {
     case 'starting':
       if (ownerTyping) return at('desk', 'talkSeated');
       if (i.now - i.idleSince < IDLE_WANDER_MS) return at('desk', 'sit');
-      return i.wanderSeed % 2 === 0 ? at('coffee', 'drink') : at('lounge', 'idle');
+      return i.wanderSeed % 2 === 0 ? at('coffee', 'drink') : at('lounge', 'sit');
     case 'limited':
     case 'error':
     case 'interrupted':
