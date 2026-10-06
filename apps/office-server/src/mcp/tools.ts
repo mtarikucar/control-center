@@ -1,5 +1,6 @@
-import { MODEL_ALIASES, type Employee, type EmployeeKind, type ModelAlias, type Task } from '@cc/shared';
+import { MODEL_ALIASES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task } from '@cc/shared';
 import type { Company } from '../company/company.ts';
+import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
 import { NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
@@ -7,6 +8,9 @@ import type { McpTool } from './protocol.ts';
 
 const EVERYONE: EmployeeKind[] = ['member', 'lead', 'coordinator'];
 const COORDINATOR: EmployeeKind[] = ['coordinator'];
+const LEADS: EmployeeKind[] = ['lead', 'coordinator'];
+const HIT_KIND: Record<MemoryHit['kind'], string> = { note: 'not', decision: 'karar', playbook: 'el kitabı', task: 'teslim' };
+const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 
 type Args = Record<string, unknown>;
 
@@ -58,8 +62,8 @@ const integer = (description: string, minimum: number, maximum: number) => ({ ty
 const number = (description: string) => ({ type: 'number', minimum: 0, description });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 
-export function officeTools(o: { company: Company; roster: Roster; tasks: TaskStore; characters: () => string[] }): McpTool[] {
-  const { company, roster, tasks } = o;
+export function officeTools(o: { company: Company; roster: Roster; tasks: TaskStore; characters: () => string[]; memory: Memory }): McpTool[] {
+  const { company, roster, tasks, memory } = o;
 
   /** A colleague by id or by name (case and Turkish dotted/dotless i insensitive). */
   const findPerson = (who: string): Employee => {
@@ -95,7 +99,7 @@ export function officeTools(o: { company: Company; roster: Roster; tasks: TaskSt
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         const task = company.finish(employee.id, str(args, 'taskId'), { summary: str(args, 'summary'), outputs: list(args, 'outputs') ?? [], learned: optStr(args, 'learned') ?? '' });
-        return `“${task.title}” teslim edildi. İsteyen ve koordinatör haberdar edildi.`;
+        return `“${task.title}” teslim edildi${task.result?.archive ? ` (arşiv: ${task.result.archive})` : ''}. İsteyen ve koordinatör haberdar edildi.`;
       },
     },
     {
@@ -140,6 +144,96 @@ export function officeTools(o: { company: Company; roster: Roster; tasks: TaskSt
       inputSchema: object({}),
       kinds: EVERYONE,
       run: () => company.brief(),
+    },
+    {
+      name: 'memorySearch',
+      description: 'Search the company memory (knowledge notes, decisions, playbook topics and finished work) for every word you give. Use it before starting work and whenever you wonder whether the company already knows something.',
+      inputSchema: object({ query: s('Words to look for.'), limit: integer('How many results (default 10).', 1, 30) }, ['query']),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        const hits = memory.search(str(args, 'query'), num(args, 'limit') ?? 10);
+        if (hits.length === 0) return 'Şirket hafızasında bununla ilgili bir şey yok.';
+        return hits.map((h) => `• [${HIT_KIND[h.kind]}] ${h.title} (${day(h.ts)}, ${h.kind === 'playbook' ? `playbookRead konu: ${h.id}` : h.id}): ${h.snippet}`).join('\n');
+      },
+    },
+    {
+      name: 'noteWrite',
+      description: 'Write a knowledge note for the whole company: something you learned that others will need (a tool that works, a pitfall, a contact, a number). Short title, the facts, a few tags.',
+      inputSchema: object({ title: s('Short title.'), text: s('The note.'), tags: strings('Up to 8 tags.') }, ['title', 'text']),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        const note = memory.writeNote(employee.id, { title: str(args, 'title'), text: str(args, 'text'), tags: list(args, 'tags') });
+        return `Not kaydedildi (#${note.id}).`;
+      },
+    },
+    {
+      name: 'playbookRead',
+      description: 'Read the company playbook: without a topic, the list of topics; with a topic, how the company does it (the newest version). Follow it unless you have a reason not to, and say so.',
+      inputSchema: object({ topic: s('Topic name.') }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        const topic = optStr(args, 'topic');
+        if (!topic) {
+          const topics = memory.playbookTopics();
+          return topics.length ? `El kitabı konuları:\n${topics.map((t) => `• ${t.topic} (sürüm ${t.version}, ${day(t.ts)})`).join('\n')}` : 'El kitabı henüz boş.';
+        }
+        const entry = memory.playbookTopic(topic);
+        return `# ${entry.topic} (sürüm ${entry.version}, ${company.nameOf(entry.by)}, ${day(entry.ts)})\n\n${entry.text}`;
+      },
+    },
+    {
+      name: 'decisionsRead',
+      description: 'Read the company decision log, newest first: what was chosen, why, and the alternatives; reverted decisions are marked. Filter by words or by plan id.',
+      inputSchema: object({ query: s('Words to look for.'), planId: s('Only this plan’s decisions.'), limit: integer('How many (default 15).', 1, 50) }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        const found = memory.decisions({ query: optStr(args, 'query'), planId: optStr(args, 'planId'), limit: num(args, 'limit') ?? 15 });
+        if (found.length === 0) return 'Karar defterinde eşleşen kayıt yok.';
+        const reverted = new Set(memory.decisions({ limit: 500 }).map((d) => d.reverts).filter((x): x is string => x !== null));
+        return found
+          .map((d) => `• ${day(d.ts)} ${d.title} → ${d.chosen}${reverted.has(d.id) ? ' (geri alındı)' : ''} — ${d.reason}${d.alternatives.length ? ` [alternatifler: ${d.alternatives.join(', ')}]` : ''} (${company.nameOf(d.by)}, ${d.id})`)
+          .join('\n');
+      },
+    },
+    {
+      name: 'playbookUpdate',
+      description: 'Write a new version of a playbook topic (coordinator or team lead): the whole method as it should be followed from now on, and why it changed.',
+      inputSchema: object({ topic: s('Topic name, e.g. "Test prosedürü".'), text: s('The whole method, in Markdown.'), reason: s('Why it changed.') }, ['topic', 'text']),
+      kinds: LEADS,
+      run: ({ employee }, args) => {
+        const entry = memory.updatePlaybook(employee.id, { topic: str(args, 'topic'), text: str(args, 'text'), reason: optStr(args, 'reason') });
+        return `El kitabı güncellendi: “${entry.topic}” sürüm ${entry.version}.`;
+      },
+    },
+    {
+      name: 'decisionRecord',
+      description: 'Record a decision in the company decision log (coordinator or team lead): what was decided about, what was chosen, why, and the alternatives considered. The owner can revert it.',
+      inputSchema: object({ title: s('What was decided about.'), chosen: s('What was chosen.'), reason: s('Why.'), alternatives: strings('Other options considered.'), planId: s('The plan it belongs to.') }, ['title', 'chosen', 'reason']),
+      kinds: LEADS,
+      run: ({ employee }, args) => {
+        const d = memory.recordDecision(employee.id, { title: str(args, 'title'), chosen: str(args, 'chosen'), reason: str(args, 'reason'), alternatives: list(args, 'alternatives'), planId: optStr(args, 'planId') ?? null });
+        return `Karar kaydedildi (${d.id}).`;
+      },
+    },
+    {
+      name: 'employeeNote',
+      description: 'The employee file (coordinator): with text, add an observation about someone (what they are good at, what to watch); without text, read their file (your notes and their finished work). Look at it before handing out work.',
+      inputSchema: object({ employee: s('Employee id or name.'), text: s('Your observation.') }, ['employee']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const text = optStr(args, 'text');
+        const who = findPerson(str(args, 'employee'));
+        if (text) {
+          memory.addEmployeeNote(employee.id, who.id, text);
+          return `${who.name} adlı çalışanın dosyasına not eklendi.`;
+        }
+        const file = memory.employeeFile(who.id);
+        return [
+          `${who.name}${who.title ? ` — ${who.title}` : ''}: ${file.finished} görev bitirdi.`,
+          ...(file.notes.length ? ['Notların:', ...file.notes.map((n) => `• ${day(n.ts)} ${n.text}`)] : ['Henüz notun yok.']),
+          ...(file.recent.length ? ['Son işleri:', ...file.recent.map((r) => `• ${r.title}: ${r.summary}`)] : []),
+        ].join('\n');
+      },
     },
     {
       name: 'taskCreate',

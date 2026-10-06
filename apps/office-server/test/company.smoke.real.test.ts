@@ -23,9 +23,12 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
     const plans = new PlanStore(s.db);
     const notices = new NoticeStore(s.db);
     const characters = () => ['coder', 'designer'];
-    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters });
+    const { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } = await import('../src/company/memory-store.ts');
+    const { Memory } = await import('../src/company/memory.ts');
+    const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes: new NoteStore(s.db), employeeNotes: new EmployeeNoteStore(s.db) });
+    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id) });
     const api = createApi(
-      { engine, roster: s.roster, events: s.events, quota: new QuotaTracker(s.db, s.events), mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters }) }, company: { service: company, tasks, plans } },
+      { engine, roster: s.roster, events: s.events, quota: new QuotaTracker(s.db, s.events), mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory }) }, company: { service: company, tasks, plans } },
       { allowedOrigins: [] },
     );
     await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
