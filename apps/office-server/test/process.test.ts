@@ -91,6 +91,16 @@ describe('runOnce', () => {
     });
   });
 
+  it('does not start at all when it is already aborted (the office is shutting down)', async () => {
+    const abort = new AbortController();
+    abort.abort();
+    const r = await runOnce({
+      command: [process.execPath, FAKE_CLAUDE], args: ['--output-format', 'json'], cwd: tempDir(),
+      env: { ...process.env, FAKE_CLAUDE_STATE: tempDir(), FAKE_CLAUDE_SIDE_HANG: '1' }, input: 'x', timeoutMs: 20_000, signal: abort.signal,
+    });
+    expect(r.ok).toBe(false);
+  });
+
   it('reports failure when the command cannot run', async () => {
     const r = await runOnce({ command: ['/nonexistent/claude-binary'], args: [], cwd: tempDir(), input: 'x', timeoutMs: 5000 });
     expect(r.ok).toBe(false);

@@ -187,4 +187,13 @@ describe('normalize', () => {
     expect(input.content!.length).toBeLessThan(2100);
     expect(input.content).toContain('kısaltıldı');
   });
+
+  it('also shortens long text nested in a tool input (e.g. MultiEdit edits)', () => {
+    const input = { file_path: '/d/a.txt', edits: [{ old_string: 'a'.repeat(5000), new_string: 'b' }] };
+    const [event] = normalize(assistant([{ type: 'tool_use', id: 't', name: 'MultiEdit', input }]));
+    const out = (event as { input: { file_path: string; edits: Array<{ old_string: string; new_string: string }> } }).input;
+    expect(out.file_path).toBe('/d/a.txt');
+    expect(out.edits[0]!.old_string.length).toBeLessThan(2100);
+    expect(out.edits[0]!.new_string).toBe('b');
+  });
 });

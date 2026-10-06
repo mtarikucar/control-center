@@ -131,4 +131,14 @@ describe('static serving', () => {
     expect(etag).not.toBe('');
     expect((await get(port, '/assets3d/furniture/desk.glb', 'GET', { 'if-none-match': etag })).status).toBe(304);
   });
+
+  it('understands every If-None-Match form a browser or proxy sends', async () => {
+    const port = await start();
+    const etag = String((await get(port, '/assets3d/furniture/desk.glb', 'HEAD')).headers.etag ?? '');
+    const status = async (value: string) => (await get(port, '/assets3d/furniture/desk.glb', 'GET', { 'if-none-match': value })).status;
+    expect(await status(`"another", ${etag}`)).toBe(304);
+    expect(await status('*')).toBe(304);
+    expect(await status(etag.replace(/^W\//, ''))).toBe(304);
+    expect(await status('"nope"')).toBe(200);
+  });
 });

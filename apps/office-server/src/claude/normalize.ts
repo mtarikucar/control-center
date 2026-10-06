@@ -52,10 +52,13 @@ export function truncate(text: string, limit = TOOL_OUTPUT_LIMIT): string {
 
 const INPUT_FIELD_LIMIT = 2000;
 
-/** Tool inputs can carry whole files (Write/Edit); keep every field but shorten long text. */
-function shortenInput(input: unknown): unknown {
-  if (!isObj(input)) return input ?? null;
-  return Object.fromEntries(Object.entries(input).map(([k, v]) => [k, typeof v === 'string' ? truncate(v, INPUT_FIELD_LIMIT) : v]));
+/** Tool inputs can carry whole files (Write, Edit, MultiEdit's edits); keep every field but shorten long text. */
+function shortenInput(input: unknown, depth = 0): unknown {
+  if (typeof input === 'string') return truncate(input, INPUT_FIELD_LIMIT);
+  if (depth >= 4) return input;
+  if (Array.isArray(input)) return input.map((v) => shortenInput(v, depth + 1));
+  if (isObj(input)) return Object.fromEntries(Object.entries(input).map(([k, v]) => [k, shortenInput(v, depth + 1)]));
+  return input ?? null;
 }
 
 function windowOf(raw: unknown): QuotaWindow | null {
