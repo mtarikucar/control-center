@@ -1,0 +1,58 @@
+import { describe, expect, it } from 'vitest';
+import type { Usage } from '@cc/shared';
+import { migrateUp, openDb } from '../src/db.ts';
+import { EventStore } from '../src/event-store.ts';
+import { QuotaTracker } from '../src/quota.ts';
+
+const TODAY_NOON = new Date(2026, 9, 6, 12, 0, 0).getTime();
+const YESTERDAY = TODAY_NOON - 24 * 60 * 60 * 1000;
+
+function make() {
+  let clock = TODAY_NOON;
+  const db = openDb(':memory:');
+  migrateUp(db);
+  const events = new EventStore(db, () => clock);
+  const quota = new QuotaTracker(db, events, () => clock);
+  return { events, quota, setClock: (t: number) => (clock = t) };
+}
+
+const usage = (n: number): Usage => ({ inputTokens: n, outputTokens: n * 2, cacheReadTokens: n * 10, cacheCreationTokens: n * 5 });
+
+describe('QuotaTracker', () => {
+  it('has no state before any quota event', () => {
+    expect(make().quota.state()).toBeNull();
+  });
+
+  it('keeps the latest windows and keeps a window an update omits', () => {
+    const { events, quota } = make();
+    events.append('e1', { type: 'quota.updated', status: 'allowed', fiveHour: { utilization: 0.2, resetsAt: 1000 }, sevenDay: { utilization: 0.1, resetsAt: 2000 } });
+    events.append('e2', { type: 'quota.updated', status: 'allowed_warning', fiveHour: { utilization: 0.8, resetsAt: 1000 }, sevenDay: null });
+    expect(quota.state()).toEqual({
+      status: 'allowed_warning',
+      fiveHour: { utilization: 0.8, resetsAt: 1000 },
+      sevenDay: { utilization: 0.1, resetsAt: 2000 },
+      updatedAt: TODAY_NOON,
+    });
+  });
+
+  it('sums usage per employee for today and in total, including side answers', () => {
+    const { events, quota, setClock } = make();
+    setClock(YESTERDAY);
+    events.append('e1', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(100), costUsd: 1, numTurns: 1 });
+    setClock(TODAY_NOON);
+    events.append('e1', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(10), costUsd: 0.5, numTurns: 1 });
+    events.append('e1', { type: 'side.answer', text: 'x', ok: true, usage: usage(1), costUsd: 0.1 });
+    events.append('e2', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(7), costUsd: 9, numTurns: 1 });
+    events.append('e1', { type: 'message.assistant', text: 'sayılmaz' });
+
+    const e1 = quota.usage('e1');
+    expect(e1.today).toMatchObject({ inputTokens: 11, outputTokens: 22, cacheReadTokens: 110, cacheCreationTokens: 55 });
+    expect(e1.today.costUsd).toBeCloseTo(0.6);
+    expect(e1.total).toMatchObject({ inputTokens: 111, outputTokens: 222 });
+    expect(e1.total.costUsd).toBeCloseTo(1.6);
+    expect(quota.usageAll(['e1', 'e2', 'nobody']).nobody).toEqual({
+      today: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 },
+      total: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 },
+    });
+  });
+});
