@@ -218,3 +218,14 @@ describe('company data', () => {
     expect(d.plans).toEqual({});
   });
 });
+
+describe('company memory', () => {
+  it('counts memory changes so open tabs know to reload', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot());
+    expect(d.memoryRev).toBe(0);
+    d = applyEvent(d, stored({ type: 'note.written', id: 1, title: 'n', tags: [] }));
+    d = applyEvent(d, stored({ type: 'playbook.updated', topic: 'Test', version: 2, reason: '' }));
+    expect(d.memoryRev).toBe(2);
+    expect(applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 1 })).memoryRev).toBe(2);
+  });
+});

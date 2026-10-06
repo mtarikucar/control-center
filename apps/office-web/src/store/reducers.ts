@@ -25,9 +25,11 @@ export interface OfficeData {
   /** The company: every task the snapshot or the feed has shown (open ones and the latest closed). */
   tasks: Record<string, Task>;
   plans: Record<string, Plan>;
+  /** Bumped by every memory change, so open memory tabs reload. */
+  memoryRev: number;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {} };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0 };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
 
@@ -67,6 +69,7 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     usage: s.usage,
     views,
     synced: true,
+    memoryRev: d.memoryRev,
     tasks: Object.fromEntries((s.tasks ?? []).map((t) => [t.id, t])),
     plans: Object.fromEntries((s.plans ?? []).map((p) => [p.id, p])),
   };
@@ -90,6 +93,7 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   // Company records are global: keep them whatever the page knows about the employee the event is filed under.
   if (ev.type === 'task.changed') next.tasks = { ...d.tasks, [ev.task.id]: ev.task };
   if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: ev.plan };
+  if (ev.type === 'decision.recorded' || ev.type === 'playbook.updated' || ev.type === 'note.written') next.memoryRev = d.memoryRev + 1;
   const id = s.employeeId;
   const view = id ? d.views[id] : undefined;
   if (!id || !view) return next;

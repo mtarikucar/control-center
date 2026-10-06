@@ -1,4 +1,4 @@
-import type { Employee, HireInput, OfficeSnapshot, Plan, StoredEvent } from '@cc/shared';
+import type { Decision, Employee, EmployeeFile, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -39,7 +39,14 @@ export const api = {
   declinePlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/decline`),
   appointCoordinator: (employeeId: string) => request<Employee>('POST', '/api/company/coordinator', { employeeId }),
   hireCoordinator: () => request<Employee>('POST', '/api/company/coordinator/hire'),
-  fire: (id: string) => request<null>('DELETE', employee(id)),
+  /** Without `now` the company first asks for a hand-over and answers with that task; `now` fires at once (null). */
+  fire: (id: string, now = false) => request<{ handover: Task } | null>('DELETE', `${employee(id)}${now ? '?now=1' : ''}`),
+  employeeFile: (id: string) => request<EmployeeFile>('GET', `${employee(id)}/file`),
+  decisions: () => request<Decision[]>('GET', '/api/memory/decisions'),
+  revertDecision: (id: string) => request<Decision>('POST', `/api/decisions/${encodeURIComponent(id)}/revert`),
+  playbook: () => request<PlaybookEntry[]>('GET', '/api/memory/playbook'),
+  playbookHistory: (topic: string) => request<PlaybookEntry[]>('GET', `/api/memory/playbook/history?topic=${encodeURIComponent(topic)}`),
+  notes: (q = '') => request<Array<{ note: Note; snippet: string }>>('GET', `/api/memory/notes${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`),
   send: (id: string, text: string) => request<{ ok: true }>('POST', `${employee(id)}/messages`, { text }),
   sideQuestion: (id: string, text: string) => request<{ ok: boolean; answer: string }>('POST', `${employee(id)}/side-questions`, { text }),
   stop: (id: string) => request<Employee>('POST', `${employee(id)}/stop`),
