@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -39,6 +39,9 @@ async function start(withWeb = true) {
   writeFileSync(join(assets, 'manifest.json'), '{"items":[]}');
   writeFileSync(join(assets, 'furniture', 'desk.glb'), 'glTF');
   writeFileSync(join(root, 'secret.txt'), 'gizli');
+  writeFileSync(join(assets, 'locked.glb'), 'glTF');
+  chmodSync(join(assets, 'locked.glb'), 0o000);
+  writeFileSync(join(assets, 'big.glb'), Buffer.alloc(8 * 1024 * 1024, 1));
   const api = createApi(
     { engine: f.engine, roster: s.roster, events: s.events, quota: new QuotaTracker(s.db, s.events) },
     { allowedOrigins: [], webDir: withWeb ? web : join(web, 'missing'), assetsDir: assets },
@@ -92,4 +95,31 @@ describe('static serving', () => {
     expect(page.status).toBe(404);
     expect(page.body).toContain('pnpm --filter @cc/office-web build');
   });
+
+  it('answers 404 for a file it may not read and keeps running', async () => {
+    const port = await start();
+    expect((await get(port, '/assets3d/locked.glb')).status).toBe(404);
+    expect((await get(port, '/assets3d/manifest.json')).status).toBe(200);
+  });
+
+  it('closes the file when a download is aborted', async () => {
+    const port = await start();
+    const openFiles = () => readdirSync('/proc/self/fd').length;
+    const before = openFiles();
+    for (let i = 0; i < 10; i += 1) {
+      await new Promise<void>((resolve) => {
+        const req = httpRequest({ host: '127.0.0.1', port, method: 'GET', path: '/assets3d/big.glb' }, (res) => {
+          res.once('data', () => {
+            req.destroy();
+            resolve();
+          });
+        });
+        req.on('error', () => resolve());
+        req.end();
+      });
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    expect(openFiles() - before).toBeLessThanOrEqual(2);
+  });
 });
+

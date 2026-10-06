@@ -1,6 +1,7 @@
-import { createReadStream, statSync } from 'node:fs';
+import { accessSync, constants, createReadStream, statSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -32,12 +33,13 @@ export function resolveInside(root: string, urlPath: string): string | null {
   return full === base || full.startsWith(base + sep) ? full : null;
 }
 
-/** Streams a regular file; false when it does not exist (caller decides what 404 looks like). */
+/** Streams a readable regular file; false when there is none to send (caller decides what 404 looks like). */
 export function sendFile(res: ServerResponse, file: string): boolean {
   let size: number;
   try {
     const st = statSync(file);
     if (!st.isFile()) return false;
+    accessSync(file, constants.R_OK);
     size = st.size;
   } catch {
     return false;
@@ -48,6 +50,7 @@ export function sendFile(res: ServerResponse, file: string): boolean {
     'x-content-type-options': 'nosniff',
     'cache-control': 'no-cache',
   });
-  createReadStream(file).pipe(res);
+  // pipeline closes the file when the client goes away and never lets a read error escape as an 'error' event.
+  pipeline(createReadStream(file), res, () => {});
   return true;
 }
