@@ -40,17 +40,19 @@ export class EventStore {
     return stored;
   }
 
-  list(opts: { after?: number; employeeId?: string; limit?: number } = {}): StoredEvent[] {
+  list(opts: { after?: number; employeeId?: string; limit?: number; tail?: boolean } = {}): StoredEvent[] {
     const after = opts.after ?? 0;
     const limit = Math.max(1, Math.min(opts.limit ?? 500, 5000));
+    const order = opts.tail ? 'DESC' : 'ASC';
     const rows = (
       opts.employeeId === undefined
-        ? this.#db.prepare('SELECT seq, employee_id, ts, payload FROM events WHERE seq > ? ORDER BY seq LIMIT ?').all(after, limit)
+        ? this.#db.prepare(`SELECT seq, employee_id, ts, payload FROM events WHERE seq > ? ORDER BY seq ${order} LIMIT ?`).all(after, limit)
         : this.#db
-            .prepare('SELECT seq, employee_id, ts, payload FROM events WHERE seq > ? AND employee_id = ? ORDER BY seq LIMIT ?')
+            .prepare(`SELECT seq, employee_id, ts, payload FROM events WHERE seq > ? AND employee_id = ? ORDER BY seq ${order} LIMIT ?`)
             .all(after, opts.employeeId, limit)
     ) as unknown as Row[];
-    return rows.map(toStored);
+    const events = rows.map(toStored);
+    return opts.tail ? events.reverse() : events;
   }
 
   latest(employeeId: string, type: OfficeEventType): StoredEvent | null {

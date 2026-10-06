@@ -1,0 +1,46 @@
+import type { Employee, HireInput, OfficeSnapshot, StoredEvent } from '@cc/shared';
+
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  const init: RequestInit =
+    method === 'POST'
+      ? { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? '{}' : JSON.stringify(body) }
+      : { method, body: undefined };
+  const res = await fetch(path, init);
+  const text = await res.text();
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+  if (!res.ok) {
+    const message = (data as { error?: unknown } | null)?.error;
+    throw new ApiError(res.status, typeof message === 'string' ? message : `İstek başarısız (HTTP ${res.status}).`);
+  }
+  return data as T;
+}
+
+const employee = (id: string) => `/api/employees/${encodeURIComponent(id)}`;
+
+export const api = {
+  office: () => request<OfficeSnapshot>('GET', '/api/office'),
+  hire: (input: HireInput) => request<Employee>('POST', '/api/employees', input),
+  fire: (id: string) => request<null>('DELETE', employee(id)),
+  send: (id: string, text: string) => request<{ ok: true }>('POST', `${employee(id)}/messages`, { text }),
+  sideQuestion: (id: string, text: string) => request<{ ok: boolean; answer: string }>('POST', `${employee(id)}/side-questions`, { text }),
+  stop: (id: string) => request<Employee>('POST', `${employee(id)}/stop`),
+  resume: (id: string) => request<Employee>('POST', `${employee(id)}/resume`),
+  openTerminal: (id: string) => request<{ command: string; employee: Employee }>('POST', `${employee(id)}/terminal`),
+  closeTerminal: (id: string) => request<Employee>('DELETE', `${employee(id)}/terminal`),
+  events: (id: string, tail = 500) => request<StoredEvent[]>('GET', `${employee(id)}/events?tail=${tail}`),
+};

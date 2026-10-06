@@ -7,6 +7,7 @@ import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } 
 import type { EventStore } from './event-store.ts';
 import type { QuotaTracker } from './quota.ts';
 import type { Roster } from './roster.ts';
+import { resolveInside, sendFile } from './static.ts';
 
 export interface ApiDeps {
   engine: Engine;
@@ -17,6 +18,10 @@ export interface ApiDeps {
 
 export interface ApiOptions {
   allowedOrigins: string[];
+  /** Built office-web; omitted → only the API is served. */
+  webDir?: string;
+  /** Models + manifest served under /assets3d/. */
+  assetsDir?: string;
 }
 
 export interface Api {
@@ -111,12 +116,30 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'DELETE' && action === 'terminal') return sendJson(res, 200, d.engine.returnFromTerminal(id));
     if (method === 'GET' && action === 'events') {
       d.roster.get(id);
+      const tail = Number(url.searchParams.get('tail') ?? '0') || 0;
+      if (tail > 0) return sendJson(res, 200, d.events.list({ employeeId: id, tail: true, limit: tail }));
       const after = Number(url.searchParams.get('after') ?? '0') || 0;
       const limit = Number(url.searchParams.get('limit') ?? '500') || 500;
       return sendJson(res, 200, d.events.list({ employeeId: id, after, limit }));
     }
   }
+  if (method === 'GET' && !url.pathname.startsWith('/api/')) return serveStatic(opts, url.pathname, res);
   sendJson(res, 404, { error: 'Bulunamadı.' });
+}
+
+function serveStatic(opts: ApiOptions, pathname: string, res: ServerResponse): void {
+  if (pathname.startsWith('/assets3d/')) {
+    const file = opts.assetsDir ? resolveInside(opts.assetsDir, pathname.slice('/assets3d'.length)) : null;
+    if (file && sendFile(res, file)) return;
+    return sendJson(res, 404, { error: 'Model bulunamadı.' });
+  }
+  if (opts.webDir) {
+    const file = resolveInside(opts.webDir, pathname === '/' ? '/index.html' : pathname);
+    if (file && sendFile(res, file)) return;
+    const index = resolveInside(opts.webDir, '/index.html');
+    if (index && sendFile(res, index)) return;
+  }
+  sendJson(res, 404, { error: 'Arayüz derlenmemiş: önce `pnpm --filter @cc/office-web build` çalıştır.' });
 }
 
 function attach(d: ApiDeps, ws: WebSocket, after: number): void {

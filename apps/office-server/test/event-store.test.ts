@@ -52,6 +52,15 @@ describe('EventStore', () => {
     expect(s.latest('e1', 'turn.started')).toEqual(last);
   });
 
+  it('returns the last N events in ascending order with tail', () => {
+    const s = store();
+    for (let i = 0; i < 5; i += 1) s.append('e1', { type: 'turn.started' });
+    s.append('e2', { type: 'turn.started' });
+    const tail = s.list({ employeeId: 'e1', tail: true, limit: 2 });
+    expect(tail.map((e) => e.seq)).toEqual([4, 5]);
+    expect(s.list({ tail: true, limit: 1 }).map((e) => e.seq)).toEqual([6]);
+  });
+
   it('reports lastSeq, 0 when empty', () => {
     const s = store();
     expect(s.lastSeq()).toBe(0);

@@ -12,6 +12,10 @@ export interface OfficeConfig {
   deskCount: number;
   /** Origins allowed besides the server's own http://127.0.0.1:<port> and http://localhost:<port>. */
   allowedOrigins: string[];
+  /** Built office-web (served at /). */
+  webDir: string;
+  /** Models and manifest (served at /assets3d/). */
+  assetsDir: string;
 }
 
 function insideRepo(dir: string): boolean {
@@ -41,5 +45,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfficeConfig {
   }
   // No extra origins by default: a dev server on a shared port (e.g. Vite's 5173) could otherwise drive employees.
   const allowedOrigins = (env.OFFICE_ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
-  return { dataDir, host: '127.0.0.1', port, claudeCommand, deskCount: 8, allowedOrigins };
+  const webDir = env.OFFICE_WEB_DIR ?? join(REPO_ROOT, 'apps', 'office-web', 'dist');
+  const assetsDir = env.OFFICE_ASSETS_DIR ?? join(REPO_ROOT, 'assets', '3d');
+  return { dataDir, host: '127.0.0.1', port, claudeCommand, deskCount: 8, allowedOrigins, webDir, assetsDir };
 }

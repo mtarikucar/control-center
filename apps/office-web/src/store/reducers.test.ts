@@ -1,0 +1,131 @@
+import { describe, expect, it } from 'vitest';
+import type { Employee, OfficeEvent, OfficeSnapshot, StoredEvent } from '@cc/shared';
+import { EMPTY_DATA, MAX_EVENTS, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
+
+const employee = (over: Partial<Employee> = {}): Employee => ({
+  id: 'e1', slug: 'ada', name: 'Ada', role: 'r', model: 'haiku', characterId: 'coder', deskIndex: 0,
+  sessionId: 's1', sessionStarted: false, lifecycle: 'idle', limitResetsAt: null, lastError: null, createdAt: 1, ...over,
+});
+const snapshot = (over: Partial<OfficeSnapshot> = {}): OfficeSnapshot => ({ employees: [employee()], quota: null, usage: {}, lastSeq: 10, ...over });
+let seq = 10;
+const stored = (event: OfficeEvent, employeeId: string | null = 'e1', ts = 1000): StoredEvent => ({ seq: ++seq, employeeId, ts, event });
+const usage = { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0 };
+
+describe('applySnapshot', () => {
+  it('builds views and keeps loaded events of known employees', () => {
+    const first = applySnapshot(EMPTY_DATA, snapshot());
+    const withEvent = applyEvent(first, stored({ type: 'turn.started' }));
+    const again = applySnapshot(withEvent, snapshot({ lastSeq: withEvent.lastSeq + 1, employees: [employee({ lifecycle: 'working' })] }));
+    expect(again.views.e1?.events).toHaveLength(1);
+    expect(again.views.e1?.employee.lifecycle).toBe('working');
+    expect(again.lastSeq).toBe(withEvent.lastSeq + 1);
+  });
+
+  it('drops employees that are no longer in the snapshot', () => {
+    const d = applySnapshot(applySnapshot(EMPTY_DATA, snapshot()), snapshot({ employees: [] }));
+    expect(d.views).toEqual({});
+  });
+});
+
+describe('applyEvent', () => {
+  const base = () => applySnapshot(EMPTY_DATA, snapshot());
+
+  it('follows lifecycle, tools, turns and session start', () => {
+    let d = base();
+    d = applyEvent(d, stored({ type: 'lifecycle.changed', from: 'idle', to: 'working', reason: 'x' }));
+    d = applyEvent(d, stored({ type: 'session.started', model: 'm', mcp: [] }));
+    d = applyEvent(d, stored({ type: 'tool.started', toolUseId: 't1', name: 'Bash', input: {} }, 'e1', 2000));
+    expect(d.views.e1?.employee).toMatchObject({ lifecycle: 'working', sessionStarted: true });
+    expect(openToolSince(d.views.e1!)).toBe(2000);
+    d = applyEvent(d, stored({ type: 'tool.finished', toolUseId: 't1', isError: false, output: '' }));
+    expect(openToolSince(d.views.e1!)).toBeNull();
+    d = applyEvent(d, stored({ type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd: 0.01, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0.01 }, 'e1', 3000));
+    expect(d.views.e1?.lastTurnFinishedAt).toBe(3000);
+    expect(d.usage.e1?.today).toMatchObject({ inputTokens: 10, outputTokens: 20, costUsd: 0.01 });
+    d = applyEvent(d, stored({ type: 'side.answer', text: 'a', ok: true, usage, costUsd: 0.002 }));
+    expect(d.usage.e1?.total.costUsd).toBeCloseTo(0.012);
+  });
+
+  it('keeps the turn open while claude has queued turns', () => {
+    let d = applyEvent(base(), stored({ type: 'tool.started', toolUseId: 't1', name: 'Bash', input: {} }, 'e1', 2000));
+    d = applyEvent(d, stored({ type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd: 0, numTurns: 1, queuedTurns: 1, sessionUsage: null, sessionCostUsd: 0 }, 'e1', 3000));
+    expect(d.views.e1?.lastTurnFinishedAt).toBeNull();
+    expect(openToolSince(d.views.e1!)).toBe(2000);
+  });
+
+  it('review focus: ignores a replayed event it already has', () => {
+    const e = stored({ type: 'message.assistant', text: 'bir kez' });
+    const d = applyEvent(applyEvent(base(), e), e);
+    expect(d.views.e1?.events).toHaveLength(1);
+  });
+
+  it('updates the quota but keeps a window the update omits', () => {
+    let d = applyEvent(base(), stored({ type: 'quota.updated', status: 'allowed', fiveHour: { utilization: 0.1, resetsAt: 5 }, sevenDay: { utilization: 0.2, resetsAt: 6 } }, null, 7));
+    d = applyEvent(d, stored({ type: 'quota.updated', status: 'allowed_warning', fiveHour: { utilization: 0.9, resetsAt: 5 }, sevenDay: null }, null, 8));
+    expect(d.quota).toEqual({ status: 'allowed_warning', fiveHour: { utilization: 0.9, resetsAt: 5 }, sevenDay: { utilization: 0.2, resetsAt: 6 }, updatedAt: 8 });
+  });
+
+  it('caps the event list and ignores unknown employees', () => {
+    let d = base();
+    for (let i = 0; i < MAX_EVENTS + 5; i += 1) d = applyEvent(d, stored({ type: 'turn.started' }));
+    expect(d.views.e1?.events).toHaveLength(MAX_EVENTS);
+    const before = d.views;
+    d = applyEvent(d, stored({ type: 'turn.started' }, 'ghost'));
+    expect(d.views).toBe(before);
+  });
+
+  it('asks for a refresh when someone is hired or fired', () => {
+    expect(needsRefresh(stored({ type: 'employee.hired', name: 'x' }))).toBe(true);
+    expect(needsRefresh(stored({ type: 'employee.fired' }))).toBe(true);
+    expect(needsRefresh(stored({ type: 'lifecycle.changed', from: 'error', to: 'idle', reason: 'x' }))).toBe(true);
+    expect(needsRefresh(stored({ type: 'turn.started' }))).toBe(false);
+  });
+});
+
+describe('mergeEvents', () => {
+  it('merges history with live events in seq order and derives turn state', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot());
+    const live = stored({ type: 'message.assistant', text: 'canlı' }, 'e1', 9000);
+    d = applyEvent(d, live);
+    const history = [
+      { seq: 1, employeeId: 'e1', ts: 100, event: { type: 'tool.started', toolUseId: 'old', name: 'Bash', input: {} } },
+      { seq: 2, employeeId: 'e1', ts: 200, event: { type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd: 0, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 } },
+      live,
+    ] as StoredEvent[];
+    const view = mergeEvents(d.views.e1!, history);
+    expect(view.events.map((e) => e.seq)).toEqual([1, 2, live.seq]);
+    expect(view.eventsLoaded).toBe(true);
+    expect(view.lastTurnFinishedAt).toBe(200);
+    expect(openToolSince(view)).toBeNull();
+  });
+});
+
+describe('usage watermark', () => {
+  const tf = (seq: number, input: number): StoredEvent => ({
+    seq, employeeId: 'e1', ts: seq,
+    event: { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: input, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 },
+  });
+  const counted = { today: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 }, total: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 } };
+
+  it('review focus: counts usage once across a reconnect (snapshot, then replay of events it already covers)', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 10, usage: { e1: counted } }));
+    d = applyEvent(d, tf(9, 40));
+    d = applyEvent(d, tf(10, 60));
+    d = applyEvent(d, tf(11, 10));
+    expect(d.usage.e1?.today.inputTokens).toBe(110);
+  });
+
+  it('an HTTP snapshot does not move the replay point, a live one does', () => {
+    const base = applyEvent(applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 3 })), tf(5, 1));
+    expect(applySnapshot(base, snapshot({ lastSeq: 20 }), 'http').lastSeq).toBe(5);
+    expect(applySnapshot(base, snapshot({ lastSeq: 20 }), 'live').lastSeq).toBe(20);
+  });
+
+  it('ignores a snapshot older than what it already shows', () => {
+    const fresh = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 30, usage: { e1: counted } }));
+    const stale = applySnapshot(fresh, snapshot({ lastSeq: 12, usage: {}, employees: [] }), 'http');
+    expect(stale.usage.e1?.today.inputTokens).toBe(100);
+    expect(Object.keys(stale.views)).toEqual(['e1']);
+  });
+});
+
