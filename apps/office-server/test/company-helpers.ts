@@ -1,3 +1,6 @@
+import type { QuotaState } from '@cc/shared';
+import { Budget } from '../src/company/budget.ts';
+import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { Company } from '../src/company/company.ts';
 import { Memory } from '../src/company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
@@ -14,10 +17,20 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir,
     decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes: new NoteStore(s.db), employeeNotes: new EmployeeNoteStore(s.db),
   });
+  let quotaState: QuotaState | null = null;
+  const budget = new Budget({
+    constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db), tasks, plans, roster: s.roster, events: s.events, notices,
+    quota: { state: () => quotaState }, deskCount: 8,
+  });
   const reloaded: string[] = [];
   const company = new Company({
-    roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory,
+    roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(),
     reload: (id) => void reloaded.push(id),
   });
-  return { tasks, plans, notices, memory, company, reloaded };
+  return {
+    tasks, plans, notices, memory, company, reloaded, budget,
+    setQuota: (q: QuotaState | null) => {
+      quotaState = q;
+    },
+  };
 }

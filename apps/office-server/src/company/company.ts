@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Task, TaskResult } from '@cc/shared';
-import { OWNER } from '@cc/shared';
+import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -13,8 +13,12 @@ import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
 
-/** The constitution's loop guards (spec §4.6). */
-export const LIMITS = { chainDepth: 5, perDay: 30, perPlanOpen: 60 } as const;
+/** The constitution's loop guards by default (spec §4.6); the owner changes them in the constitution. */
+export const LIMITS = {
+  chainDepth: DEFAULT_CONSTITUTION.chainDepth,
+  perDay: DEFAULT_CONSTITUTION.tasksPerDay,
+  perPlanOpen: DEFAULT_CONSTITUTION.openTasksPerPlan,
+} as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BRIEF_MAX = 8000;
 const HANDOVER_TITLE = 'Devir: işten ayrılıyorsun';
@@ -40,6 +44,8 @@ export interface CompanyDeps {
   characters: () => string[];
   /** Restarts a session so it reads a new role card and tool list (Engine.reload); absent in tests that do not care. */
   reload?: (id: string) => void;
+  /** The owner's constitution (team size, loop limits); absent: the defaults. */
+  constitution?: () => Constitution;
   /** The company memory: a hand-in's lesson becomes a note (absent in tests that do not care). */
   memory?: Memory;
   now?: () => number;
@@ -124,6 +130,7 @@ export class Company {
     if (by !== OWNER) this.#assertCoordinator(by);
     const characters = this.#d.characters();
     const characterId = input.characterId && characters.includes(input.characterId) ? input.characterId : this.#leastUsedCharacter(characters);
+    this.#assertRoom();
     return this.#d.hire({ ...input, kind: 'member', characterId });
   }
 
@@ -132,6 +139,7 @@ export class Company {
     if (this.coordinator()) throw new ConflictError('Ofiste zaten bir koordinatör var.');
     const characters = this.#d.characters();
     const characterId = characters.includes('manager') ? 'manager' : this.#leastUsedCharacter(characters);
+    this.#assertRoom();
     const hired = this.#d.hire({ name: 'Koordinatör', role: COORDINATOR_ROLE, model, title: 'Koordinatör', kind: 'coordinator', characterId });
     this.#emit(hired.id, { type: 'role.changed', kind: hired.kind, title: hired.title, team: hired.team });
     return hired;
@@ -174,10 +182,24 @@ export class Company {
     this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
     return next;
   }
+  /** The coordinator (or the owner) moves someone to another model; their session goes on with it, memory kept. */
+  setModel(by: string, id: string, model: ModelAlias): Employee {
+    if (by !== OWNER) this.#assertCoordinator(by);
+    if (!(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
+    const current = this.#d.roster.get(id);
+    if (current.lifecycle === 'archived') throw new ConflictError(`${current.name} işten çıkarıldı.`);
+    if (current.model === model) return current;
+    const next = this.#d.roster.update(id, { model });
+    this.#emit(id, { type: 'model.changed', model });
+    this.#d.reload?.(id);
+    return next;
+  }
+
 
   // ── tasks ─────────────────────────────────────────────────────────────────
 
   createTask(by: string, input: TaskInput): Task {
+    const rules = this.#rules();
     const assignee = this.#d.roster.get(input.assignee);
     if (assignee.lifecycle === 'archived') throw new ConflictError(`${assignee.name} işten çıkarıldı; ona görev verilemez.`);
     const title = clean(input.title, 'Başlık', 120, true);
@@ -190,19 +212,19 @@ export class Company {
       const plan = this.#d.plans.get(planId);
       if (plan.status === 'draft') throw new ConflictError(`“${plan.title}” planı henüz onaylanmadı; görevleri onaydan sonra aç.`);
       if (plan.status === 'declined') throw new ConflictError(`“${plan.title}” planından vazgeçildi; gerekiyorsa yeni bir plan öner.`);
-      if (this.#d.tasks.openInPlan(planId) >= LIMITS.perPlanOpen) throw new ConflictError(`Bu planda en fazla ${LIMITS.perPlanOpen} açık görev olabilir.`);
+      if (this.#d.tasks.openInPlan(planId) >= rules.openTasksPerPlan) throw new ConflictError(`Bu planda en fazla ${rules.openTasksPerPlan} açık görev olabilir.`);
     }
     const dependsOn = (input.dependsOn ?? []).filter(Boolean);
     for (const dep of dependsOn) this.#d.tasks.get(dep);
     const chainDepth = by === OWNER ? 0 : (this.#d.tasks.inProgressOf(by)?.chainDepth ?? -1) + 1;
-    if (chainDepth > LIMITS.chainDepth) {
-      this.#tellCoordinator(by, `${this.nameOf(by)} “${title}” görevini paslayamadı: görev zinciri ${LIMITS.chainDepth} halkayı geçti. Zinciri sen çöz.`);
-      throw new ConflictError(`Görev zinciri en fazla ${LIMITS.chainDepth} halka olabilir; bu işi koordinatöre bırak.`);
+    if (chainDepth > rules.chainDepth) {
+      this.#tellCoordinator(by, `${this.nameOf(by)} “${title}” görevini paslayamadı: görev zinciri ${rules.chainDepth} halkayı geçti. Zinciri sen çöz.`);
+      throw new ConflictError(`Görev zinciri en fazla ${rules.chainDepth} halka olabilir; bu işi koordinatöre bırak.`);
     }
     const isCoordinator = by !== OWNER && this.#d.roster.get(by).kind === 'coordinator';
-    if (by !== OWNER && !isCoordinator && this.#d.tasks.createdSince(by, this.#now() - DAY_MS) >= LIMITS.perDay) {
-      this.#tellCoordinator(by, `${this.nameOf(by)} bugün ${LIMITS.perDay} görev açtı ve sınıra geldi.`);
-      throw new ConflictError(`Bir çalışan günde en fazla ${LIMITS.perDay} görev açabilir.`);
+    if (by !== OWNER && !isCoordinator && this.#d.tasks.createdSince(by, this.#now() - DAY_MS) >= rules.tasksPerDay) {
+      this.#tellCoordinator(by, `${this.nameOf(by)} bugün ${rules.tasksPerDay} görev açtı ve sınıra geldi.`);
+      throw new ConflictError(`Bir çalışan günde en fazla ${rules.tasksPerDay} görev açabilir.`);
     }
     const task = this.#d.tasks.create({ planId, title, description, done, requester: by, assignee: assignee.id, priority, dependsOn, chainDepth: Math.max(0, chainDepth) });
     this.#taskEvent('created', task);
@@ -463,6 +485,15 @@ export class Company {
     const counts = new Map(characters.map((c) => [c, 0]));
     for (const e of this.#d.roster.list()) if (counts.has(e.characterId)) counts.set(e.characterId, (counts.get(e.characterId) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => a[1] - b[1] || characters.indexOf(a[0]) - characters.indexOf(b[0]))[0]![0];
+  }
+
+  #rules(): Constitution {
+    return this.#d.constitution?.() ?? DEFAULT_CONSTITUTION;
+  }
+
+  #assertRoom(): void {
+    const max = this.#rules().maxEmployees;
+    if (this.#d.roster.list().length >= max) throw new ConflictError(`Anayasa en fazla ${max} çalışan diyor; yeni biri için sahibine getir.`);
   }
 
   #assertCoordinator(by: string): void {

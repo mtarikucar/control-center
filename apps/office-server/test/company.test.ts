@@ -364,3 +364,31 @@ describe('Company — final review (phase 2)', () => {
     expect(t.company.handedOver(ada.id)).toBe(true);
   });
 });
+
+describe('Company — within the constitution', () => {
+  it('refuses a hire past maxEmployees and uses the constitution’s loop limits', async () => {
+    const { companyFor } = await import('./company-helpers.ts');
+    const s = setup();
+    const f = fakeEngine(s);
+    cleanups.push(f.cleanup, s.cleanup);
+    const t = companyFor(s, f);
+    t.budget.setConstitution({ maxEmployees: 2, tasksPerDay: 1 });
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    expect(() => t.company.hire(c.id, { name: 'Can', role: 'r' })).toThrow(/en fazla 2 çalışan/);
+    expect(() => t.company.hire(OWNER, { name: 'Can', role: 'r' })).toThrow(/en fazla 2 çalışan/);
+    t.company.createTask(ada.id, { assignee: c.id, title: 'bir' });
+    expect(() => t.company.createTask(ada.id, { assignee: c.id, title: 'iki' })).toThrow(/günde en fazla 1/);
+  });
+
+  it('lets the coordinator change someone’s model and reloads their session', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r', model: 'haiku' });
+    expect(t.company.setModel(c.id, ada.id, 'sonnet').model).toBe('sonnet');
+    expect(t.reloaded).toContain(ada.id);
+    expect(t.events.list({ limit: 500 }).some((e) => e.employeeId === ada.id && e.event.type === 'model.changed')).toBe(true);
+    expect(() => t.company.setModel(c.id, ada.id, 'gpt' as never)).toThrow(/Bilinmeyen model/);
+    expect(() => t.company.setModel(ada.id, c.id, 'haiku')).toThrow(/Yalnız koordinatör/);
+  });
+});
