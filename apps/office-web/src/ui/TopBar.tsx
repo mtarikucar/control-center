@@ -6,6 +6,7 @@ export function TopBar() {
   const quota = useOffice((s) => s.quota);
   const count = useOffice((s) => Object.keys(s.views).length);
   const setHireOpen = useOffice((s) => s.setHireOpen);
+  const setCompanyOpen = useOffice((s) => s.setCompanyOpen);
   return (
     <header className="topbar">
       <div className="brand">
@@ -14,6 +15,9 @@ export function TopBar() {
         <span className="muted">{count} çalışan</span>
       </div>
       <QuotaHud quota={quota} now={Date.now()} />
+      <button type="button" onClick={() => setCompanyOpen(true)}>
+        Şirket
+      </button>
       <button type="button" className="primary" onClick={() => setHireOpen(true)}>
         + Çalışan al
       </button>

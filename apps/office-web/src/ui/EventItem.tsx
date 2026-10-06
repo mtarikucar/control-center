@@ -1,6 +1,7 @@
 import type { StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, summarizeToolInput } from './format.ts';
 import { lifecycleLabel } from './labels.ts';
+import { PlanCard } from './PlanCard.tsx';
 
 export function EventItem({ stored }: { stored: StoredEvent }) {
   const e = stored.event;
@@ -72,6 +73,32 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
         </details>
       );
     }
+    case 'plan.changed':
+      if (e.change === 'proposed' || e.change === 'revised') return <PlanCard plan={e.plan} />;
+      return (
+        <div className="note">
+          Plan “{e.plan.title}”: {e.change === 'approved' ? 'onaylandı' : e.change === 'declined' ? 'vazgeçildi' : 'bitti'}
+        </div>
+      );
+    case 'company.report':
+      return (
+        <div className="msg report">
+          <span className="who">Rapor</span>
+          <p>{e.text}</p>
+          {time}
+        </div>
+      );
+    case 'task.changed':
+      if (e.change !== 'created' && e.change !== 'finished' && e.change !== 'started') return null;
+      return (
+        <div className="note">
+          Görev {e.change === 'created' ? 'açıldı' : e.change === 'started' ? 'başladı' : 'bitti'}: {e.task.title}
+        </div>
+      );
+    case 'brief.updated':
+      return <div className="note">Şirket özeti güncellendi</div>;
+    case 'role.changed':
+      return <div className="note">Rol: {e.title || e.kind}</div>;
     default:
       return null;
   }
