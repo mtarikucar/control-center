@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { HireInput, OfficeSnapshot, ServerMessage } from '@cc/shared';
+import { OWNER, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
+import type { Company } from './company/company.ts';
+import type { PlanStore, TaskStore } from './company/store.ts';
 import type { Engine } from './engine.ts';
 import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } from './errors.ts';
 import type { EventStore } from './event-store.ts';
@@ -18,6 +20,8 @@ export interface ApiDeps {
   quota: QuotaTracker;
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
+  /** The company layer: plans, tasks and the coordinator (absent: v1 office). */
+  company?: { service: Company; tasks: TaskStore; plans: PlanStore };
 }
 
 export interface ApiOptions {
@@ -35,12 +39,17 @@ export interface Api {
 
 const MAX_BODY_BYTES = 1_000_000;
 const WS_OPEN = 1;
+const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline)$/;
 const EMPLOYEE_ROUTE =
   /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events))?$/;
 
 export function snapshot(d: ApiDeps): OfficeSnapshot {
   const employees = d.roster.list();
-  return { employees, quota: d.quota.state(), usage: d.quota.usageAll(employees.map((e) => e.id)), lastSeq: d.events.lastSeq() };
+  const base: OfficeSnapshot = { employees, quota: d.quota.state(), usage: d.quota.usageAll(employees.map((e) => e.id)), lastSeq: d.events.lastSeq() };
+  if (!d.company) return base;
+  const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'] });
+  const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
+  return { ...base, tasks: [...open, ...closed], plans: d.company.plans.list() };
 }
 
 /** Blocks DNS rebinding (Host) and cross-site requests from other pages in the owner's browser (Origin). */
@@ -109,7 +118,19 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
   if (method === 'POST' && url.pathname === '/api/employees') {
     const body = await readJson(req);
     if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
-    return sendJson(res, 201, d.engine.hire(body as HireInput));
+    const input = body as HireInput;
+    return sendJson(res, 201, d.company ? d.company.service.hire(OWNER, input) : d.engine.hire(input));
+  }
+  if (d.company) {
+    const company = d.company.service;
+    const plan = PLAN_ROUTE.exec(url.pathname);
+    if (method === 'POST' && plan) return sendJson(res, 200, plan[2] === 'approve' ? company.approve(plan[1] ?? '') : company.decline(plan[1] ?? ''));
+    if (method === 'POST' && url.pathname === '/api/company/coordinator/hire') return sendJson(res, 201, company.hireCoordinator());
+    if (method === 'POST' && url.pathname === '/api/company/coordinator') {
+      const id = (await readJson(req) as { employeeId?: unknown }).employeeId;
+      if (typeof id !== 'string' || !id) throw new ValidationError('employeeId gerekli.');
+      return sendJson(res, 200, company.appointCoordinator(id));
+    }
   }
 
   const match = EMPLOYEE_ROUTE.exec(url.pathname);
