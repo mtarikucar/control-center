@@ -1,17 +1,25 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { afterAll } from 'vitest';
 import type { StoredEvent } from '@cc/shared';
-import { rmSync } from 'node:fs';
 import { migrateUp, openDb, type Db } from '../src/db.ts';
 import { EventStore } from '../src/event-store.ts';
 import { Roster } from '../src/roster.ts';
 
 export const FAKE_CLAUDE = fileURLToPath(new URL('./fake-claude.mjs', import.meta.url));
 
+const created: string[] = [];
+// Every test file gets its own copy of this module: remove what its tests created once the file is done.
+afterAll(() => {
+  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 export function tempDir(prefix = 'cc-test-'): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  created.push(dir);
+  return dir;
 }
 
 export async function until(check: () => boolean, timeoutMs = 5000): Promise<void> {
