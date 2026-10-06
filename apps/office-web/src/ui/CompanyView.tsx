@@ -3,6 +3,16 @@ import type { Employee, Task, TaskStatus } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
+import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
+
+const TABS = [
+  ['org', 'Örgüt'],
+  ['tasks', 'Görevler'],
+  ['decisions', 'Kararlar'],
+  ['playbook', 'El kitabı'],
+  ['notes', 'Notlar'],
+] as const;
+type Tab = (typeof TABS)[number][0];
 
 const COLUMNS: TaskStatus[] = ['waiting', 'in_progress', 'blocked', 'done'];
 
@@ -72,7 +82,7 @@ export function CompanyView() {
   const plans = useOffice((s) => s.plans);
   const setCompanyOpen = useOffice((s) => s.setCompanyOpen);
   const select = useOffice((s) => s.select);
-  const [tab, setTab] = useState<'org' | 'tasks'>('org');
+  const [tab, setTab] = useState<Tab>('org');
   const [person, setPerson] = useState('');
   const [planFilter, setPlanFilter] = useState('');
   const people = useMemo(() => Object.values(views).map((v) => v.employee).filter((e) => e.lifecycle !== 'archived'), [views]);
@@ -100,12 +110,11 @@ export function CompanyView() {
         <header className="row">
           <h2>Şirket</h2>
           <div role="tablist" className="tabs">
-            <button type="button" role="tab" aria-selected={tab === 'org'} onClick={() => setTab('org')}>
-              Örgüt
-            </button>
-            <button type="button" role="tab" aria-selected={tab === 'tasks'} onClick={() => setTab('tasks')}>
-              Görevler
-            </button>
+            {TABS.map(([key, label]) => (
+              <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
+                {label}
+              </button>
+            ))}
           </div>
           <button type="button" className="icon" aria-label="Kapat" onClick={() => setCompanyOpen(false)}>
             ×
@@ -130,7 +139,7 @@ export function CompanyView() {
               ))}
             </div>
           </div>
-        ) : (
+        ) : tab === 'tasks' ? (
           <div className="board-wrap">
             <div className="row board-filters">
               <label>
@@ -183,6 +192,12 @@ export function CompanyView() {
               })}
             </div>
           </div>
+        ) : tab === 'decisions' ? (
+          <DecisionsTab />
+        ) : tab === 'playbook' ? (
+          <PlaybookTab />
+        ) : (
+          <NotesTab />
         )}
       </section>
     </div>
