@@ -189,7 +189,7 @@ describe('company data', () => {
     status: 'draft', version: 1, proposedBy: 'e1', createdAt: 1, updatedAt: 1, approvedAt: null, ...over,
   });
   const task = (over: Partial<Task> = {}): Task => ({
-    id: 't1', planId: 'p1', title: 'Senaryo', description: '', done: [], requester: 'owner', assignee: 'e1', priority: 3, dependsOn: [],
+    id: 't1', kind: 'work', planId: 'p1', title: 'Senaryo', description: '', done: [], requester: 'owner', assignee: 'e1', priority: 3, dependsOn: [],
     status: 'waiting', chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null, ...over,
   });
 

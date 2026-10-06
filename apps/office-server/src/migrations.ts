@@ -117,4 +117,70 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE employees DROP COLUMN team;
       ALTER TABLE employees DROP COLUMN title;`,
   },
+  {
+    version: 3,
+    name: 'company memory: decisions, playbook, notes, employee files, task kind',
+    up: `
+      ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'work';
+      CREATE TABLE IF NOT EXISTS decisions (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        by_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        chosen TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        alternatives TEXT NOT NULL,
+        plan_id TEXT,
+        reverts TEXT
+      );
+      CREATE INDEX IF NOT EXISTS decisions_ts ON decisions (ts);
+      CREATE INDEX IF NOT EXISTS decisions_reverts ON decisions (reverts);
+      CREATE TABLE IF NOT EXISTS playbook (
+        topic TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        by_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        PRIMARY KEY (topic, version)
+      );
+      CREATE TABLE IF NOT EXISTS notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL,
+        by_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        text TEXT NOT NULL,
+        tags TEXT NOT NULL,
+        source TEXT
+      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+        title, text, tags, content = 'notes', content_rowid = 'id', tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
+        INSERT INTO notes_fts (rowid, title, text, tags) VALUES (new.id, new.title, new.text, new.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
+        INSERT INTO notes_fts (notes_fts, rowid, title, text, tags) VALUES ('delete', old.id, old.title, old.text, old.tags);
+      END;
+      CREATE TABLE IF NOT EXISTS employee_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL,
+        employee_id TEXT NOT NULL,
+        by_id TEXT NOT NULL,
+        text TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS employee_notes_employee ON employee_notes (employee_id, ts);`,
+    down: `
+      DROP INDEX IF EXISTS employee_notes_employee;
+      DROP TABLE IF EXISTS employee_notes;
+      DROP TRIGGER IF EXISTS notes_ad;
+      DROP TRIGGER IF EXISTS notes_ai;
+      DROP TABLE IF EXISTS notes_fts;
+      DROP TABLE IF EXISTS notes;
+      DROP TABLE IF EXISTS playbook;
+      DROP INDEX IF EXISTS decisions_reverts;
+      DROP INDEX IF EXISTS decisions_ts;
+      DROP TABLE IF EXISTS decisions;
+      ALTER TABLE tasks DROP COLUMN kind;`,
+  },
 ];
