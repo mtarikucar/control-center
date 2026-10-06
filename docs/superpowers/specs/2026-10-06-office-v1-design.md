@@ -31,7 +31,7 @@ v1'in başarı ölçütü — sahibi şunları yapabildiğinde v1 biter:
 | Kişisel ayarlar | Çalışanlar sahibinin kişisel `CLAUDE.md`'sini, hafızasını ve eklentilerini (superpowers dahil) **devralmaz**; talimatları kendi rol tanımıdır. |
 | Erişim | Şimdilik **yalnızca bu bilgisayar** (localhost). İnternete açılırken giriş sistemi zorunlu olacak. |
 | Görünürlük | Kimin ne kadar token/maliyet harcadığı karakterin üstünde görünür. |
-| Meshy | Çekirdeğin parçası **değil**; bir Claude skill'i (§9). Ofis yalnızca model dosyalarını okur. |
+| Meshy | Sisteme **entegre edilmez**, skill'i de yazılmaz (sahibinin kararı, 2026-10-06). Modeller tek seferlik üretilir; ofis yalnızca `assets/3d/` ve manifest'i okur (§8, §9). |
 
 ## 3. Mimari
 
@@ -70,7 +70,6 @@ apps/office-web/        sahne, karakterler, panel, form, kota göstergesi
 packages/shared/        ortak tipler: Employee, OfficeEvent, EmployeeState, AssetManifest
 assets/2d/              sahibin referans görselleri (Meshy girdisi)
 assets/3d/              üretilmiş modeller + manifest.json (ofisin okuduğu tek yer)
-.claude/skills/meshy/   Meshy skill'i (çekirdek dışı)
 ```
 
 Çalışma zamanı verisi **repo dışında** durur: `~/.control-center/` (`OFFICE_DATA_DIR` ile değiştirilebilir).
@@ -240,39 +239,29 @@ Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet. Toplant�
   "items": [
     { "id": "work_desk", "kind": "furniture", "file": "furniture/work_desk.glb",
       "size": { "x": 1.52, "y": 0.75, "z": 0.80 } },
-    { "id": "coder", "kind": "character", "file": "characters/coder.glb",
+    { "id": "coder", "kind": "character", "name": "Kodcu", "file": "characters/coder/base.glb",
       "height": 1.7,
-      "clips": { "idle": "Idle", "walk": "walking_man", "sit": "Chair_Sit_Idle_M",
-                 "sitDown": "Stand_to_Sit_Transition_M", "typing": "typing",
-                 "talkSeated": "Sitting_Answering_Questions", "drink": "Stand_and_Drink" } }
+      "clips": { "idle": "characters/coder/idle.glb", "walk": "characters/coder/walk.glb",
+                 "sit": "characters/coder/sit.glb", "typing": "characters/coder/typing.glb",
+                 "talkSeated": "characters/coder/talkSeated.glb", "drink": "characters/coder/drink.glb" } }
   ]
 }
 ```
 
 - Ofis modeli `size`/`height`'e ölçekler; kaynak dosyanın ölçeğine güvenmez.
-- Bir karakter dosyası tek model + tüm animasyon klipleridir (aynı modeli her klipte tekrar taşıyan
-  dosyalar birleştirilir).
+- Bir karakter, iskeletli tek bir model dosyası (`file`) ve her rol için yalnızca hareketi taşıyan ayrı bir
+  klip dosyasıdır (`clips`; klip dosyasındaki ilk animasyon kullanılır, kemik adları modelinkiyle aynıdır).
+  Eksik bir rol için yakın bir klip kullanılır (yazma → oturma → durma).
 - Model eksik ya da bozuksa ofis yerine düz bir voksel kutu (karakterde basit voksel figür) gösterir
   ve çalışmaya devam eder.
 - Modelin nereden geldiği (Meshy, Blender, başka araç) ofisi ilgilendirmez.
 
-## 9. Meshy skill'i (çekirdek dışı)
+## 9. Modellerin üretimi (sistem dışı)
 
-`.claude/skills/meshy/` — ben ya da ileride bir "3D sanatçısı" çalışanı kullanır. 2026-10-06 denemesinden
-öğrenilenleri kural olarak taşır:
-
-- **Eşya:** `image-to-3d` yalnız şekil (`should_texture:false`, düşük `target_polycount`), ardından
-  `retexture` — `image_style_url` = orijinal görsel, `ai_model:"meshy-6"`, `remove_lighting:true`.
-  Metinle tarif edilerek dokulama denendi, renkler bozuldu; kullanılmaz.
-- **Karakter:** A pozunda, karşıdan, düz arka planlı görsel → `image-to-3d` (`pose_mode:"a-pose"`,
-  `target_polycount` ≤ 50k; 320k yüzeyin üstü iskelet takmada reddedilir) → `rigging` (yürüme/koşma
-  dahil) → kütüphane animasyonları (33 Chair_Sit_Idle_M, 57 Stand_to_Sit_Transition_M, 307
-  Sitting_Answering_Questions, 342 Stand_and_Drink, 0 Idle) + `text-to-motion` ile "yazma" (bir kez
-  üretilir, 3 gün içinde tüm karakterlere uygulanır).
-- **Kredi:** işe başlamadan bakiye ve tahmin kontrolü; iş listesi dosyası (görev no, harcanan kredi,
-  çıktı) ile biten işi tekrar ödememe; indirme linkleri süreli olduğu için çıktıyı hemen indirme;
-  sonucu `assets/3d/` ve manifest'e yazma.
-- Anahtar `.env`'de (`MESHY_API_KEY`); hiçbir yere yazdırılmaz.
+Sahibinin 2026-10-06 kararıyla Meshy sisteme entegre edilmez ve skill'i yazılmaz. Modeller tek seferlik bir
+betikle üretilip `assets/3d/`'ye konur; ofis yalnızca manifest anlaşmasını (§8) bilir. Denemeden öğrenilenler
+(eşya: yalnız şekil + orijinal görselle yeniden dokulama; karakter: A pozu → ≤50k yüzey → iskelet → kütüphane
+animasyonları + metinden "yazma" hareketi) o betikte uygulanır. Anahtar `.env`'de kalır.
 
 ## 10. Hata durumları (çekirdek)
 
@@ -300,7 +289,6 @@ Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet. Toplant�
   yan soru.
 - **Arayüz:** panel bileşen testleri; 3D sahne başsız Chrome ile açılıp ekran görüntüsüyle kontrol
   (Playwright MCP bu makinede sandbox nedeniyle açılmıyor; `chrome --headless=new --no-sandbox` çalışıyor).
-- Meshy skill'inin kontrolleri skill'in kendi klasöründe durur; çekirdek testlerinin parçası değildir.
 
 ## 12. Sonraki aşamalar (bu belgede uygulanmaz)
 
@@ -327,7 +315,7 @@ Konuşmada kararlaştırılanlar, sırası sonra belirlenecek:
 - **Ofis araç seti (MCP):** çalışanın platformla konuştuğu araçlar (iş aç, teslim et, el kitabını
   güncelle, işe al…); yetkiler araç erişimiyle uygulanır.
 - Toplantı odasının kullanımı, Codex motoru, internetten erişim (giriş sistemiyle), boştaki süreçleri
-  kapatıp gerektiğinde açma, yeni çalışanlar için karakter üretimi (Meshy skill'iyle).
+  kapatıp gerektiğinde açma, yeni çalışanlar için karakter üretimi (sistem dışı, tek seferlik).
 
 ## 13. Doğrulananlar (2026-10-06)
 
