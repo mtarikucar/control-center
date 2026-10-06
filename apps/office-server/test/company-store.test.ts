@@ -1,0 +1,95 @@
+import { describe, expect, it } from 'vitest';
+import { migrateUp, openDb } from '../src/db.ts';
+import { NoticeStore, PlanStore, TaskStore, type NewTask } from '../src/company/store.ts';
+
+function stores() {
+  const db = openDb(':memory:');
+  migrateUp(db);
+  let t = 1_000;
+  const now = () => (t += 1);
+  return { tasks: new TaskStore(db, now), plans: new PlanStore(db, now), notices: new NoticeStore(db, now) };
+}
+
+const task = (over: Partial<NewTask> = {}): NewTask => ({
+  planId: null, title: 'Yaz', description: 'd', done: ['bitti'], requester: 'owner', assignee: 'e1', priority: 3,
+  dependsOn: [], chainDepth: 0, ...over,
+});
+
+describe('TaskStore', () => {
+  it('creates and reads a task with its lists intact', () => {
+    const { tasks } = stores();
+    const created = tasks.create(task({ done: ['a', 'b'], dependsOn: [] }));
+    expect(tasks.get(created.id)).toEqual(created);
+    expect(created).toMatchObject({ status: 'waiting', done: ['a', 'b'], note: null, result: null, nudged: false, startedAt: null });
+  });
+
+  it('gives the most urgent waiting task first, then the oldest, and skips tasks whose dependencies are not done', () => {
+    const { tasks } = stores();
+    const later = tasks.create(task({ title: 'sonra', priority: 3 }));
+    const urgent = tasks.create(task({ title: 'acil', priority: 1 }));
+    const blocked = tasks.create(task({ title: 'bekleyen', priority: 1, dependsOn: [later.id] }));
+    expect(tasks.nextFor('e1')?.id).toBe(urgent.id);
+    tasks.update(urgent.id, { status: 'done' });
+    expect(tasks.nextFor('e1')?.id).toBe(later.id);
+    tasks.update(later.id, { status: 'done' });
+    expect(tasks.nextFor('e1')?.id).toBe(blocked.id);
+    expect(tasks.nextFor('someone-else')).toBeNull();
+  });
+
+  it('knows what is in progress, what one person opened lately and how much of a plan is open', () => {
+    const { tasks } = stores();
+    const a = tasks.create(task({ requester: 'e2', planId: 'p1' }));
+    tasks.create(task({ requester: 'e2', planId: 'p1' }));
+    expect(tasks.inProgressOf('e1')).toBeNull();
+    tasks.update(a.id, { status: 'in_progress', startedAt: 5 });
+    expect(tasks.inProgressOf('e1')?.id).toBe(a.id);
+    expect(tasks.createdSince('e2', 0)).toBe(2);
+    expect(tasks.createdSince('e2', 10_000)).toBe(0);
+    expect(tasks.openInPlan('p1')).toBe(2);
+    tasks.update(a.id, { status: 'done', result: { summary: 's', outputs: ['x.md'], learned: '' } });
+    expect(tasks.openInPlan('p1')).toBe(1);
+    expect(tasks.get(a.id).result).toEqual({ summary: 's', outputs: ['x.md'], learned: '' });
+  });
+
+  it('lists by assignee, plan and status', () => {
+    const { tasks } = stores();
+    tasks.create(task({ assignee: 'e1', planId: 'p1' }));
+    const b = tasks.create(task({ assignee: 'e2', planId: 'p1' }));
+    tasks.update(b.id, { status: 'blocked' });
+    expect(tasks.list({ assignee: 'e2' }).map((t) => t.id)).toEqual([b.id]);
+    expect(tasks.list({ planId: 'p1' })).toHaveLength(2);
+    expect(tasks.list({ statuses: ['blocked'] }).map((t) => t.id)).toEqual([b.id]);
+  });
+
+  it('says so in Turkish when a task does not exist', () => {
+    expect(() => stores().tasks.get('nope')).toThrow(/Görev bulunamadı/);
+  });
+});
+
+describe('PlanStore', () => {
+  it('creates a draft at version 1 and updates it, newest first in the list', () => {
+    const { plans } = stores();
+    const first = plans.create({ title: 'A', goal: 'g', approach: 'a', people: 'p', steps: ['1', '2'], quotaPct: 10, usd: null, days: 2, risks: '', proposedBy: 'c' });
+    expect(first).toMatchObject({ status: 'draft', version: 1, steps: ['1', '2'], approvedAt: null });
+    const second = plans.create({ title: 'B', goal: 'g', approach: 'a', people: 'p', steps: [], quotaPct: null, usd: 5, days: null, risks: 'r', proposedBy: 'c' });
+    const approved = plans.update(first.id, { status: 'approved', approvedAt: 7 });
+    expect(approved).toMatchObject({ status: 'approved', approvedAt: 7 });
+    expect(approved.updatedAt).toBeGreaterThan(first.updatedAt);
+    expect(plans.list().map((p) => p.id)).toEqual([second.id, first.id]);
+    expect(() => plans.get('nope')).toThrow(/Plan bulunamadı/);
+  });
+});
+
+describe('NoticeStore', () => {
+  it('keeps notices until they are delivered', () => {
+    const { notices } = stores();
+    notices.add('e1', 'bir');
+    notices.add('e1', 'iki');
+    notices.add('e2', 'başka');
+    const pending = notices.pending('e1');
+    expect(pending.map((n) => n.text)).toEqual(['bir', 'iki']);
+    notices.markDelivered(pending.map((n) => n.id));
+    expect(notices.pending('e1')).toEqual([]);
+    expect(notices.pending('e2')).toHaveLength(1);
+  });
+});
