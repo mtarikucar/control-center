@@ -124,7 +124,8 @@ cwd = ~/.control-center/desks/<slug>
 - **Mesaj:** stdin'e `{"type":"user","message":{"role":"user","content":…}}` yazılır. Tur sürerken
   yazılan mesaj bir sonraki araç adımında modele ulaşır ve aynı turda cevaplanır (doğrulandı).
 - **Yan soru (`/btw`):** ayrı, tek seferlik bir süreç: `claude -p --resume <sessionId> --fork-session
-  --tools "" --setting-sources project,local --strict-mcp-config <soru>`. Cevap panelde "yan cevap" olarak
+  --setting-sources user,project,local --settings <aynı çalışan ayarları> --strict-mcp-config --tools ""`;
+  soru stdin'den verilir (`--tools` kendinden sonraki argümanları yuttuğu için en sonda). Cevap panelde "yan cevap" olarak
   görünür, asıl konuşmaya eklenmez, asıl iş bölünmez (doğrulandı, ~6 sn). Kopya oturum o an süren adımı
   "yarıda kalmış" sanabilir; kabul edilen küçük kusur.
 - **Durdur:** stdin'e `{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}` yazılır;
@@ -164,9 +165,12 @@ Ham stream-json satırları ayrıca masada saklanmaz; Claude'un kendi oturum kay
 
 ### 4.4 quota
 
-- Çalışan başına: her `result` olayının `usage` (girdi, çıktı, önbellek okuma/yazma) ve `total_cost_usd`
-  değerleri toplanır; bugünkü ve toplam olarak tutulur. Maliyet, Claude'un hesapladığı API karşılığıdır;
-  abonelikten ayrıca para çekilmez.
+- Çalışan başına: Claude `result` olayında `total_cost_usd` ve `modelUsage` değerlerini **oturum boyunca
+  birikmiş toplam** olarak verir (devam ettirilen ve kopyalanan oturumlar da eski toplamdan başlar; `usage`
+  yalnızca o turun ana döngüsüdür). Bu yüzden engine her sonuçta bir önceki toplamdan farkı alır ve olaya o
+  turun payı olarak yazar; yan sorunun payı, kopyanın toplamı eksi ana oturumun kopyalandığı andaki toplamıdır.
+  Tokenlar `modelUsage`'dan (bütün modeller, alt ajanlar dahil) gelir. Bugünkü ve toplam değerler bu paylardan
+  toplanır. Maliyet, Claude'un hesapladığı API karşılığıdır; abonelikten ayrıca para çekilmez.
 - Ofis geneli: `rate_limit_event.rate_limit_info.unifiedWindows.{five_hour,seven_day}`
   `utilization` ve `resetsAt` değerleri son okunan hâliyle tutulur (doğrulandı).
 
@@ -181,8 +185,8 @@ HTTP (yalnızca 127.0.0.1): `GET /api/office` (kartlar, durumlar, kota, manifest
 
 **Güvenlik:** çalışanlar onaysız ve sahibinin bağlantılarıyla çalıştığı için ofis API'si, onları dışarıdan
 yönetmenin tek kapısıdır. Bu yüzden: yalnızca `127.0.0.1`'e bağlanır; `Host` başlığı `127.0.0.1:<port>` ya
-da `localhost:<port>` olmalı (DNS rebinding'e karşı); `Origin` varsa ofisin kendi adresi ya da izin verilen
-geliştirme adresi olmalı (tarayıcıda açık başka bir sitenin istek atmasına — CSRF, WebSocket ele geçirme —
+da `localhost:<port>` olmalı (DNS rebinding'e karşı); `Origin` varsa ofisin kendi adresi ya da `OFFICE_ALLOWED_ORIGINS` ile açıkça izin
+verilmiş bir adres olmalı (varsayılan boş: ortak bir geliştirme portunu, örn. Vite'ın 5173'ünü, kendiliğinden güvenmeyiz) (tarayıcıda açık başka bir sitenin istek atmasına — CSRF, WebSocket ele geçirme —
 karşı); `POST` istekleri `application/json` olmalı.
 
 WebSocket `/ws`: bağlanınca anlık görüntü, ardından olay akışı. Kopma sonrası istemci son gördüğü
@@ -274,7 +278,11 @@ Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet. Toplant�
 
 | Durum | Davranış |
 |---|---|
-| Çalışanın süreci beklenmedik kapanır | Olay kaydı; bir kez `--resume` ile yeniden açma. 2 dk içinde tekrar kapanırsa `error`, panelde stderr özeti. |
+| Çalışanın süreci beklenmedik kapanır | Olay kaydı; bir kez `--resume` ile yeniden açma. Claude'un okuduğunu onaylamadığı mesajlar (`--replay-user-messages`) yeni sürece yeniden gönderilir; okunmuş bir iş yarım kaldıysa "kaldığın yerden devam et" de eklenir. 2 dk içinde tekrar kapanırsa `error`, panelde stderr özeti. |
+| Tur bitmek üzereyken mesaj gelir | Claude onu ayrı bir ek turda cevaplar (`queued_turn_count` > 0); çalışan bu turlar bitene dek `working` kalır. |
+| Durdur / işten çıkar / terminalde aç üst üste gelir | Çalışan başına sırayla çalışır; biri sürerken gelen mesaj ya da "devam" 409 ile reddedilir, hiçbir komut bir öncekinin sonucunu ezmez. |
+| Aynı veri klasöründe ikinci bir ofis açılır | Veri klasöründeki kilit dosyası yüzünden ikinci ofis, çalışanlara dokunmadan çıkar; ofis portu aldıktan sonra kurtarmaya başlar. |
+| Bozuk bir WebSocket çerçevesi gelir | Yalnızca o bağlantı kapanır; ofis süreci ayakta kalır. |
 | office-server kapanır / çöker | Açılışta her etkin kart kendi oturumuyla geri gelir; o an süren tur `interrupted` olarak işaretlenir ve tek tıkla sürdürülür. |
 | Abonelik limiti dolar | `limited`; `resetsAt` (+30 sn) geldiğinde engine kendiliğinden "Limit açıldı, kaldığın yerden devam et." mesajını gönderir. |
 | Bir bağlantı açılamaz | `session.started`'taki bağlantı durumundan panelde uyarı; çalışan diğerleriyle sürer. |
