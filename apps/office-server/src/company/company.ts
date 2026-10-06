@@ -1,17 +1,31 @@
+import { statSync } from 'node:fs';
+import { relative } from 'node:path';
 import type { Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Task, TaskResult } from '@cc/shared';
 import { OWNER } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
-import { readBrief, writeBrief } from './brief.ts';
+import { archiveTask } from './archive.ts';
+import { briefPath, readBrief, writeBrief } from './brief.ts';
+import type { Memory } from './memory.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
+import { clean, lines } from './text.ts';
 
 /** The constitution's loop guards (spec §4.6). */
 export const LIMITS = { chainDepth: 5, perDay: 30, perPlanOpen: 60 } as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BRIEF_MAX = 8000;
+const HANDOVER_TITLE = 'Devir: işten ayrılıyorsun';
+const HANDOVER_TEXT = `Sahibi seni işten çıkarıyor. Ayrılmadan önce bildiklerini şirkete devret: öğrendiklerini ve yarım kalan işlerin
+durumunu yaz, işe yarayacak dosyaları göster. Bu görevi taskFinish ile teslim edince ofis seni işten çıkaracak; açık
+görevlerin koordinatöre döner.`;
+const HANDOVER_DONE = [
+  'Öğrendiklerin ve başkasının bilmesi gerekenler noteWrite ile şirket notlarında',
+  'Elindeki işlerin durumu teslim özetinde (açık görevlerin koordinatöre dönecek)',
+  'İşe yarayacak dosyalar teslimin outputs listesinde',
+];
 
 export interface CompanyDeps {
   roster: Roster;
@@ -26,6 +40,8 @@ export interface CompanyDeps {
   characters: () => string[];
   /** Restarts a session so it reads a new role card and tool list (Engine.reload); absent in tests that do not care. */
   reload?: (id: string) => void;
+  /** The company memory: a hand-in's lesson becomes a note (absent in tests that do not care). */
+  memory?: Memory;
   now?: () => number;
 }
 
@@ -59,20 +75,6 @@ export interface StatusLine {
   kind: EmployeeKind;
   lifecycle: Lifecycle;
   task: string | null;
-}
-
-function clean(value: string | undefined, label: string, max: number, required: boolean): string {
-  const text = (value ?? '').trim();
-  if (required && !text) throw new ValidationError(`${label} boş olamaz.`);
-  if (text.length > max) throw new ValidationError(`${label} en fazla ${max} karakter olabilir.`);
-  return text;
-}
-
-function lines(items: string[] | undefined, label: string, maxItems: number, itemMax: number): string[] {
-  const out = (items ?? []).map((s) => String(s).trim()).filter(Boolean);
-  if (out.length > maxItems) throw new ValidationError(`${label} en fazla ${maxItems} madde olabilir.`);
-  for (const item of out) if (item.length > itemMax) throw new ValidationError(`${label} maddeleri en fazla ${itemMax} karakter olabilir.`);
-  return out;
 }
 
 function amount(value: number | null | undefined, label: string): number | null {
@@ -211,6 +213,8 @@ export class Company {
   assign(by: string, taskId: string, assignee: string): Task {
     this.#assertCoordinator(by);
     const task = this.#d.tasks.get(taskId);
+    // Finishing a hand-over lets its holder go: moving it would fire someone the owner never chose.
+    if (task.kind === 'handover') throw new ConflictError('Devir görevi başkasına verilemez; sahibi beklemek istemezse Hemen çıkar ile devri atlayabilir.');
     const holder = this.#person(task.assignee);
     // A running task stays with its assignee — unless they were fired or left it open after the office's reminder.
     if (task.status === 'in_progress' && !task.nudged && holder !== null && holder.lifecycle !== 'archived') {
@@ -227,16 +231,54 @@ export class Company {
     return next;
   }
 
-  /** Someone was fired: their open tasks wait again, and the coordinator hands them out (spec §10). */
+  /** Someone was fired: their open work waits again and the coordinator hands it out (spec §10); a hand-over is cancelled. */
   releaseTasksOf(id: string): void {
-    const open = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] });
-    if (open.length === 0) return;
-    for (const task of open) {
+    const work: Task[] = [];
+    for (const task of this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] })) {
+      if (task.kind === 'handover') {
+        this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'cancelled', finishedAt: this.#now() }));
+        continue;
+      }
+      work.push(task);
       if (task.status !== 'waiting') this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null, nudged: false }));
     }
-    const list = open.map((t) => `“${t.title}” (no ${t.id})`).join(', ');
+    if (work.length === 0) return;
+    const list = work.map((t) => `“${t.title}” (no ${t.id})`).join(', ');
     this.#tellCoordinator(id, `${this.nameOf(id)} işten çıkarıldı; açık görevleri sahipsiz bekliyor: ${list}. taskAssign ile yeniden dağıt.`);
   }
+
+  /**
+   * The owner's "İşten çıkar": first a hand-over task (write down what you know), delivered before anything else; the
+   * Dispatcher lets the person go once it is handed in (spec §3.4). Asking again returns the same task.
+   */
+  beginHandover(id: string): Task {
+    const employee = this.#d.roster.get(id);
+    if (employee.lifecycle === 'archived') throw new ConflictError(`${employee.name} zaten işten çıkarıldı.`);
+    const open = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
+    if (open) return open;
+    const task = this.#d.tasks.create({
+      kind: 'handover', planId: null, title: HANDOVER_TITLE, description: HANDOVER_TEXT, done: HANDOVER_DONE,
+      requester: OWNER, assignee: id, priority: 1, dependsOn: [], chainDepth: 0,
+    });
+    this.#taskEvent('created', task);
+    this.#tellCoordinator(id, `${employee.name} işten çıkarılıyor; önce devir notlarını yazıyor. Açık görevleri sonra sana dönecek.`);
+    return task;
+  }
+
+  /** The hand-over is in: the office may let them go. */
+  handedOver(id: string): boolean {
+    return this.#d.tasks.handoverDone(id);
+  }
+
+  /** When the company brief last changed (0 = never written). */
+  briefUpdatedAt(): number {
+    try {
+      return statSync(briefPath(this.#d.dataDir)).mtimeMs;
+    } catch {
+      return 0;
+    }
+  }
+
 
   reprioritize(by: string, taskId: string, priority: number): Task {
     this.#assertCoordinator(by);
@@ -279,11 +321,22 @@ export class Company {
       learned: (result.learned ?? '').trim().slice(0, 4000),
     };
     if (!handed.summary) throw new ValidationError('Teslim özeti boş olamaz.');
-    const next = this.#d.tasks.update(taskId, { status: 'done', result: handed, finishedAt: this.#now() });
+    const finishedAt = this.#now();
+    let archived: TaskResult = handed;
+    try {
+      const assignee = this.#d.roster.get(task.assignee);
+      const planTitle = task.planId ? this.#d.plans.get(task.planId).title : null;
+      const dir = archiveTask({ dataDir: this.#d.dataDir, desk: deskDir(this.#d.dataDir, assignee.slug), task, result: handed, planTitle, by: assignee.name, now: finishedAt });
+      archived = { ...handed, archive: relative(this.#d.dataDir, dir) };
+    } catch {
+      // The archive never blocks a hand-in: the result is kept in the database either way.
+    }
+    const next = this.#d.tasks.update(taskId, { status: 'done', result: archived, finishedAt });
     const line = `Görev bitti: “${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
     if (task.requester !== OWNER && task.requester !== by) this.#d.notices.add(task.requester, line);
     if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, line);
     this.#taskEvent('finished', next);
+    this.#d.memory?.learnedFrom(next, handed);
     if (task.planId) this.#maybeFinishPlan(task.planId);
     return next;
   }

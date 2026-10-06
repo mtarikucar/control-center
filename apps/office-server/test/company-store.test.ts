@@ -61,6 +61,13 @@ describe('TaskStore', () => {
     expect(tasks.list({ statuses: ['blocked'] }).map((t) => t.id)).toEqual([b.id]);
   });
 
+  it('keeps the task kind, work by default', () => {
+    const { tasks } = stores();
+    expect(tasks.create(task()).kind).toBe('work');
+    const handover = tasks.create(task({ kind: 'handover' }));
+    expect(tasks.get(handover.id).kind).toBe('handover');
+  });
+
   it('says so in Turkish when a task does not exist', () => {
     expect(() => stores().tasks.get('nope')).toThrow(/Görev bulunamadı/);
   });

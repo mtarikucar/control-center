@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Plan, PlanStatus, Task, TaskResult, TaskStatus } from '@cc/shared';
+import type { Plan, PlanStatus, Task, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 
@@ -21,12 +21,14 @@ interface TaskRow {
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
+  kind: string;
 }
 
 function taskFromRow(r: TaskRow): Task {
   return {
     id: r.id,
     planId: r.plan_id,
+    kind: r.kind as TaskKind,
     title: r.title,
     description: r.description,
     done: JSON.parse(r.done) as string[],
@@ -47,6 +49,8 @@ function taskFromRow(r: TaskRow): Task {
 
 export interface NewTask {
   planId: string | null;
+  /** Default 'work'. */
+  kind?: TaskKind;
   title: string;
   description: string;
   done: string[];
@@ -71,14 +75,14 @@ export class TaskStore {
   }
 
   create(t: NewTask): Task {
-    const task: Task = { ...t, id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null };
+    const task: Task = { ...t, kind: t.kind ?? 'work', id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null };
     this.#db
       .prepare(
         `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth,
-           note, result, nudged, created_at, started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL)`,
+           note, result, nudged, created_at, started_at, finished_at, kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?)`,
       )
-      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt);
+      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind);
     return task;
   }
 
@@ -138,6 +142,20 @@ export class TaskStore {
       .prepare("SELECT * FROM tasks WHERE assignee = ? AND status = 'in_progress' ORDER BY started_at DESC, rowid DESC LIMIT 1")
       .get(assignee) as unknown as TaskRow | undefined;
     return row ? taskFromRow(row) : null;
+  }
+
+  /** The owner's hand-over for this person is in (one query: a long track record must not hide it). */
+  handoverDone(assignee: string): boolean {
+    return (
+      this.#db.prepare("SELECT 1 FROM tasks WHERE assignee = ? AND kind = 'handover' AND requester = 'owner' AND status = 'done' LIMIT 1").get(assignee) !==
+      undefined
+    );
+  }
+
+  /** When this person last started a task other than `exceptId` (null: never). */
+  lastStartedAt(assignee: string, exceptId: string): number | null {
+    const row = this.#db.prepare('SELECT MAX(started_at) AS t FROM tasks WHERE assignee = ? AND id != ?').get(assignee, exceptId) as unknown as { t: number | null };
+    return row.t;
   }
 
   createdSince(requester: string, since: number): number {

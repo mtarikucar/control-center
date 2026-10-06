@@ -47,3 +47,8 @@ export function summarizeToolInput(name: string, input: unknown): string {
   const text = typeof preferred === 'string' ? preferred : JSON.stringify(record);
   return text.length > 120 ? `${text.slice(0, 117)}...` : text;
 }
+
+/** "6 Eki 14:05": when a memory record was written. */
+export function formatWhen(ts: number): string {
+  return new Date(ts).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}

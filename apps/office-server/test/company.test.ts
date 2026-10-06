@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
@@ -33,7 +33,7 @@ describe('Company — people', () => {
     const c = t.company.hireCoordinator();
     expect(c).toMatchObject({ kind: 'coordinator', model: 'fable', name: 'Koordinatör' });
     expect(t.company.coordinator()?.id).toBe(c.id);
-    expect(readFileSync(join(deskDir(t.dataDir, c.slug), 'CLAUDE.md'), 'utf8')).toContain('planPropose');
+    expect(readFileSync(join(deskDir(t.dataDir, c.slug), 'office-guide.md'), 'utf8')).toContain('planPropose');
     expect(() => t.company.hireCoordinator()).toThrow(/zaten bir koordinatör/);
   });
 
@@ -44,7 +44,7 @@ describe('Company — people', () => {
     const next = t.company.appointCoordinator(ada.id);
     expect(next.kind).toBe('coordinator');
     expect(t.roster.get(old.id).kind).toBe('member');
-    expect(readFileSync(join(deskDir(t.dataDir, ada.slug), 'CLAUDE.md'), 'utf8')).toContain('planPropose');
+    expect(readFileSync(join(deskDir(t.dataDir, ada.slug), 'office-guide.md'), 'utf8')).toContain('planPropose');
     // one from hiring the coordinator, two from the appointment (demoted + promoted)
     expect(ofType(t.events.list({ limit: 500 }), 'role.changed')).toHaveLength(3);
   });
@@ -282,5 +282,85 @@ describe('Company — final review', () => {
     const declined = t.company.propose(c.id, { title: 'Red', goal: 'g', approach: 'a' });
     t.company.decline(declined.id);
     expect(() => t.company.createTask(c.id, { assignee: ada.id, title: 'x', planId: declined.id })).toThrow(/vazgeçildi/);
+  });
+});
+
+describe('Company — hand-ins feed the memory', () => {
+  it('archives the outputs, records where, and turns what was learned into a note', async () => {
+    const { Memory } = await import('../src/company/memory.ts');
+    const { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } = await import('../src/company/memory-store.ts');
+    const s = setup();
+    const f = fakeEngine(s);
+    cleanups.push(f.cleanup, s.cleanup);
+    const tasks = new TaskStore(s.db);
+    const plans = new PlanStore(s.db);
+    const notices = new NoticeStore(s.db);
+    const notes = new NoteStore(s.db);
+    const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes, employeeNotes: new EmployeeNoteStore(s.db) });
+    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'], memory });
+    const ada = company.hire(OWNER, { name: 'Ada', role: 'r' });
+    writeFileSync(join(deskDir(s.dataDir, ada.slug), 'not.md'), 'içerik');
+    const task = company.createTask(OWNER, { assignee: ada.id, title: 'Not yaz' });
+    company.start(task.id);
+    const done = company.finish(ada.id, task.id, { summary: 'Yazıldı.', outputs: ['not.md'], learned: 'Başlık önce gelir.' });
+    expect(done.result?.archive).toMatch(/^company\/archive\/plansiz\//);
+    expect(readFileSync(join(s.dataDir, done.result!.archive!, 'not.md'), 'utf8')).toBe('içerik');
+    expect(notes.list()[0]).toMatchObject({ title: 'Öğrenilen: Not yaz', text: 'Başlık önce gelir.', source: `task:${task.id}` });
+  });
+});
+
+describe('Company — hand-over', () => {
+  it('review focus: one hand-over task however often the owner asks, priority 1, and the coordinator hears', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const first = t.company.beginHandover(ada.id);
+    expect(first).toMatchObject({ kind: 'handover', priority: 1, requester: OWNER, assignee: ada.id, status: 'waiting' });
+    expect(t.company.beginHandover(ada.id).id).toBe(first.id);
+    expect(t.notices.pending(c.id).at(-1)?.text).toMatch(/Ada işten çıkarılıyor/);
+    expect(t.company.handedOver(ada.id)).toBe(false);
+    t.company.start(first.id);
+    t.company.finish(ada.id, first.id, { summary: 'Devrettim.', outputs: [], learned: '' });
+    expect(t.company.handedOver(ada.id)).toBe(true);
+    await t.engine.fire(ada.id);
+    expect(() => t.company.beginHandover(ada.id)).toThrow(/zaten işten çıkarıldı/);
+  });
+
+  it('review focus: firing at once during a hand-over cancels it and returns only the real work', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const work = t.company.createTask(c.id, { assignee: ada.id, title: 'gerçek iş' });
+    const handover = t.company.beginHandover(ada.id);
+    await t.engine.fire(ada.id);
+    t.company.releaseTasksOf(ada.id);
+    expect(t.tasks.get(handover.id).status).toBe('cancelled');
+    expect(t.tasks.get(work.id).status).toBe('waiting');
+    const note = t.notices.pending(c.id).at(-1)!.text;
+    expect(note).toContain('gerçek iş');
+    expect(note).not.toContain('Devir');
+  });
+});
+
+describe('Company — final review (phase 2)', () => {
+  it('critical: a hand-over cannot be given to someone else, so only the person the owner chose leaves', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, bob] = [t.company.hire(c.id, { name: 'Ada', role: 'r' }), t.company.hire(c.id, { name: 'Bob', role: 'r' })];
+    const handover = t.company.beginHandover(ada.id);
+    t.company.start(handover.id);
+    t.tasks.update(handover.id, { nudged: true });
+    expect(() => t.company.assign(c.id, handover.id, bob.id)).toThrow(/Devir görevi başkasına verilemez/);
+    expect(t.tasks.get(handover.id).assignee).toBe(ada.id);
+    expect(t.company.handedOver(bob.id)).toBe(false);
+  });
+
+  it('knows a hand-over is in however many tasks the person finished before', () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    for (let i = 0; i < 1001; i += 1) t.tasks.update(t.tasks.create({ planId: null, title: `iş ${i}`, description: '', done: [], requester: OWNER, assignee: ada.id, priority: 3, dependsOn: [], chainDepth: 0 }).id, { status: 'done' });
+    const handover = t.company.beginHandover(ada.id);
+    t.tasks.update(handover.id, { status: 'done' });
+    expect(t.company.handedOver(ada.id)).toBe(true);
   });
 });

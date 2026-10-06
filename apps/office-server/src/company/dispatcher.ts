@@ -7,6 +7,7 @@ import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 export interface DispatchEngine {
   ready(id: string): boolean;
   send(id: string, text: string, source: 'system'): void;
+  fire(id: string): Promise<void>;
 }
 
 export interface DispatcherDeps {
@@ -35,6 +36,8 @@ export class Dispatcher {
   readonly #queued = new Set<string>();
   /** Stalled tasks the coordinator has been told about (once per office run). */
   readonly #escalated = new Set<string>();
+  /** Being let go after their hand-over (fire is under way). */
+  readonly #leaving = new Set<string>();
   #sweepQueued = false;
 
   constructor(d: DispatcherDeps) {
@@ -46,7 +49,7 @@ export class Dispatcher {
     const off = this.#d.events.subscribe((stored) => {
       const ev = stored.event;
       if (ev.type === 'lifecycle.changed' && ev.to === 'idle' && stored.employeeId) this.#schedule(stored.employeeId);
-      else if (ev.type === 'task.changed' || ev.type === 'plan.changed') this.#scheduleSweep();
+      else if (ev.type === 'task.changed' || ev.type === 'plan.changed' || ev.type === 'decision.recorded') this.#scheduleSweep();
     });
     this.#scheduleSweep();
     return off;
@@ -76,13 +79,22 @@ export class Dispatcher {
 
   #consider(id: string): void {
     if (!this.#d.engine.ready(id)) return;
+    if (this.#d.company.handedOver(id)) {
+      this.#letGo(id);
+      return;
+    }
     const pending = this.#d.notices.pending(id);
-    const current = this.#d.tasks.inProgressOf(id);
+    // Someone the owner is letting go gets nothing but their hand-over, even while it is blocked.
+    const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
+    const focus = handover && handover.status !== 'waiting' ? handover : this.#d.tasks.inProgressOf(id);
     let body = '';
     let started: Task | null = null;
-    if (current) {
-      if (!current.nudged) body = this.#nudge(current);
-      else this.#escalate(id, current);
+    if (handover?.status === 'waiting') {
+      // Leaving comes first, even with another task open: that task goes back to the coordinator afterwards.
+      started = this.#d.company.start(handover.id);
+    } else if (focus) {
+      if (!focus.nudged) body = this.#nudge(focus);
+      else this.#escalate(id, focus);
     } else {
       const next = this.#d.tasks.nextFor(id);
       if (next) started = this.#d.company.start(next.id);
@@ -97,8 +109,26 @@ export class Dispatcher {
       if (started) this.#d.tasks.update(started.id, { status: 'waiting', startedAt: null });
       return;
     }
-    if (current && !current.nudged) this.#d.tasks.update(current.id, { nudged: true });
+    if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
+  }
+
+  /** The hand-over is in and they are idle: fire them, then their open work goes back to the coordinator. */
+  #letGo(id: string): void {
+    if (this.#leaving.has(id)) return;
+    this.#leaving.add(id);
+    void this.#d.engine
+      .fire(id)
+      .then(() => this.#d.company.releaseTasksOf(id))
+      .catch(() => this.#leaving.delete(id));
+  }
+
+  /** The brief changed since this employee's previous task started (or since they were hired). */
+  #briefChanged(task: Task): boolean {
+    const changed = this.#d.company.briefUpdatedAt();
+    if (changed === 0) return false;
+    const since = this.#d.tasks.lastStartedAt(task.assignee, task.id) ?? this.#d.roster.get(task.assignee).createdAt;
+    return changed >= since;
   }
 
   #delivery(task: Task): string {
@@ -112,9 +142,10 @@ export class Dispatcher {
     }
     const done = task.done.length ? `\n\nBitti tanımı:\n${task.done.map((d) => `- ${d}`).join('\n')}` : '';
     const deps = task.dependsOn.length ? `\nÖnce bitenler: ${task.dependsOn.join(', ')}` : '';
+    const brief = this.#briefChanged(task) ? '\nŞirket özeti değişti; güncelini briefRead ile oku.' : '';
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
-İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${deps}
+İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${deps}${brief}
 
 ${task.description || '(açıklama yok)'}${done}
 
@@ -127,9 +158,12 @@ ${task.description || '(açıklama yok)'}${done}
     const coordinator = this.#d.company.coordinator();
     if (!coordinator || coordinator.id === id) return;
     this.#escalated.add(task.id);
+    const name = this.#d.company.nameOf(id);
     this.#d.notices.add(
       coordinator.id,
-      `${this.#d.company.nameOf(id)} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
+      task.kind === 'handover'
+        ? `${name} devir görevini hatırlatmaya rağmen teslim etmedi. Devir başkasına verilemez: ona sor, gerekirse reportToOwner ile sahibine bildir (sahibi Hemen çıkar ile devri atlayabilir).`
+        : `${name} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
     );
     this.#schedule(coordinator.id);
   }

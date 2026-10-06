@@ -4,6 +4,8 @@ import { useOffice } from '../store/office.ts';
 import { EventItem } from './EventItem.tsx';
 import { formatCost, formatTokens, tokensOf } from './format.ts';
 import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
+import { EmployeeFileSection } from './EmployeeFile.tsx';
+import { FireControls } from './FireControls.tsx';
 
 export function Panel({ id }: { id: string }) {
   const view = useOffice((s) => s.views[id]);
@@ -128,21 +130,7 @@ export function Panel({ id }: { id: string }) {
             Ofise geri al
           </button>
         )}
-        <button
-          type="button"
-          className="danger"
-          disabled={busy}
-          onClick={() => {
-            if (window.confirm(`${e.name} işten çıkarılsın mı?`)) {
-              void run(async () => {
-                await api.fire(id);
-                select(null);
-              });
-            }
-          }}
-        >
-          İşten çıkar
-        </button>
+        <FireControls employee={e} />
       </div>
       {command && (
         <div className="terminal">
@@ -153,6 +141,7 @@ export function Panel({ id }: { id: string }) {
         </div>
       )}
       {e.lastError && <p className="error">{e.lastError}</p>}
+      <EmployeeFileSection id={id} />
       <div
         className="stream"
         ref={stream}

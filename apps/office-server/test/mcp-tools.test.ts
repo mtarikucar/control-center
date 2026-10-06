@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type Employee } from '@cc/shared';
-import { Company } from '../src/company/company.ts';
-import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
+import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
 
@@ -16,30 +15,30 @@ function make() {
   const s = setup();
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
-  const tasks = new TaskStore(s.db);
-  const plans = new PlanStore(s.db);
-  const notices = new NoticeStore(s.db);
-  const characters = () => ['coder', 'designer'];
-  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters });
-  const tools = officeTools({ company, roster: s.roster, tasks, characters });
+  const c = companyFor(s, f, ['coder', 'designer']);
+  const tools = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder', 'designer'], memory: c.memory });
   const call = async (employee: Employee, name: string, args: Record<string, unknown> = {}) => {
     const tool = tools.find((t: McpTool) => t.name === name);
     if (!tool) throw new Error(`no tool ${name}`);
-    if (!tool.kinds.includes(employee.kind)) throw new Error(`closed: ${name}`);
-    return tool.run({ employee: s.roster.get(employee.id) }, args);
+    const current = s.roster.get(employee.id);
+    if (!tool.kinds.includes(current.kind)) throw new Error(`closed: ${name}`);
+    return tool.run({ employee: current }, args);
   };
-  return { ...s, tasks, plans, company, tools, call };
+  return { ...s, ...c, tools, call };
 }
 
 describe('office tools', () => {
-  it('splits the tools between everyone and the coordinator', () => {
+  it('splits the tools between everyone, leads and the coordinator', () => {
     const t = make();
-    const forMember = t.tools.filter((x) => x.kinds.includes('member')).map((x) => x.name).sort();
-    expect(forMember).toEqual(['briefRead', 'myTasks', 'officeStatus', 'taskFinish', 'taskPass', 'taskUpdate']);
-    const coordinatorOnly = t.tools.filter((x) => !x.kinds.includes('member')).map((x) => x.name).sort();
-    expect(coordinatorOnly).toEqual(['briefUpdate', 'editRoleCard', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'taskAssign', 'taskCreate', 'taskReprioritize']);
+    const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
+    expect(names('member')).toEqual(['briefRead', 'decisionsRead', 'memorySearch', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'taskFinish', 'taskPass', 'taskUpdate']);
+    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate']);
+    expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
+      'briefUpdate', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'taskAssign', 'taskCreate', 'taskReprioritize',
+    ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
+
 
   it('lets an employee see their queue, pass work to a colleague and hand in their own task', async () => {
     const t = make();
@@ -111,5 +110,38 @@ describe('office tools', () => {
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
     await expect(t.call(ada, 'taskFinish', { taskId: 42 })).rejects.toThrow(/taskId/);
     await expect(t.call(ada, 'taskPass', { to: 'x', title: 'y', done: 'tek madde' })).rejects.toThrow(/done/);
+  });
+
+  it('everyone writes and searches the memory; leads and the coordinator write the playbook and decisions', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    expect(await t.call(ada, 'noteWrite', { title: 'Seslendirme', text: 'ElevenLabs Türkçe iyi.', tags: ['ses'] })).toMatch(/Not kaydedildi/);
+    expect(await t.call(ada, 'memorySearch', { query: 'turkce' })).toContain('[not] Seslendirme');
+    expect(await t.call(ada, 'memorySearch', { query: 'hiçbirşey' })).toContain('bir şey yok');
+    expect(await t.call(ada, 'playbookRead')).toBe('El kitabı henüz boş.');
+    await t.call(c, 'playbookUpdate', { topic: 'Video üretimi', text: 'Önce senaryo, sonra ses.', reason: 'ilk sürüm' });
+    expect(await t.call(ada, 'playbookRead')).toContain('Video üretimi (sürüm 1');
+    expect(await t.call(ada, 'playbookRead', { topic: 'video ÜRETİMİ' })).toContain('Önce senaryo, sonra ses.');
+    await t.call(c, 'decisionRecord', { title: 'Ses aracı', chosen: 'ElevenLabs', reason: 'Türkçe', alternatives: ['Polly'] });
+    expect(await t.call(ada, 'decisionsRead')).toMatch(/Ses aracı → ElevenLabs — Türkçe \[alternatifler: Polly\]/);
+    await expect(t.call(ada, 'decisionRecord', { title: 'x', chosen: 'y', reason: 'z' })).rejects.toThrow(/closed/);
+    t.roster.update(ada.id, { kind: 'lead' });
+    expect(await t.call(ada, 'playbookUpdate', { topic: 'Video üretimi', text: 'Senaryo, ses, kurgu.' })).toContain('sürüm 2');
+  });
+
+  it('lets the coordinator keep an employee file and read it back', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r', title: 'Yazar' });
+    await t.call(c, 'employeeNote', { employee: 'ada', text: 'Kısa metinlerde çok iyi.' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'Slogan' });
+    t.company.start(task.id);
+    const handed = await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'Üç slogan.', outputs: [] });
+    expect(handed).toMatch(/arşiv: company\/archive\//);
+    const file = await t.call(c, 'employeeNote', { employee: ada.id });
+    expect(file).toContain('Ada — Yazar: 1 görev bitirdi.');
+    expect(file).toContain('Kısa metinlerde çok iyi.');
+    expect(file).toContain('Slogan: Üç slogan.');
   });
 });

@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OWNER, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
 import type { Company } from './company/company.ts';
+import type { Memory } from './company/memory.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
 import type { Engine } from './engine.ts';
 import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } from './errors.ts';
@@ -21,7 +22,7 @@ export interface ApiDeps {
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
   /** The company layer: plans, tasks and the coordinator (absent: v1 office). */
-  company?: { service: Company; tasks: TaskStore; plans: PlanStore };
+  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory };
 }
 
 export interface ApiOptions {
@@ -39,9 +40,10 @@ export interface Api {
 
 const MAX_BODY_BYTES = 1_000_000;
 const WS_OPEN = 1;
+const DECISION_ROUTE = /^\/api\/decisions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/revert$/;
 const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline)$/;
 const EMPLOYEE_ROUTE =
-  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events))?$/;
+  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file))?$/;
 
 export function snapshot(d: ApiDeps): OfficeSnapshot {
   const employees = d.roster.list();
@@ -131,6 +133,13 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       if (typeof id !== 'string' || !id) throw new ValidationError('employeeId gerekli.');
       return sendJson(res, 200, company.appointCoordinator(id));
     }
+    const memory = d.company.memory;
+    if (method === 'GET' && url.pathname === '/api/memory/decisions') return sendJson(res, 200, memory.decisions({ query: url.searchParams.get('q') ?? undefined, limit: 200 }));
+    const revert = DECISION_ROUTE.exec(url.pathname);
+    if (method === 'POST' && revert) return sendJson(res, 201, memory.revertDecision(revert[1] ?? ''));
+    if (method === 'GET' && url.pathname === '/api/memory/playbook') return sendJson(res, 200, memory.playbookTopics());
+    if (method === 'GET' && url.pathname === '/api/memory/playbook/history') return sendJson(res, 200, memory.playbookHistory(url.searchParams.get('topic') ?? ''));
+    if (method === 'GET' && url.pathname === '/api/memory/notes') return sendJson(res, 200, memory.notes(url.searchParams.get('q') ?? undefined, 100));
   }
 
   const match = EMPLOYEE_ROUTE.exec(url.pathname);
@@ -138,10 +147,13 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     const id = match[1] ?? '';
     const action = match[2];
     if (method === 'DELETE' && action === undefined) {
+      // The company asks for a hand-over first (spec §3.4); "?now=1" — or an office without the company — fires at once.
+      if (d.company && url.searchParams.get('now') !== '1') return sendJson(res, 202, { handover: d.company.service.beginHandover(id) });
       await d.engine.fire(id);
       d.company?.service.releaseTasksOf(id);
       return sendEmpty(res, 204);
     }
+    if (method === 'GET' && action === 'file' && d.company) return sendJson(res, 200, d.company.memory.employeeFile(id));
     if (method === 'POST' && action === 'messages') {
       d.engine.send(id, textOf(await readJson(req)));
       return sendJson(res, 202, { ok: true });

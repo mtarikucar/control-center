@@ -12,7 +12,7 @@ const person = (id: string, over: Partial<Employee> = {}): Employee => ({
   sessionId: `s-${id}`, sessionStarted: true, lifecycle: 'idle', limitResetsAt: null, lastError: null, createdAt: 1, ...over,
 });
 const task = (id: string, over: Partial<Task> = {}): Task => ({
-  id, planId: null, title: id, description: '', done: [], requester: 'owner', assignee: 'ada', priority: 3, dependsOn: [], status: 'waiting',
+  id, kind: 'work', planId: null, title: id, description: '', done: [], requester: 'owner', assignee: 'ada', priority: 3, dependsOn: [], status: 'waiting',
   chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null, ...over,
 });
 const office = (employees: Employee[], tasks: Task[] = []) =>

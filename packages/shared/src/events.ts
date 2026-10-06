@@ -1,5 +1,6 @@
 import type { Plan, PlanChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle } from './employee.ts';
+import type { Decision } from './memory.ts';
 
 export interface Usage {
   inputTokens: number;
@@ -53,6 +54,9 @@ export type OfficeEvent =
   | { type: 'company.report'; text: string }
   | { type: 'brief.updated' }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
+  | { type: 'decision.recorded'; decision: Decision }
+  | { type: 'playbook.updated'; topic: string; version: number; reason: string }
+  | { type: 'note.written'; id: number; title: string; tags: string[] }
   | { type: 'error'; message: string };
 
 export type OfficeEventType = OfficeEvent['type'];

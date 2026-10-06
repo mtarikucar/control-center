@@ -6,14 +6,21 @@ export interface TaskResult {
   /** Paths of the files the work produced (relative to the employee's desk or absolute). */
   outputs: string[];
   learned: string;
+  /** Where the office archived the hand-in, relative to the data folder (set by the office). */
+  archive?: string;
 }
 
 /** The id the office uses for the owner wherever a task or plan names who asked. */
 export const OWNER = 'owner';
 
+/** `handover`: the task "İşten çıkar" gives — write down what you know before you leave. */
+export const TASK_KINDS = ['work', 'handover'] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+
 export interface Task {
   id: string;
   planId: string | null;
+  kind: TaskKind;
   title: string;
   description: string;
   /** Definition of done, one item per line. */

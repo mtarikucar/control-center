@@ -189,7 +189,7 @@ describe('company data', () => {
     status: 'draft', version: 1, proposedBy: 'e1', createdAt: 1, updatedAt: 1, approvedAt: null, ...over,
   });
   const task = (over: Partial<Task> = {}): Task => ({
-    id: 't1', planId: 'p1', title: 'Senaryo', description: '', done: [], requester: 'owner', assignee: 'e1', priority: 3, dependsOn: [],
+    id: 't1', kind: 'work', planId: 'p1', title: 'Senaryo', description: '', done: [], requester: 'owner', assignee: 'e1', priority: 3, dependsOn: [],
     status: 'waiting', chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null, ...over,
   });
 
@@ -216,5 +216,16 @@ describe('company data', () => {
     const d = applySnapshot(EMPTY_DATA, snapshot());
     expect(d.tasks).toEqual({});
     expect(d.plans).toEqual({});
+  });
+});
+
+describe('company memory', () => {
+  it('counts memory changes so open tabs know to reload', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot());
+    expect(d.memoryRev).toBe(0);
+    d = applyEvent(d, stored({ type: 'note.written', id: 1, title: 'n', tags: [] }));
+    d = applyEvent(d, stored({ type: 'playbook.updated', topic: 'Test', version: 2, reason: '' }));
+    expect(d.memoryRev).toBe(2);
+    expect(applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 1 })).memoryRev).toBe(2);
   });
 });

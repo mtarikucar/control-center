@@ -62,6 +62,9 @@ Koordinatör yazar ve istediği zaman değiştirir: ad, unvan, ekip, iş tanım�
 içe aktarması (§5.1). Kart değişince dosya yeniden yazılır; çalışan bunu bir sonraki oturum açılışında ya da
 sıkıştırmada okur, ayrıca ofis değişikliği bir sonraki görevle birlikte kısaca iletir (CLAUDE.md oturum ortasında
 yeniden okunmaz — doğrulandı, Claude Code belgeleri).
+Ofisin çalışma kuralları rol kartından `@office-guide.md` ile içe aktarılır; ofis bu dosyayı her oturum açılışında
+çalışanın türüne göre yeniden yazar. Bir çalışanın türü değişince (ör. koordinatör yapılınca) ofis oturumunu yeniden
+açar (hafıza korunur), çünkü araç listesi ve kart yalnız açılışta okunur.
 
 ### 3.3 İşe alma, model ve karakter
 
@@ -80,7 +83,7 @@ yeniden okunmaz — doğrulandı, Claude Code belgeleri).
 - **Uyku:** koordinatör `sleep` ile ya da ofis kendiliğinden (sıra boş, 30 dk işsiz) çalışanın sürecini kapatır;
   oturum ve masa durur. Ona görev düşünce ya da sahibi yazınca aynı oturumla uyanır. Karakter masasında soluk.
 - **İşten çıkarma:** yalnız sahibi (ekrandan). Önce çalışana bir devir görevi düşer (elindekileri ve öğrendiklerini
-  hafızaya yaz, açık görevlerini koordinatöre geri ver), bitince arşive alınır. Koordinatör yalnız önerir.
+  hafızaya yaz, açık görevlerini koordinatöre geri ver), bitince arşive alınır. Koordinatör yalnız önerir. Sahibi beklemek istemezse **Hemen çıkar** devri atlar; yarım kalan devir iptal edilir.
 
 ## 4. İş akışı
 
@@ -206,10 +209,11 @@ koordinatörü değiştirme.
 
 Yeni göç sürümleri (her biri `up` + `down`, `down` yalnız kendi eklediğini kaldırır; gidiş-dönüş testli):
 
-- `employees`: `title`, `team`, `kind`, `reports_to`, `sleeping`, `token_hash` sütunları.
+- `employees`: `title`, `team`, `kind`, `reports_to`, `sleeping` sütunu (aşama 3); jetonlar oturum başına bellekte tutulur, DB'ye yazılmaz.
 - `plans` (id, başlık, hedef, yaklaşım, taslak görevler JSON, kota payı, para, süre, riskler, durum, sürüm, onay zamanı).
 - `tasks` (id, plan, başlık, açıklama, bitti tanımı JSON, isteyen, üstlenen, öncelik, bağımlılıklar JSON, durum,
   zincir derinliği, zamanlar, teslim JSON).
+- `tasks.kind` (`work` | `handover`).
 - `decisions` (id, zaman, veren, başlık, seçilen, gerekçe, alternatifler, plan, `reverts`).
 - `playbook` (konu, sürüm, metin, yazan, gerekçe, zaman). `notes` (+ FTS5 dizini). `spend`. `proposals`.
   `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, döngü sınırları).

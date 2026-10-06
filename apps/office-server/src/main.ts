@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { createApi } from './api.ts';
 import { manifestCharacters } from './company/characters.ts';
 import { Company } from './company/company.ts';
+import { Memory } from './company/memory.ts';
+import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
 import { Dispatcher } from './company/dispatcher.ts';
 import { NoticeStore, PlanStore, TaskStore } from './company/store.ts';
 import { loadConfig } from './config.ts';
@@ -37,12 +39,16 @@ const engine = new Engine({ roster, events, dataDir: config.dataDir, claudeComma
 const tasks = new TaskStore(db);
 const plans = new PlanStore(db);
 const notices = new NoticeStore(db);
+const memory = new Memory({
+  roster, events, notices, tasks, plans, dataDir: config.dataDir,
+  decisions: new DecisionStore(db), playbook: new PlaybookStore(db), notes: new NoteStore(db), employeeNotes: new EmployeeNoteStore(db),
+});
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id) });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory });
 const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine });
 
 const api = createApi(
-  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters }) }, company: { service: company, tasks, plans } },
+  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory }) }, company: { service: company, tasks, plans, memory } },
   { allowedOrigins: config.allowedOrigins, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {

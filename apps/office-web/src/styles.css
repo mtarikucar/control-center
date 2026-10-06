@@ -153,3 +153,29 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .task-card.blocked { border-color: var(--bad); }
 .task-note { font-size: 12px; color: var(--bad); }
 @media (max-width: 760px) { .board { grid-template-columns: 1fr; } }
+
+.tabs { flex-wrap: wrap; }
+.memory-list { display: flex; flex-direction: column; gap: 8px; }
+.memory-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font-size: 14px; }
+.memory-item p { margin: 0; overflow-wrap: anywhere; }
+.memory-item.reverted { opacity: 0.6; }
+.memory-item.revert { border-style: dashed; }
+.prose { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.playbook { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 14px; }
+.playbook-topics { display: flex; flex-direction: column; gap: 4px; }
+.playbook-topics button { text-align: left; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); cursor: pointer; }
+.playbook-topics button[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.playbook-text h3 { margin: 0 0 4px; }
+.history { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.history > button, .employee-file > button { align-self: flex-start; padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface-2); cursor: pointer; font-size: 13px; }
+.history-version { border-left: 3px solid var(--line); padding-left: 10px; }
+.notes { display: flex; flex-direction: column; gap: 10px; }
+.notes input[type='search'] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.fire-ask { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: var(--radius); background: #fff1f0; font-size: 14px; }
+.fire-ask p { margin: 0; }
+.leaving { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius); background: #fff7e0; font-size: 13px; }
+.employee-file { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; font-size: 13px; }
+.employee-file ul { margin: 0; padding-left: 18px; }
+@media (max-width: 760px) { .playbook { grid-template-columns: 1fr; } }
+.memory-item > .badge { align-self: flex-start; }

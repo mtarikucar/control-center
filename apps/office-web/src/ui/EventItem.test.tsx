@@ -31,4 +31,16 @@ describe('EventItem', () => {
     render(<EventItem stored={{ seq: 1, employeeId: 'c', ts: 0, event: { type: 'plan.changed', change: 'reopened', plan } }} />);
     expect(screen.getByText(/Lansman.*yeniden açıldı/)).toBeTruthy();
   });
+
+  it('notes decisions, reverts, playbook versions and knowledge notes in the feed', () => {
+    const decision = { id: 'd1', ts: 0, by: 'c', title: 'Ses aracı', chosen: 'ElevenLabs', reason: 'r', alternatives: [], planId: null, reverts: null };
+    const { rerender } = render(<EventItem stored={{ seq: 1, employeeId: 'c', ts: 0, event: { type: 'decision.recorded', decision } }} />);
+    expect(screen.getByText('Karar: Ses aracı → ElevenLabs')).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 2, employeeId: 'c', ts: 0, event: { type: 'decision.recorded', decision: { ...decision, id: 'd2', title: 'Geri alındı: Ses aracı', reverts: 'd1' } } }} />);
+    expect(screen.getByText('Sahibi bir kararı geri aldı: Ses aracı')).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 3, employeeId: 'c', ts: 0, event: { type: 'playbook.updated', topic: 'Test', version: 2, reason: '' } }} />);
+    expect(screen.getByText('El kitabı: Test (sürüm 2)')).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 4, employeeId: 'c', ts: 0, event: { type: 'note.written', id: 3, title: 'Seslendirme', tags: [] } }} />);
+    expect(screen.getByText('Not: Seslendirme')).toBeTruthy();
+  });
 });

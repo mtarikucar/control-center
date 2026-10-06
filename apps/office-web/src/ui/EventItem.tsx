@@ -108,6 +108,16 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note">Şirket özeti güncellendi</div>;
     case 'role.changed':
       return <div className="note">Rol: {e.title || e.kind}</div>;
+    case 'decision.recorded':
+      return (
+        <div className="note">
+          {e.decision.reverts ? `Sahibi bir kararı geri aldı: ${e.decision.title.replace(/^Geri alındı: /, '')}` : `Karar: ${e.decision.title} → ${e.decision.chosen}`}
+        </div>
+      );
+    case 'playbook.updated':
+      return <div className="note">{`El kitabı: ${e.topic} (sürüm ${e.version})`}</div>;
+    case 'note.written':
+      return <div className="note">{`Not: ${e.title}`}</div>;
     default:
       return null;
   }
