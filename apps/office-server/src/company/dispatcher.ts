@@ -1,4 +1,4 @@
-import type { Task } from '@cc/shared';
+import type { Constitution, Employee, Task } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
@@ -8,6 +8,8 @@ export interface DispatchEngine {
   ready(id: string): boolean;
   send(id: string, text: string, source: 'system'): void;
   fire(id: string): Promise<void>;
+  sleep(id: string): Promise<unknown>;
+  wake(id: string): unknown;
 }
 
 export interface DispatcherDeps {
@@ -20,6 +22,11 @@ export interface DispatcherDeps {
   engine: DispatchEngine;
   /** Runs work after the current event has been handled (default setImmediate), so sends never nest in an event. */
   defer?: (fn: () => void) => void;
+  /** The owner's reserve and the constitution (absent: no reserve, no idle sleep). */
+  budget?: { reserveActive(): boolean; constitution(): Constitution; checkReserve(): void };
+  now?: () => number;
+  /** How often the reserve is re-checked and everyone swept again (the quota resets on its own clock). */
+  tickMs?: number;
 }
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
@@ -38,21 +45,36 @@ export class Dispatcher {
   readonly #escalated = new Set<string>();
   /** Being let go after their hand-over (fire is under way). */
   readonly #leaving = new Set<string>();
+  readonly #now: () => number;
+  /** When each employee last became idle (for idle sleep). */
+  readonly #idleSince = new Map<string, number>();
   #sweepQueued = false;
 
   constructor(d: DispatcherDeps) {
     this.#d = d;
     this.#defer = d.defer ?? ((fn) => void setImmediate(fn));
+    this.#now = d.now ?? Date.now;
   }
 
   start(): () => void {
     const off = this.#d.events.subscribe((stored) => {
       const ev = stored.event;
-      if (ev.type === 'lifecycle.changed' && ev.to === 'idle' && stored.employeeId) this.#schedule(stored.employeeId);
-      else if (ev.type === 'task.changed' || ev.type === 'plan.changed' || ev.type === 'decision.recorded') this.#scheduleSweep();
+      if (ev.type === 'lifecycle.changed' && stored.employeeId) {
+        if (ev.to === 'idle') this.#idleSince.set(stored.employeeId, this.#now());
+        else this.#idleSince.delete(stored.employeeId);
+        if (ev.to === 'idle') this.#schedule(stored.employeeId);
+      } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed'].includes(ev.type)) this.#scheduleSweep();
     });
+    const timer = setInterval(() => {
+      this.#d.budget?.checkReserve();
+      this.#scheduleSweep();
+    }, this.#d.tickMs ?? 60_000);
+    timer.unref();
     this.#scheduleSweep();
-    return off;
+    return () => {
+      off();
+      clearInterval(timer);
+    };
   }
 
   sweep(): void {
@@ -78,6 +100,12 @@ export class Dispatcher {
   }
 
   #consider(id: string): void {
+    const employee = this.#person(id);
+    if (!employee) return;
+    if (employee.lifecycle === 'sleeping') {
+      if (this.#hasWorkFor(employee)) this.#wake(id);
+      return;
+    }
     if (!this.#d.engine.ready(id)) return;
     if (this.#d.company.handedOver(id)) {
       this.#letGo(id);
@@ -97,10 +125,13 @@ export class Dispatcher {
       else this.#escalate(id, focus);
     } else {
       const next = this.#d.tasks.nextFor(id);
-      if (next) started = this.#d.company.start(next.id);
+      if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
     if (started) body = this.#delivery(started);
-    if (!body && pending.length === 0) return;
+    if (!body && pending.length === 0) {
+      this.#maybeSleep(employee, focus ?? null);
+      return;
+    }
     const text = [pending.length ? `${NOTICES_PREFIX}\n${pending.map((n) => `- ${n.text}`).join('\n')}` : '', body].filter(Boolean).join('\n\n');
     try {
       this.#d.engine.send(id, text, 'system');
@@ -111,6 +142,56 @@ export class Dispatcher {
     }
     if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
+  }
+
+  #person(id: string): Employee | null {
+    try {
+      return this.#d.roster.get(id);
+    } catch {
+      return null;
+    }
+  }
+
+  #reserve(): boolean {
+    return this.#d.budget?.reserveActive() ?? false;
+  }
+
+  /** While the owner's share is kept, only urgent work and hand-overs start. */
+  #mayStart(task: Task): boolean {
+    return !this.#reserve() || task.priority === 1 || task.kind === 'handover';
+  }
+
+  /** A sleeper wakes for a task that may start now; the coordinator also for its notices (they are its work). */
+  #hasWorkFor(e: Employee): boolean {
+    if (this.#d.tasks.list({ assignee: e.id, statuses: ['waiting'] }).some((t) => t.kind === 'handover')) return true;
+    const next = this.#d.tasks.nextFor(e.id);
+    if (next && this.#mayStart(next)) return true;
+    return e.kind === 'coordinator' && this.#d.notices.pending(e.id).length > 0;
+  }
+
+  #wake(id: string): void {
+    try {
+      this.#d.engine.wake(id);
+    } catch {
+      // Busy with an owner's action: the next sweep tries again.
+    }
+  }
+
+  /** Nothing to do: in the reserve members sleep at once; otherwise after the constitution's idle minutes. */
+  #maybeSleep(e: Employee, focus: Task | null): void {
+    if (focus) return;
+    if (this.#reserve() && e.kind !== 'coordinator') {
+      void this.#d.engine.sleep(e.id).catch(() => undefined);
+      return;
+    }
+    const minutes = this.#d.budget?.constitution().idleSleepMinutes ?? 0;
+    if (minutes <= 0) return;
+    const since = this.#idleSince.get(e.id);
+    if (since === undefined) {
+      this.#idleSince.set(e.id, this.#now());
+      return;
+    }
+    if (this.#now() - since >= minutes * 60_000) void this.#d.engine.sleep(e.id).catch(() => undefined);
   }
 
   /** The hand-over is in and they are idle: fire them, then their open work goes back to the coordinator. */
