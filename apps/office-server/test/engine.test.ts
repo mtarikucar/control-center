@@ -95,8 +95,10 @@ describe('Engine — core', () => {
     t.engine.send(e.id, 'geç kalan');
     const first = await waitFor(t.events, (x) => x.event.type === 'turn.finished');
     expect(first.event).toMatchObject({ ok: true, queuedTurns: 1 });
-    expect(t.roster.get(e.id).lifecycle).toBe('working');
     const late = await waitFor(t.events, (x) => x.event.type === 'message.assistant' && x.event.text === 'echo: geç kalan');
+    // Read from the log, not the live state: under load the follow-up turn can already be over when this line runs.
+    const wentIdle = t.events.list({ limit: 5000 }).some((x) => x.seq > first.seq && x.seq < late.seq && x.event.type === 'lifecycle.changed' && x.event.to === 'idle');
+    expect(wentIdle).toBe(false);
     await waitFor(t.events, (x) => x.event.type === 'turn.finished', { after: late.seq });
     expect(t.roster.get(e.id).lifecycle).toBe('idle');
     expect(t.events.list().filter((x) => x.event.type === 'turn.started')).toHaveLength(1);
