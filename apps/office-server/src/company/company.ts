@@ -164,6 +164,7 @@ export class Company {
     const next = this.#d.roster.update(id, { kind: 'coordinator', reportsTo: null });
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(next.id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
+    if (previous && previous.id !== id) this.#rerouteProposals(previous.id);
     if (previous?.id !== id) {
       this.#d.notices.add(
         id,
@@ -260,6 +261,8 @@ export class Company {
 
   /** Someone was fired: their open work waits again and the coordinator hands it out (spec §10); a hand-over is cancelled. */
   releaseTasksOf(id: string): void {
+    this.#rerouteProposals(id);
+    for (const m of this.#d.roster.list()) if (m.reportsTo === id) this.#d.roster.update(m.id, { reportsTo: null });
     const work: Task[] = [];
     for (const task of this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] })) {
       if (task.kind === 'handover') {
@@ -529,6 +532,22 @@ export class Company {
       .filter((p) => p.routedTo === id || (me.kind === 'coordinator' && p.routedTo === null));
   }
 
+  /** Their decider is gone (demoted, fired, replaced): open proposals go to today's coordinator, or wait for the next. */
+  #rerouteProposals(fromId: string): void {
+    if (!this.#d.proposals) return;
+    const open = this.#d.proposals.list({ statuses: ['open'], routedTo: fromId });
+    if (open.length === 0) return;
+    const coordinator = this.coordinator();
+    const to = coordinator && coordinator.id !== fromId ? coordinator.id : null;
+    for (const p of open) {
+      const next = this.#d.proposals.update(p.id, { routedTo: to });
+      this.#emit(to ?? p.by, { type: 'proposal.changed', change: 'escalated', proposal: next });
+    }
+    if (to) {
+      this.#d.notices.add(to, `${this.nameOf(fromId)} artık karar vermiyor; açık önerileri sana geçti: ${open.map((p) => `“${p.title}” (no ${p.id})`).join(', ')}. proposalDecide ile karara bağla.`);
+    }
+  }
+
   #store(): ProposalStore {
     if (!this.#d.proposals) throw new ConflictError('Bu ofiste öneriler açık değil.');
     return this.#d.proposals;
@@ -553,6 +572,7 @@ export class Company {
         this.#d.notices.add(m.id, `${next.name} artık ${team} ekibinin lideri; önerilerin önce ona gider.`);
       } else if (!makeLead && m.reportsTo === id) this.#d.roster.update(m.id, { reportsTo: null });
     }
+    if (!makeLead) this.#rerouteProposals(id);
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
     this.#d.notices.add(

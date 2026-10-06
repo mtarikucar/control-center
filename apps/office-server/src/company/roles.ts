@@ -24,8 +24,10 @@ const MEMBER = `- Sana verilen işler "Görev" başlığıyla bir mesaj olarak g
 
 const LEAD = `- Ekip liderisin: ekibine \`taskCreate\` ile iş açar, \`taskAssign\` ve \`taskReprioritize\` ile dağıtır, sıralarsın.
 - Bir yöntem netleşince ya da değişince \`playbookUpdate\` ile el kitabına yaz (konu, metin, neden). Önemli bir seçim
-  yapınca \`decisionRecord\` ile kaydet: ne seçildi, neden, hangi alternatifler vardı.
-- Ekibinden gelen önerileri \`proposalsOpen\` ile gör, \`proposalDecide\` ile karara bağla (accept / decline; büyükse
+  yapınca \`decisionRecord\` ile kaydet: ne seçildi, neden, hangi alternatifler vardı.`;
+
+/** Only for leads: the coordinator decides proposals and hires itself (its own block says so). */
+const LEAD_ONLY = `- Ekibinden gelen önerileri \`proposalsOpen\` ile gör, \`proposalDecide\` ile karara bağla (accept / decline; büyükse
   escalate ile koordinatöre). İşe alamazsın; gerekirse koordinatörden iste.`;
 
 const COORDINATOR = `- Sen şirketin koordinatörüsün; sahibi seninle konuşur. Bir ihtiyaç gelince önce \`planPropose\` ile bir plan kartı aç:
@@ -53,6 +55,6 @@ const COORDINATOR = `- Sen şirketin koordinatörüsün; sahibi seninle konuşur
 /** How someone works with the office: the tools they have and the rules that come with them. */
 export function officeGuide(kind: EmployeeKind): string {
   if (kind === 'coordinator') return `${MEMBER}\n${LEAD.replace('Ekip liderisin', 'Ekip lideri gibi de çalışırsın')}\n${COORDINATOR}`;
-  if (kind === 'lead') return `${MEMBER}\n${LEAD}`;
+  if (kind === 'lead') return `${MEMBER}\n${LEAD}\n${LEAD_ONLY}`;
   return MEMBER;
 }

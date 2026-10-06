@@ -56,6 +56,19 @@ describe('role card', () => {
 });
 
 
+describe('office guide — final review (phase 4)', () => {
+  it('important: the coordinator’s guide never tells it that it cannot hire or should escalate to the coordinator', () => {
+    const dataDir = tempDir();
+    const dir = prepareDesk(dataDir, person({ kind: 'coordinator', title: 'Koordinatör' }));
+    const guide = readFileSync(join(dir, GUIDE_FILE), 'utf8');
+    expect(guide).not.toContain('İşe alamazsın');
+    expect(guide).not.toContain('escalate ile koordinatöre');
+    expect(guide).toContain('escalate ile sahibine');
+    const lead = readFileSync(join(prepareDesk(dataDir, person({ id: 'e2', slug: 'can', name: 'Can', kind: 'lead' })), GUIDE_FILE), 'utf8');
+    expect(lead).toContain('İşe alamazsın');
+  });
+});
+
 describe('desk', () => {
   it('copies the company brief onto the desk and keeps a card the owner edited', () => {
     const dataDir = tempDir();

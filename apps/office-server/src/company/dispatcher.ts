@@ -185,7 +185,8 @@ export class Dispatcher {
     if (this.#d.tasks.list({ assignee: e.id, statuses: ['waiting'] }).some((t) => t.kind === 'handover')) return true;
     const next = this.#d.tasks.nextFor(e.id);
     if (next && this.#mayStart(next)) return true;
-    return e.kind === 'coordinator' && this.#d.notices.pending(e.id).length > 0;
+    // Notices are the coordinator's and a lead's work (decisions waiting); a member's wait for their next task.
+    return (e.kind === 'coordinator' || e.kind === 'lead') && this.#d.notices.pending(e.id).length > 0;
   }
 
   #wake(id: string): void {

@@ -261,4 +261,16 @@ describe('Dispatcher — reserve and sleep', () => {
     t.advance(25 * 3_600_000);
     await until(() => reminders().length === 2, 8000);
   });
+
+  it('important: a sleeping lead wakes for a proposal to decide', async () => {
+    const t = makeBudgeted();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r', team: 'İçerik' });
+    const can = t.company.hire(coord.id, { name: 'Can', role: 'r', team: 'İçerik' });
+    t.company.appointLead(coord.id, ada.id, { team: 'İçerik' });
+    await until(() => t.engine.ready(ada.id), 8000);
+    await t.engine.sleep(ada.id);
+    t.company.openProposal(can.id, { kind: 'idea', title: 'Altyazı', text: 't' });
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.includes('Altyazı')), 8000);
+  });
 });

@@ -130,3 +130,44 @@ describe('Rule B — revisions', () => {
     expect(t.company.decline(fresh.id).status).toBe('declined');
   });
 });
+
+describe('Final review (phase 4)', () => {
+  it('important: a demoted lead’s open proposals go to the coordinator, who can decide them', () => {
+    const t = make();
+    t.company.appointLead(t.coord.id, t.ada.id, { team: 'İçerik' });
+    const p = t.company.openProposal(t.can.id, { kind: 'idea', title: 'Altyazı', text: 't' });
+    expect(p.routedTo).toBe(t.ada.id);
+    t.company.appointLead(t.coord.id, t.ada.id, { lead: false });
+    expect(t.proposals.get(p.id).routedTo).toBe(t.coord.id);
+    expect(t.company.proposalsFor(t.coord.id).map((x) => x.id)).toEqual([p.id]);
+    expect(t.notices.pending(t.coord.id).at(-1)?.text).toContain('Altyazı');
+  });
+
+  it('important: a fired lead’s proposals and team go back to the coordinator', async () => {
+    const t = make();
+    t.company.appointLead(t.coord.id, t.ada.id, { team: 'İçerik' });
+    const p = t.company.openProposal(t.can.id, { kind: 'need', title: 'Test ortamı', text: 't' });
+    await t.engine.fire(t.ada.id);
+    t.company.releaseTasksOf(t.ada.id);
+    expect(t.proposals.get(p.id).routedTo).toBe(t.coord.id);
+    expect(t.roster.get(t.can.id).reportsTo).toBeNull();
+  });
+
+  it('important: a replaced coordinator’s open proposals reach the new coordinator', () => {
+    const t = make();
+    const p = t.company.openProposal(t.ada.id, { kind: 'idea', title: 'Blog', text: 't' });
+    t.company.appointCoordinator(t.can.id);
+    expect(t.proposals.get(p.id).routedTo).toBe(t.can.id);
+    expect(t.company.proposalsFor(t.can.id).map((x) => x.id)).toEqual([p.id]);
+  });
+
+  it('important: with no coordinator left, an open proposal waits for the next one', async () => {
+    const t = make();
+    const p = t.company.openProposal(t.ada.id, { kind: 'idea', title: 'Blog', text: 't' });
+    await t.engine.fire(t.coord.id);
+    t.company.releaseTasksOf(t.coord.id);
+    expect(t.proposals.get(p.id).routedTo).toBeNull();
+    t.company.appointCoordinator(t.can.id);
+    expect(t.company.proposalsFor(t.can.id).map((x) => x.id)).toEqual([p.id]);
+  });
+});
