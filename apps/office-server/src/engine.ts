@@ -16,7 +16,7 @@ export const CONTINUE_AFTER_RESTART = 'Ofis yeniden başladı; yarım kalan işi
  * and would otherwise answer as if the work had stopped.
  */
 export const SIDE_QUESTION_MID_WORK =
-  '[Ofis notu — yan soru: asıl oturumun şu an çalışıyor ve işine devam ediyor. Bu kopyada son aracın "kesildi" görünmesi yalnızca bu yan soruya ait; iş durmadı. Kısaca cevap ver.]';
+  '[Ofis notu — yan soru: asıl oturumun şu an çalışıyor ve işine devam ediyor. Bu kopyada son aracın "kesildi" görünmesi yalnızca bu yan soruya ait; iş durmadı. Sorunun dilinde, kısaca cevap ver.]';
 
 const clip = (text: string, limit: number): string => {
   const flat = text.replace(/\s+/g, ' ').trim();
