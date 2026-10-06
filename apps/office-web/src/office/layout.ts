@@ -46,6 +46,17 @@ export interface Desk {
   monitors: 1 | 2;
 }
 
+/** A framed picture on a wall: (x, y, z) is its centre, rotY the way it faces; `seed` picks the art. */
+export interface Frame {
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  w: number;
+  h: number;
+  seed: number;
+}
+
 export interface Carpet {
   x1: number;
   z1: number;
@@ -61,6 +72,7 @@ export interface Layout {
   walls: Wall[];
   furniture: Placement[];
   carpets: Carpet[];
+  frames: Frame[];
   desks: Desk[];
   seats: Spot[];
   coffeeSpots: Spot[];
@@ -91,7 +103,9 @@ function cluster(xs: number[], z0: number, dual: boolean[]) {
       furniture.push(item('ergonomic_chair', x, chairZ, rotY, 0.6, 0.6, 1.0, '#3a3f47', { blocks: false }));
       desks.push({ x, z: deskZ, rotY, monitors: dual[col * 2 + row] ? 2 : 1 });
       rows[row]!.push({ x, z: chairZ, rotY });
-      if ((col + row) % 2 === 0) furniture.push(decor('desk_plant', x + (row === 0 ? 0.52 : -0.52), 0.75, deskZ + (row === 0 ? -0.18 : 0.18), 0, 0.2, 0.2, 0.26, '#6a9a4a', { sway: true }));
+      const s = row === 0 ? 1 : -1;
+      if ((col + row) % 2 === 0) furniture.push(decor('desk_plant', x + s * 0.52, 0.75, deskZ - s * 0.18, 0, 0.2, 0.2, 0.26, '#6a9a4a', { sway: true }));
+      else furniture.push(decor('desk_lamp', x + s * 0.56, 0.75, deskZ + s * 0.2, rotY + PI, 0.2, 0.2, 0.4, '#2d3138', { glow: 0.7, glowAt: 0.85 }));
     }
     furniture.push(decor('desk_planter', x, 0.75, z0 + 0.4, 0, 1.3, 0.32, 0.3, '#6a9a4a', { sway: true }));
   });
@@ -144,11 +158,23 @@ furniture.push(
   item('floor_lamp', 0.75, 13.35, 0, 0.4, 0.4, 1.7, '#efe7d2', { glow: 1.8, glowAt: 0.88 }),
   plant('large_plant_pot', 6.7, 9.6, 1.3),
   plant('snake_plant', 6.1, 13.4, 1.0, 0.5),
+  decor('wall_shelf', 0.16, 1.55, 12.9, PI / 2, 1.0, 0.25, 0.55, '#c99a5b'),
+
+  // A reading corner between the desks and the lounge.
+  item('armchair', 2.4, 8.1, PI / 2, 0.95, 0.95, 0.85, '#e07a3a'),
+  item('pouf', 3.6, 8.2, 0, 0.5, 0.5, 0.42, '#2f7c83'),
+  item('floor_lamp', 1.4, 8.95, 0, 0.4, 0.4, 1.7, '#efe7d2', { glow: 1.5, glowAt: 0.88 }),
+  plant('fiddle_plant', 5.2, 8.8, 1.6, 0.6),
 
   // Reception (front, middle) behind a low oak slat partition, and a credenza by the coffee bar.
   item('reception_desk', 11.4, 12.0, PI, 2.6, 1.0, 1.1, '#d3a46a'),
   decor('table_lamp', 12.4, 1.1, 11.75, 0, 0.3, 0.3, 0.42, '#efe7d2', { glow: 1.4, glowAt: 0.75 }),
   item('low_credenza', 17.45, 10.6, -PI / 2, 1.8, 0.45, 0.7, '#cfa36d'),
+  item('water_cooler', 17.45, 8.9, -PI / 2, 0.4, 0.4, 1.3, '#dfe9f3'),
+  item('printer', 15.9, 13.45, PI, 0.7, 0.55, 1.0, '#e9e7e3'),
+  item('coat_rack', 14.3, 13.45, 0, 0.5, 0.5, 1.8, '#a6793f'),
+  plant('fiddle_plant', 13.2, 13.4, 1.6, 0.6),
+  decor('wall_shelf', 6.9, 1.5, 0.17, 0, 1.0, 0.25, 0.55, '#c99a5b'),
   decor('table_lamp', 17.45, 0.7, 11.1, 0, 0.3, 0.3, 0.42, '#efe7d2', { glow: 1.2, glowAt: 0.75 }),
   plant('large_plant_pot', 8.8, 13.3, 1.2),
   plant('large_plant_pot', 13.9, 9.7, 1.3),
@@ -185,6 +211,14 @@ export const LAYOUT: Layout = {
     { x1: 8.4, z1: 0.4, x2: 12.6, z2: 3.8, color: '#3f7f86' },
     { x1: 0.7, z1: 10.4, x2: 5.6, z2: 13.7, color: '#e8dcc6' },
     { x1: 9.8, z1: 11.0, x2: 13.4, z2: 13.6, color: '#dccdb4' },
+    { x1: 1.2, z1: 7.2, x2: 4.4, z2: 9.3, color: '#cdb293' },
+  ],
+  frames: [
+    { x: 1.5, y: 1.6, z: 0.15, rotY: 0, w: 0.7, h: 0.9, seed: 1 },
+    { x: 7.5, y: 2.25, z: 0.15, rotY: 0, w: 0.6, h: 0.45, seed: 2 },
+    { x: 0.15, y: 2.55, z: 11.6, rotY: PI / 2, w: 0.9, h: 0.55, seed: 3 },
+    { x: 11.4, y: 0.95, z: 10.43, rotY: 0, w: 0.7, h: 0.38, seed: 4 },
+    { x: 14.64, y: 1.6, z: 2.4, rotY: PI / 2, w: 0.6, h: 0.8, seed: 5 },
   ],
   desks,
   seats,

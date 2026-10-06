@@ -2,6 +2,7 @@ import { MapControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { LAYOUT } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
+import { ArtFrames } from './ArtFrames.tsx';
 import { AZIMUTH, CAMERA_POSITION, CAMERA_ZOOM } from './camera.ts';
 import { CharactersLayer } from './CharactersLayer.tsx';
 import { DeskDressing, ServerLights } from './DeskDressing.tsx';
@@ -29,6 +30,7 @@ export function OfficeScene() {
       <group position={[-LAYOUT.width / 2 + 1.1, 0, -LAYOUT.depth / 2 + 1.1]}>
         <Room />
         <FurnitureLayer />
+        <ArtFrames />
         <DeskDressing />
         <ServerLights />
         <CharactersLayer />

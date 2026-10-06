@@ -41,7 +41,7 @@ export function Backdrop() {
 export function Lighting() {
   return (
     <>
-      <hemisphereLight args={[PALETTE.sky, PALETTE.ground, 0.5]} />
+      <hemisphereLight args={[PALETTE.sky, PALETTE.ground, 0.42]} />
       <directionalLight
         color={PALETTE.sun}
         position={[-13, 13, 5]}

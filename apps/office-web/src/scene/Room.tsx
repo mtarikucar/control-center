@@ -244,7 +244,7 @@ export function Room() {
         {box(LAYOUT.width + 0.7, 0.06, LAYOUT.depth + 0.7)}
         {paint(PALETTE.plinthDark)}
       </mesh>
-      <ReflectiveFloor width={LAYOUT.width} depth={LAYOUT.depth} color={PALETTE.floor} strength={0.24} blur={1.6} />
+      <ReflectiveFloor width={LAYOUT.width} depth={LAYOUT.depth} color={PALETTE.floor} strength={0.3} blur={1.6} />
       {LAYOUT.carpets.map((c, i) => (
         <mesh key={i} position={[(c.x1 + c.x2) / 2, 0.012, (c.z1 + c.z2) / 2]} receiveShadow>
           {box(c.x2 - c.x1, 0.022, c.z2 - c.z1)}
