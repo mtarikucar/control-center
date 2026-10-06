@@ -18,11 +18,11 @@ async function start() {
   const f = fakeEngine(s);
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory } }, { allowedOrigins: [] });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -109,5 +109,16 @@ describe('company API', () => {
     expect((await call(t.port, 'GET', `/api/memory/playbook/history?topic=${encodeURIComponent('test')}`)).body.map((p: { version: number }) => p.version)).toEqual([2, 1]);
     expect((await call(t.port, 'GET', `/api/memory/notes?q=${encodeURIComponent('elevenlabs')}`)).body[0].note.title).toBe('Seslendirme');
     expect((await call(t.port, 'GET', '/api/memory/notes')).body).toHaveLength(1);
+  });
+
+  it('shows the owner the budget and lets them change the constitution', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    t.budget.recordSpend(c.id, { service: 'Canva', usd: 12, purpose: 'görsel' });
+    expect((await call(t.port, 'GET', '/api/budget')).body).toMatchObject({ month: { usd: 12 }, reserve: { active: false, limitPct: 75 } });
+    expect((await call(t.port, 'GET', '/api/budget/spend')).body.map((x: { service: string }) => x.service)).toEqual(['Canva']);
+    expect((await call(t.port, 'POST', '/api/constitution', { ownerReservePct: 40 })).body).toMatchObject({ ownerReservePct: 40 });
+    expect((await call(t.port, 'POST', '/api/constitution', { ownerReservePct: 400 })).status).toBe(400);
+    expect((await call(t.port, 'GET', '/api/office')).body.budget).toMatchObject({ constitution: { ownerReservePct: 40 } });
   });
 });

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OWNER, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
+import type { Budget } from './company/budget.ts';
 import type { Company } from './company/company.ts';
 import type { Memory } from './company/memory.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
@@ -22,7 +23,7 @@ export interface ApiDeps {
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
   /** The company layer: plans, tasks and the coordinator (absent: v1 office). */
-  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory };
+  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget };
 }
 
 export interface ApiOptions {
@@ -51,7 +52,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   if (!d.company) return base;
   const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'] });
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
-  return { ...base, tasks: [...open, ...closed], plans: d.company.plans.list() };
+  return { ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary() };
 }
 
 /** Blocks DNS rebinding (Host) and cross-site requests from other pages in the owner's browser (Origin). */
@@ -140,6 +141,14 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'GET' && url.pathname === '/api/memory/playbook') return sendJson(res, 200, memory.playbookTopics());
     if (method === 'GET' && url.pathname === '/api/memory/playbook/history') return sendJson(res, 200, memory.playbookHistory(url.searchParams.get('topic') ?? ''));
     if (method === 'GET' && url.pathname === '/api/memory/notes') return sendJson(res, 200, memory.notes(url.searchParams.get('q') ?? undefined, 100));
+    const budget = d.company.budget;
+    if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
+    if (method === 'GET' && url.pathname === '/api/budget/spend') return sendJson(res, 200, budget.spending(url.searchParams.get('planId') ?? undefined));
+    if (method === 'POST' && url.pathname === '/api/constitution') {
+      const body = await readJson(req);
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
+      return sendJson(res, 200, budget.setConstitution(body as Record<string, unknown>));
+    }
   }
 
   const match = EMPLOYEE_ROUTE.exec(url.pathname);
