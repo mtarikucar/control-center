@@ -27,17 +27,35 @@ const ack = (uuid, text) => {
 
 const sessionId = opt('--resume') ?? opt('--session-id') ?? randomUUID();
 const historyFile = join(stateDir, `${sessionId}.json`);
-const history = existsSync(historyFile) ? JSON.parse(readFileSync(historyFile, 'utf8')) : [];
+const state = existsSync(historyFile)
+  ? JSON.parse(readFileSync(historyFile, 'utf8'))
+  : { messages: [], totals: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, cost: 0 } };
+const history = state.messages;
+const save = () => writeFileSync(historyFile, JSON.stringify(state));
 const remember = (text) => {
   history.push(text);
-  writeFileSync(historyFile, JSON.stringify(history));
+  save();
 };
 const out = (obj) => process.stdout.write(`${JSON.stringify({ ...obj, session_id: sessionId })}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const usage = { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 };
+const modelUsage = (t) => ({
+  'fake-model': { inputTokens: t.input, outputTokens: t.output, cacheReadInputTokens: t.cacheRead, cacheCreationInputTokens: t.cacheCreation, costUSD: t.cost },
+});
+const add = (t, cost) => ({
+  input: t.input + usage.input_tokens,
+  output: t.output + usage.output_tokens,
+  cacheRead: t.cacheRead + usage.cache_read_input_tokens,
+  cacheCreation: t.cacheCreation + usage.cache_creation_input_tokens,
+  cost: t.cost + cost,
+});
 let queued = 0;
-const result = (extra = {}) =>
-  out({ type: 'result', subtype: 'success', is_error: false, num_turns: 1, total_cost_usd: 0.01, usage, result: '', queued_turn_count: queued, ...extra });
+// Like the real CLI: `usage` is this turn only, `total_cost_usd` and `modelUsage` are running totals for the session.
+const result = (extra = {}) => {
+  state.totals = add(state.totals, 0.01);
+  save();
+  out({ type: 'result', subtype: 'success', is_error: false, num_turns: 1, total_cost_usd: state.totals.cost, modelUsage: modelUsage(state.totals), usage, result: '', queued_turn_count: queued, ...extra });
+};
 const rateLimit = (status, resetsInSec) => {
   const resetsAt = Math.floor(Date.now() / 1000) + resetsInSec;
   out({
@@ -58,8 +76,9 @@ const say = (text) => out({ type: 'assistant', message: { role: 'assistant', con
 if (opt('--output-format') === 'json') {
   let prompt = '';
   for await (const chunk of process.stdin) prompt += chunk;
+  const forkTotals = add(state.totals, 0.002); // a fork starts from the parent's running total
   process.stdout.write(
-    `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: `side:${prompt.trim()}|history:${history.length}`, usage, total_cost_usd: 0.002, session_id: randomUUID() })}\n`,
+    `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: `side:${prompt.trim()}|history:${history.length}`, usage, total_cost_usd: forkTotals.cost, modelUsage: modelUsage(forkTotals), session_id: randomUUID() })}\n`,
   );
   process.exit(0);
 }

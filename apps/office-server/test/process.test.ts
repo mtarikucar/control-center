@@ -72,7 +72,13 @@ describe('ClaudeProcess', () => {
 describe('runOnce', () => {
   it('feeds the input on stdin and parses the JSON result', async () => {
     const r = await runOnce({ command: [process.execPath, FAKE_CLAUDE], args: ['--output-format', 'json'], cwd: tempDir(), env: { ...process.env, FAKE_CLAUDE_STATE: tempDir() }, input: 'ne yapıyorsun?', timeoutMs: 5000 });
-    expect(r).toEqual({ ok: true, text: 'side:ne yapıyorsun?|history:0', usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 100, cacheCreationTokens: 50 }, costUsd: 0.002 });
+    expect(r).toEqual({
+      ok: true,
+      text: 'side:ne yapıyorsun?|history:0',
+      usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 100, cacheCreationTokens: 50 },
+      sessionUsage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 100, cacheCreationTokens: 50 },
+      sessionCostUsd: 0.002,
+    });
   });
 
   it('reports failure when the command cannot run', async () => {

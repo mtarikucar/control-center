@@ -1,4 +1,4 @@
-import type { OfficeEvent, StoredEvent } from '@cc/shared';
+import type { OfficeEvent, OfficeEventType, StoredEvent } from '@cc/shared';
 import type { Db } from './db.ts';
 
 export type EventListener = (event: StoredEvent) => void;
@@ -51,6 +51,13 @@ export class EventStore {
             .all(after, opts.employeeId, limit)
     ) as unknown as Row[];
     return rows.map(toStored);
+  }
+
+  latest(employeeId: string, type: OfficeEventType): StoredEvent | null {
+    const row = this.#db
+      .prepare('SELECT seq, employee_id, ts, payload FROM events WHERE employee_id = ? AND type = ? ORDER BY seq DESC LIMIT 1')
+      .get(employeeId, type) as unknown as Row | undefined;
+    return row ? toStored(row) : null;
   }
 
   lastSeq(): number {

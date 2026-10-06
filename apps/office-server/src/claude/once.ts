@@ -1,12 +1,15 @@
 import { spawn } from 'node:child_process';
 import type { Usage } from '@cc/shared';
-import { usageOf } from './normalize.ts';
+import { modelUsageOf, usageOf } from './normalize.ts';
 
 export interface OnceResult {
   ok: boolean;
   text: string;
+  /** This run's main-loop tokens. */
   usage: Usage;
-  costUsd: number;
+  /** Running totals of the (forked) session, which include the parent session's history. */
+  sessionUsage: Usage | null;
+  sessionCostUsd: number;
 }
 
 export interface OnceOptions {
@@ -20,7 +23,7 @@ export interface OnceOptions {
 
 /** Runs `claude -p --output-format json` once with `input` on stdin. Never rejects. */
 export function runOnce(o: OnceOptions): Promise<OnceResult> {
-  const fail = (text: string): OnceResult => ({ ok: false, text, usage: usageOf(undefined), costUsd: 0 });
+  const fail = (text: string): OnceResult => ({ ok: false, text, usage: usageOf(undefined), sessionUsage: null, sessionCostUsd: 0 });
   const [command, ...prefix] = o.command;
   if (!command) return Promise.resolve(fail('claude komutu boş'));
   return new Promise((resolve) => {
@@ -60,7 +63,8 @@ export function runOnce(o: OnceOptions): Promise<OnceResult> {
         ok: code === 0 && parsed.is_error !== true,
         text: typeof parsed.result === 'string' ? parsed.result : '',
         usage: usageOf(parsed.usage),
-        costUsd: typeof parsed.total_cost_usd === 'number' ? parsed.total_cost_usd : 0,
+        sessionUsage: modelUsageOf(parsed.modelUsage),
+        sessionCostUsd: typeof parsed.total_cost_usd === 'number' ? parsed.total_cost_usd : 0,
       });
     });
     child.stdin.end(o.input);

@@ -43,6 +43,15 @@ describe('EventStore', () => {
     expect(seen).toEqual([first.seq]);
   });
 
+  it('finds the latest event of a type for an employee', () => {
+    const s = store();
+    expect(s.latest('e1', 'turn.started')).toBeNull();
+    s.append('e1', { type: 'turn.started' });
+    const last = s.append('e1', { type: 'turn.started' });
+    s.append('e2', { type: 'turn.started' });
+    expect(s.latest('e1', 'turn.started')).toEqual(last);
+  });
+
   it('reports lastSeq, 0 when empty', () => {
     const s = store();
     expect(s.lastSeq()).toBe(0);

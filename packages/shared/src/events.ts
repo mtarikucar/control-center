@@ -28,6 +28,9 @@ export type OfficeEvent =
       numTurns: number;
       /** > 0: claude already holds more user turns and will produce more results without a new message. */
       queuedTurns: number;
+      /** claude's running totals for the whole session (all models); `usage`/`costUsd` are this turn's share. */
+      sessionUsage: Usage | null;
+      sessionCostUsd: number;
     }
   | { type: 'message.user'; text: string; source: 'owner' | 'system' }
   | { type: 'message.assistant'; text: string }

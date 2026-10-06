@@ -41,6 +41,26 @@ describe('Engine — core', () => {
     expect(t.events.list().find((x) => x.event.type === 'message.user')?.event).toEqual({ type: 'message.user', text: 'merhaba', source: 'owner' });
   });
 
+  it("reports each turn's own cost and tokens, not claude's running total, also across a resume", async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    const turn = async (text: string) => {
+      const before = t.events.lastSeq();
+      t.engine.send(e.id, text);
+      return (await waitFor(t.events, (x) => x.event.type === 'turn.finished', { after: before })).event as { costUsd: number; usage: { inputTokens: number }; sessionCostUsd: number };
+    };
+    const first = await turn('bir');
+    const second = await turn('iki');
+    await t.engine.stop(e.id);
+    t.engine.resume(e.id);
+    const third = await turn('üç');
+    for (const finished of [first, second, third]) {
+      expect(finished.costUsd).toBeCloseTo(0.01);
+      expect(finished.usage.inputTokens).toBe(10);
+    }
+    expect(third.sessionCostUsd).toBeCloseTo(0.03);
+  });
+
   it('rejects an empty message', () => {
     const t = make();
     const e = t.engine.hire({ name: 'Ada', role: 'r' });

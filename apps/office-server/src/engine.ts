@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { Employee, HireInput, Lifecycle, OfficeEvent, QuotaWindow } from '@cc/shared';
+import type { Employee, HireInput, Lifecycle, OfficeEvent, QuotaWindow, Usage } from '@cc/shared';
 import { sessionArgs, sideQuestionArgs, terminalCommand } from './claude/args.ts';
-import { normalize, replayedUuid } from './claude/normalize.ts';
+import { normalize, replayedUuid, usageSince } from './claude/normalize.ts';
 import { runOnce } from './claude/once.ts';
 import { ClaudeProcess } from './claude/process.ts';
 import { deskDir, prepareDesk } from './desk.ts';
@@ -13,6 +13,13 @@ export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam e
 export const CONTINUE_AFTER_RESTART = 'Ofis yeniden başladı; yarım kalan işine kaldığın yerden devam et.';
 export const CONTINUE_AFTER_CRASH =
   'Oturumun beklenmedik şekilde kapandı ve yeniden açıldı; yarım kalan işine kaldığın yerden devam et.';
+
+type TurnFinished = Extract<OfficeEvent, { type: 'turn.finished' }>;
+interface Totals {
+  usage: Usage;
+  costUsd: number;
+}
+const NO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
 
 export interface EngineOptions {
   roster: Roster;
@@ -44,6 +51,8 @@ interface Runtime {
   unread: Array<{ uuid: string; text: string }>;
   /** claude took in at least one message of the current turn, so there is work to continue after a crash. */
   consumedInTurn: boolean;
+  /** claude's running totals at the last result; null until loaded from the event log. */
+  totals: Totals | null;
 }
 
 export class Engine {
@@ -113,6 +122,7 @@ export class Engine {
     if (employee.lifecycle === 'archived') throw new ConflictError('Bu çalışan işten çıkarıldı.');
     if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; önce normal bir mesaj gönder.');
     this.#emit(id, { type: 'side.question', text: question });
+    const atFork = this.#totals(id);
     const result = await runOnce({
       command: this.#command,
       args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
@@ -121,7 +131,10 @@ export class Engine {
       input: question,
       timeoutMs: this.#sideQuestionTimeoutMs,
     });
-    this.#emit(id, { type: 'side.answer', text: result.text, ok: result.ok, usage: result.usage, costUsd: result.costUsd });
+    // The fork's running totals start from the parent's, so only the difference is this question's cost.
+    const usage = result.sessionUsage ? usageSince(result.sessionUsage, atFork.usage) : result.usage;
+    const costUsd = result.sessionCostUsd >= atFork.costUsd ? result.sessionCostUsd - atFork.costUsd : result.sessionCostUsd;
+    this.#emit(id, { type: 'side.answer', text: result.text, ok: result.ok, usage, costUsd });
     return { ok: result.ok, answer: result.text };
   }
 
@@ -227,9 +240,32 @@ export class Engine {
         rt.quotaStatus = event.status;
         rt.windows = { fiveHour: event.fiveHour ?? rt.windows.fiveHour, sevenDay: event.sevenDay ?? rt.windows.sevenDay };
       }
+      if (event.type === 'turn.finished') {
+        this.#emit(id, this.#accountTurn(id, event));
+        this.#onTurnFinished(id, event.ok, event.queuedTurns);
+        continue;
+      }
       this.#emit(id, event);
-      if (event.type === 'turn.finished') this.#onTurnFinished(id, event.ok, event.queuedTurns);
     }
+  }
+
+  /** claude reports running totals; record what this turn added on top of the previous result. */
+  #accountTurn(id: string, event: TurnFinished): TurnFinished {
+    const before = this.#totals(id);
+    const usage = event.sessionUsage ? usageSince(event.sessionUsage, before.usage) : event.usage;
+    const costUsd = event.sessionCostUsd >= before.costUsd ? event.sessionCostUsd - before.costUsd : event.sessionCostUsd;
+    this.#runtime(id).totals = { usage: event.sessionUsage ?? before.usage, costUsd: event.sessionCostUsd };
+    return { ...event, usage, costUsd };
+  }
+
+  #totals(id: string): Totals {
+    const rt = this.#runtime(id);
+    if (!rt.totals) {
+      const last = this.#events.latest(id, 'turn.finished')?.event;
+      rt.totals =
+        last?.type === 'turn.finished' ? { usage: last.sessionUsage ?? NO_USAGE, costUsd: last.sessionCostUsd ?? 0 } : { usage: NO_USAGE, costUsd: 0 };
+    }
+    return rt.totals;
   }
 
   #onTurnFinished(id: string, ok: boolean, queuedTurns: number): void {
@@ -408,6 +444,7 @@ export class Engine {
         pendingOps: 0,
         unread: [],
         consumedInTurn: false,
+        totals: null,
       };
       this.#runtimes.set(id, rt);
     }

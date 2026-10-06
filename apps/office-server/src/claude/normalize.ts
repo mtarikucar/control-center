@@ -18,6 +18,33 @@ export function usageOf(raw: unknown): Usage {
   };
 }
 
+/** Sums `modelUsage` (running totals per model, subagents included); null when claude did not send it. */
+export function modelUsageOf(raw: unknown): Usage | null {
+  if (!isObj(raw)) return null;
+  const models = Object.values(raw).filter(isObj);
+  if (models.length === 0) return null;
+  return models.reduce<Usage>(
+    (sum, m) => ({
+      inputTokens: sum.inputTokens + num(m.inputTokens),
+      outputTokens: sum.outputTokens + num(m.outputTokens),
+      cacheReadTokens: sum.cacheReadTokens + num(m.cacheReadInputTokens),
+      cacheCreationTokens: sum.cacheCreationTokens + num(m.cacheCreationInputTokens),
+    }),
+    { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+  );
+}
+
+/** What changed between two running totals; a total that went down means claude restarted its count. */
+export function usageSince(now: Usage, before: Usage): Usage {
+  const d = (a: number, b: number) => (a >= b ? a - b : a);
+  return {
+    inputTokens: d(now.inputTokens, before.inputTokens),
+    outputTokens: d(now.outputTokens, before.outputTokens),
+    cacheReadTokens: d(now.cacheReadTokens, before.cacheReadTokens),
+    cacheCreationTokens: d(now.cacheCreationTokens, before.cacheCreationTokens),
+  };
+}
+
 export function truncate(text: string, limit = TOOL_OUTPUT_LIMIT): string {
   if (text.length <= limit) return text;
   return `${text.slice(0, limit)}\n… (${text.length - limit} karakter kısaltıldı)`;
@@ -79,6 +106,8 @@ export function normalize(raw: unknown): OfficeEvent[] {
           costUsd: num(raw.total_cost_usd),
           numTurns: num(raw.num_turns),
           queuedTurns: num(raw.queued_turn_count),
+          sessionUsage: modelUsageOf(raw.modelUsage),
+          sessionCostUsd: num(raw.total_cost_usd),
         },
       ];
     case 'rate_limit_event': {

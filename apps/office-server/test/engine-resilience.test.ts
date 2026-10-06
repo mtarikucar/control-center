@@ -121,8 +121,10 @@ describe('Engine — resilience', () => {
     expect(await t.engine.sideQuestion(e.id, 'ne yapıyorsun?')).toEqual({ ok: true, answer: 'side:ne yapıyorsun?|history:1' });
     const argvs = await readArgv(t.argvLog, 2);
     expect(argvs[1]?.args).toEqual(expect.arrayContaining(['--fork-session', '--resume', e.sessionId, '--output-format', 'json']));
-    const answer = t.events.list().find((x) => x.event.type === 'side.answer');
-    expect(answer?.event).toMatchObject({ ok: true, costUsd: 0.002 });
+    const answer = t.events.list().find((x) => x.event.type === 'side.answer')?.event as { ok: boolean; costUsd: number; usage: { inputTokens: number } };
+    expect(answer.ok).toBe(true);
+    expect(answer.costUsd).toBeCloseTo(0.002); // the fork's own cost, not the parent session's running total
+    expect(answer.usage.inputTokens).toBe(10);
     expect(t.roster.get(e.id).lifecycle).toBe('idle');
   });
 });

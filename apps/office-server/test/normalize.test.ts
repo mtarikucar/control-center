@@ -117,6 +117,8 @@ describe('normalize', () => {
         costUsd: 0.0216893,
         numTurns: 4,
         queuedTurns: 0,
+        sessionUsage: null,
+        sessionCostUsd: 0.0216893,
       },
     ]);
     const interrupted = { type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1, result: null };
@@ -129,8 +131,26 @@ describe('normalize', () => {
         costUsd: 0,
         numTurns: 1,
         queuedTurns: 0,
+        sessionUsage: null,
+        sessionCostUsd: 0,
       },
     ]);
+  });
+
+  it('carries the session running totals summed over every model in modelUsage', () => {
+    const raw = {
+      ...RESULT,
+      total_cost_usd: 0.05,
+      modelUsage: {
+        'claude-haiku-4-5': { inputTokens: 28, outputTokens: 453, cacheReadInputTokens: 57136, cacheCreationInputTokens: 8267, costUSD: 0.03 },
+        'claude-sonnet-5-5': { inputTokens: 2, outputTokens: 7, cacheReadInputTokens: 4, cacheCreationInputTokens: 1, costUSD: 0.02 },
+      },
+    };
+    expect(normalize(raw)[0]).toMatchObject({
+      type: 'turn.finished',
+      sessionUsage: { inputTokens: 30, outputTokens: 460, cacheReadTokens: 57140, cacheCreationTokens: 8268 },
+      sessionCostUsd: 0.05,
+    });
   });
 
   it('reports follow-up turns claude has queued', () => {
