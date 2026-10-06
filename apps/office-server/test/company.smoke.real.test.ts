@@ -28,9 +28,13 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
     const { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } = await import('../src/company/memory-store.ts');
     const { Memory } = await import('../src/company/memory.ts');
     const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes: new NoteStore(s.db), employeeNotes: new EmployeeNoteStore(s.db) });
-    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id) });
+    const { Budget } = await import('../src/company/budget.ts');
+    const { ConstitutionStore, SpendStore } = await import('../src/company/budget-store.ts');
+    const quota = new QuotaTracker(s.db, s.events);
+    const budget = new Budget({ constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8 });
+    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id), constitution: () => budget.constitution() });
     const api = createApi(
-      { engine, roster: s.roster, events: s.events, quota: new QuotaTracker(s.db, s.events), mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory }) }, company: { service: company, tasks, plans, memory } },
+      { engine, roster: s.roster, events: s.events, quota, mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine }) }, company: { service: company, tasks, plans, memory } },
       { allowedOrigins: [] },
     );
     await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));

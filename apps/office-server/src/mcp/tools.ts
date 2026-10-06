@@ -1,4 +1,5 @@
 import { MODEL_ALIASES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task } from '@cc/shared';
+import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
@@ -62,8 +63,16 @@ const integer = (description: string, minimum: number, maximum: number) => ({ ty
 const number = (description: string) => ({ type: 'number', minimum: 0, description });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 
-export function officeTools(o: { company: Company; roster: Roster; tasks: TaskStore; characters: () => string[]; memory: Memory }): McpTool[] {
-  const { company, roster, tasks, memory } = o;
+export function officeTools(o: {
+  company: Company;
+  roster: Roster;
+  tasks: TaskStore;
+  characters: () => string[];
+  memory: Memory;
+  budget: Budget;
+  engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown };
+}): McpTool[] {
+  const { company, roster, tasks, memory, budget, engine } = o;
 
   /** A colleague by id or by name (case and Turkish dotted/dotless i insensitive). */
   const findPerson = (who: string): Employee => {
@@ -233,6 +242,60 @@ export function officeTools(o: { company: Company; roster: Roster; tasks: TaskSt
           ...(file.notes.length ? ['Notların:', ...file.notes.map((n) => `• ${day(n.ts)} ${n.text}`)] : ['Henüz notun yok.']),
           ...(file.recent.length ? ['Son işleri:', ...file.recent.map((r) => `• ${r.title}: ${r.summary}`)] : []),
         ].join('\n');
+      },
+    },
+    {
+      name: 'recordSpend',
+      description: 'Record money you spent on an outside service (a subscription, a purchase, a paid API). Call it right after spending: the office cannot see outside spending, and the owner sets monthly and per-plan limits.',
+      inputSchema: object({ service: s('Which service or vendor.'), usd: number('Amount in USD.'), purpose: s('What it was for.'), planId: s('The plan it belongs to.') }, ['service', 'usd', 'purpose']),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        const usd = num(args, 'usd');
+        if (usd === undefined) throw new ValidationError('usd gerekli.');
+        const { spend, warnings } = budget.recordSpend(employee.id, { service: str(args, 'service'), usd, purpose: str(args, 'purpose'), planId: optStr(args, 'planId') ?? null });
+        return [`Harcama kaydedildi: ${spend.service} $${spend.usd}.`, ...warnings].join('\n');
+      },
+    },
+    {
+      name: 'budgetStatus',
+      description: 'See the budget (coordinator): quota use and the owner’s reserve, this month’s spending against the cap, money and Claude usage of every running plan, and who used most today.',
+      inputSchema: object({}),
+      kinds: COORDINATOR,
+      run: () => budget.status(),
+    },
+    {
+      name: 'setModel',
+      description: `Move an employee to another model (coordinator): ${MODEL_ALIASES.join(', ')}. Their session goes on with the new model and keeps its memory.`,
+      inputSchema: object({ employee: s('Employee id or name.'), model: { type: 'string', enum: [...MODEL_ALIASES] } }, ['employee', 'model']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const model = str(args, 'model') as ModelAlias;
+        const who = findPerson(str(args, 'employee'));
+        const next = company.setModel(employee.id, who.id, model);
+        return `${next.name} artık ${next.model} ile çalışıyor (oturumu yeniden açılıyor; hafızası korunur).`;
+      },
+    },
+    {
+      name: 'sleep',
+      description: 'Put an idle employee to sleep to free the machine (coordinator). Their session is kept; a task for them or a message wakes them.',
+      inputSchema: object({ employee: s('Employee id or name.') }, ['employee']),
+      kinds: COORDINATOR,
+      run: async ({ employee }, args) => {
+        const who = findPerson(str(args, 'employee'));
+        if (who.id === employee.id) throw new ValidationError('Kendini uyutamazsın.');
+        await engine.sleep(who.id);
+        return `${who.name} uyudu.`;
+      },
+    },
+    {
+      name: 'wake',
+      description: 'Wake a sleeping employee (coordinator).',
+      inputSchema: object({ employee: s('Employee id or name.') }, ['employee']),
+      kinds: COORDINATOR,
+      run: (_ctx, args) => {
+        const who = findPerson(str(args, 'employee'));
+        engine.wake(who.id);
+        return `${who.name} uyandı.`;
       },
     },
     {
