@@ -7,6 +7,7 @@ import type { Roster } from '../roster.ts';
 import { readBrief, writeBrief } from './brief.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
+import { clean, lines } from './text.ts';
 
 /** The constitution's loop guards (spec §4.6). */
 export const LIMITS = { chainDepth: 5, perDay: 30, perPlanOpen: 60 } as const;
@@ -59,20 +60,6 @@ export interface StatusLine {
   kind: EmployeeKind;
   lifecycle: Lifecycle;
   task: string | null;
-}
-
-function clean(value: string | undefined, label: string, max: number, required: boolean): string {
-  const text = (value ?? '').trim();
-  if (required && !text) throw new ValidationError(`${label} boş olamaz.`);
-  if (text.length > max) throw new ValidationError(`${label} en fazla ${max} karakter olabilir.`);
-  return text;
-}
-
-function lines(items: string[] | undefined, label: string, maxItems: number, itemMax: number): string[] {
-  const out = (items ?? []).map((s) => String(s).trim()).filter(Boolean);
-  if (out.length > maxItems) throw new ValidationError(`${label} en fazla ${maxItems} madde olabilir.`);
-  for (const item of out) if (item.length > itemMax) throw new ValidationError(`${label} maddeleri en fazla ${itemMax} karakter olabilir.`);
-  return out;
 }
 
 function amount(value: number | null | undefined, label: string): number | null {
