@@ -5,7 +5,8 @@ import { layoutTags, type TagBox } from './tagPlacement.ts';
 
 /** Where a character's tag floats above the floor, in metres. */
 export const TAG_HEIGHT = 2.15;
-const GAP = 4;
+// A little more than needed: drei positions tags with its own rounding, a pixel or two off our projection.
+const GAP = 6;
 
 interface Entry {
   group: RefObject<Group | null>;

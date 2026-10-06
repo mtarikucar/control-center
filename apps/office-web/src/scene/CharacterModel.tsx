@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { LoopOnce, LoopRepeat, type AnimationAction, type AnimationClip, type Group, type Material, type Mesh } from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { assetUrl, type CharacterAsset, type ClipRole } from '../assets/manifest.ts';
-import { inPlace, pickClip } from './clips.ts';
+import { inPlace, onSeat, pickClip } from './clips.ts';
 import { SIT_DOWN_MS, STAND_UP_MS } from '../office/pose.ts';
 import { boundsOf, fitToHeight } from './fit.ts';
 import { repairNormals } from './repair.ts';
@@ -43,17 +43,23 @@ export function CharacterModel({ asset, role, faded }: { asset: CharacterAsset; 
   );
   const fit = useMemo(() => fitToHeight(boundsOf(model), asset.height), [model, asset.height]);
 
+  // The hips' rest position in the rig: seated clips are pinned over it (see onSeat).
+  const rest = useMemo(() => {
+    const hips = base!.scene.getObjectByName('Hips');
+    return hips ? { x: hips.position.x, y: hips.position.y, z: hips.position.z } : null;
+  }, [base]);
   const clips = useMemo(() => {
     const out: Partial<Record<ClipRole, AnimationClip>> = {};
     roles.forEach((r, i) => {
       const source = clipFiles[i]?.animations[0];
       if (!source) return;
-      const clip = r === 'walk' ? inPlace(source) : source.clone();
+      const seated = r === 'sit' || r === 'typing' || r === 'talkSeated' || r === 'sitDown';
+      const clip = r === 'walk' ? inPlace(source) : seated && rest ? onSeat(source, rest, r === 'sitDown') : source.clone();
       clip.name = r;
       out[r] = clip;
     });
     return out;
-  }, [roles, clipFiles]);
+  }, [roles, clipFiles, rest]);
 
   const clipList = useMemo(() => Object.values(clips) as AnimationClip[], [clips]);
   const root = useRef<Group>(null);
