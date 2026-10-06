@@ -5,6 +5,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { assetUrl, type CharacterAsset, type ClipRole } from '../assets/manifest.ts';
 import { inPlace, pickClip } from './clips.ts';
 import { boundsOf, fitToHeight } from './fit.ts';
+import { repairNormals } from './repair.ts';
 
 export function CharacterModel({ asset, role, faded }: { asset: CharacterAsset; role: ClipRole; faded: boolean }) {
   const roles = useMemo(() => Object.keys(asset.clips) as ClipRole[], [asset]);
@@ -16,6 +17,7 @@ export function CharacterModel({ asset, role, faded }: { asset: CharacterAsset; 
   const clipFiles = useMemo(() => loaded.slice(1), [loaded]);
 
   const model = useMemo(() => {
+    repairNormals(base!.scene);
     const copy = cloneSkinned(base!.scene);
     copy.traverse((o) => {
       const mesh = o as Mesh;

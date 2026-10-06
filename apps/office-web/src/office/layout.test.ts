@@ -25,20 +25,22 @@ describe('office layout', () => {
     expect([LAYOUT.width, LAYOUT.depth]).toEqual([18, 14]);
   });
 
-  it('review focus: leaves the server room through its door, not its glass front', () => {
-    const door = { x1: 14.9, x2: 16.1, z: 4.5 };
+  it('review focus: leaves the server room through its door, not its walls', () => {
+    // The door is in the server room's west wall (x 14.5) at z 2.9–4.1; its south wall backs the coffee bar.
+    const door = { x: 14.5, z1: 2.9, z2: 4.1 };
     for (const from of LAYOUT.serverSpots) {
       const pts = [from, ...findPath(GRID, from, LAYOUT.seats[0]!)];
       let crossings = 0;
       for (let i = 1; i < pts.length; i += 1) {
         const a = pts[i - 1]!;
         const b = pts[i]!;
-        if ((a.z - door.z) * (b.z - door.z) >= 0) continue;
-        const x = a.x + ((door.z - a.z) / (b.z - a.z)) * (b.x - a.x);
-        if (x < 14.5) continue; // the line z = 4.5 outside the server room is open floor
+        expect(a.z < 4.5 && a.x > 14.5 && b.z > 4.5, `${a.x},${a.z} → ${b.x},${b.z} through the south wall`).toBe(false);
+        if ((a.x - door.x) * (b.x - door.x) >= 0) continue;
+        const z = a.z + ((door.x - a.x) / (b.x - a.x)) * (b.z - a.z);
+        if (z > 4.5) continue; // the line x = 14.5 south of the server room is open floor
         crossings += 1;
-        expect(x, 'crossing the server room front').toBeGreaterThan(door.x1);
-        expect(x).toBeLessThan(door.x2);
+        expect(z, 'crossing the server room west wall').toBeGreaterThan(door.z1);
+        expect(z).toBeLessThan(door.z2);
       }
       expect(crossings).toBe(1);
     }
