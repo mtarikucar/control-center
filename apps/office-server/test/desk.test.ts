@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Employee } from '@cc/shared';
 import { BRIEF_FILE, DEFAULT_BRIEF, readBrief, writeBrief } from '../src/company/brief.ts';
-import { deskDir, prepareDesk, roleCard, writeRoleCard } from '../src/desk.ts';
+import { GUIDE_FILE, deskDir, prepareDesk, roleCard, writeRoleCard } from '../src/desk.ts';
 import { setup, tempDir } from './helpers.ts';
 
 describe('desk folder', () => {
@@ -26,24 +26,35 @@ const person = (over: Partial<Employee> = {}): Employee => ({
 });
 
 describe('role card', () => {
-  it('names the person and their job, explains the office tools and imports the company brief', () => {
+  it('names the person and their job, and imports the office guide and the company brief', () => {
     const card = roleCard(person());
     expect(card).toContain('# Ada — Testçi');
     expect(card).toContain('ekibin: Kalite');
     expect(card).toContain('Testleri yazar.');
-    expect(card).toContain('taskFinish');
-    expect(card).toContain('taskPass');
+    expect(card).toContain('@office-guide.md');
     expect(card).toContain('@company-brief.md');
-    expect(card).not.toContain('planPropose');
+    expect(card).not.toContain('taskFinish');
   });
 
-  it("gives the coordinator the coordinator's way of working", () => {
-    const card = roleCard(person({ kind: 'coordinator', title: 'Koordinatör' }));
-    expect(card).toContain('planPropose');
-    expect(card).toMatch(/sahibi kartı onaylamadan/i);
-    expect(card).toContain('hire');
+  it('writes the guide for the employee’s kind on the desk at every start', () => {
+    const dataDir = tempDir();
+    const dir = prepareDesk(dataDir, person());
+    const guide = () => readFileSync(join(dir, GUIDE_FILE), 'utf8');
+    expect(guide()).toContain('taskFinish');
+    expect(guide()).toContain('taskPass');
+    expect(guide()).toContain('memorySearch');
+    expect(guide()).toContain('noteWrite');
+    expect(guide()).not.toContain('planPropose');
+    prepareDesk(dataDir, person({ kind: 'coordinator', title: 'Koordinatör' }));
+    expect(guide()).toContain('planPropose');
+    expect(guide()).toMatch(/sahibi kartı onaylamadan/i);
+    expect(guide()).toContain('employeeNote');
+    prepareDesk(dataDir, person({ kind: 'lead' }));
+    expect(guide()).toContain('decisionRecord');
+    expect(guide()).not.toContain('planPropose');
   });
 });
+
 
 describe('desk', () => {
   it('copies the company brief onto the desk and keeps a card the owner edited', () => {
@@ -51,12 +62,14 @@ describe('desk', () => {
     const e = person();
     const dir = prepareDesk(dataDir, e);
     expect(readFileSync(join(dir, BRIEF_FILE), 'utf8')).toBe(DEFAULT_BRIEF);
-    writeFileSync(join(dir, 'CLAUDE.md'), 'elle yazılmış kart\n\n@company-brief.md\n');
+    const edited = 'elle yazılmış kart\n\n@office-guide.md\n\n@company-brief.md\n';
+    writeFileSync(join(dir, 'CLAUDE.md'), edited);
     prepareDesk(dataDir, e);
-    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toBe('elle yazılmış kart\n\n@company-brief.md\n');
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toBe(edited);
   });
 
-  it('gives a desk from before the company its brief once, without rewriting the card', () => {
+
+  it('review focus: gives a desk from before the company its guide and brief once, without rewriting the card', () => {
     const dataDir = tempDir();
     const e = person();
     const dir = deskDir(dataDir, e.slug);
@@ -67,7 +80,9 @@ describe('desk', () => {
     const card = readFileSync(join(dir, 'CLAUDE.md'), 'utf8');
     expect(card.startsWith('# Ada\n\neski kart\n')).toBe(true);
     expect(card.match(/@company-brief\.md/g)).toHaveLength(1);
+    expect(card.match(/@office-guide\.md/g)).toHaveLength(1);
   });
+
 
   it('rewrites the card when the coordinator changes it', () => {
     const dataDir = tempDir();
@@ -75,6 +90,8 @@ describe('desk', () => {
     prepareDesk(dataDir, e);
     writeRoleCard(dataDir, { ...e, role: 'Artık sürüm çıkarır.' });
     expect(readFileSync(join(deskDir(dataDir, e.slug), 'CLAUDE.md'), 'utf8')).toContain('Artık sürüm çıkarır.');
+    writeRoleCard(dataDir, { ...e, kind: 'coordinator' });
+    expect(readFileSync(join(deskDir(dataDir, e.slug), GUIDE_FILE), 'utf8')).toContain('planPropose');
   });
 });
 

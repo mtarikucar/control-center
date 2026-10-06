@@ -33,7 +33,7 @@ describe('Company — people', () => {
     const c = t.company.hireCoordinator();
     expect(c).toMatchObject({ kind: 'coordinator', model: 'fable', name: 'Koordinatör' });
     expect(t.company.coordinator()?.id).toBe(c.id);
-    expect(readFileSync(join(deskDir(t.dataDir, c.slug), 'CLAUDE.md'), 'utf8')).toContain('planPropose');
+    expect(readFileSync(join(deskDir(t.dataDir, c.slug), 'office-guide.md'), 'utf8')).toContain('planPropose');
     expect(() => t.company.hireCoordinator()).toThrow(/zaten bir koordinatör/);
   });
 
@@ -44,7 +44,7 @@ describe('Company — people', () => {
     const next = t.company.appointCoordinator(ada.id);
     expect(next.kind).toBe('coordinator');
     expect(t.roster.get(old.id).kind).toBe('member');
-    expect(readFileSync(join(deskDir(t.dataDir, ada.slug), 'CLAUDE.md'), 'utf8')).toContain('planPropose');
+    expect(readFileSync(join(deskDir(t.dataDir, ada.slug), 'office-guide.md'), 'utf8')).toContain('planPropose');
     // one from hiring the coordinator, two from the appointment (demoted + promoted)
     expect(ofType(t.events.list({ limit: 500 }), 'role.changed')).toHaveLength(3);
   });
