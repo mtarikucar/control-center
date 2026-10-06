@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
@@ -282,5 +282,29 @@ describe('Company — final review', () => {
     const declined = t.company.propose(c.id, { title: 'Red', goal: 'g', approach: 'a' });
     t.company.decline(declined.id);
     expect(() => t.company.createTask(c.id, { assignee: ada.id, title: 'x', planId: declined.id })).toThrow(/vazgeçildi/);
+  });
+});
+
+describe('Company — hand-ins feed the memory', () => {
+  it('archives the outputs, records where, and turns what was learned into a note', async () => {
+    const { Memory } = await import('../src/company/memory.ts');
+    const { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } = await import('../src/company/memory-store.ts');
+    const s = setup();
+    const f = fakeEngine(s);
+    cleanups.push(f.cleanup, s.cleanup);
+    const tasks = new TaskStore(s.db);
+    const plans = new PlanStore(s.db);
+    const notices = new NoticeStore(s.db);
+    const notes = new NoteStore(s.db);
+    const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes, employeeNotes: new EmployeeNoteStore(s.db) });
+    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'], memory });
+    const ada = company.hire(OWNER, { name: 'Ada', role: 'r' });
+    writeFileSync(join(deskDir(s.dataDir, ada.slug), 'not.md'), 'içerik');
+    const task = company.createTask(OWNER, { assignee: ada.id, title: 'Not yaz' });
+    company.start(task.id);
+    const done = company.finish(ada.id, task.id, { summary: 'Yazıldı.', outputs: ['not.md'], learned: 'Başlık önce gelir.' });
+    expect(done.result?.archive).toMatch(/^company\/archive\/plansiz\//);
+    expect(readFileSync(join(s.dataDir, done.result!.archive!, 'not.md'), 'utf8')).toBe('içerik');
+    expect(notes.list()[0]).toMatchObject({ title: 'Öğrenilen: Not yaz', text: 'Başlık önce gelir.', source: `task:${task.id}` });
   });
 });

@@ -1,10 +1,13 @@
+import { relative } from 'node:path';
 import type { Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Task, TaskResult } from '@cc/shared';
 import { OWNER } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
+import { archiveTask } from './archive.ts';
 import { readBrief, writeBrief } from './brief.ts';
+import type { Memory } from './memory.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
@@ -27,6 +30,8 @@ export interface CompanyDeps {
   characters: () => string[];
   /** Restarts a session so it reads a new role card and tool list (Engine.reload); absent in tests that do not care. */
   reload?: (id: string) => void;
+  /** The company memory: a hand-in's lesson becomes a note (absent in tests that do not care). */
+  memory?: Memory;
   now?: () => number;
 }
 
@@ -266,11 +271,22 @@ export class Company {
       learned: (result.learned ?? '').trim().slice(0, 4000),
     };
     if (!handed.summary) throw new ValidationError('Teslim özeti boş olamaz.');
-    const next = this.#d.tasks.update(taskId, { status: 'done', result: handed, finishedAt: this.#now() });
+    const finishedAt = this.#now();
+    let archived: TaskResult = handed;
+    try {
+      const assignee = this.#d.roster.get(task.assignee);
+      const planTitle = task.planId ? this.#d.plans.get(task.planId).title : null;
+      const dir = archiveTask({ dataDir: this.#d.dataDir, desk: deskDir(this.#d.dataDir, assignee.slug), task, result: handed, planTitle, by: assignee.name, now: finishedAt });
+      archived = { ...handed, archive: relative(this.#d.dataDir, dir) };
+    } catch {
+      // The archive never blocks a hand-in: the result is kept in the database either way.
+    }
+    const next = this.#d.tasks.update(taskId, { status: 'done', result: archived, finishedAt });
     const line = `Görev bitti: “${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
     if (task.requester !== OWNER && task.requester !== by) this.#d.notices.add(task.requester, line);
     if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, line);
     this.#taskEvent('finished', next);
+    this.#d.memory?.learnedFrom(next, handed);
     if (task.planId) this.#maybeFinishPlan(task.planId);
     return next;
   }
