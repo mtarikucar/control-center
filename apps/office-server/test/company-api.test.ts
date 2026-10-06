@@ -3,9 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER } from '@cc/shared';
 import { createApi } from '../src/api.ts';
-import { Company } from '../src/company/company.ts';
-import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { QuotaTracker } from '../src/quota.ts';
+import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
 
@@ -17,16 +16,13 @@ afterEach(async () => {
 async function start() {
   const s = setup();
   const f = fakeEngine(s);
-  const tasks = new TaskStore(s.db);
-  const plans = new PlanStore(s.db);
-  const notices = new NoticeStore(s.db);
-  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder', 'manager'] });
+  const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: company, tasks, plans } }, { allowedOrigins: [] });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company, tasks };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -81,7 +77,37 @@ describe('company API', () => {
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
     const task = t.company.createTask(c.id, { assignee: ada.id, title: 'x' });
     t.company.start(task.id);
-    expect((await call(t.port, 'DELETE', `/api/employees/${ada.id}`)).status).toBe(204);
+    expect((await call(t.port, 'DELETE', `/api/employees/${ada.id}?now=1`)).status).toBe(204);
     expect(t.tasks.get(task.id)).toMatchObject({ status: 'waiting', startedAt: null });
+  });
+
+  it('firing first asks for a hand-over; ?now=1 fires at once', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const asked = await call(t.port, 'DELETE', `/api/employees/${ada.id}`);
+    expect(asked.status).toBe(202);
+    expect(asked.body.handover).toMatchObject({ kind: 'handover', assignee: ada.id });
+    expect((await call(t.port, 'DELETE', `/api/employees/${ada.id}`)).body.handover.id).toBe(asked.body.handover.id);
+    expect((await call(t.port, 'DELETE', `/api/employees/${ada.id}?now=1`)).status).toBe(204);
+    expect(t.tasks.get(asked.body.handover.id).status).toBe('cancelled');
+    expect((await call(t.port, 'GET', `/api/employees/${ada.id}/file`)).body).toMatchObject({ employee: { lifecycle: 'archived' }, finished: 0 });
+    expect(c.kind).toBe('coordinator');
+  });
+
+  it('shows the memory to the owner and lets them revert a decision once', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const d = t.memory.recordDecision(c.id, { title: 'Ses aracı', chosen: 'ElevenLabs', reason: 'Türkçe' });
+    t.memory.updatePlaybook(c.id, { topic: 'Test', text: 'birim' });
+    t.memory.updatePlaybook(c.id, { topic: 'Test', text: 'birim + e2e' });
+    t.memory.writeNote(c.id, { title: 'Seslendirme', text: 'ElevenLabs iyi' });
+    expect((await call(t.port, 'GET', '/api/memory/decisions')).body.map((x: { id: string }) => x.id)).toEqual([d.id]);
+    expect((await call(t.port, 'POST', `/api/decisions/${d.id}/revert`)).status).toBe(201);
+    expect((await call(t.port, 'POST', `/api/decisions/${d.id}/revert`)).status).toBe(409);
+    expect((await call(t.port, 'GET', '/api/memory/playbook')).body).toMatchObject([{ topic: 'Test', version: 2 }]);
+    expect((await call(t.port, 'GET', `/api/memory/playbook/history?topic=${encodeURIComponent('test')}`)).body.map((p: { version: number }) => p.version)).toEqual([2, 1]);
+    expect((await call(t.port, 'GET', `/api/memory/notes?q=${encodeURIComponent('elevenlabs')}`)).body[0].note.title).toBe('Seslendirme');
+    expect((await call(t.port, 'GET', '/api/memory/notes')).body).toHaveLength(1);
   });
 });
