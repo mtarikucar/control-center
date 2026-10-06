@@ -29,9 +29,13 @@ interface Props {
   asset: CharacterAsset | null;
   usage: EmployeeUsage | undefined;
   selected: boolean;
+  /** The running task's title, a colleague's pass note, and unread reports for the tag. */
+  task?: string | null;
+  ping?: string | null;
+  reports?: number;
 }
 
-export function Character({ employee, behavior, spot, asset, usage, selected }: Props) {
+export function Character({ employee, behavior, spot, asset, usage, selected, task = null, ping = null, reports = 0 }: Props) {
   const select = useOffice((s) => s.select);
   const group = useRef<Group>(null);
   const sits = SEATED.has(behavior.activity);
@@ -136,6 +140,16 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
           <span className="tag-line">
             <span className={`dot ${employee.lifecycle}`} aria-hidden="true" />
             <strong className="tag-name">{employee.name}</strong>
+            {employee.kind === 'lead' && (
+              <span className="tag-badge" aria-label="ekip lideri">
+                ★
+              </span>
+            )}
+            {reports > 0 && (
+              <span className="tag-report" aria-label={`${reports} okunmamış rapor`}>
+                📋 {reports}
+              </span>
+            )}
             {behavior.marker === 'alert' && <span aria-label="dikkat">⚠</span>}
             {behavior.marker === 'terminal' && <span aria-label="terminalde">⌨</span>}
           </span>
@@ -143,6 +157,8 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
             {formatTokens(tokensOf(today))} · {formatCost(today?.costUsd ?? 0)}
           </span>
           {limitNote(employee, Date.now()) && <span className="tag-usage">{limitNote(employee, Date.now())}</span>}
+          {task && <span className="tag-task">{task.length > 28 ? `${task.slice(0, 27)}…` : task}</span>}
+          {ping && <span className="tag-ping">{ping}</span>}
         </button>
       </Html>
       )}

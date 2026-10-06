@@ -206,3 +206,9 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .proposal-list { display: flex; flex-direction: column; gap: 8px; }
 .proposal-list h3 { margin: 0; font-size: 13px; color: var(--muted); }
 .count { margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 12px; line-height: 18px; display: inline-block; text-align: center; }
+
+.tag-badge { color: #c98a00; font-size: 12px; }
+.tag-report { font-size: 11px; padding: 0 4px; border-radius: 99px; background: #fff1d6; }
+.tag-task { display: block; max-width: 160px; font-size: 11px; color: var(--info); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag-ping { display: block; font-size: 11px; color: var(--accent); font-weight: 600; }
+.dot.sleeping { background: #b8bcc6; }

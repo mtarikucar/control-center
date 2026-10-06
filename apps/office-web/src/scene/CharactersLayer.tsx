@@ -26,6 +26,10 @@ export function CharactersLayer() {
   const manifest = useOffice((s) => s.manifest);
   const typingAt = useOffice((s) => s.typingAt);
   const selectedId = useOffice((s) => s.selectedId);
+  const tasks = useOffice((s) => s.tasks);
+  const plans = useOffice((s) => s.plans);
+  const pings = useOffice((s) => s.pings);
+  const unseenReports = useOffice((s) => s.unseenReports);
   const now = useNow(1000);
 
   const placed = Object.values(views)
@@ -39,6 +43,7 @@ export function CharactersLayer() {
         ownerTypingAt: typingAt[e.id] ?? null,
         now,
         wanderSeed: e.deskIndex,
+        planning: e.kind === 'coordinator' && Object.values(plans).some((p) => p.status === 'draft' && p.proposedBy === e.id),
       });
       return { view: v, behavior, spot: spotFor(LAYOUT, behavior.zone, e.deskIndex) };
     });
@@ -56,6 +61,9 @@ export function CharactersLayer() {
             asset={characterAsset(manifest, e.characterId)}
             usage={usage[e.id]}
             selected={selectedId === e.id}
+            task={Object.values(tasks).find((t) => t.assignee === e.id && t.status === 'in_progress')?.title ?? null}
+            ping={pings[e.id] && now - pings[e.id]!.at < 8000 ? pings[e.id]!.text : null}
+            reports={unseenReports[e.id] ?? 0}
           />
         );
       })}
