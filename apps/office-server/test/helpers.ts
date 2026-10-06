@@ -1,11 +1,14 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { StoredEvent } from '@cc/shared';
 import { rmSync } from 'node:fs';
 import { migrateUp, openDb, type Db } from '../src/db.ts';
 import { EventStore } from '../src/event-store.ts';
 import { Roster } from '../src/roster.ts';
+
+export const FAKE_CLAUDE = fileURLToPath(new URL('./fake-claude.mjs', import.meta.url));
 
 export function tempDir(prefix = 'cc-test-'): string {
   return mkdtempSync(join(tmpdir(), prefix));
