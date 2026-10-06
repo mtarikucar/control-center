@@ -1,0 +1,57 @@
+import type { AddressInfo } from 'node:net';
+import { describe, expect, it } from 'vitest';
+import { OWNER, type Plan } from '@cc/shared';
+import { createApi } from '../src/api.ts';
+import { Company } from '../src/company/company.ts';
+import { Dispatcher } from '../src/company/dispatcher.ts';
+import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
+import { Engine } from '../src/engine.ts';
+import { TokenRegistry } from '../src/mcp/tokens.ts';
+import { officeTools } from '../src/mcp/tools.ts';
+import { QuotaTracker } from '../src/quota.ts';
+import { setup, waitFor } from './helpers.ts';
+
+const enabled = process.env.OFFICE_SMOKE === '1';
+
+describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonnet, a hired writer)', () => {
+  it('need → plan card → approval → hire and task → handed in', async () => {
+    const s = setup();
+    const tokens = new TokenRegistry();
+    let url = '';
+    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['claude'], mcp: { url: () => url, tokens } });
+    const tasks = new TaskStore(s.db);
+    const plans = new PlanStore(s.db);
+    const notices = new NoticeStore(s.db);
+    const characters = () => ['coder', 'designer'];
+    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters });
+    const api = createApi(
+      { engine, roster: s.roster, events: s.events, quota: new QuotaTracker(s.db, s.events), mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters }) }, company: { service: company, tasks, plans } },
+      { allowedOrigins: [] },
+    );
+    await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
+    url = `http://127.0.0.1:${(api.server.address() as AddressInfo).port}/mcp`;
+    const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks, notices, plans, company, engine }).start();
+    try {
+      const coordinator = company.hireCoordinator('sonnet');
+      engine.send(
+        coordinator.id,
+        'Ofis klasörüne NOTES.md adında, ofisin ne olduğunu iki cümleyle anlatan bir dosya yazdırmak istiyorum. Önce planPropose ile bir plan kartı aç. Onaydan sonra işi kendin yapma: hire ile haiku modelli bir yazar al ve görevi ona ver.',
+      );
+      const proposed = await waitFor(s.events, (e) => e.event.type === 'plan.changed' && e.event.change === 'proposed', { timeoutMs: 300_000 });
+      const plan = (proposed.event as { plan: Plan }).plan;
+      company.approve(plan.id);
+      const created = await waitFor(s.events, (e) => e.event.type === 'task.changed' && e.event.change === 'created', { after: proposed.seq, timeoutMs: 600_000 });
+      const finished = await waitFor(s.events, (e) => e.event.type === 'task.changed' && e.event.change === 'finished', { after: created.seq, timeoutMs: 900_000 });
+      const writer = s.roster.list().find((e) => e.id !== coordinator.id);
+      expect(writer, 'the coordinator hired someone').toBeDefined();
+      expect((finished.event as { task: { assignee: string; result: { summary: string } | null } }).task).toMatchObject({ assignee: writer!.id });
+      expect(company.coordinator()?.id).toBe(coordinator.id);
+      expect(OWNER).toBe('owner');
+    } finally {
+      stop();
+      await engine.shutdown();
+      await api.close();
+      s.cleanup();
+    }
+  }, 1_900_000);
+});
