@@ -7,6 +7,7 @@ import { ClaudeProcess } from './claude/process.ts';
 import { deskDir, prepareDesk } from './desk.ts';
 import { ConflictError, ValidationError } from './errors.ts';
 import type { EventStore } from './event-store.ts';
+import type { TokenRegistry } from './mcp/tokens.ts';
 import type { Roster } from './roster.ts';
 
 export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam et.';
@@ -53,6 +54,8 @@ export interface EngineOptions {
   limitGraceMs?: number;
   stopTimeoutMs?: number;
   sideQuestionTimeoutMs?: number;
+  /** The office tools (MCP over HTTP): `url` is read at every session start, a fresh token is issued each time. */
+  mcp?: { url: () => string; tokens: TokenRegistry };
 }
 
 interface Runtime {
@@ -89,6 +92,7 @@ export class Engine {
   readonly #limitGraceMs: number;
   readonly #stopTimeoutMs: number;
   readonly #sideQuestionTimeoutMs: number;
+  readonly #mcp: EngineOptions['mcp'];
   readonly #runtimes = new Map<string, Runtime>();
   readonly #sideRuns = new Set<AbortController>();
 
@@ -104,6 +108,7 @@ export class Engine {
     this.#limitGraceMs = o.limitGraceMs ?? 30_000;
     this.#stopTimeoutMs = o.stopTimeoutMs ?? 10_000;
     this.#sideQuestionTimeoutMs = o.sideQuestionTimeoutMs ?? 120_000;
+    this.#mcp = o.mcp;
   }
 
   hire(input: HireInput): Employee {
@@ -232,9 +237,23 @@ export class Engine {
     return this.#exclusive(id, async () => {
       if (this.#roster.get(id).lifecycle === 'archived') return;
       await this.#halt(id);
+      this.#mcp?.tokens.revoke(id);
       this.#setLifecycle(this.#roster.get(id), 'archived', 'işten çıkarıldı');
       this.#emit(id, { type: 'employee.fired' });
     });
+  }
+
+  /** Idle with a live session and nothing queued against it: the moment to hand over the next task. */
+  ready(id: string): boolean {
+    let employee: Employee;
+    try {
+      employee = this.#roster.get(id);
+    } catch {
+      return false;
+    }
+    if (employee.lifecycle !== 'idle') return false;
+    const rt = this.#runtimes.get(id);
+    return rt !== undefined && rt.proc !== null && !rt.proc.exited && !rt.turnActive && rt.pendingOps === 0;
   }
 
   /** Call once after the office process starts, before serving requests. */
@@ -266,10 +285,17 @@ export class Engine {
     if (rt.proc && !rt.proc.exited) return this.#roster.get(employee.id);
     rt.expectingExit = false;
     rt.turnActive = false;
+    const mcpConfig = this.#mcp
+      ? JSON.stringify({
+          mcpServers: {
+            office: { type: 'http', url: this.#mcp.url(), headers: { Authorization: `Bearer ${this.#mcp.tokens.issue(employee.id)}` } },
+          },
+        })
+      : undefined;
     rt.proc = new ClaudeProcess(
       {
         command: this.#command,
-        args: sessionArgs({ model: employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home }),
+        args: sessionArgs({ model: employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home, mcpConfig }),
         cwd: prepareDesk(this.#dataDir, employee),
         env: this.#env,
       },

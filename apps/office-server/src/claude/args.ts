@@ -15,7 +15,7 @@ function settingsArgs(home: string | undefined): string[] {
   return ['--setting-sources', 'user,project,local', '--settings', JSON.stringify(employeeSettings(home ?? homedir()))];
 }
 
-export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: boolean; home?: string }): string[] {
+export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: boolean; home?: string; mcpConfig?: string }): string[] {
   return [
     '-p',
     '--input-format',
@@ -29,6 +29,8 @@ export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: b
     '--permission-mode',
     'bypassPermissions',
     ...settingsArgs(o.home),
+    // The office tools come on top of every connection the owner has (no --strict-mcp-config).
+    ...(o.mcpConfig ? ['--mcp-config', o.mcpConfig] : []),
     ...(o.resume ? ['--resume', o.sessionId] : ['--session-id', o.sessionId]),
   ];
 }
