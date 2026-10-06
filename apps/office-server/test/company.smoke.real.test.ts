@@ -28,9 +28,13 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
     const { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } = await import('../src/company/memory-store.ts');
     const { Memory } = await import('../src/company/memory.ts');
     const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes: new NoteStore(s.db), employeeNotes: new EmployeeNoteStore(s.db) });
-    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id) });
+    const { Budget } = await import('../src/company/budget.ts');
+    const { ConstitutionStore, SpendStore } = await import('../src/company/budget-store.ts');
+    const quota = new QuotaTracker(s.db, s.events);
+    const budget = new Budget({ constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8 });
+    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id), constitution: () => budget.constitution() });
     const api = createApi(
-      { engine, roster: s.roster, events: s.events, quota: new QuotaTracker(s.db, s.events), mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory }) }, company: { service: company, tasks, plans, memory } },
+      { engine, roster: s.roster, events: s.events, quota, mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine }) }, company: { service: company, tasks, plans, memory, budget } },
       { allowedOrigins: [] },
     );
     await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
@@ -55,7 +59,13 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
       expect(existsSync(join(s.dataDir, handed.result!.archive!, 'teslim.md'))).toBe(true);
       await waitFor(s.events, (e) => e.event.type === 'decision.recorded', { timeoutMs: 300_000 });
       // The owner lets the writer go: a hand-over first, then the office fires them.
+      // The coordinator's setModel goes on with the same session on the new model (spec §3.3: --resume + --model);
+      // the restarted session reports itself with its first message, the hand-over.
+      const mark = s.events.lastSeq();
+      company.setModel(coordinator.id, writer!.id, 'sonnet');
       company.beginHandover(writer!.id);
+      const restarted = await waitFor(s.events, (e) => e.employeeId === writer!.id && e.event.type === 'session.started', { after: mark, timeoutMs: 300_000 });
+      expect((restarted.event as { model: string }).model).toMatch(/sonnet/);
       await until(() => s.roster.get(writer!.id).lifecycle === 'archived', 600_000);
       const out = tasks.list({ assignee: writer!.id, statuses: ['done'] }).find((t) => t.kind === 'handover');
       expect(out?.result?.summary, 'the hand-over was handed in').toBeTruthy();

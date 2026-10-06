@@ -158,6 +158,16 @@ export class TaskStore {
     return row.t;
   }
 
+  /** One finished turn's Claude usage, added to the task the employee was on. */
+  charge(id: string, usd: number, tokens: number): void {
+    this.#db.prepare('UPDATE tasks SET cost_usd = cost_usd + ?, tokens = tokens + ? WHERE id = ?').run(usd, tokens, id);
+  }
+
+  costByPlan(): Record<string, number> {
+    const rows = this.#db.prepare('SELECT plan_id, SUM(cost_usd) AS n FROM tasks WHERE plan_id IS NOT NULL GROUP BY plan_id').all() as unknown as Array<{ plan_id: string; n: number }>;
+    return Object.fromEntries(rows.map((r) => [r.plan_id, Math.round(r.n * 100) / 100]));
+  }
+
   createdSince(requester: string, since: number): number {
     const row = this.#db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE requester = ? AND created_at >= ?').get(requester, since) as unknown as { n: number };
     return row.n;

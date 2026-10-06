@@ -81,7 +81,7 @@ açar (hafıza korunur), çünkü araç listesi ve kart yalnız açılışta oku
 ### 3.4 Uyku ve işten çıkarma
 
 - **Uyku:** koordinatör `sleep` ile ya da ofis kendiliğinden (sıra boş, 30 dk işsiz) çalışanın sürecini kapatır;
-  oturum ve masa durur. Ona görev düşünce ya da sahibi yazınca aynı oturumla uyanır. Karakter masasında soluk.
+  oturum ve masa durur. Ona görev düşünce ya da sahibi yazınca aynı oturumla uyanır. Karakter masasında soluk. Uyuyan çalışanın yaşam döngüsü `sleeping`'dir (sahibinin `Durdur`'u olan `stopped`'tan ayrı); ofis yalnız başlatabileceği bir görev için uyandırır, koordinatörü notları için de.
 - **İşten çıkarma:** yalnız sahibi (ekrandan). Önce çalışana bir devir görevi düşer (elindekileri ve öğrendiklerini
   hafızaya yaz, açık görevlerini koordinatöre geri ver), bitince arşive alınır. Koordinatör yalnız önerir. Sahibi beklemek istemezse **Hemen çıkar** devri atlar; yarım kalan devir iptal edilir.
 
@@ -169,6 +169,7 @@ görev sayısı ≤ 60. Aşınca araç reddeder ve koordinatöre not düşer.
   koordinatör sahibine getirir. (Ofis harcamayı **engelleyemez** — çalışanlar serbest; sınır görünürlük ve
   koordinatörün görevi içindir.)
 - **Görünürlük:** karakter başına token/maliyet (v1) + plan ve ekip başına toplam kota, para, kalan bütçe.
+- Plan başına Claude kullanımı: her bitmiş turun maliyeti çalışanın o an sürdüğü göreve, görevler de planlarına yazılır; plan başına kota payı tahmin olarak kalır (kota ortak).
 
 ## 7. Ofis araç seti (MCP)
 
@@ -216,7 +217,7 @@ Yeni göç sürümleri (her biri `up` + `down`, `down` yalnız kendi eklediğini
 - `tasks.kind` (`work` | `handover`).
 - `decisions` (id, zaman, veren, başlık, seçilen, gerekçe, alternatifler, plan, `reverts`).
 - `playbook` (konu, sürüm, metin, yazan, gerekçe, zaman). `notes` (+ FTS5 dizini). `spend`. `proposals`.
-  `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, döngü sınırları).
+  `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, `chainDepth`, `tasksPerDay`, `openTasksPerPlan`, `idleSleepMinutes`); `tasks.cost_usd`, `tasks.tokens`.
 - Olaylar (`OfficeEvent`): `plan.*`, `task.*`, `proposal.*`, `decision.recorded`, `spend.recorded`, `brief.updated`,
   `employee.slept/woke`, `role.changed` — v1 olay kaydına ve canlı akışa girer (ekran bunlardan beslenir).
 

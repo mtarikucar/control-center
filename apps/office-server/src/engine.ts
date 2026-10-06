@@ -204,6 +204,25 @@ export class Engine {
     });
   }
 
+  /** Closes an idle employee's session to free the machine; their next task or message starts it again (same session). */
+  sleep(id: string): Promise<Employee> {
+    return this.#exclusive(id, async () => {
+      const employee = this.#roster.get(id);
+      if (employee.lifecycle === 'sleeping') return employee;
+      if (employee.lifecycle !== 'idle' || this.#runtime(id).turnActive) throw new ConflictError('Yalnız boştaki bir çalışan uyutulabilir; işi bitince uyut.');
+      await this.#halt(id);
+      return this.#setLifecycle(this.#roster.get(id), 'sleeping', 'uyutuldu');
+    });
+  }
+
+  /** A sleeper starts again with the same session; anyone else is left as they are. */
+  wake(id: string): Employee {
+    const employee = this.#roster.get(id);
+    if (employee.lifecycle !== 'sleeping') return employee;
+    this.#assertNotBusy(this.#runtime(id));
+    return this.#start(employee, 'uyandı');
+  }
+
   resume(id: string): Employee {
     const employee = this.#roster.get(id);
     this.#assertReachable(employee);

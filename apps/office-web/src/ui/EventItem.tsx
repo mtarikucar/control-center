@@ -118,6 +118,10 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note">{`El kitabı: ${e.topic} (sürüm ${e.version})`}</div>;
     case 'note.written':
       return <div className="note">{`Not: ${e.title}`}</div>;
+    case 'spend.recorded':
+      return <div className="note">{`Harcama: ${e.spend.service} $${e.spend.usd} — ${e.spend.purpose}`}</div>;
+    case 'model.changed':
+      return <div className="note">{`Model: ${e.model}`}</div>;
     default:
       return null;
   }

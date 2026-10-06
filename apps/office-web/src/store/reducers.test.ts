@@ -229,3 +229,22 @@ describe('company memory', () => {
     expect(applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 1 })).memoryRev).toBe(2);
   });
 });
+
+describe('budget', () => {
+  const summary = (pct: number) => ({
+    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30 },
+    reserve: { active: false, limitPct: 100 - pct, fiveHourPct: null, sevenDayPct: null },
+    month: { key: '2026-10', usd: 0 },
+    plans: {},
+  });
+
+  it('takes the budget from the snapshot and keeps it current; a model change reaches the employee', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ budget: summary(25) }));
+    expect(d.budget?.constitution.ownerReservePct).toBe(25);
+    d = applyEvent(d, stored({ type: 'budget.changed', budget: summary(40) }, null));
+    expect(d.budget?.reserve.limitPct).toBe(60);
+    d = applyEvent(d, stored({ type: 'model.changed', model: 'opus' }));
+    expect(d.views.e1?.employee.model).toBe('opus');
+    expect(applySnapshot(EMPTY_DATA, snapshot()).budget).toBeNull();
+  });
+});

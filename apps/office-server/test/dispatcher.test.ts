@@ -173,3 +173,76 @@ describe('Dispatcher — hand-over and the brief', () => {
     expect(systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.includes('Yeni iş'))).toBe(false);
   });
 });
+
+describe('Dispatcher — reserve and sleep', () => {
+  function makeBudgeted(o: { idleSleepMinutes?: number } = {}) {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    if (o.idleSleepMinutes !== undefined) c.budget.setConstitution({ idleSleepMinutes: o.idleSleepMinutes });
+    let clock = Date.now();
+    const stop = new Dispatcher({
+      events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine,
+      budget: c.budget, now: () => clock, tickMs: 50,
+    }).start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    return { ...s, ...c, engine: f.engine, advance: (ms: number) => (clock += ms) };
+  }
+  const high = () => ({ status: 'allowed', fiveHour: { utilization: 0.9, resetsAt: Date.now() + 3_600_000 }, sevenDay: null, updatedAt: Date.now() });
+
+  it('review focus: in the reserve only priority 1 starts, idle members sleep, and everything resumes when it ends', async () => {
+    const t = makeBudgeted();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id));
+    t.setQuota(high());
+    t.budget.checkReserve();
+    const routine = t.company.createTask(coord.id, { assignee: ada.id, title: 'Rutin', priority: 3 });
+    await until(() => t.roster.get(ada.id).lifecycle === 'sleeping', 8000);
+    expect(t.tasks.get(routine.id).status).toBe('waiting');
+    expect(t.roster.get(coord.id).lifecycle).not.toBe('sleeping');
+    const urgent = t.company.createTask(coord.id, { assignee: ada.id, title: 'Acil', priority: 1 });
+    await until(() => t.tasks.get(urgent.id).status === 'in_progress', 8000);
+    t.company.finish(ada.id, urgent.id, { summary: 'tamam', outputs: [], learned: '' });
+    t.setQuota(null);
+    await until(() => t.tasks.get(routine.id).status === 'in_progress', 8000);
+  });
+
+  it('review focus: someone idle with nothing to do sleeps after the constitution’s minutes, and a task wakes them', async () => {
+    const t = makeBudgeted({ idleSleepMinutes: 1 });
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id));
+    await sleep(200);
+    expect(t.roster.get(ada.id).lifecycle).toBe('idle');
+    t.advance(61_000);
+    await until(() => t.roster.get(ada.id).lifecycle === 'sleeping', 8000);
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Uyanınca' });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    expect(systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.includes('## Görev: Uyanınca'))).toBe(true);
+  });
+
+  it('a sleeping coordinator wakes for its notices; a sleeping member waits for real work', async () => {
+    const t = makeBudgeted();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id) && t.engine.ready(coord.id));
+    await t.engine.sleep(coord.id);
+    await t.engine.sleep(ada.id);
+    t.notices.add(ada.id, 'Bilgi: toplantı yok.');
+    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Plan onaylandı')), 8000);
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+  });
+
+  it('does not wake someone the owner stopped, even with work', async () => {
+    const t = makeBudgeted();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await t.engine.stop(ada.id);
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'x' });
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('stopped');
+    expect(t.tasks.get(task.id).status).toBe('waiting');
+  });
+});

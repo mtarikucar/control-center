@@ -4,7 +4,7 @@ import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
-import { setup } from './helpers.ts';
+import { setup, until } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -16,7 +16,7 @@ function make() {
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
   const c = companyFor(s, f, ['coder', 'designer']);
-  const tools = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder', 'designer'], memory: c.memory });
+  const tools = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder', 'designer'], memory: c.memory, budget: c.budget, engine: f.engine });
   const call = async (employee: Employee, name: string, args: Record<string, unknown> = {}) => {
     const tool = tools.find((t: McpTool) => t.name === name);
     if (!tool) throw new Error(`no tool ${name}`);
@@ -24,17 +24,18 @@ function make() {
     if (!tool.kinds.includes(current.kind)) throw new Error(`closed: ${name}`);
     return tool.run({ employee: current }, args);
   };
-  return { ...s, ...c, tools, call };
+  return { ...s, ...c, engine: f.engine, tools, call };
 }
 
 describe('office tools', () => {
   it('splits the tools between everyone, leads and the coordinator', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
-    expect(names('member')).toEqual(['briefRead', 'decisionsRead', 'memorySearch', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'taskFinish', 'taskPass', 'taskUpdate']);
+    expect(names('member')).toEqual(['briefRead', 'decisionsRead', 'memorySearch', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'recordSpend', 'taskFinish', 'taskPass', 'taskUpdate']);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate']);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'briefUpdate', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'taskAssign', 'taskCreate', 'taskReprioritize',
+      'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'setModel', 'sleep',
+      'taskAssign', 'taskCreate', 'taskReprioritize', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
@@ -143,5 +144,29 @@ describe('office tools', () => {
     expect(file).toContain('Ada — Yazar: 1 görev bitirdi.');
     expect(file).toContain('Kısa metinlerde çok iyi.');
     expect(file).toContain('Slogan: Üç slogan.');
+  });
+
+  it('records spending with its warnings and shows the coordinator the budget', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    t.budget.setConstitution({ monthlyUsdCap: 10 });
+    expect(await t.call(ada, 'recordSpend', { service: 'ElevenLabs', usd: 5, purpose: 'ses' })).toBe('Harcama kaydedildi: ElevenLabs $5.');
+    expect(await t.call(ada, 'recordSpend', { service: 'Canva', usd: 6, purpose: 'görsel' })).toMatch(/aylık sınırı/);
+    await expect(t.call(ada, 'recordSpend', { service: 'x', purpose: 'y' })).rejects.toThrow(/usd/);
+    expect(await t.call(c, 'budgetStatus')).toContain('Bu ay harcanan: $11 / sınır $10');
+  });
+
+  it('lets the coordinator change a model and put someone to sleep and wake them', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r', model: 'haiku' });
+    expect(await t.call(c, 'setModel', { employee: 'Ada', model: 'sonnet' })).toContain('sonnet');
+    expect(t.roster.get(ada.id).model).toBe('sonnet');
+    await until(() => t.engine.ready(ada.id));
+    expect(await t.call(c, 'sleep', { employee: 'Ada' })).toBe('Ada uyudu.');
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+    expect(await t.call(c, 'wake', { employee: ada.id })).toBe('Ada uyandı.');
+    await expect(t.call(c, 'sleep', { employee: c.id })).rejects.toThrow(/Kendini uyutamazsın/);
   });
 });

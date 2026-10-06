@@ -3,6 +3,7 @@ import type { Employee, Task, TaskStatus } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
+import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
 
 const TABS = [
@@ -11,6 +12,8 @@ const TABS = [
   ['decisions', 'Kararlar'],
   ['playbook', 'El kitabı'],
   ['notes', 'Notlar'],
+  ['budget', 'Bütçe'],
+  ['constitution', 'Anayasa'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -196,8 +199,12 @@ export function CompanyView() {
           <DecisionsTab />
         ) : tab === 'playbook' ? (
           <PlaybookTab />
-        ) : (
+        ) : tab === 'notes' ? (
           <NotesTab />
+        ) : tab === 'budget' ? (
+          <BudgetTab />
+        ) : (
+          <ConstitutionTab />
         )}
       </section>
     </div>

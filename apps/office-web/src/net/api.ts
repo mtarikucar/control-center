@@ -1,4 +1,4 @@
-import type { Decision, Employee, EmployeeFile, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, StoredEvent, Task } from '@cc/shared';
+import type { BudgetSummary, Constitution, Decision, Employee, EmployeeFile, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -42,6 +42,9 @@ export const api = {
   /** Without `now` the company first asks for a hand-over and answers with that task; `now` fires at once (null). */
   fire: (id: string, now = false) => request<{ handover: Task } | null>('DELETE', `${employee(id)}${now ? '?now=1' : ''}`),
   employeeFile: (id: string) => request<EmployeeFile>('GET', `${employee(id)}/file`),
+  budget: () => request<BudgetSummary>('GET', '/api/budget'),
+  spending: (planId?: string) => request<Spend[]>('GET', `/api/budget/spend${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`),
+  setConstitution: (patch: Record<string, number | null>) => request<Constitution>('POST', '/api/constitution', patch),
   decisions: () => request<Decision[]>('GET', '/api/memory/decisions'),
   revertDecision: (id: string) => request<Decision>('POST', `/api/decisions/${encodeURIComponent(id)}/revert`),
   playbook: () => request<PlaybookEntry[]>('GET', '/api/memory/playbook'),

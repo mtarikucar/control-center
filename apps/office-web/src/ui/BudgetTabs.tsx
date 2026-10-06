@@ -1,0 +1,189 @@
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import type { BudgetSummary, Constitution } from '@cc/shared';
+import { api } from '../net/api.ts';
+import { useOffice } from '../store/office.ts';
+import { PLAN_STATUS_LABELS } from './labels.ts';
+
+const money = (n: number) => `$${Math.round(n * 100) / 100}`;
+const pct = (p: number | null) => (p === null ? '—' : `%${p}`);
+
+/** Where the money and the quota go (spec §6): live from the store, refreshed every 15 s while open. */
+export function BudgetTab() {
+  const stored = useOffice((s) => s.budget);
+  const plans = useOffice((s) => s.plans);
+  const views = useOffice((s) => s.views);
+  const usage = useOffice((s) => s.usage);
+  const [fresh, setFresh] = useState<BudgetSummary | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => void api.budget().then((b) => alive && setFresh(b), () => undefined);
+    load();
+    const timer = setInterval(load, 15_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [stored]);
+  const b = fresh ?? stored;
+  if (!b) return <p className="muted">Yükleniyor…</p>;
+  const shown = Object.values(plans)
+    .filter((p) => p.status === 'approved' || p.status === 'done')
+    .sort((x, y) => y.updatedAt - x.updatedAt);
+  const teams = new Map<string, number>();
+  for (const v of Object.values(views)) {
+    if (v.employee.lifecycle === 'archived') continue;
+    const team = v.employee.team || 'Ekipsiz';
+    teams.set(team, (teams.get(team) ?? 0) + (usage[v.employee.id]?.today.costUsd ?? 0));
+  }
+  const cap = b.constitution.monthlyUsdCap;
+  return (
+    <div className="budget">
+      {b.reserve.active && (
+        <p className="reserve-banner" role="status">
+          Sahibinin payı korunuyor: kullanım %{Math.max(b.reserve.fiveHourPct ?? 0, b.reserve.sevenDayPct ?? 0)}, sınır %{b.reserve.limitPct}. Ofis yalnız öncelik 1 işleri
+          başlatıyor; pencere açılınca kendiliğinden döner.
+        </p>
+      )}
+      <section aria-label="Kota">
+        <h3>Kota</h3>
+        <p>
+          5 saat {pct(b.reserve.fiveHourPct)} · 7 gün {pct(b.reserve.sevenDayPct)} · sahibinin payı %{b.constitution.ownerReservePct} (sınır %{b.reserve.limitPct})
+        </p>
+      </section>
+      <section aria-label="Bu ay">
+        <h3>Bu ay harcanan</h3>
+        <p className={cap !== null && b.month.usd > cap ? 'over' : ''}>
+          {money(b.month.usd)}
+          {cap !== null ? ` / ${money(cap)}` : ' (sınır yok)'}
+        </p>
+      </section>
+      <section aria-label="Planlar">
+        <h3>Planlar</h3>
+        {shown.length === 0 ? (
+          <p className="muted">Onaylı plan yok.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Plan</th>
+                <th>Durum</th>
+                <th>Para (harcanan / onaylı)</th>
+                <th>Claude kullanımı</th>
+                <th>Tahmini kota</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((p) => {
+                const used = b.plans[p.id] ?? { spentUsd: 0, claudeUsd: 0 };
+                const over = p.usd !== null && used.spentUsd > p.usd;
+                return (
+                  <tr key={p.id} aria-label={p.title} className={over ? 'over' : ''}>
+                    <td>{p.title}</td>
+                    <td>{PLAN_STATUS_LABELS[p.status]}</td>
+                    <td>{`${money(used.spentUsd)}${p.usd !== null ? ` / ${money(p.usd)}` : ''}`}</td>
+                    <td>{`~${money(used.claudeUsd)}`}</td>
+                    <td>{p.quotaPct !== null ? `%${p.quotaPct}` : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+      <section aria-label="Ekipler">
+        <h3>Ekipler (bugün, Claude kullanımı)</h3>
+        <table>
+          <tbody>
+            {[...teams.entries()].map(([team, usd]) => (
+              <tr key={team} aria-label={team}>
+                <td>{team}</td>
+                <td>{money(usd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  );
+}
+
+const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean }> = [
+  { key: 'maxEmployees', label: 'Çalışan sınırı', hint: 'Koordinatör dahil; masa sayısını aşamaz.' },
+  { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
+  { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
+  { key: 'chainDepth', label: 'Paslama zinciri', hint: 'Paslanan işten paslanan iş en çok kaç halka olabilir.' },
+  { key: 'tasksPerDay', label: 'Günlük görev sınırı', hint: 'Bir çalışanın günde açabileceği görev (koordinatör hariç).' },
+  { key: 'openTasksPerPlan', label: 'Plan başına açık görev', hint: 'Bir planda aynı anda açık en çok görev.' },
+  { key: 'idleSleepMinutes', label: 'Boşta uyuma (dk)', hint: 'İşi olmayan çalışan bu kadar sonra uyur; 0 = hiç.' },
+];
+
+/** The owner's fixed limits; the server checks every value and says what is wrong. */
+export function ConstitutionTab() {
+  const current = useOffice((s) => s.budget?.constitution);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // While the owner is typing, a budget update (someone's spending) must not reset the form.
+  const dirty = useRef(false);
+  useEffect(() => {
+    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, current[f.key] === null ? '' : String(current[f.key])])));
+  }, [current]);
+  if (!current) return <p className="muted">Yükleniyor…</p>;
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setSaved(false);
+    setError(null);
+    const patch: Record<string, number | null> = {};
+    for (const f of FIELDS) {
+      const raw = (draft[f.key] ?? '').trim().replace(',', '.');
+      if (raw === '' && f.nullable) {
+        patch[f.key] = null;
+        continue;
+      }
+      // "50 dolar" or an emptied field must not slip through as no cap or 0 %: say so and send nothing.
+      const value = raw === '' ? Number.NaN : Number(raw);
+      if (!Number.isFinite(value)) {
+        setError(`${f.label}: bir sayı girin.`);
+        setBusy(false);
+        return;
+      }
+      patch[f.key] = value;
+    }
+    try {
+      await api.setConstitution(patch);
+      dirty.current = false;
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="constitution" onSubmit={(e) => void save(e)}>
+      {FIELDS.map((f) => (
+        <label key={f.key}>
+          <span>{f.label}</span>
+          <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => {
+              dirty.current = true;
+              setDraft({ ...draft, [f.key]: e.target.value });
+            }} />
+          <small className="muted">{f.hint}</small>
+        </label>
+      ))}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {saved && <p className="muted">Kaydedildi.</p>}
+      <div className="row end">
+        <button type="submit" className="primary" disabled={busy}>
+          Kaydet
+        </button>
+      </div>
+    </form>
+  );
+}

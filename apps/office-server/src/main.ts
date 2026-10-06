@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { createApi } from './api.ts';
+import { Budget } from './company/budget.ts';
+import { ConstitutionStore, SpendStore } from './company/budget-store.ts';
 import { manifestCharacters } from './company/characters.ts';
 import { Company } from './company/company.ts';
 import { Memory } from './company/memory.ts';
@@ -43,12 +45,15 @@ const memory = new Memory({
   roster, events, notices, tasks, plans, dataDir: config.dataDir,
   decisions: new DecisionStore(db), playbook: new PlaybookStore(db), notes: new NoteStore(db), employeeNotes: new EmployeeNoteStore(db),
 });
+const budget = new Budget({
+  constitution: new ConstitutionStore(db), spend: new SpendStore(db), tasks, plans, roster, events, notices, quota, deskCount: config.deskCount,
+});
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory });
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution() });
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget });
 
 const api = createApi(
-  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory }) }, company: { service: company, tasks, plans, memory } },
+  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine }) }, company: { service: company, tasks, plans, memory, budget } },
   { allowedOrigins: config.allowedOrigins, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {
@@ -66,6 +71,7 @@ api.server.listen(config.port, config.host, () => {
   mcpUrl = `http://${config.host}:${port}/mcp`;
   engine.recover();
   dispatcher.start();
+  budget.watch();
   console.log(`office-server hazır: http://${config.host}:${port}  (veri: ${config.dataDir})`);
 });
 

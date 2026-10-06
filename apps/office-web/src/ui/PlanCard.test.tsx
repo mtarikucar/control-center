@@ -41,4 +41,16 @@ describe('PlanCard', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Vazgeç' })));
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Yalnız taslak bir plan reddedilebilir.');
   });
+
+  it('shows what an approved plan has spent next to its money', () => {
+    useOffice.setState({
+      plans: { p1: plan({ status: 'approved' }) },
+      budget: {
+        constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30 },
+        reserve: { active: false, limitPct: 75, fiveHourPct: null, sevenDayPct: null }, month: { key: '2026-10', usd: 0 }, plans: { p1: { spentUsd: 30, claudeUsd: 1.5 } },
+      },
+    });
+    render(<PlanCard plan={plan({ status: 'approved' })} />);
+    expect(screen.getByText('Harcanan: $30 / $25 · Claude ~$1.5').className).toContain('over');
+  });
 });

@@ -1,4 +1,4 @@
-import type { Employee, EmployeeUsage, OfficeSnapshot, Plan, QuotaState, StoredEvent, Task, Usage, UsageTotals } from '@cc/shared';
+import type { BudgetSummary, Employee, EmployeeUsage, OfficeSnapshot, Plan, QuotaState, StoredEvent, Task, Usage, UsageTotals } from '@cc/shared';
 
 export const MAX_EVENTS = 500;
 
@@ -27,9 +27,11 @@ export interface OfficeData {
   plans: Record<string, Plan>;
   /** Bumped by every memory change, so open memory tabs reload. */
   memoryRev: number;
+  /** The constitution, the reserve and the money (null: an office without the company layer). */
+  budget: BudgetSummary | null;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0 };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
 
@@ -70,6 +72,7 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     views,
     synced: true,
     memoryRev: d.memoryRev,
+    budget: s.budget ?? null,
     tasks: Object.fromEntries((s.tasks ?? []).map((t) => [t.id, t])),
     plans: Object.fromEntries((s.plans ?? []).map((p) => [p.id, p])),
   };
@@ -94,6 +97,7 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'task.changed') next.tasks = { ...d.tasks, [ev.task.id]: ev.task };
   if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: ev.plan };
   if (ev.type === 'decision.recorded' || ev.type === 'playbook.updated' || ev.type === 'note.written') next.memoryRev = d.memoryRev + 1;
+  if (ev.type === 'budget.changed') next.budget = ev.budget;
   const id = s.employeeId;
   const view = id ? d.views[id] : undefined;
   if (!id || !view) return next;
@@ -107,6 +111,9 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
       // Only a working employee runs tools; a crash or stop never reports the open ones finished.
       if (ev.to !== 'working') v = { ...v, openTools: {} };
       if (ev.to === 'idle') v = { ...v, idleSince: s.ts };
+      break;
+    case 'model.changed':
+      v = { ...v, employee: { ...v.employee, model: ev.model } };
       break;
     case 'session.started':
       v = { ...v, employee: { ...v.employee, sessionStarted: true } };
