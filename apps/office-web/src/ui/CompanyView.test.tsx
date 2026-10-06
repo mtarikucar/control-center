@@ -85,4 +85,19 @@ describe('CompanyView', () => {
     fireEvent.click(screen.getByRole('button', { name: /Koordinatör/ }));
     expect(useOffice.getState()).toMatchObject({ selectedId: 'koor', companyOpen: false });
   });
+
+  it('lists what waits for the owner first in the Öneriler tab', () => {
+    office([person('koor', { kind: 'coordinator' }), person('ada', { name: 'Ada' })]);
+    useOffice.setState({
+      proposals: {
+        a: { id: 'a', ts: 2, by: 'ada', kind: 'idea', title: 'Blog', text: 't', usd: null, planId: null, status: 'open', routedTo: 'koor', decidedBy: null, note: null, decidedAt: null },
+        b: { id: 'b', ts: 1, by: 'ada', kind: 'purchase', title: 'Telefon', text: 't', usd: 9, planId: null, status: 'owner', routedTo: null, decidedBy: null, note: null, decidedAt: null },
+      },
+    });
+    render(<CompanyView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Öneriler' }));
+    const owner = screen.getByRole('region', { name: 'Senin kararını bekleyenler' });
+    expect(within(owner).getByText('Telefon')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Ekipte karar bekleyenler' })).getByText('Blog')).toBeTruthy();
+  });
 });

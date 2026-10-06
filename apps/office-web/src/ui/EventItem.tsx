@@ -2,6 +2,7 @@ import type { PlanChange, StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, summarizeToolInput } from './format.ts';
 import { lifecycleLabel } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
+import { ProposalCard } from './ProposalCard.tsx';
 
 const PLAN_CHANGE: Record<PlanChange, string> = {
   proposed: 'önerildi',
@@ -123,6 +124,8 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note">{`Harcama: ${e.spend.service} $${e.spend.usd} — ${e.spend.purpose}`}</div>;
     case 'model.changed':
       return <div className="note">{`Model: ${e.model}`}</div>;
+    case 'proposal.changed':
+      return e.change === 'opened' || e.change === 'escalated' ? <ProposalCard proposal={e.proposal} /> : <div className="note">{`Öneri “${e.proposal.title}”: ${e.change === 'accepted' ? 'kabul edildi' : 'reddedildi'}`}</div>;
     default:
       return null;
   }

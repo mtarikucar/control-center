@@ -194,3 +194,15 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .constitution input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
 .constitution .row, .constitution .error, .constitution > p { grid-column: 1 / -1; }
 @media (max-width: 760px) { .budget table { font-size: 12px; } }
+
+.proposal-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font-size: 14px; }
+.proposal-card p { margin: 0; }
+.proposal-card.purchase { border-left: 3px solid var(--accent); }
+.proposal-card.objection { border-left: 3px solid var(--bad); }
+.badge.proposal-owner { color: var(--warn); }
+.badge.proposal-accepted { color: var(--ok); }
+.badge.proposal-declined { color: var(--muted); }
+.proposals { display: flex; flex-direction: column; gap: 14px; }
+.proposal-list { display: flex; flex-direction: column; gap: 8px; }
+.proposal-list h3 { margin: 0; font-size: 13px; color: var(--muted); }
+.count { margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 12px; line-height: 18px; display: inline-block; text-align: center; }
