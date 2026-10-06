@@ -191,4 +191,33 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS decisions;
       ALTER TABLE tasks DROP COLUMN kind;`,
   },
+  {
+    version: 4,
+    name: 'budget: constitution, spending, task usage',
+    up: `
+      CREATE TABLE IF NOT EXISTS constitution (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS spend (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        by_id TEXT NOT NULL,
+        service TEXT NOT NULL,
+        usd REAL NOT NULL,
+        purpose TEXT NOT NULL,
+        plan_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS spend_ts ON spend (ts);
+      CREATE INDEX IF NOT EXISTS spend_plan ON spend (plan_id);
+      ALTER TABLE tasks ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0;
+      ALTER TABLE tasks ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0;`,
+    down: `
+      ALTER TABLE tasks DROP COLUMN tokens;
+      ALTER TABLE tasks DROP COLUMN cost_usd;
+      DROP INDEX IF EXISTS spend_plan;
+      DROP INDEX IF EXISTS spend_ts;
+      DROP TABLE IF EXISTS spend;
+      DROP TABLE IF EXISTS constitution;`,
+  },
 ];

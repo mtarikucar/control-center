@@ -11,6 +11,7 @@ export const LIFECYCLES = [
   'idle',
   'working',
   'stopped',
+  'sleeping',
   'in_terminal',
   'limited',
   'interrupted',

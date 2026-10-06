@@ -15,14 +15,15 @@ function tables(db: Db): string[] {
     .all() as unknown as { name: string }[];
   return rows.map((r) => r.name);
 }
+const V4_TABLES = [...V3_TABLES, 'constitution', 'spend'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(3);
-    expect(tables(db)).toEqual(V3_TABLES);
+    expect(migrateUp(db)).toBe(4);
+    expect(tables(db)).toEqual(V4_TABLES);
   });
 
   it('round-trips up → down → up', () => {
@@ -31,14 +32,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(3);
-    expect(tables(db)).toEqual(V3_TABLES);
+    expect(migrateUp(db)).toBe(4);
+    expect(tables(db)).toEqual(V4_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(3);
+    expect(migrateUp(db)).toBe(4);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -72,14 +73,14 @@ describe('migrations', () => {
       `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
        VALUES ('t1', NULL, 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'waiting', 0, 1)`,
     ).run();
-    migrateUp(db);
+    migrateUp(db, upTo(3));
     expect(tables(db)).toEqual(V3_TABLES);
     expect({ ...(db.prepare('SELECT kind FROM tasks').get() as object) }).toEqual({ kind: 'work' });
     expect(migrateDown(db, 2)).toBe(2);
     expect(tables(db)).toEqual(V2_TABLES);
     expect(columns(db, 'tasks')).not.toContain('kind');
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(3);
+    expect(migrateUp(db, upTo(3))).toBe(3);
   });
 
   it('v3 keeps the notes index in step with the notes table', () => {
@@ -95,5 +96,22 @@ describe('migrations', () => {
     expect(hits('polly')).toBe(1);
     db.prepare('DELETE FROM notes').run();
     expect(hits('polly')).toBe(0);
+  });
+
+  it('v4 adds the constitution, spending and task usage; v4 down restores v3 and keeps tasks', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(3));
+    db.prepare(
+      `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
+       VALUES ('t1', NULL, 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'waiting', 0, 1)`,
+    ).run();
+    migrateUp(db);
+    expect(tables(db)).toEqual(V4_TABLES);
+    expect({ ...(db.prepare('SELECT cost_usd, tokens FROM tasks').get() as object) }).toEqual({ cost_usd: 0, tokens: 0 });
+    expect(migrateDown(db, 3)).toBe(3);
+    expect(tables(db)).toEqual(V3_TABLES);
+    expect(columns(db, 'tasks')).not.toContain('cost_usd');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
+    expect(migrateUp(db)).toBe(4);
   });
 });

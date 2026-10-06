@@ -6,6 +6,7 @@ const LABELS: Record<Lifecycle, string> = {
   idle: 'Boşta',
   working: 'Çalışıyor',
   stopped: 'Durduruldu',
+  sleeping: 'Uyuyor',
   in_terminal: 'Terminalde',
   limited: 'Limit doldu',
   interrupted: 'Kesildi',
