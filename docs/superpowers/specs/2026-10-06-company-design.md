@@ -97,6 +97,7 @@ açar (hafıza korunur), çünkü araç listesi ve kart yalnız açılışta oku
 5. Koordinatör görevleri açar, işe alır, dağıtır.
 
 Plan durumları: `taslak` → `onaylı` → `sürüyor` → `bitti` | `vazgeçildi`; revizyon onay bekliyorsa `revizyonda`.
+Onaylı bir planın revizyonu sahibince reddedilirse plan onaylı sürümüne döner (`kept`); hiç onaylanmamış plan reddedilirse vazgeçilir.
 
 ### 4.2 Görev kartı
 
@@ -118,7 +119,7 @@ plan, bağımlılıklar (başka görevler: "şu parça gelince başla"), durum (
 - `taskPass(kime, …)`: herkes herkese; alıcının kuyruğuna düşer, önerilen öncelikle. Koordinatör/lider sırayı değiştirebilir.
 - `propose(tür, başlık, metin)`: tür `ihtiyaç` \| `satınalma` \| `fikir` \| `itiraz`; liderine ya da koordinatöre düşer.
   Koordinatör karar verir (karar defterine yazılır) ya da büyükse plan revizyonuna katıp sahibine getirir.
-  **Satın almalar her zaman sahibine** gider (parayı ödeyen ve alan sahibi).
+  **Satın almalar her zaman sahibine** gider (parayı ödeyen ve alan sahibi). Bir lider öneriyi koordinatöre, koordinatör sahibine götürebilir (`escalate`); satın alma ve sahibine götürülen her öneri sahibinin kartında Onayla / Reddet ile kapanır ve karar defterine sahibinin kararı olarak yazılır.
 
 ### 4.5 Değişiklik (B kuralı) ve rapor
 
@@ -218,8 +219,8 @@ Yeni göç sürümleri (her biri `up` + `down`, `down` yalnız kendi eklediğini
 - `decisions` (id, zaman, veren, başlık, seçilen, gerekçe, alternatifler, plan, `reverts`).
 - `playbook` (konu, sürüm, metin, yazan, gerekçe, zaman). `notes` (+ FTS5 dizini). `spend`. `proposals`.
   `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, `chainDepth`, `tasksPerDay`, `openTasksPerPlan`, `idleSleepMinutes`); `tasks.cost_usd`, `tasks.tokens`.
-- Olaylar (`OfficeEvent`): `plan.*`, `task.*`, `proposal.*`, `decision.recorded`, `spend.recorded`, `brief.updated`,
-  `employee.slept/woke`, `role.changed` — v1 olay kaydına ve canlı akışa girer (ekran bunlardan beslenir).
+- Olaylar (`OfficeEvent`): `plan.*`, `task.*`, `proposal.changed`, `decision.recorded`, `spend.recorded`, `brief.updated`,
+  `lifecycle.changed` (`sleeping`), `role.changed` — v1 olay kaydına ve canlı akışa girer (ekran bunlardan beslenir).
 
 ## 10. Hata durumları
 
