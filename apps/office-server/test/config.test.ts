@@ -4,14 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { REPO_ROOT, loadConfig } from '../src/config.ts';
 
 describe('loadConfig', () => {
-  it('defaults to ~/.control-center on 127.0.0.1:4319 with the real claude', () => {
+  it('defaults to ~/.control-center on 127.0.0.1:4319 with the real claude and no extra origins', () => {
     const c = loadConfig({});
     expect(c.dataDir).toBe(join(homedir(), '.control-center'));
     expect(c.host).toBe('127.0.0.1');
     expect(c.port).toBe(4319);
     expect(c.claudeCommand).toEqual(['claude']);
     expect(c.deskCount).toBe(8);
-    expect(c.allowedOrigins).toEqual(['http://127.0.0.1:5173', 'http://localhost:5173']);
+    expect(c.allowedOrigins).toEqual([]);
   });
 
   it('reads overrides from the environment', () => {

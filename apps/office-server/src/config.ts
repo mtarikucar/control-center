@@ -39,8 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfficeConfig {
     }
     claudeCommand = parsed;
   }
-  const allowedOrigins = env.OFFICE_ALLOWED_ORIGINS
-    ? env.OFFICE_ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
-    : ['http://127.0.0.1:5173', 'http://localhost:5173'];
+  // No extra origins by default: a dev server on a shared port (e.g. Vite's 5173) could otherwise drive employees.
+  const allowedOrigins = (env.OFFICE_ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
   return { dataDir, host: '127.0.0.1', port, claudeCommand, deskCount: 8, allowedOrigins };
 }
