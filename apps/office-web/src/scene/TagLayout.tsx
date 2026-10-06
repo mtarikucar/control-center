@@ -35,7 +35,9 @@ export function registerTag(id: string, group: RefObject<Group | null>, el: HTML
  */
 export function TagLayout() {
   const p = useMemo(() => new Vector3(), []);
-  useFrame(({ camera, size }) => {
+  useFrame(({ camera, size }, dt) => {
+    // Time-based easing: about a fifth of a second at any frame rate.
+    const k = 1 - Math.exp(-Math.min(dt, 0.5) * 14);
     const boxes: TagBox[] = [];
     for (const [id, e] of entries) {
       const g = e.group.current;
@@ -49,7 +51,7 @@ export function TagLayout() {
     for (const b of boxes) {
       const e = entries.get(b.id)!;
       const target = raise[b.id] ?? 0;
-      e.shown = Math.abs(target - e.shown) < 0.5 ? target : e.shown + (target - e.shown) * 0.3;
+      e.shown = Math.abs(target - e.shown) < 0.5 ? target : e.shown + (target - e.shown) * k;
       e.el.style.transform = e.shown > 0 ? `translateY(${-e.shown}px)` : '';
     }
   });

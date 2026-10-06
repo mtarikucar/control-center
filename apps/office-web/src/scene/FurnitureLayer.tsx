@@ -6,7 +6,7 @@ import { assetUrl, furnitureAsset } from '../assets/manifest.ts';
 import { LAYOUT, type Placement } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
-import { boundsOf, fitToHeight } from './fit.ts';
+import { boundsOf, fitToBox, fitToHeight } from './fit.ts';
 import { PALETTE } from './palette.ts';
 import { repairNormals } from './repair.ts';
 
@@ -19,13 +19,16 @@ function VoxelBox({ p }: { p: Placement }) {
   );
 }
 
-function AssetModel({ url, height }: { url: string; height: number }) {
+function AssetModel({ url, p }: { url: string; p: Placement }) {
   const { scene } = useGLTF(url);
   const object = useMemo(() => {
     repairNormals(scene);
     return scene.clone(true);
   }, [scene]);
-  const fit = useMemo(() => fitToHeight(boundsOf(object), height), [object, height]);
+  const fit = useMemo(() => {
+    const bounds = boundsOf(object);
+    return p.fit === 'box' ? fitToBox(bounds, p) : fitToHeight(bounds, p.h);
+  }, [object, p]);
   useEffect(() => {
     object.traverse((o) => {
       const mesh = o as Mesh;
@@ -77,7 +80,7 @@ export function FurnitureLayer() {
         const model = asset ? (
           <ErrorBoundary fallback={fallback}>
             <Suspense fallback={fallback}>
-              <AssetModel url={assetUrl(asset.file)} height={p.h} />
+              <AssetModel url={assetUrl(asset.file)} p={p} />
             </Suspense>
           </ErrorBoundary>
         ) : (

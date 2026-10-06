@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { behaviorOf, IDLE_WANDER_MS } from './behavior.ts';
 import { findPath, isFreeAt } from './grid.ts';
-import { GRID, LAYOUT, spotFor } from './layout.ts';
+import { COUNTER_TOP, GRID, LAYOUT, spotFor } from './layout.ts';
 
 const allSpots = [...LAYOUT.seats, ...LAYOUT.coffeeSpots, ...LAYOUT.loungeSpots, ...LAYOUT.serverSpots];
 
@@ -76,5 +76,18 @@ describe('office layout', () => {
     });
     expect(new Set(wandering).size).toBe(desks.length);
   });
-});
 
+  it('stands the coffee machine on the counter top, inside the counter', () => {
+    const counter = LAYOUT.furniture.find((p) => p.assetId === 'coffee_counter_sink')!;
+    const machine = LAYOUT.furniture.find((p) => p.assetId === 'espresso_machine')!;
+    expect(machine.y).toBeCloseTo(counter.y + COUNTER_TOP * counter.h);
+    expect(Math.abs(machine.x - counter.x) + machine.w / 2).toBeLessThan(counter.w / 2);
+    expect(Math.abs(machine.z - counter.z) + machine.d / 2).toBeLessThan(counter.d / 2);
+  });
+
+  it('keeps every board on the floor: nothing that stands is hung in the air', () => {
+    for (const p of LAYOUT.furniture.filter((q) => ['whiteboard', 'server_rack', 'reception_desk', 'coffee_counter_sink'].includes(q.assetId))) {
+      expect(p.y, p.assetId).toBe(0);
+    }
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Bone, BoxGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, Object3D, Skeleton, SkinnedMesh, Uint16BufferAttribute } from 'three';
-import { boundsOf, fitToHeight } from './fit.ts';
+import { boundsOf, fitToBox, fitToHeight } from './fit.ts';
 
 describe('fitToHeight', () => {
   it('scales to the wanted height and puts the base on the floor, centred', () => {
@@ -40,4 +40,14 @@ describe('fitToHeight', () => {
     const b = boundsOf(root);
     expect(b.max.y - b.min.y).toBeCloseTo(1.7, 3);
   });
+
+describe('fitToBox', () => {
+  it('scales each axis to the wanted size, base on the floor, centred (for models drawn with the wrong proportions)', () => {
+    const fit = fitToBox({ min: { x: -1, y: 2, z: 0 }, max: { x: 1, y: 6, z: 1 } }, { w: 1, h: 2, d: 3 });
+    expect(fit.scale).toEqual([0.5, 0.5, 3]);
+    expect(fit.offset[0]).toBeCloseTo(0);
+    expect(fit.offset[1]).toBeCloseTo(-1);
+    expect(fit.offset[2]).toBeCloseTo(-1.5);
+  });
+});
 });

@@ -38,7 +38,7 @@ function codeTexture(seed: number, background: string): CanvasTexture {
 
 function Monitor({ x, screen }: { x: number; screen: CanvasTexture }) {
   return (
-    <group position={[x, SURFACE, 0.2]}>
+    <group position={[x, SURFACE, 0.1]}>
       <mesh position={[0, 0.02, 0]} castShadow>
         <boxGeometry args={[0.18, 0.02, 0.12]} />
         <meshStandardMaterial color="#2a2d33" roughness={0.6} />
@@ -74,15 +74,15 @@ function DeskThings({ desk, index, screens }: { desk: Desk; index: number; scree
       ) : (
         <Monitor x={0} screen={screen} />
       )}
-      <mesh position={[0, SURFACE + 0.012, -0.12]} castShadow receiveShadow>
+      <mesh position={[0, SURFACE + 0.012, -0.2]} castShadow receiveShadow>
         <boxGeometry args={[0.42, 0.022, 0.13]} />
         <meshStandardMaterial color="#e9e7e3" roughness={0.7} />
       </mesh>
-      <mesh position={[0.29, SURFACE + 0.012, -0.12]} castShadow>
+      <mesh position={[0.29, SURFACE + 0.012, -0.2]} castShadow>
         <boxGeometry args={[0.06, 0.022, 0.1]} />
         <meshStandardMaterial color="#e9e7e3" roughness={0.7} />
       </mesh>
-      <mesh position={[-0.47, SURFACE + 0.05, -0.14]} castShadow>
+      <mesh position={[-0.47, SURFACE + 0.05, -0.2]} castShadow>
         <cylinderGeometry args={[0.04, 0.036, 0.1, 12]} />
         <meshStandardMaterial color={mug} roughness={0.5} />
       </mesh>
