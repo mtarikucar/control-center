@@ -18,7 +18,7 @@ async function start() {
   const f = fakeEngine(s);
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget } }, { allowedOrigins: [] });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
@@ -120,5 +120,18 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', '/api/constitution', { ownerReservePct: 40 })).body).toMatchObject({ ownerReservePct: 40 });
     expect((await call(t.port, 'POST', '/api/constitution', { ownerReservePct: 400 })).status).toBe(400);
     expect((await call(t.port, 'GET', '/api/office')).body.budget).toMatchObject({ constitution: { ownerReservePct: 40 } });
+  });
+
+  it('shows the owner what waits for them and lets them approve or reject it', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const buy = t.company.openProposal(ada.id, { kind: 'purchase', title: 'Telefon hattı', text: 'Müşteriler arıyor.', usd: 12 });
+    const idea = t.company.openProposal(ada.id, { kind: 'idea', title: 'Blog', text: 'Haftalık.' });
+    expect((await call(t.port, 'GET', '/api/proposals')).body.map((p: { title: string }) => p.title).sort()).toEqual(['Blog', 'Telefon hattı']);
+    expect((await call(t.port, 'POST', `/api/proposals/${buy.id}/approve`, { note: 'Alıyorum.' })).body).toMatchObject({ status: 'accepted', note: 'Alıyorum.' });
+    expect((await call(t.port, 'POST', `/api/proposals/${buy.id}/reject`)).status).toBe(409);
+    expect((await call(t.port, 'POST', `/api/proposals/${idea.id}/approve`)).status).toBe(409);
+    expect((await call(t.port, 'GET', '/api/office')).body.proposals.map((p: { status: string }) => p.status).sort()).toEqual(['accepted', 'open']);
   });
 });

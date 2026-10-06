@@ -5,6 +5,7 @@ import { OWNER, type HireInput, type OfficeSnapshot, type ServerMessage } from '
 import type { Budget } from './company/budget.ts';
 import type { Company } from './company/company.ts';
 import type { Memory } from './company/memory.ts';
+import type { ProposalStore } from './company/proposal-store.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
 import type { Engine } from './engine.ts';
 import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } from './errors.ts';
@@ -23,7 +24,7 @@ export interface ApiDeps {
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
   /** The company layer: plans, tasks and the coordinator (absent: v1 office). */
-  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget };
+  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore };
 }
 
 export interface ApiOptions {
@@ -42,9 +43,15 @@ export interface Api {
 const MAX_BODY_BYTES = 1_000_000;
 const WS_OPEN = 1;
 const DECISION_ROUTE = /^\/api\/decisions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/revert$/;
+const PROPOSAL_ROUTE = /^\/api\/proposals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|reject)$/;
 const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline)$/;
 const EMPLOYEE_ROUTE =
   /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file))?$/;
+
+/** What the owner sees of the proposals: everything still open or waiting for them, and the last 30 decided. */
+function visibleProposals(store: ProposalStore) {
+  return [...store.list({ statuses: ['open', 'owner'] }), ...store.list({ statuses: ['accepted', 'declined'], limit: 30 })];
+}
 
 export function snapshot(d: ApiDeps): OfficeSnapshot {
   const employees = d.roster.list();
@@ -52,7 +59,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   if (!d.company) return base;
   const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'] });
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
-  return { ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary() };
+  return { ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals) };
 }
 
 /** Blocks DNS rebinding (Host) and cross-site requests from other pages in the owner's browser (Origin). */
@@ -148,6 +155,12 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       const body = await readJson(req);
       if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
       return sendJson(res, 200, budget.setConstitution(body as Record<string, unknown>));
+    }
+    if (method === 'GET' && url.pathname === '/api/proposals') return sendJson(res, 200, visibleProposals(d.company.proposals));
+    const decide = PROPOSAL_ROUTE.exec(url.pathname);
+    if (method === 'POST' && decide) {
+      const note = (await readJson(req)) as { note?: unknown } | null;
+      return sendJson(res, 200, company.ownerDecideProposal(decide[1] ?? '', decide[2] === 'approve', typeof note?.note === 'string' ? note.note : undefined));
     }
   }
 
