@@ -86,6 +86,21 @@ export class Memory {
     return revert;
   }
 
+  /** The owner's own decisions: approving a purchase, settling what was brought to them. */
+  recordOwnerDecision(d: { title: string; chosen: string; reason: string; planId?: string | null }): Decision {
+    const decision = this.#d.decisions.create({
+      by: OWNER,
+      title: clean(d.title, 'Karar başlığı', 160, true),
+      chosen: clean(d.chosen, 'Seçilen', 2000, true),
+      reason: clean(d.reason, 'Gerekçe', 4000, true),
+      alternatives: [],
+      planId: d.planId ?? null,
+      reverts: null,
+    });
+    this.#emit(this.#coordinator()?.id ?? null, { type: 'decision.recorded', decision });
+    return decision;
+  }
+
   // ── playbook ──────────────────────────────────────────────────────────────
 
   updatePlaybook(by: string, p: { topic: string; text: string; reason?: string }): PlaybookEntry {

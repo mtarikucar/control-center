@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER } from '@cc/shared';
+import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, PROPOSAL_KINDS } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -9,6 +9,7 @@ import type { Roster } from '../roster.ts';
 import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
+import type { ProposalStore } from './proposal-store.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
@@ -30,6 +31,7 @@ const HANDOVER_DONE = [
   'Elindeki işlerin durumu teslim özetinde (açık görevlerin koordinatöre dönecek)',
   'İşe yarayacak dosyalar teslimin outputs listesinde',
 ];
+const PROPOSAL_TR: Record<ProposalKind, string> = { need: 'ihtiyaç', purchase: 'satın alma', idea: 'fikir', objection: 'itiraz' };
 
 export interface CompanyDeps {
   roster: Roster;
@@ -46,6 +48,8 @@ export interface CompanyDeps {
   reload?: (id: string) => void;
   /** The owner's constitution (team size, loop limits); absent: the defaults. */
   constitution?: () => Constitution;
+  /** Proposals (absent in tests that do not care). */
+  proposals?: ProposalStore;
   /** The company memory: a hand-in's lesson becomes a note (absent in tests that do not care). */
   memory?: Memory;
   now?: () => number;
@@ -130,8 +134,9 @@ export class Company {
     if (by !== OWNER) this.#assertCoordinator(by);
     const characters = this.#d.characters();
     const characterId = input.characterId && characters.includes(input.characterId) ? input.characterId : this.#leastUsedCharacter(characters);
+    const lead = input.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === input.team?.trim()) : undefined;
     this.#assertRoom();
-    return this.#d.hire({ ...input, kind: 'member', characterId });
+    return this.#d.hire({ ...input, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null });
   }
 
   /** Fable by default: planning and judgement are the hardest work in the company. */
@@ -233,7 +238,7 @@ export class Company {
   }
 
   assign(by: string, taskId: string, assignee: string): Task {
-    this.#assertCoordinator(by);
+    this.#assertManages(by, this.#d.tasks.get(taskId).assignee, assignee);
     const task = this.#d.tasks.get(taskId);
     // Finishing a hand-over lets its holder go: moving it would fire someone the owner never chose.
     if (task.kind === 'handover') throw new ConflictError('Devir görevi başkasına verilemez; sahibi beklemek istemezse Hemen çıkar ile devri atlayabilir.');
@@ -303,7 +308,7 @@ export class Company {
 
 
   reprioritize(by: string, taskId: string, priority: number): Task {
-    this.#assertCoordinator(by);
+    this.#assertManages(by, this.#d.tasks.get(taskId).assignee);
     if (!Number.isInteger(priority) || priority < 1 || priority > 5) throw new ValidationError('Öncelik 1 (en acil) ile 5 arasında bir tam sayı olmalı.');
     const next = this.#d.tasks.update(taskId, { priority });
     this.#taskEvent('reprioritized', next);
@@ -388,6 +393,8 @@ export class Company {
       risks: draft.risks ?? current.risks,
     });
     // A revision of an approved (or finished) plan is a new proposal: it waits for the owner again (rule B, big change).
+    // Rule B: the approved version is kept until the owner decides on the revision (only the first revision saves it).
+    if (current.status === 'approved' || current.status === 'done') this.#d.plans.saveApproved(planId);
     const plan = this.#d.plans.update(planId, { ...merged, version: current.version + 1, status: 'draft', approvedAt: null });
     this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
     return plan;
@@ -397,6 +404,7 @@ export class Company {
     const current = this.#d.plans.get(planId);
     if (current.status !== 'draft') throw new ConflictError('Yalnız taslak bir plan onaylanabilir.');
     const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now() });
+    this.#d.plans.clearApproved(planId);
     const desk = this.#planDesk(plan);
     this.#d.notices.add(desk, `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
@@ -406,12 +414,157 @@ export class Company {
   decline(planId: string): Plan {
     const current = this.#d.plans.get(planId);
     if (current.status !== 'draft') throw new ConflictError('Yalnız taslak bir plan reddedilebilir.');
+    if (this.#d.plans.approvedSnapshot(planId)) {
+      const kept = this.#d.plans.restoreApproved(planId);
+      const desk = this.#planDesk(kept);
+      this.#d.notices.add(desk, `Sahibi “${current.title}” revizyonunu onaylamadı; plan onaylı sürümüyle (sürüm ${kept.version}) sürüyor.`);
+      this.#emit(desk, { type: 'plan.changed', change: 'kept', plan: kept });
+      return kept;
+    }
     const plan = this.#d.plans.update(planId, { status: 'declined' });
     const desk = this.#planDesk(plan);
     this.#d.notices.add(desk, `Sahibi planı onaylamadı: “${plan.title}”. Ne istediğini sor, gerekirse yeni bir plan öner.`);
     this.#emit(desk, { type: 'plan.changed', change: 'declined', plan });
     return plan;
   }
+  // ── proposals ─────────────────────────────────────────────────────────────
+
+  /**
+   * Someone carries a need, an idea, an objection or a purchase upwards (spec §4.4): to their lead, else the
+   * coordinator. A purchase always goes to the owner (the coordinator is told), as does anything the coordinator raises.
+   */
+  openProposal(by: string, p: { kind: string; title: string; text: string; usd?: number | null; planId?: string | null }): Proposal {
+    const who = this.#d.roster.get(by);
+    if (!(PROPOSAL_KINDS as readonly string[]).includes(p.kind)) {
+      throw new ValidationError(`Bilinmeyen öneri türü: ${p.kind}. Türler: need (ihtiyaç), purchase (satın alma), idea (fikir), objection (itiraz).`);
+    }
+    const kind = p.kind as ProposalKind;
+    const planId = p.planId ?? null;
+    if (planId !== null) this.#d.plans.get(planId);
+    const coordinator = this.coordinator();
+    const lead = who.reportsTo ? this.#person(who.reportsTo) : null;
+    const decider = lead && lead.kind === 'lead' && lead.lifecycle !== 'archived' ? lead : coordinator;
+    const toOwner = kind === 'purchase' || !decider || decider.id === by;
+    const proposal = this.#store().create({
+      by,
+      kind,
+      title: clean(p.title, 'Başlık', 160, true),
+      text: clean(p.text, 'Açıklama', 4000, true),
+      usd: amount(p.usd, 'Tutar'),
+      planId,
+      status: toOwner ? 'owner' : 'open',
+      routedTo: toOwner ? null : decider!.id,
+    });
+    const label = PROPOSAL_TR[kind];
+    if (toOwner) {
+      if (coordinator && coordinator.id !== by) {
+        this.#d.notices.add(coordinator.id, `${who.name} sahibine bir ${label} talebi açtı: “${proposal.title}”${proposal.usd !== null ? ` ($${proposal.usd})` : ''}. Sahibi karar verince haber gelecek.`);
+      }
+    } else {
+      this.#d.notices.add(decider!.id, `${who.name} bir ${label} açtı: “${proposal.title}” (no ${proposal.id}). proposalDecide ile karara bağla: accept, decline ya da büyükse escalate.`);
+    }
+    this.#emit(toOwner ? (coordinator?.id ?? by) : decider!.id, { type: 'proposal.changed', change: toOwner ? 'escalated' : 'opened', proposal });
+    return proposal;
+  }
+
+  decideProposal(by: string, id: string, d: { decision: string; note?: string }): Proposal {
+    const p = this.#store().get(id);
+    if (p.status === 'owner') throw new ConflictError('Bu öneri sahibinin kararını bekliyor.');
+    if (p.status !== 'open') throw new ConflictError('Bu öneri artık açık değil.');
+    const me = this.#d.roster.get(by);
+    if (p.routedTo !== by && me.kind !== 'coordinator') throw new ForbiddenError('Bu öneri sana gelmedi.');
+    if (!['accept', 'decline', 'escalate'].includes(d.decision)) throw new ValidationError('Karar accept, decline ya da escalate olmalı.');
+    const note = clean(d.note, 'Not', 2000, false) || null;
+    if (d.decision === 'escalate') {
+      const coordinator = this.coordinator();
+      const toOwner = me.kind === 'coordinator' || !coordinator;
+      const next = this.#store().update(id, toOwner ? { status: 'owner', routedTo: null, note } : { routedTo: coordinator!.id, note });
+      if (!toOwner) this.#d.notices.add(coordinator!.id, `${me.name} bir öneriyi sana getirdi: “${p.title}” (no ${id})${note ? `: ${note}` : '.'} proposalDecide ile karara bağla.`);
+      this.#emit(toOwner ? by : coordinator!.id, { type: 'proposal.changed', change: 'escalated', proposal: next });
+      return next;
+    }
+    const accepted = d.decision === 'accept';
+    const next = this.#store().update(id, { status: accepted ? 'accepted' : 'declined', decidedBy: by, note, decidedAt: this.#now() });
+    this.#d.memory?.recordDecision(by, {
+      title: `Öneri: ${p.title}`,
+      chosen: accepted ? 'Kabul edildi' : 'Reddedildi',
+      reason: note ?? (accepted ? 'Kabul edildi.' : 'Reddedildi.'),
+      planId: p.planId,
+    });
+    if (p.by !== by) this.#d.notices.add(p.by, `“${p.title}” önerin ${accepted ? 'kabul edildi' : 'reddedildi'}${note ? `: ${note}` : '.'}`);
+    this.#emit(by, { type: 'proposal.changed', change: accepted ? 'accepted' : 'declined', proposal: next });
+    return next;
+  }
+
+  /** The owner settles what waits for them: every purchase, and what was escalated. */
+  ownerDecideProposal(id: string, approve: boolean, note?: string): Proposal {
+    const p = this.#store().get(id);
+    if (p.status !== 'owner') throw new ConflictError('Bu öneri sahibinin kararını beklemiyor.');
+    const why = clean(note, 'Not', 2000, false) || null;
+    const next = this.#store().update(id, { status: approve ? 'accepted' : 'declined', decidedBy: OWNER, note: why, decidedAt: this.#now() });
+    const label = PROPOSAL_TR[p.kind];
+    this.#d.memory?.recordOwnerDecision({
+      title: `${label[0]!.toLocaleUpperCase('tr')}${label.slice(1)}: ${p.title}`,
+      chosen: approve ? 'Onaylandı' : 'Reddedildi',
+      reason: why ?? (approve ? 'Sahibi onayladı.' : 'Sahibi onaylamadı.'),
+      planId: p.planId,
+    });
+    const line = approve
+      ? p.kind === 'purchase'
+        ? `Sahibi “${p.title}” satın alımını onayladı; satın alıp kuracak, hazır olunca haber verecek.`
+        : `Sahibi “${p.title}” önerisini onayladı${why ? `: ${why}` : '.'}`
+      : `Sahibi “${p.title}” ${label} talebini onaylamadı${why ? `: ${why}` : '.'}`;
+    const coordinator = this.coordinator();
+    this.#d.notices.add(p.by, line);
+    if (coordinator && coordinator.id !== p.by) this.#d.notices.add(coordinator.id, line);
+    this.#emit(coordinator?.id ?? p.by, { type: 'proposal.changed', change: approve ? 'accepted' : 'declined', proposal: next });
+    return next;
+  }
+
+  /** Open proposals this person decides now (the coordinator also sees those with nobody). */
+  proposalsFor(id: string): Proposal[] {
+    const me = this.#d.roster.get(id);
+    return this.#store()
+      .list({ statuses: ['open'] })
+      .filter((p) => p.routedTo === id || (me.kind === 'coordinator' && p.routedTo === null));
+  }
+
+  #store(): ProposalStore {
+    if (!this.#d.proposals) throw new ConflictError('Bu ofiste öneriler açık değil.');
+    return this.#d.proposals;
+  }
+
+  // ── leads ─────────────────────────────────────────────────────────────────
+
+  /** The coordinator makes someone lead of a team (or ends it): the team's members report to them (spec §3.1). */
+  appointLead(by: string, id: string, o: { team?: string; lead?: boolean } = {}): Employee {
+    this.#assertCoordinator(by);
+    const target = this.#d.roster.get(id);
+    if (target.lifecycle === 'archived') throw new ConflictError(`${target.name} işten çıkarıldı.`);
+    if (target.kind === 'coordinator') throw new ConflictError('Koordinatör ekip lideri yapılamaz.');
+    const makeLead = o.lead ?? true;
+    const team = o.team === undefined ? target.team : clean(o.team, 'Ekip adı', 40, false);
+    if (makeLead && !team) throw new ValidationError('Ekip liderinin bir ekibi olmalı (team).');
+    const next = this.#d.roster.update(id, { kind: makeLead ? 'lead' : 'member', team, reportsTo: null });
+    for (const m of this.#d.roster.list()) {
+      if (m.id === id || m.kind !== 'member') continue;
+      if (makeLead && m.team === team && m.reportsTo !== id) {
+        this.#d.roster.update(m.id, { reportsTo: id });
+        this.#d.notices.add(m.id, `${next.name} artık ${team} ekibinin lideri; önerilerin önce ona gider.`);
+      } else if (!makeLead && m.reportsTo === id) this.#d.roster.update(m.id, { reportsTo: null });
+    }
+    writeRoleCard(this.#d.dataDir, next);
+    this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
+    this.#d.notices.add(
+      id,
+      makeLead
+        ? `Artık ${team} ekibinin liderisin: ekibine taskCreate ile iş açar, taskAssign ve taskReprioritize ile dağıtır, önerilerini proposalDecide ile karara bağlarsın. Rol kartın ve araçların yenilendi.`
+        : 'Ekip liderliğin bitti; ekipte çalışansın.',
+    );
+    this.#d.reload?.(id);
+    return next;
+  }
+
 
   report(by: string, text: string): void {
     this.#assertCoordinator(by);
@@ -494,6 +647,14 @@ export class Company {
   #assertRoom(): void {
     const max = this.#rules().maxEmployees;
     if (this.#d.roster.list().length >= max) throw new ConflictError(`Anayasa en fazla ${max} çalışan diyor; yeni biri için sahibine getir.`);
+  }
+
+  /** The coordinator manages everyone; a lead their own team (spec §3.1). */
+  #assertManages(by: string, ...ids: string[]): void {
+    const me = this.#d.roster.get(by);
+    if (me.kind === 'coordinator') return;
+    if (me.kind === 'lead' && me.team && ids.every((id) => id === by || this.#person(id)?.team === me.team)) return;
+    throw new ForbiddenError(me.kind === 'lead' ? 'Ekip lideri yalnız kendi ekibindeki işleri dağıtır.' : 'Yalnız koordinatör bunu yapabilir.');
   }
 
   #assertCoordinator(by: string): void {
