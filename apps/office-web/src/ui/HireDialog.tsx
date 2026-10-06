@@ -8,6 +8,7 @@ export function HireDialog() {
   const manifest = useOffice((s) => s.manifest);
   const setHireOpen = useOffice((s) => s.setHireOpen);
   const select = useOffice((s) => s.select);
+  const admit = useOffice((s) => s.admit);
   const characters = characterAssets(manifest);
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
@@ -23,6 +24,7 @@ export function HireDialog() {
     try {
       const hired = await api.hire({ name, role, model, characterId: character });
       setHireOpen(false);
+      admit(hired);
       select(hired.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

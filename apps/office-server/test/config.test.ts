@@ -39,6 +39,10 @@ describe('loadConfig', () => {
     expect(loadConfig({ OFFICE_DATA_DIR: rel }).dataDir).toBe(join(tmpdir(), 'cc-rel-office'));
   });
 
+  it('resolves a relative data directory from where the owner ran pnpm, not the package folder', () => {
+    expect(loadConfig({ OFFICE_DATA_DIR: 'rel-office', INIT_CWD: tmpdir() }).dataDir).toBe(join(tmpdir(), 'rel-office'));
+  });
+
   it('refuses a data directory inside the repository', () => {
     expect(() => loadConfig({ OFFICE_DATA_DIR: join(REPO_ROOT, 'office-data') })).toThrow(/repo/);
     expect(() => loadConfig({ OFFICE_DATA_DIR: REPO_ROOT })).toThrow(/repo/);

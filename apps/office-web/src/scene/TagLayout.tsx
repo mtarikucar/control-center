@@ -16,10 +16,16 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 
-/** Called by each character's tag element (a callback ref): the element, or null when it goes away. */
-export function registerTag(id: string, group: RefObject<Group | null>, el: HTMLElement | null): void {
-  if (el) entries.set(id, { group, el, shown: 0 });
-  else entries.delete(id);
+/**
+ * Called from each character's tag element (a callback ref). Returns the clean-up, which removes exactly this
+ * registration: a late clean-up of an old element must not drop a newer one for the same employee.
+ */
+export function registerTag(id: string, group: RefObject<Group | null>, el: HTMLElement): () => void {
+  const entry: Entry = { group, el, shown: 0 };
+  entries.set(id, entry);
+  return () => {
+    if (entries.get(id) === entry) entries.delete(id);
+  };
 }
 
 /**

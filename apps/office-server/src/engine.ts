@@ -318,6 +318,11 @@ export class Engine {
 
   #onTurnFinished(id: string, ok: boolean, queuedTurns: number): void {
     const rt = this.#runtime(id);
+    // A turn that went through proves the subscription is open again, even if claude sent no fresh reading.
+    if (ok) {
+      rt.quotaStatus = '';
+      rt.limitAt = null;
+    }
     const rejected = !ok && rt.quotaStatus === 'rejected';
     // claude still holds queued user turns: the work goes on and a later result closes it.
     if (queuedTurns > 0 && !rejected && !rt.expectingExit) return;
@@ -414,7 +419,7 @@ export class Engine {
   }
 
   #limitResetTime(rt: Runtime): number {
-    if (rt.limitAt !== null) return rt.limitAt;
+    if (rt.limitAt !== null && rt.limitAt > this.#now()) return rt.limitAt;
     const windows = [rt.windows.fiveHour, rt.windows.sevenDay].filter((w): w is QuotaWindow => w !== null);
     const full = windows.filter((w) => w.utilization >= 1);
     const candidates = (full.length > 0 ? full : windows.slice(0, 1)).map((w) => w.resetsAt);

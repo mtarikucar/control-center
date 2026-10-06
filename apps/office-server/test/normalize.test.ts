@@ -108,6 +108,11 @@ describe('normalize', () => {
     expect(normalize(raw)).toEqual([{ type: 'quota.updated', status: 'rejected', fiveHour: null, sevenDay: { utilization: 1, resetsAt: 100_000 }, limitResetsAt: 100_000 }]);
   });
 
+  it('puts a per-model weekly limit on the weekly meter, not the five-hour one', () => {
+    const raw = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 100, rateLimitType: 'seven_day_opus' } };
+    expect(normalize(raw)).toEqual([{ type: 'quota.updated', status: 'rejected', fiveHour: null, sevenDay: { utilization: 1, resetsAt: 100_000 }, limitResetsAt: 100_000 }]);
+  });
+
   it('maps result to turn.finished, including an interrupted turn', () => {
     expect(normalize(RESULT)).toEqual([
       {

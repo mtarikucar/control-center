@@ -125,7 +125,8 @@ export function normalize(raw: unknown): OfficeEvent[] {
       let sevenDay = windowOf(windows.seven_day);
       if (!fiveHour && !sevenDay && typeof info.resetsAt === 'number') {
         const fallback = { utilization: info.status === 'rejected' ? 1 : num(info.utilization), resetsAt: info.resetsAt * 1000 };
-        if (info.rateLimitType === 'seven_day') sevenDay = fallback;
+        // Per-model weekly limits (seven_day_opus, …) are weekly too.
+        if (str(info.rateLimitType).startsWith('seven_day')) sevenDay = fallback;
         else fiveHour = fallback;
       }
       const limitResetsAt = info.status === 'rejected' && typeof info.resetsAt === 'number' ? info.resetsAt * 1000 : null;

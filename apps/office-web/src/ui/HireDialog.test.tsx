@@ -3,7 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOffice } from '../store/office.ts';
 import { HireDialog } from './HireDialog.tsx';
 
-vi.mock('../net/api.ts', () => ({ api: { hire: vi.fn(async () => ({ id: 'new-id' })), events: vi.fn(async () => []) } }));
+vi.mock('../net/api.ts', () => ({
+  api: {
+    hire: vi.fn(async () => ({
+      id: 'new-id', slug: 'ece', name: 'Ece', role: 'r', model: 'opus', characterId: 'designer', deskIndex: 1, sessionId: 's-new',
+      sessionStarted: false, lifecycle: 'idle', limitResetsAt: null, lastError: null, createdAt: 1,
+    })),
+    events: vi.fn(async () => []),
+  },
+}));
 const { api } = await import('../net/api.ts');
 
 beforeEach(() => {
@@ -29,6 +37,8 @@ describe('HireDialog', () => {
     await waitFor(() => expect(api.hire).toHaveBeenCalledWith({ name: 'Ece', role: 'Arayüz tasarımcısı', model: 'opus', characterId: 'designer' }));
     await waitFor(() => expect(useOffice.getState().hireOpen).toBe(false));
     expect(useOffice.getState().selectedId).toBe('new-id');
+    // The panel must find the new employee at once, not say "not found" until the next snapshot.
+    expect(useOffice.getState().views['new-id']?.employee.name).toBe('Ece');
   });
 
   it('keeps the dialog open and shows why when hiring fails', async () => {

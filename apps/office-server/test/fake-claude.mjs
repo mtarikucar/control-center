@@ -126,6 +126,11 @@ async function turn(text, uuid) {
     result({ subtype: 'error_during_execution', is_error: true, result: 'usage limit reached' });
     return;
   }
+  if (text.includes('OOPS')) {
+    // Fails for a reason other than the subscription (e.g. the API is overloaded): no rate-limit event.
+    result({ subtype: 'error_during_execution', is_error: true, result: 'overloaded' });
+    return;
+  }
   if (text.includes('BIGWRITE')) {
     out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_big', name: 'Write', input: { file_path: '/d/a.txt', content: 'x'.repeat(10_000) } }] } });
     result();

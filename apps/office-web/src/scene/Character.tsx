@@ -44,7 +44,7 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
   const [tagReady, setTagReady] = useState(false);
   useEffect(() => setTagReady(true), []);
   // drei renders the tag in its own React root, so a callback ref is the reliable way to know its element.
-  const tagRef = useCallback((el: HTMLButtonElement | null) => registerTag(employee.id, group, el), [employee.id]);
+  const tagRef = useCallback((el: HTMLButtonElement | null) => (el ? registerTag(employee.id, group, el) : undefined), [employee.id]);
   const goal = `${spot.x},${spot.z},${spot.rotY}`;
 
   useEffect(() => {

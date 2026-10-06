@@ -52,12 +52,18 @@ export function applySnapshot(d: OfficeData, s: OfficeSnapshot, source: 'live' |
   const views: Record<string, EmployeeView> = {};
   for (const employee of s.employees) {
     const prev = d.views[employee.id];
-    views[employee.id] = prev
-      ? { ...prev, employee }
-      : { employee, events: [], openTools: {}, idleSince: null, eventsLoaded: false };
+    views[employee.id] = prev ? { ...prev, employee } : freshView(employee);
   }
   const lastSeq = source === 'live' ? Math.max(d.lastSeq, s.lastSeq) : d.lastSeq;
   return { lastSeq, usageSeq: s.lastSeq, quota: s.quota, usage: s.usage, views, synced: true };
+}
+
+const freshView = (employee: Employee): EmployeeView => ({ employee, events: [], openTools: {}, idleSince: null, eventsLoaded: false });
+
+/** A just-hired employee, shown before the next snapshot lists them. */
+export function addEmployee(d: OfficeData, employee: Employee): OfficeData {
+  if (d.views[employee.id]) return d;
+  return { ...d, views: { ...d.views, [employee.id]: freshView(employee) } };
 }
 
 export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {

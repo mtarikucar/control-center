@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Employee, OfficeEvent, OfficeSnapshot, StoredEvent } from '@cc/shared';
-import { EMPTY_DATA, MAX_EVENTS, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
+import { EMPTY_DATA, MAX_EVENTS, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
 
 const employee = (over: Partial<Employee> = {}): Employee => ({
   id: 'e1', slug: 'ada', name: 'Ada', role: 'r', model: 'haiku', characterId: 'coder', deskIndex: 0,
@@ -159,5 +159,16 @@ describe('idle clock and running tools', () => {
   it('knows when it has the whole roster', () => {
     expect(EMPTY_DATA.synced).toBe(false);
     expect(applySnapshot(EMPTY_DATA, snapshot()).synced).toBe(true);
+  });
+});
+
+describe('addEmployee', () => {
+  it('shows a just-hired employee before the next snapshot, and leaves a known one alone', () => {
+    const d = applySnapshot(EMPTY_DATA, snapshot());
+    const withNew = addEmployee(d, employee({ id: 'e2', name: 'Can' }));
+    expect(withNew.views.e2?.employee.name).toBe('Can');
+    expect(withNew.views.e2?.eventsLoaded).toBe(false);
+    const withEvent = applyEvent(d, stored({ type: 'turn.started' }));
+    expect(addEmployee(withEvent, employee()).views.e1).toBe(withEvent.views.e1);
   });
 });
