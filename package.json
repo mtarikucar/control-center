@@ -2,9 +2,12 @@
   "name": "control-center",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "office": "pnpm --filter @cc/office-web build && pnpm --filter @cc/office-server start",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   }
