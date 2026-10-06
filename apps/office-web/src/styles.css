@@ -178,3 +178,4 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .employee-file { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; font-size: 13px; }
 .employee-file ul { margin: 0; padding-left: 18px; }
 @media (max-width: 760px) { .playbook { grid-template-columns: 1fr; } }
+.memory-item > .badge { align-self: flex-start; }
