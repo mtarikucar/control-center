@@ -135,7 +135,8 @@ cwd = ~/.control-center/desks/<slug>
 - **Devam:** `--resume <sessionId>` ile yeniden açılır; bağlam korunur (doğrulandı).
 - **Terminalde aç:** engine süreci kapatır, kartı `in_terminal` yapar ve sahibine
   `cd <masa> && claude --resume <sessionId>` komutunu verir. `in_terminal` iken engine o çalışan için
-  süreç başlatmaz (aynı oturuma iki yazar olmaz). "Ofise geri al" ile kilit kalkar.
+  süreç başlatmaz (aynı oturuma iki yazar olmaz). "Ofise geri al" ile kilit kalkar ve çalışan aynı oturumla
+  masasına hazır (`idle`) döner; boşta süreç token harcamaz.
 - **Kaynak:** boşta süreç token harcamaz; bütün bağlantılarıyla ~475 MB bellek tutar (ölçüldü; 8 çalışan
   ≈ 3,8 GB). v1'de süreçler açık kalır.
 - **Görünürlük:** başsız oturumlar da bir mesajlaşma soketi açar ve sahibinin diğer Claude oturumlarının

@@ -94,7 +94,7 @@ describe('API', () => {
     const terminal = await call(port, 'POST', `/api/employees/${e.id}/terminal`);
     expect(terminal.body.command).toContain(`claude --resume ${e.sessionId}`);
     expect((await call(port, 'POST', `/api/employees/${e.id}/messages`, { body: { text: 'x' } })).status).toBe(409);
-    expect((await call(port, 'DELETE', `/api/employees/${e.id}/terminal`)).body.lifecycle).toBe('stopped');
+    expect((await call(port, 'DELETE', `/api/employees/${e.id}/terminal`)).body.lifecycle).toBe('idle');
     expect((await call(port, 'DELETE', `/api/employees/${e.id}`)).status).toBe(204);
   });
 

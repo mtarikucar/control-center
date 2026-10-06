@@ -217,7 +217,9 @@ export class Engine {
   returnFromTerminal(id: string): Employee {
     const employee = this.#roster.get(id);
     if (employee.lifecycle !== 'in_terminal') throw new ConflictError('Bu çalışan terminalde değil.');
-    return this.#setLifecycle(employee, 'stopped', 'terminalden ofise döndü');
+    // Back at the desk and ready: the office picks the same session up again (an idle process spends no tokens).
+    this.#runtime(id).crashes = [];
+    return this.#start(employee, 'terminalden ofise döndü');
   }
 
   fire(id: string): Promise<void> {

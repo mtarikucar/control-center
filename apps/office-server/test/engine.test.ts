@@ -150,8 +150,14 @@ describe('Engine — core', () => {
     expect(command).toBe(`cd '${join(t.dataDir, 'desks', 'ada')}' && claude --resume ${e.sessionId}`);
     expect(() => t.engine.send(e.id, 'x')).toThrow(ConflictError);
     expect(() => t.engine.resume(e.id)).toThrow(ConflictError);
-    expect(t.engine.returnFromTerminal(e.id).lifecycle).toBe('stopped');
+    // Back in the office means back at the desk, ready: the same session, picked up again.
+    expect(t.engine.returnFromTerminal(e.id).lifecycle).toBe('idle');
     expect(() => t.engine.returnFromTerminal(e.id)).toThrow(ConflictError);
+    const before = t.events.lastSeq();
+    t.engine.send(e.id, 'WHAT DID I SAY');
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished', { after: before });
+    const said = t.events.list({ after: before, employeeId: e.id }).filter((x) => x.event.type === 'message.assistant');
+    expect(said.at(-1)?.event).toMatchObject({ text: 'you said: merhaba' });
   });
 
   it('fire archives the employee and frees the desk', async () => {
