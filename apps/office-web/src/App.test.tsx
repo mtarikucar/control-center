@@ -10,7 +10,7 @@ const { App } = await import('./App.tsx');
 const { useOffice } = await import('./store/office.ts');
 
 const person = (id: string, name: string): Employee => ({
-  id, slug: id, name, role: 'r', model: 'haiku', characterId: 'coder', deskIndex: 0, sessionId: `s-${id}`,
+  id, slug: id, name, role: 'r', model: 'haiku', characterId: 'coder', title: '', team: '', kind: 'member', reportsTo: null, deskIndex: 0, sessionId: `s-${id}`,
   sessionStarted: true, lifecycle: 'idle', limitResetsAt: null, lastError: null, createdAt: 1,
 });
 

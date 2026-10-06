@@ -7,7 +7,7 @@ const { useOffice } = await import('./office.ts');
 const { openToolSince } = await import('./reducers.ts');
 
 const employee = (id: string, lifecycle: Employee['lifecycle']): Employee => ({
-  id, slug: id, name: id, role: 'r', model: 'haiku', characterId: 'coder', deskIndex: 0,
+  id, slug: id, name: id, role: 'r', model: 'haiku', characterId: 'coder', title: '', team: '', kind: 'member', reportsTo: null, deskIndex: 0,
   sessionId: `s-${id}`, sessionStarted: true, lifecycle, limitResetsAt: null, lastError: null, createdAt: 1,
 });
 

@@ -20,7 +20,7 @@ vi.mock('../net/api.ts', () => ({
 const { api } = await import('../net/api.ts');
 
 const employee: Employee = {
-  id: 'e1', slug: 'ada', name: 'Ada', role: 'Testleri yazan yazılımcı', model: 'haiku', characterId: 'coder', deskIndex: 0,
+  id: 'e1', slug: 'ada', name: 'Ada', role: 'Testleri yazan yazılımcı', model: 'haiku', characterId: 'coder', title: '', team: '', kind: 'member', reportsTo: null, deskIndex: 0,
   sessionId: 's1', sessionStarted: true, lifecycle: 'working', limitResetsAt: null, lastError: null, createdAt: 1,
 };
 const events: StoredEvent[] = [

@@ -23,7 +23,7 @@ const { CharactersLayer } = await import('./CharactersLayer.tsx');
 
 const coder: CharacterAsset = { id: 'coder', kind: 'character', name: 'Kodcu', file: 'c/base.glb', height: 1.7, clips: {} };
 const person = (id: string, deskIndex: number, characterId = 'coder'): Employee => ({
-  id, slug: id, name: id, role: 'r', model: 'haiku', characterId, deskIndex, sessionId: `s-${id}`, sessionStarted: true,
+  id, slug: id, name: id, role: 'r', model: 'haiku', characterId, title: '', team: '', kind: 'member', reportsTo: null, deskIndex, sessionId: `s-${id}`, sessionStarted: true,
   lifecycle: 'idle', limitResetsAt: null, lastError: null, createdAt: 1,
 });
 function office(...employees: Employee[]) {

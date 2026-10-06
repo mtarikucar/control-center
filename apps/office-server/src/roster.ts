@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { MODEL_ALIASES, type Employee, type HireInput, type ModelAlias } from '@cc/shared';
+import { EMPLOYEE_KINDS, MODEL_ALIASES, type Employee, type EmployeeKind, type HireInput, type ModelAlias } from '@cc/shared';
 import type { Db } from './db.ts';
 import { ConflictError, NotFoundError, ValidationError } from './errors.ts';
 
@@ -31,6 +31,10 @@ interface Row {
   limit_resets_at: number | null;
   last_error: string | null;
   created_at: number;
+  title: string;
+  team: string;
+  kind: string;
+  reports_to: string | null;
 }
 
 function fromRow(r: Row): Employee {
@@ -41,6 +45,10 @@ function fromRow(r: Row): Employee {
     role: r.role,
     model: r.model as ModelAlias,
     characterId: r.character_id,
+    title: r.title,
+    team: r.team,
+    kind: r.kind as EmployeeKind,
+    reportsTo: r.reports_to,
     deskIndex: r.desk_index,
     sessionId: r.session_id,
     sessionStarted: r.session_started === 1,
@@ -51,7 +59,9 @@ function fromRow(r: Row): Employee {
   };
 }
 
-export type EmployeePatch = Partial<Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError'>>;
+export type EmployeePatch = Partial<
+  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo'>
+>;
 
 export class Roster {
   readonly #db: Db;
@@ -76,6 +86,13 @@ export class Roster {
     const model = input.model === undefined ? 'sonnet' : input.model;
     if (!(MODEL_ALIASES as readonly unknown[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}`);
     const characterId = typeof input.characterId === 'string' && input.characterId.trim() ? input.characterId.trim() : 'coder';
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    if (title.length > 80) throw new ValidationError('Unvan en fazla 80 karakter olabilir.');
+    const team = typeof input.team === 'string' ? input.team.trim() : '';
+    if (team.length > 40) throw new ValidationError('Ekip adı en fazla 40 karakter olabilir.');
+    const kind = input.kind ?? 'member';
+    if (!(EMPLOYEE_KINDS as readonly unknown[]).includes(kind)) throw new ValidationError(`Bilinmeyen çalışan türü: ${String(kind)}`);
+    const reportsTo = typeof input.reportsTo === 'string' && input.reportsTo ? input.reportsTo : null;
 
     const used = new Set(this.list().map((e) => e.deskIndex));
     let deskIndex = -1;
@@ -94,6 +111,10 @@ export class Roster {
       role,
       model: model as ModelAlias,
       characterId,
+      title,
+      team,
+      kind,
+      reportsTo,
       deskIndex,
       sessionId: randomUUID(),
       sessionStarted: false,
@@ -105,8 +126,8 @@ export class Roster {
     this.#db
       .prepare(
         `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started,
-           lifecycle, limit_resets_at, last_error, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           lifecycle, limit_resets_at, last_error, created_at, title, team, kind, reports_to)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         employee.id,
@@ -122,6 +143,10 @@ export class Roster {
         null,
         null,
         employee.createdAt,
+        employee.title,
+        employee.team,
+        employee.kind,
+        employee.reportsTo,
       );
     return employee;
   }
@@ -154,8 +179,11 @@ export class Roster {
   update(id: string, patch: EmployeePatch): Employee {
     const next = { ...this.get(id), ...patch };
     this.#db
-      .prepare('UPDATE employees SET lifecycle = ?, session_started = ?, limit_resets_at = ?, last_error = ? WHERE id = ?')
-      .run(next.lifecycle, next.sessionStarted ? 1 : 0, next.limitResetsAt, next.lastError, id);
+      .prepare(
+        `UPDATE employees SET lifecycle = ?, session_started = ?, limit_resets_at = ?, last_error = ?, role = ?, title = ?,
+           team = ?, kind = ?, reports_to = ? WHERE id = ?`,
+      )
+      .run(next.lifecycle, next.sessionStarted ? 1 : 0, next.limitResetsAt, next.lastError, next.role, next.title, next.team, next.kind, next.reportsTo, id);
     return next;
   }
 }

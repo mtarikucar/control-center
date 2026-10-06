@@ -3,7 +3,7 @@ import type { Employee, OfficeEvent, OfficeSnapshot, StoredEvent } from '@cc/sha
 import { EMPTY_DATA, MAX_EVENTS, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
 
 const employee = (over: Partial<Employee> = {}): Employee => ({
-  id: 'e1', slug: 'ada', name: 'Ada', role: 'r', model: 'haiku', characterId: 'coder', deskIndex: 0,
+  id: 'e1', slug: 'ada', name: 'Ada', role: 'r', model: 'haiku', characterId: 'coder', title: '', team: '', kind: 'member', reportsTo: null, deskIndex: 0,
   sessionId: 's1', sessionStarted: false, lifecycle: 'idle', limitResetsAt: null, lastError: null, createdAt: 1, ...over,
 });
 const snapshot = (over: Partial<OfficeSnapshot> = {}): OfficeSnapshot => ({ employees: [employee()], quota: null, usage: {}, lastSeq: 10, ...over });
