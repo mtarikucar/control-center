@@ -109,4 +109,11 @@ describe('Roster — company fields', () => {
     expect(s.roster.get(e.id)).toMatchObject({ role: 'yeni rol', title: 'Testçi', team: 'Kalite', kind: 'lead' });
     s.cleanup();
   });
+  it('changes the model', () => {
+    const s = setup();
+    const e = s.roster.create({ name: 'Ada', role: 'r', model: 'haiku' });
+    expect(s.roster.update(e.id, { model: 'opus' }).model).toBe('opus');
+    expect(s.roster.get(e.id).model).toBe('opus');
+    s.cleanup();
+  });
 });

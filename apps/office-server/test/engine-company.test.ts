@@ -73,4 +73,35 @@ describe('Engine — office tools', () => {
     expect(tokenIn(after[2]!.args)).not.toBe(tokenIn(runs[1]!.args));
     await until(() => t.engine.ready(e.id), 8000);
   });
+
+  it('review focus: sleeps only when idle, wakes with the same session, and a message wakes a sleeper', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    await readArgv(t.argvLog, 1);
+    t.engine.send(e.id, 'SLOW iş');
+    await expect(t.engine.sleep(e.id)).rejects.toThrow(/Yalnız boştaki/);
+    await until(() => t.engine.ready(e.id), 8000);
+    expect((await t.engine.sleep(e.id)).lifecycle).toBe('sleeping');
+    expect(t.engine.ready(e.id)).toBe(false);
+    expect((await t.engine.sleep(e.id)).lifecycle).toBe('sleeping');
+    const before = (await readArgv(t.argvLog, 1)).length;
+    expect(t.engine.wake(e.id).lifecycle).toBe('idle');
+    const runs = await readArgv(t.argvLog, before + 1);
+    expect(runs.at(-1)!.args).toContain('--resume');
+    await t.engine.sleep(e.id);
+    t.engine.send(e.id, 'uyan');
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.assistant' && x.event.text.includes('uyan'), { timeoutMs: 8000 });
+  });
+
+  it('review focus: a sleeper stays asleep across an office restart', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(e.id));
+    await t.engine.sleep(e.id);
+    const before = (await readArgv(t.argvLog, 1)).length;
+    t.engine.recover();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(t.roster.get(e.id).lifecycle).toBe('sleeping');
+    expect(await readArgv(t.argvLog, 1)).toHaveLength(before);
+  });
 });

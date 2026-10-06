@@ -60,7 +60,7 @@ function fromRow(r: Row): Employee {
 }
 
 export type EmployeePatch = Partial<
-  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo'>
+  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model'>
 >;
 
 export class Roster {
@@ -181,9 +181,10 @@ export class Roster {
     this.#db
       .prepare(
         `UPDATE employees SET lifecycle = ?, session_started = ?, limit_resets_at = ?, last_error = ?, role = ?, title = ?,
-           team = ?, kind = ?, reports_to = ? WHERE id = ?`,
+           team = ?, kind = ?, reports_to = ?, model = ? WHERE id = ?`,
       )
-      .run(next.lifecycle, next.sessionStarted ? 1 : 0, next.limitResetsAt, next.lastError, next.role, next.title, next.team, next.kind, next.reportsTo, id);
+      .run(next.lifecycle, next.sessionStarted ? 1 : 0, next.limitResetsAt, next.lastError, next.role, next.title, next.team, next.kind, next.reportsTo, next.model, id);
     return next;
   }
+
 }
