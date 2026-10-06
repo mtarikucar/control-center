@@ -1,0 +1,65 @@
+import type { Employee, Lifecycle } from './employee.ts';
+
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+export interface QuotaWindow {
+  /** 0..1 */
+  utilization: number;
+  /** epoch milliseconds */
+  resetsAt: number;
+}
+
+export type OfficeEvent =
+  | { type: 'employee.hired'; name: string }
+  | { type: 'employee.fired' }
+  | { type: 'session.started'; model: string; mcp: { name: string; status: string }[] }
+  | { type: 'turn.started' }
+  | { type: 'turn.finished'; ok: boolean; subtype: string; usage: Usage; costUsd: number; numTurns: number }
+  | { type: 'message.user'; text: string; source: 'owner' | 'system' }
+  | { type: 'message.assistant'; text: string }
+  | { type: 'tool.started'; toolUseId: string; name: string; input: unknown }
+  | { type: 'tool.finished'; toolUseId: string; isError: boolean; output: string }
+  | { type: 'side.question'; text: string }
+  | { type: 'side.answer'; text: string; ok: boolean; usage: Usage; costUsd: number }
+  | { type: 'quota.updated'; status: string; fiveHour: QuotaWindow | null; sevenDay: QuotaWindow | null }
+  | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string }
+  | { type: 'error'; message: string };
+
+export type OfficeEventType = OfficeEvent['type'];
+
+export interface StoredEvent {
+  seq: number;
+  employeeId: string | null;
+  ts: number;
+  event: OfficeEvent;
+}
+
+export type UsageTotals = Usage & { costUsd: number };
+
+export interface EmployeeUsage {
+  today: UsageTotals;
+  total: UsageTotals;
+}
+
+export interface QuotaState {
+  status: string;
+  fiveHour: QuotaWindow | null;
+  sevenDay: QuotaWindow | null;
+  updatedAt: number;
+}
+
+export interface OfficeSnapshot {
+  employees: Employee[];
+  quota: QuotaState | null;
+  usage: Record<string, EmployeeUsage>;
+  lastSeq: number;
+}
+
+export type ServerMessage =
+  | { type: 'snapshot'; snapshot: OfficeSnapshot }
+  | { type: 'event'; event: StoredEvent };
