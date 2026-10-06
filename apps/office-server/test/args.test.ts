@@ -15,6 +15,7 @@ describe('claude args', () => {
     expect(flag(args, '--setting-sources')).toBe('user,project,local');
     expect(flag(args, '--session-id')).toBe('sid-1');
     expect(args).not.toContain('--resume');
+    expect(args).toContain('--replay-user-messages');
     expect(JSON.parse(flag(args, '--settings') ?? '')).toEqual(employeeSettings('/home/test'));
   });
 

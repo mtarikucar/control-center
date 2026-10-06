@@ -23,6 +23,7 @@ export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: b
     '--output-format',
     'stream-json',
     '--verbose',
+    '--replay-user-messages',
     '--model',
     o.model,
     '--permission-mode',

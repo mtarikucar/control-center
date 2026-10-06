@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Test double for the `claude` CLI: speaks the subset of stream-json that office-server relies on.
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -13,6 +13,17 @@ const opt = (name) => {
 const stateDir = process.env.FAKE_CLAUDE_STATE ?? join(process.cwd(), '.fake-claude');
 mkdirSync(stateDir, { recursive: true });
 if (process.env.FAKE_CLAUDE_ARGV_LOG) appendFileSync(process.env.FAKE_CLAUDE_ARGV_LOG, `${JSON.stringify({ args, cwd: process.cwd() })}\n`);
+
+const failFlag = process.env.FAKE_CLAUDE_FAIL_FLAG;
+if (failFlag && existsSync(failFlag)) {
+  unlinkSync(failFlag);
+  process.stderr.write('startup failure\n');
+  process.exit(1);
+}
+const replay = args.includes('--replay-user-messages');
+const ack = (uuid, text) => {
+  if (replay && uuid) out({ type: 'user', uuid, isReplay: true, message: { role: 'user', content: text } });
+};
 
 const sessionId = opt('--resume') ?? opt('--session-id') ?? randomUUID();
 const historyFile = join(stateDir, `${sessionId}.json`);
@@ -58,11 +69,12 @@ if (process.env.FAKE_CLAUDE_NOISE) process.stdout.write('Warning: something odd\
 let initSent = false;
 let busy = null;
 
-async function turn(text) {
+async function turn(text, uuid) {
   if (!initSent) {
     out({ type: 'system', subtype: 'init', model: 'fake-model', cwd: process.cwd(), permissionMode: 'bypassPermissions', mcp_servers: [{ name: 'office', status: 'connected' }] });
     initSent = true;
   }
+  ack(uuid, text);
   remember(text);
   if (text.includes('CRASH')) {
     process.stderr.write('boom: fake crash\n');
@@ -118,6 +130,7 @@ createInterface({ input: process.stdin })
     if (msg.type !== 'user') return;
     const text = typeof msg.message?.content === 'string' ? msg.message.content : '';
     if (busy) {
+      ack(msg.uuid, text);
       busy.injected.push(text);
       remember(text);
       return;
@@ -125,7 +138,7 @@ createInterface({ input: process.stdin })
     queued += 1;
     chain = chain.then(() => {
       queued -= 1;
-      return turn(text);
+      return turn(text, msg.uuid);
     });
   })
   .on('close', () => {

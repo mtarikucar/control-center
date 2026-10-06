@@ -1,9 +1,10 @@
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CONTINUE_AFTER_CRASH, CONTINUE_AFTER_LIMIT, CONTINUE_AFTER_RESTART } from '../src/engine.ts';
 import { ConflictError } from '../src/errors.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
-import { setup, waitFor, type TestSetup } from './helpers.ts';
+import { setup, tempDir, waitFor, type TestSetup } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -34,6 +35,24 @@ describe('Engine — resilience', () => {
     expect(t.roster.get(e.id).lifecycle).toBe('idle');
     const error = t.events.list().find((x) => x.event.type === 'error');
     expect((error?.event as { message: string }).message).toContain('boom: fake crash');
+  });
+
+  it('review focus: an owner message survives a session that dies before reading it', async () => {
+    const flag = join(tempDir(), 'fail-next-start');
+    const t = make({ env: { FAKE_CLAUDE_FAIL_FLAG: flag } });
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'merhaba');
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished');
+    await t.engine.stop(e.id);
+    writeFileSync(flag, '1');
+    const before = t.events.lastSeq();
+    t.engine.send(e.id, 'lütfen X yap');
+    const reply = await waitFor(t.events, (x) => x.event.type === 'message.assistant', { after: before });
+    expect(reply.event).toEqual({ type: 'message.assistant', text: 'echo: lütfen X yap' });
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished', { after: before });
+    const sent = t.events.list({ after: before }).filter((x) => x.event.type === 'message.user');
+    expect(sent.map((x) => x.event)).toEqual([{ type: 'message.user', text: 'lütfen X yap', source: 'owner' }]);
+    expect(t.roster.get(e.id).lifecycle).toBe('idle');
   });
 
   it('goes to error when the session crashes twice within the window, and resume clears it', async () => {

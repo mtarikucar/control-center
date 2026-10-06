@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { Employee, HireInput, Lifecycle, OfficeEvent, QuotaWindow } from '@cc/shared';
 import { sessionArgs, sideQuestionArgs, terminalCommand } from './claude/args.ts';
-import { normalize } from './claude/normalize.ts';
+import { normalize, replayedUuid } from './claude/normalize.ts';
 import { runOnce } from './claude/once.ts';
 import { ClaudeProcess } from './claude/process.ts';
 import { deskDir, prepareDesk } from './desk.ts';
@@ -39,6 +40,10 @@ interface Runtime {
   /** stop / fire / open-in-terminal run one at a time per employee; while any is queued, messages are refused. */
   opChain: Promise<void>;
   pendingOps: number;
+  /** Messages written to claude that it has not acknowledged yet; re-sent if the process dies. */
+  unread: Array<{ uuid: string; text: string }>;
+  /** claude took in at least one message of the current turn, so there is work to continue after a crash. */
+  consumedInTurn: boolean;
 }
 
 export class Engine {
@@ -86,11 +91,13 @@ export class Engine {
     this.#clearLimitTimer(rt);
     const proc = rt.proc;
     if (!proc) throw new ConflictError('Çalışanın oturumu açılamadı.');
+    const uuid = randomUUID();
     try {
-      proc.sendUser(message);
+      proc.sendUser(message, uuid);
     } catch {
       throw new ConflictError('Çalışanın oturumu kapanıyor; birazdan tekrar dene.');
     }
+    rt.unread.push({ uuid, text: message });
     this.#emit(id, { type: 'message.user', text: message, source });
     if (!rt.turnActive) {
       rt.turnActive = true;
@@ -209,6 +216,11 @@ export class Engine {
 
   #onJson(id: string, raw: unknown): void {
     const rt = this.#runtime(id);
+    const acknowledged = replayedUuid(raw);
+    if (acknowledged) {
+      rt.unread = rt.unread.filter((m) => m.uuid !== acknowledged);
+      rt.consumedInTurn = true;
+    }
     for (const event of normalize(raw)) {
       if (event.type === 'session.started' && !this.#roster.get(id).sessionStarted) this.#roster.update(id, { sessionStarted: true });
       if (event.type === 'quota.updated') {
@@ -226,6 +238,7 @@ export class Engine {
     // claude still holds queued user turns: the work goes on and a later result closes it.
     if (queuedTurns > 0 && !rejected && !rt.expectingExit) return;
     rt.turnActive = false;
+    rt.consumedInTurn = false;
     for (const resolve of rt.turnWaiters.splice(0)) resolve();
     if (rt.expectingExit) return;
     const employee = this.#roster.get(id);
@@ -242,6 +255,9 @@ export class Engine {
   #onExit(id: string, code: number | null, signal: NodeJS.Signals | null, stderr: string): void {
     const rt = this.#runtime(id);
     const wasTurnActive = rt.turnActive;
+    const resumeWork = wasTurnActive && rt.consumedInTurn;
+    const unread = rt.unread.splice(0);
+    rt.consumedInTurn = false;
     rt.proc = null;
     rt.turnActive = false;
     for (const resolve of rt.turnWaiters.splice(0)) resolve();
@@ -257,11 +273,33 @@ export class Engine {
     const message = `claude süreci beklenmedik şekilde kapandı (kod ${code ?? '-'}, sinyal ${signal ?? '-'}).${tail ? ` ${tail}` : ''}`;
     this.#emit(id, { type: 'error', message });
     if (rt.crashes.length >= 2) {
+      if (unread.length > 0) this.#emit(id, { type: 'error', message: `Okunmamış ${unread.length} mesaj teslim edilemedi.` });
       this.#setLifecycle(this.#roster.update(id, { lastError: message }), 'error', 'süreç kısa sürede tekrar kapandı');
       return;
     }
     this.#start(employee, 'çökme sonrası yeniden açıldı');
-    if (wasTurnActive) this.send(id, CONTINUE_AFTER_CRASH, 'system');
+    if (resumeWork) this.send(id, CONTINUE_AFTER_CRASH, 'system');
+    if (unread.length > 0) this.#redeliver(id, unread);
+  }
+
+  /** Re-sends messages claude never acknowledged, without logging them a second time. */
+  #redeliver(id: string, messages: Array<{ uuid: string; text: string }>): void {
+    const rt = this.#runtime(id);
+    const proc = rt.proc;
+    if (!proc) return;
+    for (const m of messages) {
+      try {
+        proc.sendUser(m.text, m.uuid);
+        rt.unread.push(m);
+      } catch {
+        this.#emit(id, { type: 'error', message: 'Okunmamış bir mesaj yeniden gönderilemedi.' });
+      }
+    }
+    if (!rt.turnActive) {
+      rt.turnActive = true;
+      this.#emit(id, { type: 'turn.started' });
+      this.#setLifecycle(this.#roster.get(id), 'working', 'okunmamış mesajlar yeniden gönderildi');
+    }
   }
 
   async #halt(id: string): Promise<void> {
@@ -286,6 +324,9 @@ export class Engine {
     }
     await proc.close();
     rt.proc = null;
+    if (rt.unread.length > 0) this.#emit(id, { type: 'error', message: `Durdurma sırasında okunmamış ${rt.unread.length} mesaj iptal edildi.` });
+    rt.unread = [];
+    rt.consumedInTurn = false;
   }
 
   #limitResetTime(rt: Runtime): number {
@@ -365,6 +406,8 @@ export class Engine {
         turnWaiters: [],
         opChain: Promise.resolve(),
         pendingOps: 0,
+        unread: [],
+        consumedInTurn: false,
       };
       this.#runtimes.set(id, rt);
     }

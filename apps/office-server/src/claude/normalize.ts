@@ -43,6 +43,12 @@ function toolOutput(content: unknown): string {
     .join('\n');
 }
 
+/** The uuid of a message claude acknowledges having consumed (stream-json `--replay-user-messages`). */
+export function replayedUuid(raw: unknown): string | null {
+  if (!isObj(raw) || raw.type !== 'user' || raw.isReplay !== true) return null;
+  return typeof raw.uuid === 'string' ? raw.uuid : null;
+}
+
 export function normalize(raw: unknown): OfficeEvent[] {
   if (!isObj(raw)) return [];
   switch (raw.type) {

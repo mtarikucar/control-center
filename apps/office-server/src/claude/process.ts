@@ -63,8 +63,9 @@ export class ClaudeProcess {
     return this.#stderr;
   }
 
-  sendUser(text: string): void {
-    this.#write({ type: 'user', message: { role: 'user', content: text } });
+  /** `uuid` comes back in a `user` event with `isReplay: true` once claude has taken the message in. */
+  sendUser(text: string, uuid?: string): void {
+    this.#write({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: text } });
   }
 
   interrupt(): void {
