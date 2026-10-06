@@ -95,11 +95,11 @@ varsayılan `sonnet`), `characterId` (manifest'teki karakter), `deskIndex`, `ses
 başlatmada geçerli olur.
 
 İşe alma: boş masa atanır (yerleşimdeki masa sayısı üst sınırdır, v1'de 8); `desks/<slug>/` açılır;
-`CLAUDE.md` ve `.claude/settings.json` yazılır; oturum başlatılır. İşten çıkarma: süreç kapatılır, kart
+`CLAUDE.md` (rol kartı) yazılır; oturum başlatılır. İşten çıkarma: süreç kapatılır, kart
 `archived` olur, masa boşalır; masa klasörü silinmez.
 
-Masadaki `.claude/settings.json` içeriği: Claude imzasının commit/PR'a eklenmemesi (attribution kapalı)
-ve çalışana özel ayarlar. Gizli anahtar yazılmaz.
+Çalışana özel ayarlar masaya dosya olarak yazılmaz; her başlatmada `--settings` ile verilir (§4.2).
+Masaya gizli anahtar yazılmaz.
 
 ### 4.2 engine — oturumlar
 
@@ -108,29 +108,36 @@ Her etkin çalışan için sürekli açık tek bir süreç (2026-10-06 denemesin
 ```
 claude -p --input-format stream-json --output-format stream-json --verbose
        --model <model> --permission-mode bypassPermissions
-       --setting-sources project,local
-       --mcp-config <çalışan için üretilen bağlantı dosyası>
+       --setting-sources user,project,local
+       --settings '{"enabledPlugins":{"superpowers@claude-plugins-official":false},
+                    "claudeMdExcludes":["~/.claude/CLAUDE.md"],
+                    "attribution":{"commit":"","pr":""}}'
        (--session-id <uuid> | --resume <sessionId>)
 cwd = ~/.control-center/desks/<slug>
 ```
 
-- `--setting-sources project,local` sahibinin kişisel `CLAUDE.md`'sini ve eklentilerini dışarıda bırakır
-  (doğrulandı). claude.ai bağlantıları bu modda da gelir (doğrulandı). Sahibinin yerel MCP sunucuları ve
-  eklenti MCP sunucuları ise kullanıcı ayarlarıyla geldiği için engine bunları sahibinin yapılandırmasından
-  toplayıp `--mcp-config` ile verir (**uygulama planının ilk adımında doğrulanır**, §13).
+- Kullanıcı ayarları açık tutulur; böylece sahibinin bütün bağlantıları gelir: claude.ai bağlantıları,
+  yerel MCP sunucuları (blender, cad) ve eklenti MCP sunucuları (playwright, github…). `--settings` yalnızca
+  superpowers eklentisini, sahibinin kişisel `CLAUDE.md`'sini ve Claude imzasını kapatır. Masadaki rol kartı
+  (`CLAUDE.md`) yüklenmeye devam eder. (2026-10-06'da doğrulandı: "HARD RULE" görünmüyor, commit imzası yok,
+  superpowers yok, 14 eklenti ve tüm MCP sunucuları var.)
 - **Mesaj:** stdin'e `{"type":"user","message":{"role":"user","content":…}}` yazılır. Tur sürerken
   yazılan mesaj bir sonraki araç adımında modele ulaşır ve aynı turda cevaplanır (doğrulandı).
 - **Yan soru (`/btw`):** ayrı, tek seferlik bir süreç: `claude -p --resume <sessionId> --fork-session
   --tools "" --setting-sources project,local --strict-mcp-config <soru>`. Cevap panelde "yan cevap" olarak
   görünür, asıl konuşmaya eklenmez, asıl iş bölünmez (doğrulandı, ~6 sn). Kopya oturum o an süren adımı
   "yarıda kalmış" sanabilir; kabul edilen küçük kusur.
-- **Durdur:** süren tur kesilir, süreç kapatılır, oturum korunur. Kesme yöntemi (stream-json
-  `interrupt` kontrol isteği ya da SIGINT) **planın ilk adımında doğrulanır**.
+- **Durdur:** stdin'e `{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}` yazılır;
+  tur hemen `error_during_execution` ile biter, süreç açık kalır ve sonraki mesajı alır (doğrulandı). Ardından
+  süreç kapatılır, oturum korunur.
 - **Devam:** `--resume <sessionId>` ile yeniden açılır; bağlam korunur (doğrulandı).
 - **Terminalde aç:** engine süreci kapatır, kartı `in_terminal` yapar ve sahibine
   `cd <masa> && claude --resume <sessionId>` komutunu verir. `in_terminal` iken engine o çalışan için
   süreç başlatmaz (aynı oturuma iki yazar olmaz). "Ofise geri al" ile kilit kalkar.
-- **Kaynak:** boşta süreç token harcamaz, ~200–300 MB bellek tutar. v1'de süreçler açık kalır.
+- **Kaynak:** boşta süreç token harcamaz; bütün bağlantılarıyla ~475 MB bellek tutar (ölçüldü; 8 çalışan
+  ≈ 3,8 GB). v1'de süreçler açık kalır.
+- **Görünürlük:** başsız oturumlar da bir mesajlaşma soketi açar ve sahibinin diğer Claude oturumlarının
+  listesinde (`ListAgents`) masa klasörünün adıyla görünür (doğrulandı). v1'de bu olduğu gibi kalır.
 
 Motor arayüzü (`EngineAdapter`: `start`, `send`, `sideQuestion`, `stop`, `resume`, olay akışı) Claude'a
 özgü ayrıntıları kapsüller; Codex ileride aynı arayüzle eklenir.
@@ -171,6 +178,12 @@ HTTP (yalnızca 127.0.0.1): `GET /api/office` (kartlar, durumlar, kota, manifest
 `POST /api/employees/:id/stop`, `POST /api/employees/:id/resume`,
 `POST /api/employees/:id/terminal` / `DELETE …/terminal`,
 `GET /api/employees/:id/events?after=<seq>`.
+
+**Güvenlik:** çalışanlar onaysız ve sahibinin bağlantılarıyla çalıştığı için ofis API'si, onları dışarıdan
+yönetmenin tek kapısıdır. Bu yüzden: yalnızca `127.0.0.1`'e bağlanır; `Host` başlığı `127.0.0.1:<port>` ya
+da `localhost:<port>` olmalı (DNS rebinding'e karşı); `Origin` varsa ofisin kendi adresi ya da izin verilen
+geliştirme adresi olmalı (tarayıcıda açık başka bir sitenin istek atmasına — CSRF, WebSocket ele geçirme —
+karşı); `POST` istekleri `application/json` olmalı.
 
 WebSocket `/ws`: bağlanınca anlık görüntü, ardından olay akışı. Kopma sonrası istemci son gördüğü
 `seq`'ten devam eder.
@@ -308,12 +321,10 @@ Konuşmada kararlaştırılanlar, sırası sonra belirlenecek:
 - Toplantı odasının kullanımı, Codex motoru, internetten erişim (giriş sistemiyle), boştaki süreçleri
   kapatıp gerektiğinde açma, yeni çalışanlar için karakter üretimi (Meshy skill'iyle).
 
-## 13. Doğrulanacaklar (uygulama planının ilk adımı)
+## 13. Doğrulananlar (2026-10-06)
 
-1. Sahibinin yerel ve eklenti MCP sunucularının, kişisel `CLAUDE.md`/eklentiler yüklenmeden çalışana
-   nasıl verileceği (yapılandırmayı okuyup `--mcp-config` üretme).
-2. Süren turu kesmenin yolu: stream-json `interrupt` kontrol isteği mi, SIGINT mi.
-3. Masadaki `.claude/settings.json` ile Claude imzasının kapandığı.
-4. Başsız oturumlar `messaging_socket_path` açıyor: çalışanlar sahibinin diğer Claude oturumlarının
-   `ListAgents` listesinde görünüyor mu, bu istenen bir şey mi.
-5. 8 çalışanla bellek kullanımı.
+1. Bağlantıların devri: `--setting-sources user,project,local` + `--settings` (§4.2) — doğrulandı.
+2. Turu kesme: stream-json `interrupt` kontrol isteği — doğrulandı.
+3. Claude imzası: `--settings` içindeki `attribution` ile kapanıyor — doğrulandı.
+4. Başsız oturumlar sahibinin `ListAgents` listesinde görünüyor — doğrulandı, v1'de olduğu gibi kalıyor.
+5. Bellek: çalışan başına ~475 MB — ölçüldü.
