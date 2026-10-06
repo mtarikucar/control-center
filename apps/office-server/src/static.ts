@@ -33,6 +33,15 @@ export function resolveInside(root: string, urlPath: string): string | null {
   return full === base || full.startsWith(base + sep) ? full : null;
 }
 
+/** If-None-Match: `*`, or a list of tags compared weakly (a W/ prefix does not matter). */
+function unchanged(header: string | string[] | undefined, etag: string): boolean {
+  const value = Array.isArray(header) ? header.join(',') : header;
+  if (!value) return false;
+  if (value.trim() === '*') return true;
+  const bare = (tag: string) => tag.trim().replace(/^W\//, '');
+  return value.split(',').some((tag) => bare(tag) === bare(etag));
+}
+
 /**
  * Streams a readable regular file (headers only for HEAD); false when there is none to send (caller decides what
  * 404 looks like). An ETag lets the browser revalidate the ~100 MB of models instead of downloading them again.
@@ -58,7 +67,7 @@ export function sendFile(req: IncomingMessage, res: ServerResponse, file: string
     etag,
     'last-modified': modified,
   };
-  if (req.headers['if-none-match'] === etag) {
+  if (unchanged(req.headers['if-none-match'], etag)) {
     res.writeHead(304, headers);
     res.end();
     return true;

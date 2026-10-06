@@ -172,3 +172,13 @@ describe('addEmployee', () => {
     expect(addEmployee(withEvent, employee()).views.e1).toBe(withEvent.views.e1);
   });
 });
+
+describe('a restarted office log', () => {
+  it('starts over from a live snapshot that is behind what the page has seen (the database was reset)', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 900 }));
+    d = applyEvent(d, { seq: 901, employeeId: 'e1', ts: 1, event: { type: 'turn.started' } });
+    const fresh = applySnapshot(d, snapshot({ lastSeq: 3, employees: [employee({ id: 'e9', name: 'Yeni' })] }), 'live');
+    expect(Object.keys(fresh.views)).toEqual(['e9']);
+    expect(fresh).toMatchObject({ lastSeq: 3, usageSeq: 3, synced: true });
+  });
+});

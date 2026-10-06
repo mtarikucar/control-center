@@ -28,6 +28,7 @@ export function runOnce(o: OnceOptions): Promise<OnceResult> {
   const fail = (text: string): OnceResult => ({ ok: false, text, usage: usageOf(undefined), sessionUsage: null, sessionCostUsd: 0 });
   const [command, ...prefix] = o.command;
   if (!command) return Promise.resolve(fail('claude komutu boş'));
+  if (o.signal?.aborted) return Promise.resolve(fail('iptal edildi'));
   return new Promise((resolve) => {
     const child = spawn(command, [...prefix, ...o.args], { cwd: o.cwd, env: o.env ?? process.env });
     let stdout = '';

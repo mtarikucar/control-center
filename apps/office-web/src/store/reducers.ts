@@ -47,7 +47,9 @@ function addUsage(current: EmployeeUsage | undefined, u: Usage, cost: number): E
  * ahead of events still in flight on the stream and must not move that point. Older snapshots than what is shown
  * are ignored.
  */
-export function applySnapshot(d: OfficeData, s: OfficeSnapshot, source: 'live' | 'http' = 'live'): OfficeData {
+export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'live' | 'http' = 'live'): OfficeData {
+  // A live snapshot behind what the page has seen means the office's log started over (its database was reset).
+  const d = source === 'live' && s.lastSeq < current.lastSeq ? EMPTY_DATA : current;
   if (s.lastSeq < d.usageSeq) return d;
   const views: Record<string, EmployeeView> = {};
   for (const employee of s.employees) {

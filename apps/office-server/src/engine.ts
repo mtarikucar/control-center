@@ -150,15 +150,20 @@ export class Engine {
     const atFork = this.#totals(id);
     const abort = new AbortController();
     this.#sideRuns.add(abort);
-    const result = await runOnce({
-      signal: abort.signal,
-      command: this.#command,
-      args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
-      cwd: prepareDesk(this.#dataDir, employee),
-      env: this.#env,
-      input,
-      timeoutMs: this.#sideQuestionTimeoutMs,
-    }).finally(() => this.#sideRuns.delete(abort));
+    let result: Awaited<ReturnType<typeof runOnce>>;
+    try {
+      result = await runOnce({
+        signal: abort.signal,
+        command: this.#command,
+        args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
+        cwd: prepareDesk(this.#dataDir, employee),
+        env: this.#env,
+        input,
+        timeoutMs: this.#sideQuestionTimeoutMs,
+      });
+    } finally {
+      this.#sideRuns.delete(abort);
+    }
     // The fork's running totals start from the parent's, so only the difference is this question's cost.
     const usage = result.sessionUsage ? usageSince(result.sessionUsage, atFork.usage) : result.usage;
     const costUsd = result.sessionCostUsd >= atFork.costUsd ? result.sessionCostUsd - atFork.costUsd : result.sessionCostUsd;

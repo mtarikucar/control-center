@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Test double for the `claude` CLI: speaks the subset of stream-json that office-server relies on.
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -91,6 +92,11 @@ const say = (text) => out({ type: 'assistant', message: { role: 'assistant', con
 if (process.env.FAKE_CLAUDE_IGNORE_TERM) {
   process.on('SIGTERM', () => {});
   setInterval(() => {}, 1000);
+}
+if (process.env.FAKE_CLAUDE_GRANDCHILD) {
+  // Like a dev server a Bash tool left running: it holds our stdout and outlives us unless its group is killed.
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'inherit', 'inherit'] });
+  writeFileSync(process.env.FAKE_CLAUDE_GRANDCHILD, String(child.pid));
 }
 
 if (opt('--output-format') === 'json') {
