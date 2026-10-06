@@ -3,7 +3,7 @@ import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { EventItem } from './EventItem.tsx';
 import { formatCost, formatTokens, tokensOf } from './format.ts';
-import { canResume, canStop, lifecycleLabel } from './labels.ts';
+import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
 
 export function Panel({ id }: { id: string }) {
   const view = useOffice((s) => s.views[id]);
@@ -41,6 +41,7 @@ export function Panel({ id }: { id: string }) {
     );
   }
   const e = view.employee;
+  const note = limitNote(e, Date.now());
 
   const run = async (work: () => Promise<unknown>) => {
     setError(null);
@@ -69,6 +70,7 @@ export function Panel({ id }: { id: string }) {
         <div>
           <h2>{e.name}</h2>
           <span className={`badge ${e.lifecycle}`}>{lifecycleLabel(e.lifecycle)}</span>
+          {note && <span className="muted"> {note}</span>}
           <span className="muted"> {e.model}</span>
         </div>
         <button type="button" className="icon" aria-label="Paneli kapat" onClick={() => select(null)}>
@@ -76,6 +78,7 @@ export function Panel({ id }: { id: string }) {
         </button>
       </header>
       <p className="role">{e.role}</p>
+      <p className="usage">Oturum {e.sessionId}</p>
       <p className="usage">
         Bugün {formatTokens(tokensOf(usage?.today))} · {formatCost(usage?.today.costUsd ?? 0)} — toplam {formatTokens(tokensOf(usage?.total))} ·{' '}
         {formatCost(usage?.total.costUsd ?? 0)}

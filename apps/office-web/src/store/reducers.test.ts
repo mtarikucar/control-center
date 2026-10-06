@@ -77,6 +77,7 @@ describe('applyEvent', () => {
   it('asks for a refresh when someone is hired or fired', () => {
     expect(needsRefresh(stored({ type: 'employee.hired', name: 'x' }))).toBe(true);
     expect(needsRefresh(stored({ type: 'employee.fired' }))).toBe(true);
+    expect(needsRefresh(stored({ type: 'lifecycle.changed', from: 'error', to: 'idle', reason: 'x' }))).toBe(true);
     expect(needsRefresh(stored({ type: 'turn.started' }))).toBe(false);
   });
 });

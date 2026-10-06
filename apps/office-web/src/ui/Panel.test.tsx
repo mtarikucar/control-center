@@ -126,5 +126,15 @@ describe('Panel', () => {
       for (const undo of restore) undo();
     }
   });
+
+  it('shows the session number and, when limited, when the employee opens again', () => {
+    const at = new Date();
+    at.setHours(at.getHours() + 1, 40, 0, 0);
+    const hh = String(at.getHours()).padStart(2, '0');
+    useOffice.setState({ views: { e1: { employee: { ...employee, lifecycle: 'limited', limitResetsAt: at.getTime() }, events: [], openTools: {}, lastTurnFinishedAt: null, eventsLoaded: true } } });
+    render(<Panel id="e1" />);
+    expect(screen.getByText('Oturum s1')).toBeTruthy();
+    expect(screen.getByText(new RegExp(`açılış (\\S+ )?${hh}:40`))).toBeTruthy();
+  });
 });
 

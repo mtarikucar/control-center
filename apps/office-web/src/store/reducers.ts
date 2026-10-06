@@ -120,8 +120,9 @@ export function mergeEvents(view: EmployeeView, loaded: StoredEvent[]): Employee
   return { ...view, events, openTools, lastTurnFinishedAt, eventsLoaded: true };
 }
 
+/** Events that change employee fields only the snapshot carries (who exists, lastError, limitResetsAt). */
 export function needsRefresh(s: StoredEvent): boolean {
-  return s.event.type === 'employee.hired' || s.event.type === 'employee.fired';
+  return s.event.type === 'employee.hired' || s.event.type === 'employee.fired' || s.event.type === 'lifecycle.changed';
 }
 
 export function openToolSince(v: EmployeeView): number | null {

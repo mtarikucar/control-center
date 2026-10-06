@@ -10,6 +10,7 @@ import { GRID, type Spot } from '../office/layout.ts';
 import { stepAlong } from '../office/motion.ts';
 import { useOffice } from '../store/office.ts';
 import { formatCost, formatTokens, tokensOf } from '../ui/format.ts';
+import { limitNote } from '../ui/labels.ts';
 import { CharacterModel } from './CharacterModel.tsx';
 import { roleFor } from './clips.ts';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
@@ -110,6 +111,7 @@ export function Character({ employee, behavior, spot, asset, usage, selected, ta
             {formatTokens(tokensOf(today))} · {formatCost(today?.costUsd ?? 0)}
           </span>
           {behavior.marker === 'alert' && <span aria-label="dikkat">⚠</span>}
+          {limitNote(employee, Date.now()) && <span className="tag-usage">{limitNote(employee, Date.now())}</span>}
           {behavior.marker === 'terminal' && <span aria-label="terminalde">⌨</span>}
         </button>
       </Html>

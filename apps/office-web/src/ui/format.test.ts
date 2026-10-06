@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatClock, formatCost, formatPercent, formatReset, formatTokens, summarizeToolInput, tokensOf } from './format.ts';
-import { canResume, canStop, lifecycleLabel } from './labels.ts';
+import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
 
 describe('format', () => {
   it('formats tokens, cost and percent compactly', () => {
@@ -44,4 +44,13 @@ describe('labels', () => {
     expect(canResume('interrupted')).toBe(true);
     expect(canResume('working')).toBe(false);
   });
+
+  it('says when a limited employee opens again', () => {
+    const now = new Date(2026, 9, 6, 14, 0).getTime();
+    const at = new Date(2026, 9, 6, 15, 40).getTime();
+    expect(limitNote({ lifecycle: 'limited', limitResetsAt: at }, now)).toBe('açılış 15:40');
+    expect(limitNote({ lifecycle: 'limited', limitResetsAt: null }, now)).toBeNull();
+    expect(limitNote({ lifecycle: 'idle', limitResetsAt: at }, now)).toBeNull();
+  });
 });
+
