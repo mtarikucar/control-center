@@ -120,3 +120,43 @@ describe('Engine — core', () => {
     expect(t.events.list().map((x) => x.event.type)).toContain('employee.fired');
   });
 });
+
+describe('Engine — overlapping commands', () => {
+  it('fire while a stop is in flight wins and the employee stays archived', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'SLOW job');
+    await waitFor(t.events, (x) => x.event.type === 'tool.started');
+    const firing = t.engine.fire(e.id);
+    const stopping = t.engine.stop(e.id);
+    await firing;
+    await expect(stopping).rejects.toThrow(ConflictError);
+    expect(t.roster.get(e.id).lifecycle).toBe('archived');
+    expect(t.events.list().filter((x) => x.event.type === 'employee.fired')).toHaveLength(1);
+  });
+
+  it('a message sent while the employee is being stopped is refused, not silently dropped', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'SLOW job');
+    await waitFor(t.events, (x) => x.event.type === 'tool.started');
+    const stopping = t.engine.stop(e.id);
+    expect(() => t.engine.send(e.id, 'arada')).toThrow(ConflictError);
+    expect(() => t.engine.resume(e.id)).toThrow(ConflictError);
+    expect((await stopping).lifecycle).toBe('stopped');
+  });
+
+  it('stop during an open-in-terminal hand-off keeps the terminal lock', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'merhaba');
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished');
+    t.engine.send(e.id, 'SLOW job');
+    await waitFor(t.events, (x) => x.event.type === 'tool.started');
+    const opening = t.engine.openInTerminal(e.id);
+    const stopping = t.engine.stop(e.id);
+    expect((await opening).employee.lifecycle).toBe('in_terminal');
+    await expect(stopping).rejects.toThrow(ConflictError);
+    expect(t.roster.get(e.id).lifecycle).toBe('in_terminal');
+  });
+});

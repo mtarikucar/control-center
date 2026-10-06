@@ -36,6 +36,9 @@ interface Runtime {
   windows: { fiveHour: QuotaWindow | null; sevenDay: QuotaWindow | null };
   limitTimer: NodeJS.Timeout | null;
   turnWaiters: Array<() => void>;
+  /** stop / fire / open-in-terminal run one at a time per employee; while any is queued, messages are refused. */
+  opChain: Promise<void>;
+  pendingOps: number;
 }
 
 export class Engine {
@@ -78,11 +81,16 @@ export class Engine {
     const employee = this.#roster.get(id);
     this.#assertReachable(employee);
     const rt = this.#runtime(id);
+    this.#assertNotBusy(rt);
     if (!rt.proc || rt.proc.exited) this.#start(employee, 'mesaj geldi');
     this.#clearLimitTimer(rt);
     const proc = rt.proc;
     if (!proc) throw new ConflictError('Çalışanın oturumu açılamadı.');
-    proc.sendUser(message);
+    try {
+      proc.sendUser(message);
+    } catch {
+      throw new ConflictError('Çalışanın oturumu kapanıyor; birazdan tekrar dene.');
+    }
     this.#emit(id, { type: 'message.user', text: message, source });
     if (!rt.turnActive) {
       rt.turnActive = true;
@@ -110,16 +118,18 @@ export class Engine {
     return { ok: result.ok, answer: result.text };
   }
 
-  async stop(id: string): Promise<Employee> {
-    const employee = this.#roster.get(id);
-    this.#assertReachable(employee);
-    await this.#halt(id);
-    return this.#setLifecycle(this.#roster.update(id, { limitResetsAt: null }), 'stopped', 'sahibi durdurdu');
+  stop(id: string): Promise<Employee> {
+    return this.#exclusive(id, async () => {
+      this.#assertReachable(this.#roster.get(id));
+      await this.#halt(id);
+      return this.#setLifecycle(this.#roster.update(id, { limitResetsAt: null }), 'stopped', 'sahibi durdurdu');
+    });
   }
 
   resume(id: string): Employee {
     const employee = this.#roster.get(id);
     this.#assertReachable(employee);
+    this.#assertNotBusy(this.#runtime(id));
     const wasInterrupted = employee.lifecycle === 'interrupted';
     this.#runtime(id).crashes = [];
     this.#start(this.#roster.update(id, { lastError: null }), 'sahibi devam ettirdi');
@@ -127,13 +137,15 @@ export class Engine {
     return this.#roster.get(id);
   }
 
-  async openInTerminal(id: string): Promise<{ command: string; employee: Employee }> {
-    const employee = this.#roster.get(id);
-    this.#assertReachable(employee);
-    if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; terminalde açılacak bir oturum yok.');
-    await this.#halt(id);
-    const updated = this.#setLifecycle(this.#roster.get(id), 'in_terminal', 'terminalde açıldı');
-    return { command: terminalCommand(deskDir(this.#dataDir, employee.slug), employee.sessionId), employee: updated };
+  openInTerminal(id: string): Promise<{ command: string; employee: Employee }> {
+    return this.#exclusive(id, async () => {
+      const employee = this.#roster.get(id);
+      this.#assertReachable(employee);
+      if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; terminalde açılacak bir oturum yok.');
+      await this.#halt(id);
+      const updated = this.#setLifecycle(this.#roster.get(id), 'in_terminal', 'terminalde açıldı');
+      return { command: terminalCommand(deskDir(this.#dataDir, employee.slug), employee.sessionId), employee: updated };
+    });
   }
 
   returnFromTerminal(id: string): Employee {
@@ -142,12 +154,14 @@ export class Engine {
     return this.#setLifecycle(employee, 'stopped', 'terminalden ofise döndü');
   }
 
-  async fire(id: string): Promise<void> {
-    const employee = this.#roster.get(id);
-    if (employee.lifecycle === 'archived') return;
-    await this.#halt(id);
-    this.#setLifecycle(this.#roster.get(id), 'archived', 'işten çıkarıldı');
-    this.#emit(id, { type: 'employee.fired' });
+  fire(id: string): Promise<void> {
+    this.#roster.get(id);
+    return this.#exclusive(id, async () => {
+      if (this.#roster.get(id).lifecycle === 'archived') return;
+      await this.#halt(id);
+      this.#setLifecycle(this.#roster.get(id), 'archived', 'işten çıkarıldı');
+      this.#emit(id, { type: 'employee.fired' });
+    });
   }
 
   /** Call once after the office process starts, before serving requests. */
@@ -296,6 +310,23 @@ export class Engine {
     rt.limitTimer = timer;
   }
 
+  #exclusive<T>(id: string, op: () => Promise<T>): Promise<T> {
+    const rt = this.#runtime(id);
+    rt.pendingOps += 1;
+    const run = rt.opChain.then(op);
+    rt.opChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run.finally(() => {
+      rt.pendingOps -= 1;
+    });
+  }
+
+  #assertNotBusy(rt: Runtime): void {
+    if (rt.pendingOps > 0) throw new ConflictError('Çalışan şu an durduruluyor; birazdan tekrar dene.');
+  }
+
   #clearLimitTimer(rt: Runtime): void {
     if (rt.limitTimer) clearTimeout(rt.limitTimer);
     rt.limitTimer = null;
@@ -329,6 +360,8 @@ export class Engine {
         windows: { fiveHour: null, sevenDay: null },
         limitTimer: null,
         turnWaiters: [],
+        opChain: Promise.resolve(),
+        pendingOps: 0,
       };
       this.#runtimes.set(id, rt);
     }
