@@ -212,3 +212,5 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .tag-task { display: block; max-width: 160px; font-size: 11px; color: var(--info); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tag-ping { display: block; font-size: 11px; color: var(--accent); font-weight: 600; }
 .dot.sleeping { background: #b8bcc6; }
+.proposal-card header { justify-content: flex-start; gap: 8px; }
+.proposal-card header strong { margin-right: auto; }
