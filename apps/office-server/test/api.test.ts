@@ -1,4 +1,5 @@
 import { request as httpRequest } from 'node:http';
+import { connect } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -115,6 +116,21 @@ describe('API', () => {
     expect((await call(port, 'POST', '/api/employees', { ...hire, headers: { origin: 'http://127.0.0.1:5173' } })).status).toBe(201);
     expect((await call(port, 'POST', '/api/employees', { body: { name: 'Y', role: 'r' }, headers: { origin: `http://localhost:${port}` } })).status).toBe(201);
     await expect(openWs(port, '/ws', 'https://evil.example').opened).rejects.toThrow(/403|reddedildi/);
+  });
+
+  it('survives a malformed WebSocket frame from a local client', async () => {
+    const { port } = await start();
+    const socket = connect(port, '127.0.0.1');
+    cleanups.push(() => socket.destroy());
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write(
+      'GET /ws HTTP/1.1\r\nHost: 127.0.0.1:' + port + '\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
+    );
+    await new Promise<void>((resolve) => socket.once('data', () => resolve()));
+    socket.write(Buffer.from([0x83, 0x80, 1, 2, 3, 4])); // reserved opcode 3, masked, empty payload
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await call(port, 'GET', '/api/office')).status).toBe(200);
   });
 
   it('streams a snapshot and then live events over WebSocket', async () => {

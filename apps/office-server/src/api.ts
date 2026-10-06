@@ -142,6 +142,8 @@ function attach(d: ApiDeps, ws: WebSocket, after: number): void {
     send({ type: 'event', event });
   });
   ws.on('close', unsubscribe);
+  // A malformed frame must only drop this client, never the office process (and every employee with it).
+  ws.on('error', () => ws.terminate());
 }
 
 export function createApi(d: ApiDeps, opts: ApiOptions): Api {
