@@ -36,8 +36,11 @@ export interface Spot {
   x: number;
   z: number;
   rotY: number;
-  /** Where to sit once at the spot (a sofa, an armchair): the spot itself is the free floor just in front of it. */
-  seat?: { x: number; z: number };
+  /**
+   * Where to sit once at the spot (a sofa, an armchair): the spot itself is the free floor just in front of it.
+   * `height` is the seat's surface (metres, measured from the model); a desk chair's is CHAIR_SEAT.
+   */
+  seat?: { x: number; z: number; height: number };
 }
 
 /** A desk's own things: monitors, keyboard, a mug. (x, z) is the desk's centre, rotY the way its person faces. */
@@ -88,6 +91,8 @@ const PI = Math.PI;
  * from the model), so things that stand on the counter go there, not on top of the whole model.
  */
 export const COUNTER_TOP = 0.48;
+/** The desk chairs' seat height (measured from the model): the seated clips are set for it. */
+export const CHAIR_SEAT = 0.5;
 const KITCHEN_H = 2.0;
 const item = (assetId: string, x: number, z: number, rotY: number, w: number, d: number, h: number, color: string, extra: Partial<Placement> = {}): Placement => ({
   assetId, x, z, y: 0, rotY, w, d, h, color, blocks: true, ...extra,
@@ -239,10 +244,11 @@ export const LAYOUT: Layout = {
     { x: 17.4, z: 6.6, rotY: PI },
   ],
   loungeSpots: [
-    { x: 2.5, z: 12.3, rotY: PI, seat: { x: 2.5, z: 13.05 } },
-    { x: 4.2, z: 11.9, rotY: -PI / 2, seat: { x: 5.15, z: 11.9 } },
-    { x: 3.5, z: 12.3, rotY: PI, seat: { x: 3.5, z: 13.05 } },
-    { x: 1.4, z: 12.3, rotY: PI / 2, seat: { x: 1.4, z: 11.6 } },
+    // Seat heights measured from the models: sofa 0.425, armchair 0.41, pouf 0.42.
+    { x: 2.5, z: 12.3, rotY: PI, seat: { x: 2.5, z: 13.05, height: 0.425 } },
+    { x: 4.2, z: 11.9, rotY: -PI / 2, seat: { x: 5.15, z: 11.9, height: 0.41 } },
+    { x: 3.5, z: 12.3, rotY: PI, seat: { x: 3.5, z: 13.05, height: 0.425 } },
+    { x: 1.4, z: 12.3, rotY: PI / 2, seat: { x: 1.4, z: 11.6, height: 0.42 } },
   ],
   serverSpots: [
     { x: 15.3, z: 2.2, rotY: PI },

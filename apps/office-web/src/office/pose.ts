@@ -69,3 +69,21 @@ export function clipFor(p: Pose, activity: Activity): ClipRole | 'standUp' {
       return activity;
   }
 }
+
+/**
+ * How far to lower the body (metres, ≤ 0) on a seat lower than a desk chair: the seated clips are set for the
+ * chair, so on a sofa the body sinks by the difference while sitting down and rises again while getting up.
+ */
+export function seatOffset(p: Pose, now: number, drop: number): number {
+  const t = (ms: number) => Math.min(1, Math.max(0, (now - p.since) / ms));
+  switch (p.phase) {
+    case 'sittingDown':
+      return drop * t(SIT_DOWN_MS);
+    case 'seated':
+      return drop;
+    case 'standingUp':
+      return drop * (1 - t(STAND_UP_MS));
+    default:
+      return 0;
+  }
+}

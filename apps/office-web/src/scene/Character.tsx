@@ -6,9 +6,9 @@ import type { Employee, EmployeeUsage } from '@cc/shared';
 import type { CharacterAsset } from '../assets/manifest.ts';
 import type { Activity, Behavior } from '../office/behavior.ts';
 import { findPath, type Pt } from '../office/grid.ts';
-import { GRID, type Spot } from '../office/layout.ts';
+import { CHAIR_SEAT, GRID, type Spot } from '../office/layout.ts';
 import { stepAlong, turnToward } from '../office/motion.ts';
-import { advance, clipFor, initialPose, onGoal, TO_SEAT_MS, type Phase, type Pose } from '../office/pose.ts';
+import { advance, clipFor, initialPose, onGoal, seatOffset, TO_SEAT_MS, type Phase, type Pose } from '../office/pose.ts';
 import { useOffice } from '../store/office.ts';
 import { formatCost, formatTokens, tokensOf } from '../ui/format.ts';
 import { limitNote } from '../ui/labels.ts';
@@ -35,13 +35,16 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
   const select = useOffice((s) => s.select);
   const group = useRef<Group>(null);
   const sits = SEATED.has(behavior.activity);
-  const motion = useRef<{ pos: Pt; heading: number; path: Pt[] | null; goal: string; pose: Pose; seatFrom: Pt }>({
+  const dropOf = (s: Spot) => (s.seat ? s.seat.height - CHAIR_SEAT : 0);
+  const motion = useRef<{ pos: Pt; heading: number; path: Pt[] | null; goal: string; pose: Pose; seatFrom: Pt; drop: number }>({
     pos: spot.seat ? { ...spot.seat } : { x: spot.x, z: spot.z },
     heading: spot.rotY,
     path: [],
     goal: '',
     pose: initialPose(sits, performance.now()),
     seatFrom: { x: spot.x, z: spot.z },
+    // The seat the body is on (or going to): getting up uses the seat it leaves, not the next place's.
+    drop: dropOf(spot),
   });
   const [phase, setPhase] = useState<Phase>(motion.current.pose.phase);
   // drei's <Html> renders nothing if it mounts before the canvas is attached to the page, which is exactly what
@@ -86,8 +89,9 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
     }
     const next = advance(m.pose, now, { walkDone, hasSeat: spot.seat !== undefined, sits });
     if (next.phase === 'toSeat' && m.pose.phase !== 'toSeat') m.seatFrom = { ...m.pos };
+    if (next.phase === 'sittingDown' && m.pose.phase !== 'sittingDown') m.drop = dropOf(spot);
     m.pose = next;
-    g.position.set(m.pos.x, 0, m.pos.z);
+    g.position.set(m.pos.x, seatOffset(m.pose, now, m.drop), m.pos.z);
     g.rotation.y = m.heading;
     if (next.phase !== phase) setPhase(next.phase);
   });

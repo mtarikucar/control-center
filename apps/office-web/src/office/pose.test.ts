@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SIT_DOWN_MS, STAND_UP_MS, TO_SEAT_MS, advance, clipFor, initialPose, onGoal } from './pose.ts';
+import { SIT_DOWN_MS, STAND_UP_MS, TO_SEAT_MS, advance, clipFor, initialPose, onGoal, seatOffset } from './pose.ts';
 
 const seatedAt = (since = 0) => ({ phase: 'seated' as const, since });
 
@@ -44,5 +44,14 @@ describe('pose', () => {
     expect(clipFor({ phase: 'sittingDown', since: 0 }, 'typing')).toBe('sitDown');
     expect(clipFor({ phase: 'seated', since: 0 }, 'typing')).toBe('typing');
     expect(clipFor({ phase: 'standing', since: 0 }, 'drink')).toBe('drink');
+  });
+
+  it('lowers the body onto a seat lower than a desk chair while sitting down, and back up when getting up', () => {
+    const drop = -0.08;
+    expect(seatOffset({ phase: 'walking', since: 0 }, 100, drop)).toBe(0);
+    expect(seatOffset({ phase: 'sittingDown', since: 0 }, SIT_DOWN_MS / 2, drop)).toBeCloseTo(drop / 2);
+    expect(seatOffset({ phase: 'seated', since: 0 }, 99_999, drop)).toBe(drop);
+    expect(seatOffset({ phase: 'standingUp', since: 0 }, STAND_UP_MS / 4, drop)).toBeCloseTo(drop * 0.75);
+    expect(seatOffset({ phase: 'standingUp', since: 0 }, STAND_UP_MS * 2, drop)).toBeCloseTo(0);
   });
 });
