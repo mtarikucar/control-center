@@ -59,7 +59,13 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
       expect(existsSync(join(s.dataDir, handed.result!.archive!, 'teslim.md'))).toBe(true);
       await waitFor(s.events, (e) => e.event.type === 'decision.recorded', { timeoutMs: 300_000 });
       // The owner lets the writer go: a hand-over first, then the office fires them.
+      // The coordinator's setModel goes on with the same session on the new model (spec §3.3: --resume + --model);
+      // the restarted session reports itself with its first message, the hand-over.
+      const mark = s.events.lastSeq();
+      company.setModel(coordinator.id, writer!.id, 'sonnet');
       company.beginHandover(writer!.id);
+      const restarted = await waitFor(s.events, (e) => e.employeeId === writer!.id && e.event.type === 'session.started', { after: mark, timeoutMs: 300_000 });
+      expect((restarted.event as { model: string }).model).toMatch(/sonnet/);
       await until(() => s.roster.get(writer!.id).lifecycle === 'archived', 600_000);
       const out = tasks.list({ assignee: writer!.id, statuses: ['done'] }).find((t) => t.kind === 'handover');
       expect(out?.result?.summary, 'the hand-over was handed in').toBeTruthy();

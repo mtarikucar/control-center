@@ -48,6 +48,20 @@ her oturuma özel bir jetonla erişir.
 **İşten çıkar** önce bir devir görevi verir: çalışan bildiklerini yazar, teslim edince ofis onu çıkarır ve açık işleri
 koordinatöre döner. Beklemek istemezseniz **Hemen çıkar**.
 
+## Bütçe ve anayasa
+
+Şirket görünümünün **Anayasa** sekmesinde sınırları siz koyarsınız: en çok kaç çalışan, Claude kotasından size ayrılan
+pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, boştakilerin kaç dakika sonra uyuyacağı.
+
+- **Sahibinin payı:** 5 saatlik ya da haftalık kullanım `100 − pay` sınırına gelince ofis yalnız öncelik 1 işleri
+  başlatır, boştakileri uyutur ve koordinatöre haber verir; süren işler kesilmez, pencere açılınca kendiliğinden döner.
+  Üst çubukta "Sahibinin payı korunuyor" yazar.
+- **Para:** çalışanlar dış harcamayı `recordSpend` ile bildirir. Aylık sınır ya da planın onaylı parası aşılırsa uyarı
+  çıkar ve koordinatör sahibine getirir. **Bütçe** sekmesi her planın harcadığını, Claude kullanımını ve onaylanan parayı
+  yan yana gösterir.
+- **Uyku:** işi olmayan çalışan bir süre sonra uyur (oturumu korunur); görevi gelince ya da siz yazınca uyanır.
+- Koordinatör `budgetStatus` ile bütçeyi görür, `setModel` ile birinin modelini değiştirir, `sleep`/`wake` kullanır.
+
 ## office-server
 
 Gereken: Node 24+, pnpm 9, giriş yapılmış `claude` CLI.
