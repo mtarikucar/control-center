@@ -10,7 +10,10 @@ export function CharacterModel({ asset, role, faded }: { asset: CharacterAsset; 
   const roles = useMemo(() => Object.keys(asset.clips) as ClipRole[], [asset]);
   const urls = useMemo(() => [assetUrl(asset.file), ...roles.map((r) => assetUrl(asset.clips[r]!))], [asset, roles]);
   const loaded = useGLTF(urls);
-  const [base, ...clipFiles] = loaded;
+  // useGLTF returns its cached array; everything derived from it must keep its identity across renders, because
+  // drei's useAnimations stops and uncaches every action whenever the clip list it receives changes.
+  const base = loaded[0];
+  const clipFiles = useMemo(() => loaded.slice(1), [loaded]);
 
   const model = useMemo(() => {
     const copy = cloneSkinned(base!.scene);
@@ -36,8 +39,9 @@ export function CharacterModel({ asset, role, faded }: { asset: CharacterAsset; 
     return out;
   }, [roles, clipFiles]);
 
+  const clipList = useMemo(() => Object.values(clips) as AnimationClip[], [clips]);
   const root = useRef<Group>(null);
-  const { actions } = useAnimations(Object.values(clips) as AnimationClip[], root);
+  const { actions } = useAnimations(clipList, root);
   const current = useRef<ClipRole | null>(null);
 
   useEffect(() => {
@@ -50,6 +54,10 @@ export function CharacterModel({ asset, role, faded }: { asset: CharacterAsset; 
     previous?.fadeOut(0.25);
     current.current = target;
   }, [role, actions, clips]);
+  // When the actions are rebuilt (or StrictMode remounts), nothing is playing any more: start again next time.
+  useEffect(() => () => {
+    current.current = null;
+  }, [actions]);
 
   useEffect(() => {
     model.traverse((o) => {
