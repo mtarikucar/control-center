@@ -15,10 +15,10 @@ describe('applySnapshot', () => {
   it('builds views and keeps loaded events of known employees', () => {
     const first = applySnapshot(EMPTY_DATA, snapshot());
     const withEvent = applyEvent(first, stored({ type: 'turn.started' }));
-    const again = applySnapshot(withEvent, snapshot({ lastSeq: 5, employees: [employee({ lifecycle: 'working' })] }));
+    const again = applySnapshot(withEvent, snapshot({ lastSeq: withEvent.lastSeq + 1, employees: [employee({ lifecycle: 'working' })] }));
     expect(again.views.e1?.events).toHaveLength(1);
     expect(again.views.e1?.employee.lifecycle).toBe('working');
-    expect(again.lastSeq).toBe(withEvent.lastSeq);
+    expect(again.lastSeq).toBe(withEvent.lastSeq + 1);
   });
 
   it('drops employees that are no longer in the snapshot', () => {
@@ -98,3 +98,33 @@ describe('mergeEvents', () => {
     expect(openToolSince(view)).toBeNull();
   });
 });
+
+describe('usage watermark', () => {
+  const tf = (seq: number, input: number): StoredEvent => ({
+    seq, employeeId: 'e1', ts: seq,
+    event: { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: input, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 },
+  });
+  const counted = { today: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 }, total: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 } };
+
+  it('review focus: counts usage once across a reconnect (snapshot, then replay of events it already covers)', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 10, usage: { e1: counted } }));
+    d = applyEvent(d, tf(9, 40));
+    d = applyEvent(d, tf(10, 60));
+    d = applyEvent(d, tf(11, 10));
+    expect(d.usage.e1?.today.inputTokens).toBe(110);
+  });
+
+  it('an HTTP snapshot does not move the replay point, a live one does', () => {
+    const base = applyEvent(applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 3 })), tf(5, 1));
+    expect(applySnapshot(base, snapshot({ lastSeq: 20 }), 'http').lastSeq).toBe(5);
+    expect(applySnapshot(base, snapshot({ lastSeq: 20 }), 'live').lastSeq).toBe(20);
+  });
+
+  it('ignores a snapshot older than what it already shows', () => {
+    const fresh = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 30, usage: { e1: counted } }));
+    const stale = applySnapshot(fresh, snapshot({ lastSeq: 12, usage: {}, employees: [] }), 'http');
+    expect(stale.usage.e1?.today.inputTokens).toBe(100);
+    expect(Object.keys(stale.views)).toEqual(['e1']);
+  });
+});
+

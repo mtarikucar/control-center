@@ -12,13 +12,16 @@ export interface EmployeeView {
 }
 
 export interface OfficeData {
+  /** Last seq received over the live feed: the point a reconnect replays from. */
   lastSeq: number;
+  /** Events up to this seq are already included in `usage` (it came from a snapshot taken at that seq). */
+  usageSeq: number;
   quota: QuotaState | null;
   usage: Record<string, EmployeeUsage>;
   views: Record<string, EmployeeView>;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, quota: null, usage: {}, views: {} };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {} };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
 
@@ -36,7 +39,13 @@ function addUsage(current: EmployeeUsage | undefined, u: Usage, cost: number): E
   return { today: addTo(current?.today ?? ZERO, u, cost), total: addTo(current?.total ?? ZERO, u, cost) };
 }
 
-export function applySnapshot(d: OfficeData, s: OfficeSnapshot): OfficeData {
+/**
+ * `live` snapshots open the WebSocket stream, so their lastSeq is where its replay starts; an `http` snapshot may be
+ * ahead of events still in flight on the stream and must not move that point. Older snapshots than what is shown
+ * are ignored.
+ */
+export function applySnapshot(d: OfficeData, s: OfficeSnapshot, source: 'live' | 'http' = 'live'): OfficeData {
+  if (s.lastSeq < d.usageSeq) return d;
   const views: Record<string, EmployeeView> = {};
   for (const employee of s.employees) {
     const prev = d.views[employee.id];
@@ -44,7 +53,8 @@ export function applySnapshot(d: OfficeData, s: OfficeSnapshot): OfficeData {
       ? { ...prev, employee }
       : { employee, events: [], openTools: {}, lastTurnFinishedAt: null, eventsLoaded: false };
   }
-  return { lastSeq: Math.max(d.lastSeq, s.lastSeq), quota: s.quota, usage: s.usage, views };
+  const lastSeq = source === 'live' ? Math.max(d.lastSeq, s.lastSeq) : d.lastSeq;
+  return { lastSeq, usageSeq: s.lastSeq, quota: s.quota, usage: s.usage, views };
 }
 
 export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
@@ -79,10 +89,10 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
     }
     case 'turn.finished':
       if (ev.queuedTurns === 0) v = { ...v, openTools: {}, lastTurnFinishedAt: s.ts };
-      usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd) };
+      if (s.seq > d.usageSeq) usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd) };
       break;
     case 'side.answer':
-      usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd) };
+      if (s.seq > d.usageSeq) usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd) };
       break;
     default:
       break;

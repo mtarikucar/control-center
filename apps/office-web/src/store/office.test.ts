@@ -26,4 +26,19 @@ describe('office store', () => {
     useOffice.getState().receive({ type: 'snapshot', snapshot });
     expect(api.events).toHaveBeenCalledTimes(2);
   });
+
+  it('refreshes the office at local midnight so "today" starts over', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(2026, 9, 6, 23, 59, 0));
+      vi.mocked(api.office).mockResolvedValue({ employees: [], quota: null, usage: {}, lastSeq: 0 });
+      await useOffice.getState().refresh();
+      expect(api.office).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(api.office).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+

@@ -24,6 +24,15 @@ export interface OfficeStore extends OfficeData {
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let midnightTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** "Today" is the owner's local day: start it over at midnight even if the page stays open. */
+function scheduleMidnightRefresh(get: () => OfficeStore): void {
+  if (midnightTimer) clearTimeout(midnightTimer);
+  const next = new Date();
+  next.setHours(24, 0, 1, 0);
+  midnightTimer = setTimeout(() => void get().refresh(), next.getTime() - Date.now());
+}
 const loading = new Set<string>();
 
 /** History tells a fresh page which tools are still running and when each employee last finished a turn. */
@@ -58,8 +67,9 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
   async refresh() {
     try {
       const snapshot = await api.office();
-      set((s) => applySnapshot(s, snapshot));
+      set((s) => applySnapshot(s, snapshot, 'http'));
       loadMissingHistory(get);
+      scheduleMidnightRefresh(get);
     } catch {
       // The next live snapshot brings the office back in sync.
     }
