@@ -50,11 +50,14 @@ function NoCoordinator({ people }: { people: Employee[] }) {
 }
 
 function PersonCard({ e, current, onOpen }: { e: Employee; current: Task | undefined; onOpen: () => void }) {
+  // "Koordinatör — Koordinatör [Koordinatör]" says one thing three times: show each word once.
+  const title = e.title && e.title !== e.name ? e.title : '';
+  const badge = e.kind !== 'member' && KIND_LABELS[e.kind] !== e.name && KIND_LABELS[e.kind] !== e.title ? KIND_LABELS[e.kind] : '';
   return (
     <button type="button" className="org-card" onClick={onOpen}>
       <strong>{e.name}</strong>
-      {e.title && <span className="muted"> — {e.title}</span>}
-      {e.kind !== 'member' && <span className="badge">{KIND_LABELS[e.kind]}</span>}
+      {title && <span className="muted"> — {title}</span>}
+      {badge && <span className="badge">{badge}</span>}
       <span className={`dot ${e.lifecycle}`} aria-hidden="true" />
       <span className="muted">{lifecycleLabel(e.lifecycle)}</span>
       {current && <span className="org-task">şu an: {current.title}</span>}

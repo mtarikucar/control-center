@@ -56,6 +56,13 @@ describe('CompanyView', () => {
     expect(screen.queryByText(/koordinatörü yok/)).toBeNull();
   });
 
+  it('does not repeat a word the name, title and role badge share', () => {
+    office([person('koor', { name: 'Koordinatör', kind: 'coordinator', title: 'Koordinatör' }), person('ada', { name: 'Ada', kind: 'lead', title: 'Ekip lideri' })]);
+    render(<CompanyView />);
+    expect(within(screen.getByRole('region', { name: 'Koordinatör' })).getAllByText(/Koordinatör/)).toHaveLength(1);
+    expect(within(screen.getByRole('region', { name: 'Ekipsiz' })).getAllByText(/Ekip lideri/)).toHaveLength(1);
+  });
+
   it('puts tasks in columns by state and filters them by person', () => {
     office(
       [person('koor', { kind: 'coordinator' }), person('ada', { name: 'Ada' }), person('can', { name: 'Can' })],
