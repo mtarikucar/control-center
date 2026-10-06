@@ -22,7 +22,9 @@ html, body, #root { height: 100%; margin: 0; background: var(--bg); }
 button, input, select, textarea { font: inherit; color: inherit; }
 
 .app { position: relative; height: 100%; overflow: hidden; }
-.scene { position: absolute !important; inset: 0; }
+/* The scene is its own stacking context, so character tags (z-index inside it) never cover the overlays. */
+.scene { position: absolute !important; inset: 0; z-index: 0; isolation: isolate; }
+.topbar, .panel, .dialog-backdrop { z-index: 1; }
 
 .topbar {
   position: absolute; top: 12px; left: 12px; right: 12px; display: flex; align-items: center; gap: 16px;
