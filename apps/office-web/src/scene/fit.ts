@@ -14,7 +14,13 @@ export function fitToHeight(b: Bounds, height: number): { scale: number; offset:
   return { scale, offset: [-cx * scale, -b.min.y * scale, -cz * scale] };
 }
 
+/**
+ * Bounds as rendered. World matrices are refreshed first: a freshly cloned rig still carries stale bone matrices, and
+ * skinned meshes are measured through their bones (a Meshy rig's mesh node sits under a 0.01 armature while its
+ * inverse bind matrices restore metres), so the mesh's own geometry box would be off by the armature's scale.
+ */
 export function boundsOf(object: Object3D): Bounds {
+  object.updateMatrixWorld(true);
   const box = new Box3().setFromObject(object);
   return { min: box.min, max: box.max };
 }

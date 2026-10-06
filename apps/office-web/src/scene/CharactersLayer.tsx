@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { characterAsset, characterAssets } from '../assets/manifest.ts';
 import { behaviorOf } from '../office/behavior.ts';
-import { LAYOUT, spotFor } from '../office/layout.ts';
+import { LAYOUT, spotFor, tagLift } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
 import { openToolSince } from '../store/reducers.ts';
 import { Character } from './Character.tsx';
@@ -44,6 +44,7 @@ export function CharactersLayer() {
               employee={e}
               behavior={behavior}
               spot={spotFor(LAYOUT, behavior.zone, e.deskIndex)}
+              tagHeight={2.15 + tagLift(LAYOUT, behavior.zone, e.deskIndex)}
               asset={characterAsset(manifest, e.characterId) ?? fallbackAsset}
               usage={usage[e.id]}
               selected={selectedId === e.id}

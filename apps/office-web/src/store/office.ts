@@ -24,6 +24,14 @@ export interface OfficeStore extends OfficeData {
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+const loading = new Set<string>();
+
+/** History tells a fresh page which tools are still running and when each employee last finished a turn. */
+function loadMissingHistory(get: () => OfficeStore): void {
+  for (const [id, view] of Object.entries(get().views)) {
+    if (!view.eventsLoaded && !loading.has(id)) void get().loadEvents(id);
+  }
+}
 
 export const useOffice = create<OfficeStore>()((set, get) => ({
   ...EMPTY_DATA,
@@ -37,6 +45,7 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
   receive(m) {
     if (m.type === 'snapshot') {
       set((s) => applySnapshot(s, m.snapshot));
+      loadMissingHistory(get);
       return;
     }
     set((s) => applyEvent(s, m.event));
@@ -50,6 +59,7 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
     try {
       const snapshot = await api.office();
       set((s) => applySnapshot(s, snapshot));
+      loadMissingHistory(get);
     } catch {
       // The next live snapshot brings the office back in sync.
     }
@@ -60,7 +70,9 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
     if (id && view && !view.eventsLoaded) void get().loadEvents(id);
   },
   async loadEvents(id) {
+    loading.add(id);
     const loaded = await api.events(id, 500).catch(() => null);
+    loading.delete(id);
     if (!loaded) return;
     set((s) => {
       const view = s.views[id];

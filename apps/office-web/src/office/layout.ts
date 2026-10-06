@@ -74,14 +74,15 @@ export const LAYOUT: Layout = {
   depth: 18,
   cell: 0.5,
   walls: [
+    // Cutaway like the reference: the far walls (north, west) are full height, the two facing the camera are low.
     { x1: 0, z1: 0, x2: 24, z2: 0, height: 3, kind: 'window' },
-    { x1: 24, z1: 0, x2: 24, z2: 18, height: 3, kind: 'solid' },
+    { x1: 0, z1: 0, x2: 0, z2: 18, height: 3, kind: 'solid' },
+    { x1: 24, z1: 0, x2: 24, z2: 18, height: 0.5, kind: 'low' },
     { x1: 0, z1: 18, x2: 24, z2: 18, height: 0.5, kind: 'low' },
-    { x1: 0, z1: 0, x2: 0, z2: 18, height: 0.5, kind: 'low' },
     // Server room (north-east) with a door at z 5.2–6.4.
     { x1: 19.5, z1: 0, x2: 19.5, z2: 5.2, height: 3, kind: 'solid' },
     { x1: 19.5, z1: 6.4, x2: 19.5, z2: 7, height: 3, kind: 'solid' },
-    { x1: 19.5, z1: 7, x2: 24, z2: 7, height: 3, kind: 'solid' },
+    { x1: 19.5, z1: 7, x2: 24, z2: 7, height: 2.6, kind: 'glass' },
     // Glass meeting room (north) with a door at x 11.8–13.2.
     { x1: 9, z1: 0, x2: 9, z2: 6, height: 2.6, kind: 'glass' },
     { x1: 16, z1: 0, x2: 16, z2: 6, height: 2.6, kind: 'glass' },
@@ -162,4 +163,18 @@ export const GRID = buildGrid(LAYOUT.width, LAYOUT.depth, LAYOUT.cell, obstacles
 export function spotFor(layout: Layout, zone: Zone, index: number): Spot {
   const list = zone === 'desk' ? layout.seats : zone === 'coffee' ? layout.coffeeSpots : zone === 'lounge' ? layout.loungeSpots : layout.serverSpots;
   return list[((index % list.length) + list.length) % list.length]!;
+}
+
+const TAG_STEP = 0.45;
+
+/**
+ * Extra height for a character's tag at a shared place: the further from the camera (smaller x + z), the higher,
+ * so tags of people standing together stack instead of covering each other. Desks are spread out: no lift.
+ */
+export function tagLift(layout: Layout, zone: Zone, index: number): number {
+  if (zone === 'desk') return 0;
+  const list = zone === 'coffee' ? layout.coffeeSpots : zone === 'lounge' ? layout.loungeSpots : layout.serverSpots;
+  const spot = spotFor(layout, zone, index);
+  const nearer = list.filter((s) => s.x + s.z > spot.x + spot.z).length;
+  return nearer * TAG_STEP;
 }

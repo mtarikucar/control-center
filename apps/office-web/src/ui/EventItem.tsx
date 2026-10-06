@@ -64,7 +64,13 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note error">{e.message}</div>;
     case 'session.started': {
       const failed = e.mcp.filter((m) => m.status === 'failed');
-      return failed.length > 0 ? <div className="note warn">Bağlanamayan bağlantılar: {failed.map((m) => m.name).join(', ')}</div> : null;
+      if (failed.length === 0) return null;
+      return (
+        <details className="note warn">
+          <summary>{failed.length} bağlantı açılamadı</summary>
+          <span>{failed.map((m) => m.name).join(', ')}</span>
+        </details>
+      );
     }
     default:
       return null;

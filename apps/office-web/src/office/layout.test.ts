@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findPath, isFreeAt } from './grid.ts';
-import { GRID, LAYOUT, spotFor } from './layout.ts';
+import { GRID, LAYOUT, spotFor, tagLift } from './layout.ts';
 
 const allSpots = [...LAYOUT.seats, ...LAYOUT.coffeeSpots, ...LAYOUT.loungeSpots, ...LAYOUT.serverSpots];
 
@@ -41,4 +41,13 @@ describe('office layout', () => {
     expect(spotFor(LAYOUT, 'server', 1)).toBe(LAYOUT.serverSpots[1]);
     expect(spotFor(LAYOUT, 'lounge', 0)).toBe(LAYOUT.loungeSpots[0]);
   });
+
+  it('lifts the tag of whoever stands further back, so people waiting together keep readable tags', () => {
+    expect(tagLift(LAYOUT, 'desk', 5)).toBe(0);
+    const lifts = LAYOUT.coffeeSpots.map((_, i) => tagLift(LAYOUT, 'coffee', i));
+    const order = LAYOUT.coffeeSpots.map((s, i) => [s.x + s.z, lifts[i]!] as const).sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < order.length; i += 1) expect(order[i]![1]).toBeLessThan(order[i - 1]![1]);
+    expect(tagLift(LAYOUT, 'coffee', 3)).toBe(tagLift(LAYOUT, 'coffee', 0));
+  });
 });
+

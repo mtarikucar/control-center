@@ -24,9 +24,10 @@ interface Props {
   asset: CharacterAsset | null;
   usage: EmployeeUsage | undefined;
   selected: boolean;
+  tagHeight: number;
 }
 
-export function Character({ employee, behavior, spot, asset, usage, selected }: Props) {
+export function Character({ employee, behavior, spot, asset, usage, selected, tagHeight }: Props) {
   const select = useOffice((s) => s.select);
   const group = useRef<Group>(null);
   const motion = useRef<{ pos: Pt; heading: number; path: Pt[]; moving: boolean; goal: string }>({
@@ -37,6 +38,10 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
     goal: '',
   });
   const [moving, setMoving] = useState(false);
+  // drei's <Html> renders nothing if it mounts before the canvas is attached to the page, which is exactly what
+  // happens to the first character; mounting the tag one render later avoids that.
+  const [tagReady, setTagReady] = useState(false);
+  useEffect(() => setTagReady(true), []);
   const goal = `${spot.x},${spot.z},${spot.rotY}`;
 
   useEffect(() => {
@@ -96,7 +101,8 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
           <meshBasicMaterial color="#f08a3c" />
         </mesh>
       )}
-      <Html position={[0, 2.25, 0]} center zIndexRange={[20, 0]}>
+      {tagReady && (
+      <Html position={[0, tagHeight, 0]} center zIndexRange={[20, 0]}>
         <button type="button" className={`tag ${behavior.marker} ${selected ? 'selected' : ''}`} onClick={() => select(employee.id)}>
           <span className={`dot ${employee.lifecycle}`} aria-hidden="true" />
           <strong>{employee.name}</strong>
@@ -107,6 +113,7 @@ export function Character({ employee, behavior, spot, asset, usage, selected }: 
           {behavior.marker === 'terminal' && <span aria-label="terminalde">⌨</span>}
         </button>
       </Html>
+      )}
     </group>
   );
 }
