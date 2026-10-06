@@ -3,6 +3,7 @@ import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
+import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup, until, waitFor } from './helpers.ts';
 
@@ -96,5 +97,61 @@ describe('Dispatcher', () => {
     await sleep(800);
     expect(escalations()).toHaveLength(1);
     expect(escalations()[0]).toContain('Uzun iş');
+  });
+});
+
+describe('Dispatcher — hand-over and the brief', () => {
+  function makeFull() {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine }).start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    return { ...s, ...c, engine: f.engine };
+  }
+
+  it('hands the hand-over over first even with a task open, then lets the person go and returns their work', async () => {
+    const t = makeFull();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    const work = t.company.createTask(coord.id, { assignee: ada.id, title: 'Uzun iş' });
+    await until(() => t.tasks.get(work.id).status === 'in_progress');
+    const handover = t.company.beginHandover(ada.id);
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.includes('Devir: işten ayrılıyorsun')), 8000);
+    expect(t.tasks.get(handover.id).status).toBe('in_progress');
+    t.company.finish(ada.id, handover.id, { summary: 'Bildiklerimi yazdım.', outputs: [], learned: 'Müşteri sabah arar.' });
+    await until(() => t.roster.get(ada.id).lifecycle === 'archived', 8000);
+    await until(() => t.tasks.get(work.id).status === 'waiting');
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Uzun iş') && m.includes('işten çıkarıldı')), 8000);
+    expect(t.memory.notes('müşteri')).toHaveLength(1);
+  });
+
+  it('review focus: a stopped employee’s hand-over waits until they run again', async () => {
+    const t = makeFull();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await t.engine.stop(ada.id);
+    const handover = t.company.beginHandover(ada.id);
+    await sleep(400);
+    expect(t.tasks.get(handover.id).status).toBe('waiting');
+    expect(t.roster.get(ada.id).lifecycle).toBe('stopped');
+  });
+
+  it('tells the employee once that the brief changed since their previous task', async () => {
+    const t = makeFull();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    const delivered = (title: string) => systemMessages(t.events.list({ limit: 5000 }), ada.id).find((m) => m.includes(`## Görev: ${title}`));
+    const run = async (title: string) => {
+      const task = t.company.createTask(coord.id, { assignee: ada.id, title });
+      await until(() => delivered(title) !== undefined, 8000);
+      t.company.finish(ada.id, task.id, { summary: 'tamam', outputs: [], learned: '' });
+      return delivered(title)!;
+    };
+    expect(await run('bir')).not.toContain('Şirket özeti değişti');
+    await sleep(20);
+    t.company.updateBrief(coord.id, '# Özet\n\nYeni kural: her iş testli teslim edilir.\n');
+    await sleep(20);
+    expect(await run('iki')).toContain('Şirket özeti değişti');
+    expect(await run('üç')).not.toContain('Şirket özeti değişti');
   });
 });

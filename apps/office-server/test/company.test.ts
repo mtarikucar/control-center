@@ -308,3 +308,36 @@ describe('Company — hand-ins feed the memory', () => {
     expect(notes.list()[0]).toMatchObject({ title: 'Öğrenilen: Not yaz', text: 'Başlık önce gelir.', source: `task:${task.id}` });
   });
 });
+
+describe('Company — hand-over', () => {
+  it('review focus: one hand-over task however often the owner asks, priority 1, and the coordinator hears', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const first = t.company.beginHandover(ada.id);
+    expect(first).toMatchObject({ kind: 'handover', priority: 1, requester: OWNER, assignee: ada.id, status: 'waiting' });
+    expect(t.company.beginHandover(ada.id).id).toBe(first.id);
+    expect(t.notices.pending(c.id).at(-1)?.text).toMatch(/Ada işten çıkarılıyor/);
+    expect(t.company.handedOver(ada.id)).toBe(false);
+    t.company.start(first.id);
+    t.company.finish(ada.id, first.id, { summary: 'Devrettim.', outputs: [], learned: '' });
+    expect(t.company.handedOver(ada.id)).toBe(true);
+    await t.engine.fire(ada.id);
+    expect(() => t.company.beginHandover(ada.id)).toThrow(/zaten işten çıkarıldı/);
+  });
+
+  it('review focus: firing at once during a hand-over cancels it and returns only the real work', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const work = t.company.createTask(c.id, { assignee: ada.id, title: 'gerçek iş' });
+    const handover = t.company.beginHandover(ada.id);
+    await t.engine.fire(ada.id);
+    t.company.releaseTasksOf(ada.id);
+    expect(t.tasks.get(handover.id).status).toBe('cancelled');
+    expect(t.tasks.get(work.id).status).toBe('waiting');
+    const note = t.notices.pending(c.id).at(-1)!.text;
+    expect(note).toContain('gerçek iş');
+    expect(note).not.toContain('Devir');
+  });
+});
