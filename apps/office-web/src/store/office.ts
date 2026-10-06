@@ -12,6 +12,7 @@ export interface OfficeStore extends OfficeData {
   typingAt: Record<string, number>;
   terminalCommands: Record<string, string>;
   hireOpen: boolean;
+  companyOpen: boolean;
   receive: (m: ServerMessage) => void;
   setConnected: (connected: boolean) => void;
   refresh: () => Promise<void>;
@@ -23,6 +24,7 @@ export interface OfficeStore extends OfficeData {
   setManifest: (m: AssetManifest) => void;
   setTerminalCommand: (id: string, command: string | null) => void;
   setHireOpen: (open: boolean) => void;
+  setCompanyOpen: (open: boolean) => void;
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,6 +54,7 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
   typingAt: {},
   terminalCommands: {},
   hireOpen: false,
+  companyOpen: false,
 
   receive(m) {
     if (m.type === 'snapshot') {
@@ -102,4 +105,5 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
       return { terminalCommands };
     }),
   setHireOpen: (hireOpen) => set({ hireOpen }),
+  setCompanyOpen: (companyOpen) => set({ companyOpen }),
 }));

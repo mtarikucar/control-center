@@ -45,7 +45,7 @@ Başarı ölçütü — sahibi şunları yapabildiğinde biter:
 | Rol | Kim | Ne yapar |
 |---|---|---|
 | Sahibi | Siz | Koordinatörle konuşur; plan ve revizyonları onaylar; işten çıkarır; anayasayı koyar; kararları geri alır. |
-| Koordinatör | Ofiste bir tane; şirketin ilk çalışanı (ofis boşsa kendiliğinden kurulur). Varsayılan model **Fable**. | Plan yapar; işe alır; iş atar, önceliklendirir; rol kartlarını yazar/değiştirir; model seçer; ekip lideri atar; uyutur/uyandırır; el kitabını yönetir; sahibine raporlar. |
+| Koordinatör | Ofiste bir tane; Şirket görünümünden tek tıkla işe alınır ya da bir çalışan koordinatör yapılır. Varsayılan model **Fable**. | Plan yapar; işe alır; iş atar, önceliklendirir; rol kartlarını yazar/değiştirir; model seçer; ekip lideri atar; uyutur/uyandırır; el kitabını yönetir; sahibine raporlar. |
 | Ekip lideri | Bir ekip 4–5 kişiyi geçince koordinatörün atadığı çalışan | Kendi ekibine iş atar, önceliklendirir; işe alamaz (koordinatörden ister). Etiketinde rozet görünür. |
 | Çalışan | Diğerleri | Kendi tanımındaki işi yapar; herkese görev paslar; öneri/talep açar. |
 
@@ -180,12 +180,14 @@ görev sayısı ≤ 60. Aşınca araç reddeder ve koordinatöre not düşer.
 
 | Araç | Herkes | Lider (kendi ekibi) | Koordinatör |
 |---|---|---|---|
-| `myTasks`, `taskStart`, `taskUpdate`, `taskFinish`, `taskPass` | ✓ | ✓ | ✓ |
+| `myTasks`, `taskUpdate`, `taskFinish`, `taskPass` | ✓ | ✓ | ✓ |
 | `memorySearch`, `noteWrite`, `playbookRead`, `decisionsRead`, `briefRead` | ✓ | ✓ | ✓ |
 | `propose`, `recordSpend`, `askColleague` (yan soru; bölmeden), `officeStatus` | ✓ | ✓ | ✓ |
 | `taskCreate`, `taskAssign`, `taskReprioritize` | | ✓ | ✓ |
 | `playbookUpdate`, `decisionRecord` | | ✓ | ✓ |
 | `planPropose`, `planRevise`, `hire`, `setModel`, `editRoleCard`, `appointLead`, `sleep`, `wake`, `briefUpdate`, `employeeNote`, `reportToOwner`, `budgetStatus` | | | ✓ |
+
+Görevi ofis, çalışana verirken başlatır (ayrı bir `taskStart` yok).
 
 Yalnız sahibi (ekrandan, araç değil): plan/revizyon onayı ve vazgeçme, işten çıkarma, anayasa, karar geri alma,
 koordinatörü değiştirme.

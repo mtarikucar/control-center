@@ -22,4 +22,13 @@ describe('EventItem', () => {
     const { container } = render(<EventItem stored={{ seq: 1, employeeId: 'e1', ts: 0, event: { type: 'session.started', model: 'm', mcp: [{ name: 'office', status: 'connected' }] } }} />);
     expect(container.textContent).toBe('');
   });
+
+  it('says a plan was reopened when a finished plan gets a new task', () => {
+    const plan = {
+      id: 'p1', title: 'Lansman', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '',
+      status: 'approved' as const, version: 1, proposedBy: 'c', createdAt: 1, updatedAt: 1, approvedAt: 1,
+    };
+    render(<EventItem stored={{ seq: 1, employeeId: 'c', ts: 0, event: { type: 'plan.changed', change: 'reopened', plan } }} />);
+    expect(screen.getByText(/Lansman.*yeniden açıldı/)).toBeTruthy();
+  });
 });

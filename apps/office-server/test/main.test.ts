@@ -62,4 +62,22 @@ describe('office-server process', () => {
     expect(await first.exited).toBe(0);
     expect(existsSync(join(dir, 'office.lock'))).toBe(false);
   }, 30_000);
+
+  it('serves the office tools only to a valid token', async () => {
+    const dir = tempDir();
+    const office = startOffice(dir);
+    await until(() => /hazır: http:\/\/127\.0\.0\.1:\d+/.test(office.output()), 10_000);
+    const port = Number(/hazır: http:\/\/127\.0\.0\.1:(\d+)/.exec(office.output())?.[1]);
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest({ host: '127.0.0.1', port, method: 'POST', path: '/mcp', headers: { 'content-type': 'application/json' } }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on('error', reject);
+      req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+    });
+    expect(status).toBe(401);
+    office.child.kill('SIGINT');
+    await office.exited;
+  });
 });

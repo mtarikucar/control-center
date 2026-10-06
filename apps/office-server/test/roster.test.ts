@@ -83,3 +83,30 @@ describe('Roster', () => {
     expect(roster.list({ includeArchived: true }).map((e) => e.name).sort()).toEqual(['Ada', 'Can']);
   });
 });
+
+describe('Roster — company fields', () => {
+  it('stores title, team, kind and who someone reports to, with member defaults', () => {
+    const s = setup();
+    const lead = s.roster.create({ name: 'Ada', role: 'r', title: 'Koordinatör', team: 'Yönetim', kind: 'coordinator' });
+    const dev = s.roster.create({ name: 'Can', role: 'r', reportsTo: lead.id });
+    expect(s.roster.get(lead.id)).toMatchObject({ title: 'Koordinatör', team: 'Yönetim', kind: 'coordinator', reportsTo: null });
+    expect(s.roster.get(dev.id)).toMatchObject({ title: '', team: '', kind: 'member', reportsTo: lead.id });
+    s.cleanup();
+  });
+
+  it('refuses an unknown kind and over-long titles', () => {
+    const s = setup();
+    expect(() => s.roster.create({ name: 'Ada', role: 'r', kind: 'boss' as never })).toThrow(/Bilinmeyen çalışan türü/);
+    expect(() => s.roster.create({ name: 'Ada', role: 'r', title: 'x'.repeat(81) })).toThrow(/Unvan/);
+    s.cleanup();
+  });
+
+  it('updates the role card fields', () => {
+    const s = setup();
+    const e = s.roster.create({ name: 'Ada', role: 'eski rol' });
+    const next = s.roster.update(e.id, { role: 'yeni rol', title: 'Testçi', team: 'Kalite', kind: 'lead', reportsTo: null });
+    expect(next).toMatchObject({ role: 'yeni rol', title: 'Testçi', team: 'Kalite', kind: 'lead' });
+    expect(s.roster.get(e.id)).toMatchObject({ role: 'yeni rol', title: 'Testçi', team: 'Kalite', kind: 'lead' });
+    s.cleanup();
+  });
+});

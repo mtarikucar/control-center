@@ -7,6 +7,7 @@ import { ClaudeProcess } from './claude/process.ts';
 import { deskDir, prepareDesk } from './desk.ts';
 import { ConflictError, ValidationError } from './errors.ts';
 import type { EventStore } from './event-store.ts';
+import type { TokenRegistry } from './mcp/tokens.ts';
 import type { Roster } from './roster.ts';
 
 export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam et.';
@@ -53,6 +54,8 @@ export interface EngineOptions {
   limitGraceMs?: number;
   stopTimeoutMs?: number;
   sideQuestionTimeoutMs?: number;
+  /** The office tools (MCP over HTTP): `url` is read at every session start, a fresh token is issued each time. */
+  mcp?: { url: () => string; tokens: TokenRegistry };
 }
 
 interface Runtime {
@@ -66,6 +69,8 @@ interface Runtime {
   turnWaiters: Array<() => void>;
   /** stop / fire / open-in-terminal run one at a time per employee; while any is queued, messages are refused. */
   opChain: Promise<void>;
+  /** The role card or tools changed while a turn was running: start the session again once it ends. */
+  reloadPending: boolean;
   pendingOps: number;
   /** Messages written to claude that it has not acknowledged yet; re-sent if the process dies. */
   unread: Array<{ uuid: string; text: string }>;
@@ -89,6 +94,7 @@ export class Engine {
   readonly #limitGraceMs: number;
   readonly #stopTimeoutMs: number;
   readonly #sideQuestionTimeoutMs: number;
+  readonly #mcp: EngineOptions['mcp'];
   readonly #runtimes = new Map<string, Runtime>();
   readonly #sideRuns = new Set<AbortController>();
 
@@ -104,6 +110,7 @@ export class Engine {
     this.#limitGraceMs = o.limitGraceMs ?? 30_000;
     this.#stopTimeoutMs = o.stopTimeoutMs ?? 10_000;
     this.#sideQuestionTimeoutMs = o.sideQuestionTimeoutMs ?? 120_000;
+    this.#mcp = o.mcp;
   }
 
   hire(input: HireInput): Employee {
@@ -232,9 +239,49 @@ export class Engine {
     return this.#exclusive(id, async () => {
       if (this.#roster.get(id).lifecycle === 'archived') return;
       await this.#halt(id);
+      this.#mcp?.tokens.revoke(id);
       this.#setLifecycle(this.#roster.get(id), 'archived', 'işten çıkarıldı');
       this.#emit(id, { type: 'employee.fired' });
     });
+  }
+
+  /**
+   * The role card or the office tools changed (e.g. the employee became coordinator). A session reads both only when
+   * it starts, so start it again — memory is kept, the session resumes — now if it is idle, or as soon as the turn
+   * it is in ends. A session that is not running reads the new card whenever it next starts.
+   */
+  reload(id: string): void {
+    const rt = this.#runtime(id);
+    if (!rt.proc || rt.proc.exited) return;
+    if (rt.turnActive || this.#roster.get(id).lifecycle !== 'idle') {
+      rt.reloadPending = true;
+      return;
+    }
+    this.#reloadNow(id);
+  }
+
+  #reloadNow(id: string): void {
+    const rt = this.#runtime(id);
+    rt.reloadPending = false;
+    void this.#exclusive(id, async () => {
+      const employee = this.#roster.get(id);
+      if (employee.lifecycle !== 'idle' || rt.turnActive) return;
+      await this.#halt(id);
+      this.#start(this.#roster.get(id), 'rol kartı ve araçlar yenilendi');
+    }).catch((err: unknown) => this.#emit(id, { type: 'error', message: `Oturum yenilenemedi: ${err instanceof Error ? err.message : String(err)}` }));
+  }
+
+  /** Idle with a live session and nothing queued against it: the moment to hand over the next task. */
+  ready(id: string): boolean {
+    let employee: Employee;
+    try {
+      employee = this.#roster.get(id);
+    } catch {
+      return false;
+    }
+    if (employee.lifecycle !== 'idle') return false;
+    const rt = this.#runtimes.get(id);
+    return rt !== undefined && rt.proc !== null && !rt.proc.exited && !rt.turnActive && rt.pendingOps === 0;
   }
 
   /** Call once after the office process starts, before serving requests. */
@@ -266,10 +313,17 @@ export class Engine {
     if (rt.proc && !rt.proc.exited) return this.#roster.get(employee.id);
     rt.expectingExit = false;
     rt.turnActive = false;
+    const mcpConfig = this.#mcp
+      ? JSON.stringify({
+          mcpServers: {
+            office: { type: 'http', url: this.#mcp.url(), headers: { Authorization: `Bearer ${this.#mcp.tokens.issue(employee.id)}` } },
+          },
+        })
+      : undefined;
     rt.proc = new ClaudeProcess(
       {
         command: this.#command,
-        args: sessionArgs({ model: employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home }),
+        args: sessionArgs({ model: employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home, mcpConfig }),
         cwd: prepareDesk(this.#dataDir, employee),
         env: this.#env,
       },
@@ -346,6 +400,7 @@ export class Engine {
       return;
     }
     this.#setLifecycle(employee, 'idle', ok ? 'iş bitti' : 'iş hatayla bitti');
+    if (rt.reloadPending) this.#reloadNow(id);
   }
 
   #onExit(id: string, code: number | null, signal: NodeJS.Signals | null, stderr: string): void {
@@ -502,6 +557,7 @@ export class Engine {
         limitTimer: null,
         turnWaiters: [],
         opChain: Promise.resolve(),
+        reloadPending: false,
         pendingOps: 0,
         unread: [],
         consumedInTurn: false,

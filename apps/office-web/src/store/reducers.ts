@@ -1,4 +1,4 @@
-import type { Employee, EmployeeUsage, OfficeSnapshot, QuotaState, StoredEvent, Usage, UsageTotals } from '@cc/shared';
+import type { Employee, EmployeeUsage, OfficeSnapshot, Plan, QuotaState, StoredEvent, Task, Usage, UsageTotals } from '@cc/shared';
 
 export const MAX_EVENTS = 500;
 
@@ -22,9 +22,12 @@ export interface OfficeData {
   views: Record<string, EmployeeView>;
   /** A snapshot has arrived, so `views` lists everyone: an id missing from it is not an employee. */
   synced: boolean;
+  /** The company: every task the snapshot or the feed has shown (open ones and the latest closed). */
+  tasks: Record<string, Task>;
+  plans: Record<string, Plan>;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {} };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
 
@@ -57,7 +60,16 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     views[employee.id] = prev ? { ...prev, employee } : freshView(employee);
   }
   const lastSeq = source === 'live' ? Math.max(d.lastSeq, s.lastSeq) : d.lastSeq;
-  return { lastSeq, usageSeq: s.lastSeq, quota: s.quota, usage: s.usage, views, synced: true };
+  return {
+    lastSeq,
+    usageSeq: s.lastSeq,
+    quota: s.quota,
+    usage: s.usage,
+    views,
+    synced: true,
+    tasks: Object.fromEntries((s.tasks ?? []).map((t) => [t.id, t])),
+    plans: Object.fromEntries((s.plans ?? []).map((p) => [p.id, p])),
+  };
 }
 
 const freshView = (employee: Employee): EmployeeView => ({ employee, events: [], openTools: {}, idleSince: null, eventsLoaded: false });
@@ -75,6 +87,9 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
     quota = { status: ev.status, fiveHour: ev.fiveHour ?? d.quota?.fiveHour ?? null, sevenDay: ev.sevenDay ?? d.quota?.sevenDay ?? null, updatedAt: s.ts };
   }
   const next: OfficeData = { ...d, lastSeq: Math.max(d.lastSeq, s.seq), quota };
+  // Company records are global: keep them whatever the page knows about the employee the event is filed under.
+  if (ev.type === 'task.changed') next.tasks = { ...d.tasks, [ev.task.id]: ev.task };
+  if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: ev.plan };
   const id = s.employeeId;
   const view = id ? d.views[id] : undefined;
   if (!id || !view) return next;
@@ -139,7 +154,8 @@ export function mergeEvents(view: EmployeeView, loaded: StoredEvent[]): Employee
 
 /** Events that change employee fields only the snapshot carries (who exists, lastError, limitResetsAt). */
 export function needsRefresh(s: StoredEvent): boolean {
-  return s.event.type === 'employee.hired' || s.event.type === 'employee.fired' || s.event.type === 'lifecycle.changed';
+  const t = s.event.type;
+  return t === 'employee.hired' || t === 'employee.fired' || t === 'lifecycle.changed' || t === 'role.changed';
 }
 
 export function openToolSince(v: EmployeeView): number | null {

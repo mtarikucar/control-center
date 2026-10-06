@@ -1,4 +1,5 @@
-import type { Employee, Lifecycle } from './employee.ts';
+import type { Plan, PlanChange, Task, TaskChange } from './company.ts';
+import type { Employee, EmployeeKind, Lifecycle } from './employee.ts';
 
 export interface Usage {
   inputTokens: number;
@@ -47,6 +48,11 @@ export type OfficeEvent =
       limitResetsAt?: number | null;
     }
   | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string }
+  | { type: 'task.changed'; change: TaskChange; task: Task }
+  | { type: 'plan.changed'; change: PlanChange; plan: Plan }
+  | { type: 'company.report'; text: string }
+  | { type: 'brief.updated' }
+  | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
   | { type: 'error'; message: string };
 
 export type OfficeEventType = OfficeEvent['type'];
@@ -77,6 +83,9 @@ export interface OfficeSnapshot {
   quota: QuotaState | null;
   usage: Record<string, EmployeeUsage>;
   lastSeq: number;
+  /** Open tasks and the most recent finished ones (absent from servers without the company layer). */
+  tasks?: Task[];
+  plans?: Plan[];
 }
 
 export type ServerMessage =

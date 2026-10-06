@@ -1,4 +1,4 @@
-import type { Employee, HireInput, OfficeSnapshot, StoredEvent } from '@cc/shared';
+import type { Employee, HireInput, OfficeSnapshot, Plan, StoredEvent } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -35,6 +35,10 @@ const employee = (id: string) => `/api/employees/${encodeURIComponent(id)}`;
 export const api = {
   office: () => request<OfficeSnapshot>('GET', '/api/office'),
   hire: (input: HireInput) => request<Employee>('POST', '/api/employees', input),
+  approvePlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/approve`),
+  declinePlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/decline`),
+  appointCoordinator: (employeeId: string) => request<Employee>('POST', '/api/company/coordinator', { employeeId }),
+  hireCoordinator: () => request<Employee>('POST', '/api/company/coordinator/hire'),
   fire: (id: string) => request<null>('DELETE', employee(id)),
   send: (id: string, text: string) => request<{ ok: true }>('POST', `${employee(id)}/messages`, { text }),
   sideQuestion: (id: string, text: string) => request<{ ok: boolean; answer: string }>('POST', `${employee(id)}/side-questions`, { text }),

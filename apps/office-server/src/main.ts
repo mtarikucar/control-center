@@ -2,12 +2,18 @@ import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { createApi } from './api.ts';
+import { manifestCharacters } from './company/characters.ts';
+import { Company } from './company/company.ts';
+import { Dispatcher } from './company/dispatcher.ts';
+import { NoticeStore, PlanStore, TaskStore } from './company/store.ts';
 import { loadConfig } from './config.ts';
 import { migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
 import { Engine } from './engine.ts';
 import { EventStore } from './event-store.ts';
 import { acquireLock } from './lock.ts';
+import { TokenRegistry } from './mcp/tokens.ts';
+import { officeTools } from './mcp/tools.ts';
 import { QuotaTracker } from './quota.ts';
 import { Roster } from './roster.ts';
 
@@ -25,10 +31,18 @@ migrateUp(db);
 const events = new EventStore(db);
 const roster = new Roster(db, config.deskCount, Date.now, (slug) => existsSync(deskDir(config.dataDir, slug)));
 const quota = new QuotaTracker(db, events);
-const engine = new Engine({ roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand });
+const tokens = new TokenRegistry();
+let mcpUrl = '';
+const engine = new Engine({ roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens } });
+const tasks = new TaskStore(db);
+const plans = new PlanStore(db);
+const notices = new NoticeStore(db);
+const characters = manifestCharacters(config.assetsDir);
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id) });
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine });
 
 const api = createApi(
-  { engine, roster, events, quota },
+  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters }) }, company: { service: company, tasks, plans } },
   { allowedOrigins: config.allowedOrigins, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {
@@ -42,8 +56,10 @@ api.server.on('error', (err: NodeJS.ErrnoException) => {
 });
 // Recover only once the port is ours, so a failed start never touches the employees.
 api.server.listen(config.port, config.host, () => {
-  engine.recover();
   const { port } = api.server.address() as AddressInfo;
+  mcpUrl = `http://${config.host}:${port}/mcp`;
+  engine.recover();
+  dispatcher.start();
   console.log(`office-server hazır: http://${config.host}:${port}  (veri: ${config.dataDir})`);
 });
 

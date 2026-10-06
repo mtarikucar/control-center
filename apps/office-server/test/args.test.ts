@@ -46,4 +46,13 @@ describe('claude args', () => {
   it('builds a shell-safe terminal command', () => {
     expect(terminalCommand("/tmp/o'k/desks/ada", 'sid-4')).toBe(`cd '/tmp/o'\\''k/desks/ada' && claude --resume sid-4`);
   });
+
+  it('gives the session the office tools when asked, keeping the owner’s other connections', () => {
+    const config = JSON.stringify({ mcpServers: { office: { type: 'http', url: 'http://127.0.0.1:1/mcp' } } });
+    const args = sessionArgs({ model: 'fable', sessionId: 's', resume: false, mcpConfig: config });
+    expect(args[args.indexOf('--mcp-config') + 1]).toBe(config);
+    expect(args).not.toContain('--strict-mcp-config');
+    expect(args[args.indexOf('--model') + 1]).toBe('fable');
+    expect(sessionArgs({ model: 'haiku', sessionId: 's', resume: false })).not.toContain('--mcp-config');
+  });
 });

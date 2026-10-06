@@ -68,4 +68,10 @@ describe('HireDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'İşe al' }));
     await waitFor(() => expect(api.hire).toHaveBeenCalledWith(expect.objectContaining({ characterId: 'voxel' })));
   });
+
+  it('offers Fable, Opus, Sonnet and Haiku by what they are good at', () => {
+    render(<HireDialog />);
+    const options = [...(screen.getByLabelText('Model') as HTMLSelectElement).options].map((o) => o.textContent);
+    expect(options).toEqual(['Fable — en güçlü', 'Opus — güçlü', 'Sonnet — dengeli', 'Haiku — hızlı ve ucuz']);
+  });
 });
