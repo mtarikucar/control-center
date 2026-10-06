@@ -214,20 +214,28 @@ Karakter davranışı olaylardan türetilen saf bir fonksiyondur (olaylar → `{
 | `working` | Masasına yürür, oturur, **yazma** animasyonu |
 | `working` + 30 sn'den uzun süren bir araç | Server odasına gider, rafa bakar; araç bitince masaya döner |
 | sahibi paneli açıp yazıyor | Masada sahibine döner, **oturarak konuşma** |
-| `idle` (tur bitti) | 60 sn sonra kahve köşesine ya da oturma alanına gider (**kahve içme** / **ayakta durma**) |
+| `idle` (tur bitti) | 60 sn sonra kalkar; kahve barında **kahve içer** ya da oturma alanında kanepeye/berjere/pufa **oturur** |
 | `limited` / `error` | Masasında durur, başının üstünde kırmızı işaret; `limited`'da açılma saati |
 | `stopped` / `in_terminal` | Soluk görünür; `in_terminal`'de terminal simgesi |
 
 Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet (iki satırlık etiket). Etiketler ekranda üst
 üste binmez: kameraya en yakın olan yerinde kalır, arkadakiler gerektiği kadar yukarı kayar (her karede, her
 yakınlaştırma ve açıda). Her masanın kahve/oturma/server noktası kendine aittir; iki çalışan aynı noktada durmaz.
+Gövde hareketi de saf bir durum makinesidir (`office/pose.ts`): kalkar → yürür → (oturma alanında) koltuğa geçer →
+oturur; oturma bir kez oynar ve son karede kalır, kalkma aynı hareketin tersidir; dönüşler yumuşaktır.
 Toplantı odası v1'de kullanılmaz.
 
 ## 7. office-web
 
-- **Sahne:** referans görsele göre yerleşim (8 masalık açık alan, cam toplantı odası, server odası,
-  kahve köşesi, oturma alanı, resepsiyon, bitkili kitaplık). Bina (zemin, duvar, pencere, cam bölme, halı)
-  kodla voksel kutulardan kurulur. Eşyalar ve karakterler `assets/3d/manifest.json`'dan yüklenir.
+- **Sahne:** referans görsele göre kompakt yerleşim (18 × 14 m): batıda pencereler ve bitki rafları, kuzeyde cam
+  toplantı odası ve server odası, ortada aralarında saksılı bölme olan iki dörtlü masa kümesi, server odasının
+  ahşap kaplı duvarı önünde kahve barı, önde oturma alanı, okuma köşesi ve resepsiyon. Bina (zemin, duvar,
+  sütun, pencere ve kasaları, cam bölme, ahşap çıta, halı, tablo) kodla kurulur; pencerelerden şehir görünür.
+  Eşyalar ve karakterler `assets/3d/manifest.json`'dan yüklenir.
+- **Işık ve görüntü:** pencereden giren akşamüstü güneşi, sıcak dolgu ışığı, kendi köşesini aydınlatan lambalar;
+  köşe gölgelemesi (AO), parıltı (bloom), filmik ton eşleme, hafif vinyet. Zemin odayı yumuşakça yansıtan cilalı
+  beton (izometrik kamera için kendi düzlem yansıması). Ortam canlıdır: akan kodlu ekranlar, yanıp sönen server
+  ışıkları, hafif salınan bitkiler, biri kahve barındayken buhar.
 - **Yerleşim verisi:** `office/layout.ts` — bölgeler, masa oturma noktaları, kahve/oturma/server noktaları,
   yürüme ızgarası. Karakterler ızgara üzerinde en kısa yolla yürür (A*).
 - **Kamera:** referanstaki gibi yukarıdan izometrik açı; yakınlaştırma ve kaydırma, sınırlı döndürme (yalnız alçak duvarlı güney–doğu tarafında).
