@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runOnce } from '../src/claude/once.ts';
 import { ClaudeProcess } from '../src/claude/process.ts';
@@ -65,6 +67,29 @@ describe('ClaudeProcess', () => {
     await Promise.race([proc.close(200), new Promise((r) => setTimeout(r, 3000))]);
     expect(Date.now() - started).toBeLessThan(2000);
     expect(exits[0]?.signal).toBe('SIGKILL');
+  });
+
+  it('review focus: also ends what its tools left running, and does not hang on their open pipes', async () => {
+    const pidFile = join(tempDir(), 'grandchild.pid');
+    const { proc, lines } = spawnFake({ FAKE_CLAUDE_IGNORE_TERM: '1', FAKE_CLAUDE_GRANDCHILD: pidFile });
+    proc.sendUser('merhaba');
+    await until(() => lines.some((l) => l.type === 'result') && existsSync(pidFile));
+    const grandchild = Number(readFileSync(pidFile, 'utf8'));
+    const alive = () => {
+      try {
+        process.kill(grandchild, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      const closed = await Promise.race([proc.close(200).then(() => 'closed'), new Promise((r) => setTimeout(() => r('hung'), 3000))]);
+      expect(closed).toBe('closed');
+      await until(() => !alive(), 2000);
+    } finally {
+      if (alive()) process.kill(grandchild, 'SIGKILL');
+    }
   });
 
   it('reports a missing binary as an exit instead of throwing', async () => {
