@@ -245,4 +245,20 @@ describe('Dispatcher — reserve and sleep', () => {
     expect(t.roster.get(ada.id).lifecycle).toBe('stopped');
     expect(t.tasks.get(task.id).status).toBe('waiting');
   });
+  it('reminds the coordinator once a day to report when something happened', async () => {
+    const t = makeBudgeted();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    const reminders = () => systemMessages(t.events.list({ limit: 5000 }), coord.id).filter((m) => m.includes('Günlük özet zamanı'));
+    t.advance(25 * 3_600_000);
+    await sleep(300);
+    expect(reminders()).toHaveLength(0);
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'iş' });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    await until(() => reminders().length === 1, 8000);
+    await sleep(300);
+    expect(reminders()).toHaveLength(1);
+    t.advance(25 * 3_600_000);
+    await until(() => reminders().length === 2, 8000);
+  });
 });
