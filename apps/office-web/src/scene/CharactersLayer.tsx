@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react';
 import { characterAsset } from '../assets/manifest.ts';
 import { behaviorOf } from '../office/behavior.ts';
 import { LAYOUT, spotFor } from '../office/layout.ts';
+
+const ESPRESSO = LAYOUT.furniture.find((p) => p.assetId === 'espresso_machine');
 import { useOffice } from '../store/office.ts';
 import { openToolSince } from '../store/reducers.ts';
 import { Character } from './Character.tsx';
+import { Steam } from './Steam.tsx';
 import { TagLayout } from './TagLayout.tsx';
 
 
@@ -56,6 +59,8 @@ export function CharactersLayer() {
           />
         );
       })}
+      {/* The machine steams while someone is having a coffee. */}
+      {ESPRESSO && placed.some((p) => p.behavior.zone === 'coffee') ? <Steam position={[ESPRESSO.x, ESPRESSO.y + ESPRESSO.h, ESPRESSO.z]} /> : null}
       <TagLayout />
     </group>
   );

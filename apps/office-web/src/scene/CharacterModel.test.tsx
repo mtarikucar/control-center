@@ -15,6 +15,8 @@ function rig(): Group {
   geometry.setAttribute('skinWeight', new Float32BufferAttribute(Array.from({ length: count * 4 }, (_, i) => (i % 4 === 0 ? 1 : 0)), 4));
   const hips = new Bone();
   hips.name = 'Hips';
+  // Standing hips height 1: seated clips are pinned to SEATED_HIPS of it.
+  hips.position.y = 1;
   const mesh = new SkinnedMesh(geometry);
   root.add(hips, mesh);
   root.updateMatrixWorld(true);
@@ -27,6 +29,7 @@ const loaded = [{ scene: rig(), animations: [] }, { scene: new Group(), animatio
 
 vi.mock('@react-three/drei', async (importOriginal) => ({ ...(await importOriginal<object>()), useGLTF: () => loaded }));
 const { CharacterModel } = await import('./CharacterModel.tsx');
+const { SEATED_HIPS } = await import('./clips.ts');
 
 const asset: CharacterAsset = { id: 'coder', kind: 'character', name: 'Kodcu', file: 'c/base.glb', height: 1.7, clips: { sit: 'c/sit.glb' } };
 
@@ -66,5 +69,19 @@ describe('CharacterModel', () => {
     await renderer.unmount();
     expect(copies.length).toBeGreaterThan(0);
     expect(disposed).toEqual(copies);
+  });
+
+  it('sits down once and holds the seated pose; standing up plays the same motion backwards', async () => {
+    const seat: CharacterAsset = { ...asset, clips: { sitDown: 'c/sitDown.glb' } };
+    const renderer = await ReactThreeTestRenderer.create(<CharacterModel asset={seat} role="sitDown" faded={false} />);
+    await renderer.advanceFrames(30, 0.1);
+    const seated = hipsY(renderer);
+    expect(seated).toBeCloseTo(SEATED_HIPS, 2);
+    await renderer.advanceFrames(10, 0.1);
+    expect(hipsY(renderer)).toBeCloseTo(seated, 3);
+    await renderer.update(<CharacterModel asset={seat} role="standUp" faded={false} />);
+    await renderer.advanceFrames(4, 0.1);
+    expect(hipsY(renderer)).toBeLessThan(seated - 0.1);
+    await renderer.unmount();
   });
 });

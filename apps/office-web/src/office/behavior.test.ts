@@ -20,10 +20,10 @@ describe('behaviorOf (spec §6)', () => {
     expect(input('working', { ownerTypingAt: NOW - TYPING_FRESH_MS - 1 }).activity).toBe('typing');
   });
 
-  it('idle: stays at the desk for a minute, then coffee or lounge', () => {
+  it('idle: stays at the desk for a minute, then coffee or a seat in the lounge', () => {
     expect(input('idle', { idleSince: NOW - IDLE_WANDER_MS + 1 })).toEqual({ zone: 'desk', activity: 'sit', marker: 'none' });
     expect(input('idle', { idleSince: NOW - IDLE_WANDER_MS - 1, wanderSeed: 2 })).toEqual({ zone: 'coffee', activity: 'drink', marker: 'none' });
-    expect(input('idle', { idleSince: NOW - IDLE_WANDER_MS - 1, wanderSeed: 3 })).toEqual({ zone: 'lounge', activity: 'idle', marker: 'none' });
+    expect(input('idle', { idleSince: NOW - IDLE_WANDER_MS - 1, wanderSeed: 3 })).toEqual({ zone: 'lounge', activity: 'sit', marker: 'none' });
     expect(input('starting').zone).toBe('desk');
   });
 

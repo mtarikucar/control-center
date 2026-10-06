@@ -2,9 +2,13 @@ import { MapControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { LAYOUT } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
-import { AZIMUTH, CAMERA_POSITION } from './camera.ts';
+import { ArtFrames } from './ArtFrames.tsx';
+import { AZIMUTH, CAMERA_POSITION, CAMERA_ZOOM } from './camera.ts';
 import { CharactersLayer } from './CharactersLayer.tsx';
+import { DeskDressing, ServerLights } from './DeskDressing.tsx';
+import { Effects } from './Effects.tsx';
 import { FurnitureLayer } from './FurnitureLayer.tsx';
+import { Backdrop, Lighting } from './Lighting.tsx';
 import { Room } from './Room.tsx';
 
 export function OfficeScene() {
@@ -13,28 +17,22 @@ export function OfficeScene() {
     <Canvas
       className="scene"
       orthographic
-      shadows
+      shadows="percentage"
       dpr={[1, 2]}
-      camera={{ position: [...CAMERA_POSITION], zoom: 34, near: -200, far: 400 }}
+      gl={{ antialias: false, powerPreference: 'high-performance' }}
+      camera={{ position: [...CAMERA_POSITION], zoom: CAMERA_ZOOM, near: -200, far: 400 }}
       onPointerMissed={() => select(null)}
     >
-      <color attach="background" args={['#e6e9ef']} />
-      <hemisphereLight args={['#ffffff', '#9aa0aa', 1.25]} />
-      <directionalLight
-        position={[12, 28, 10]}
-        intensity={1.8}
-        castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-left={-18}
-        shadow-camera-right={18}
-        shadow-camera-top={18}
-        shadow-camera-bottom={-18}
-      />
-      {/* The office's centre sits at the origin so the camera, light and controls all aim at it. */}
-      <group position={[-LAYOUT.width / 2, 0, -LAYOUT.depth / 2]}>
+      <Backdrop />
+      <Lighting />
+      {/* The office's centre sits at the origin so the camera, light and controls all aim at it, nudged towards the
+          camera so its far corner clears the top bar. */}
+      <group position={[-LAYOUT.width / 2 + 1.1, 0, -LAYOUT.depth / 2 + 1.1]}>
         <Room />
         <FurnitureLayer />
+        <ArtFrames />
+        <DeskDressing />
+        <ServerLights />
         <CharactersLayer />
       </group>
       <MapControls
@@ -45,9 +43,10 @@ export function OfficeScene() {
         minPolarAngle={Math.PI / 6}
         minAzimuthAngle={AZIMUTH.min}
         maxAzimuthAngle={AZIMUTH.max}
-        minZoom={16}
-        maxZoom={140}
+        minZoom={22}
+        maxZoom={160}
       />
+      <Effects />
     </Canvas>
   );
 }
