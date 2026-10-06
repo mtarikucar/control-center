@@ -28,7 +28,8 @@ export function App() {
     <div className="app">
       <OfficeScene />
       <TopBar />
-      {selectedId && <Panel id={selectedId} />}
+      {/* Keyed by employee so a draft, the side-question switch or an error never carries over to someone else. */}
+      {selectedId && <Panel key={selectedId} id={selectedId} />}
       {hireOpen && <HireDialog />}
     </div>
   );
