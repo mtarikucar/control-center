@@ -1,0 +1,65 @@
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+import { FAKE_CLAUDE, tempDir, until } from './helpers.ts';
+
+const MAIN = fileURLToPath(new URL('../src/main.ts', import.meta.url));
+const cleanups: Array<() => unknown> = [];
+afterEach(async () => {
+  for (const c of cleanups.splice(0)) await c();
+});
+
+function startOffice(dataDir: string) {
+  const child = spawn(process.execPath, [MAIN], {
+    env: { ...process.env, OFFICE_DATA_DIR: dataDir, OFFICE_PORT: '0', OFFICE_CLAUDE_COMMAND: JSON.stringify([process.execPath, FAKE_CLAUDE]), FAKE_CLAUDE_STATE: tempDir() },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', (d) => (output += d));
+  child.stderr.on('data', (d) => (output += d));
+  const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+  cleanups.push(() => {
+    if (child.exitCode === null) child.kill('SIGKILL');
+  });
+  return { child, exited, output: () => output };
+}
+
+function call(port: number, method: string, path: string, body?: unknown): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: { 'content-type': 'application/json' } }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => resolve(data ? JSON.parse(data) : null));
+    });
+    req.on('error', reject);
+    if (body !== undefined) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+describe('office-server process', () => {
+  it('refuses a second office on the same data directory without touching the first', async () => {
+    const dir = tempDir();
+    const first = startOffice(dir);
+    await until(() => /hazır: http:\/\/127\.0\.0\.1:\d+/.test(first.output()), 10_000);
+    const port = Number(/hazır: http:\/\/127\.0\.0\.1:(\d+)/.exec(first.output())?.[1]);
+    expect(port).toBeGreaterThan(0);
+
+    const hired = await call(port, 'POST', '/api/employees', { name: 'Ada', role: 'r' });
+    await call(port, 'POST', `/api/employees/${hired.id}/messages`, { text: 'SLOW job' });
+
+    const second = startOffice(dir);
+    expect(await second.exited).toBe(1);
+    expect(second.output()).toMatch(/başka bir office-server/);
+
+    const events: Array<{ event: { type: string; to?: string } }> = await call(port, 'GET', `/api/employees/${hired.id}/events?after=0`);
+    expect(events.some((e) => e.event.type === 'lifecycle.changed' && e.event.to === 'interrupted')).toBe(false);
+
+    first.child.kill('SIGINT');
+    expect(await first.exited).toBe(0);
+    expect(existsSync(join(dir, 'office.lock'))).toBe(false);
+  }, 30_000);
+});
