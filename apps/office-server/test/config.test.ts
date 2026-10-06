@@ -12,6 +12,8 @@ describe('loadConfig', () => {
     expect(c.claudeCommand).toEqual(['claude']);
     expect(c.deskCount).toBe(8);
     expect(c.allowedOrigins).toEqual([]);
+    expect(c.webDir).toBe(join(REPO_ROOT, 'apps', 'office-web', 'dist'));
+    expect(c.assetsDir).toBe(join(REPO_ROOT, 'assets', '3d'));
   });
 
   it('reads overrides from the environment', () => {
@@ -20,11 +22,15 @@ describe('loadConfig', () => {
       OFFICE_PORT: '5000',
       OFFICE_CLAUDE_COMMAND: '["node","fake.mjs"]',
       OFFICE_ALLOWED_ORIGINS: 'http://a.test, http://b.test',
+      OFFICE_WEB_DIR: '/tmp/web',
+      OFFICE_ASSETS_DIR: '/tmp/assets',
     });
     expect(c.dataDir).toBe('/tmp/office-x');
     expect(c.port).toBe(5000);
     expect(c.claudeCommand).toEqual(['node', 'fake.mjs']);
     expect(c.allowedOrigins).toEqual(['http://a.test', 'http://b.test']);
+    expect(c.webDir).toBe('/tmp/web');
+    expect(c.assetsDir).toBe('/tmp/assets');
   });
 
   it('refuses a data directory inside the repository', () => {

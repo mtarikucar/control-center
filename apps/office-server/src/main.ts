@@ -25,7 +25,10 @@ const roster = new Roster(db, config.deskCount);
 const quota = new QuotaTracker(db, events);
 const engine = new Engine({ roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand });
 
-const api = createApi({ engine, roster, events, quota }, { allowedOrigins: config.allowedOrigins });
+const api = createApi(
+  { engine, roster, events, quota },
+  { allowedOrigins: config.allowedOrigins, webDir: config.webDir, assetsDir: config.assetsDir },
+);
 api.server.on('error', (err: NodeJS.ErrnoException) => {
   console.error(
     err.code === 'EADDRINUSE'
