@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { characterAsset, characterAssets } from '../assets/manifest.ts';
+import { characterAsset } from '../assets/manifest.ts';
 import { behaviorOf } from '../office/behavior.ts';
-import { LAYOUT, spotFor, tagLift } from '../office/layout.ts';
+import { LAYOUT, spotFor } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
 import { openToolSince } from '../store/reducers.ts';
 import { Character } from './Character.tsx';
+import { TagLayout } from './TagLayout.tsx';
+
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -22,35 +24,39 @@ export function CharactersLayer() {
   const typingAt = useOffice((s) => s.typingAt);
   const selectedId = useOffice((s) => s.selectedId);
   const now = useNow(1000);
-  const fallbackAsset = characterAssets(manifest)[0] ?? null;
+
+  const placed = Object.values(views)
+    .filter((v) => v.employee.lifecycle !== 'archived')
+    .map((v) => {
+      const e = v.employee;
+      const behavior = behaviorOf({
+        lifecycle: e.lifecycle,
+        openToolSince: openToolSince(v),
+        idleSince: v.idleSince ?? e.createdAt,
+        ownerTypingAt: typingAt[e.id] ?? null,
+        now,
+        wanderSeed: e.deskIndex,
+      });
+      return { view: v, behavior, spot: spotFor(LAYOUT, behavior.zone, e.deskIndex) };
+    });
 
   return (
     <group>
-      {Object.values(views)
-        .filter((v) => v.employee.lifecycle !== 'archived')
-        .map((v) => {
-          const e = v.employee;
-          const behavior = behaviorOf({
-            lifecycle: e.lifecycle,
-            openToolSince: openToolSince(v),
-            idleSince: v.lastTurnFinishedAt ?? e.createdAt,
-            ownerTypingAt: typingAt[e.id] ?? null,
-            now,
-            wanderSeed: e.deskIndex,
-          });
-          return (
-            <Character
-              key={e.id}
-              employee={e}
-              behavior={behavior}
-              spot={spotFor(LAYOUT, behavior.zone, e.deskIndex)}
-              tagHeight={2.15 + tagLift(LAYOUT, behavior.zone, e.deskIndex)}
-              asset={characterAsset(manifest, e.characterId) ?? fallbackAsset}
-              usage={usage[e.id]}
-              selected={selectedId === e.id}
-            />
-          );
-        })}
+      {placed.map(({ view, behavior, spot }) => {
+        const e = view.employee;
+        return (
+          <Character
+            key={e.id}
+            employee={e}
+            behavior={behavior}
+            spot={spot}
+            asset={characterAsset(manifest, e.characterId)}
+            usage={usage[e.id]}
+            selected={selectedId === e.id}
+          />
+        );
+      })}
+      <TagLayout />
     </group>
   );
 }

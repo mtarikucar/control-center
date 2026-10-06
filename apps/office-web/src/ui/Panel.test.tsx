@@ -31,7 +31,7 @@ const events: StoredEvent[] = [
 
 beforeEach(() => {
   useOffice.setState({
-    views: { e1: { employee, events, openTools: {}, lastTurnFinishedAt: null, eventsLoaded: true } },
+    views: { e1: { employee, events, openTools: {}, idleSince: null, eventsLoaded: true } },
     usage: { e1: { today: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.04 }, total: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.04 } } },
     selectedId: 'e1',
     terminalCommands: {},
@@ -112,7 +112,7 @@ describe('Panel', () => {
           const view = useOffice.getState().views.e1!;
           useOffice.setState({ views: { e1: { ...view, events: [...view.events, { seq, employeeId: 'e1', ts: seq, event: { type: 'message.assistant', text: `m${seq}` } } as StoredEvent].slice(-500) } } });
         });
-      useOffice.setState({ views: { e1: { employee, events: many, openTools: {}, lastTurnFinishedAt: null, eventsLoaded: true } } });
+      useOffice.setState({ views: { e1: { employee, events: many, openTools: {}, idleSince: null, eventsLoaded: true } } });
       const { container } = render(<Panel id="e1" />);
       const stream = container.querySelector('.stream') as HTMLDivElement;
       stream.scrollTop = 0;
@@ -131,10 +131,24 @@ describe('Panel', () => {
     const at = new Date();
     at.setHours(at.getHours() + 1, 40, 0, 0);
     const hh = String(at.getHours()).padStart(2, '0');
-    useOffice.setState({ views: { e1: { employee: { ...employee, lifecycle: 'limited', limitResetsAt: at.getTime() }, events: [], openTools: {}, lastTurnFinishedAt: null, eventsLoaded: true } } });
+    useOffice.setState({ views: { e1: { employee: { ...employee, lifecycle: 'limited', limitResetsAt: at.getTime() }, events: [], openTools: {}, idleSince: null, eventsLoaded: true } } });
     render(<Panel id="e1" />);
     expect(screen.getByText('Oturum s1')).toBeTruthy();
     expect(screen.getByText(new RegExp(`açılış (\\S+ )?${hh}:40`))).toBeTruthy();
+  });
+
+  it('says so when the employee does not exist, once the roster is in', () => {
+    useOffice.setState({ synced: true });
+    render(<Panel id="nobody" />);
+    expect(screen.getByText('Bu çalışan bulunamadı.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Paneli kapat' }));
+    expect(useOffice.getState().selectedId).toBeNull();
+  });
+
+  it('waits for the roster before deciding that', () => {
+    useOffice.setState({ synced: false });
+    render(<Panel id="nobody" />);
+    expect(screen.getByText('Çalışan yükleniyor…')).toBeTruthy();
   });
 });
 

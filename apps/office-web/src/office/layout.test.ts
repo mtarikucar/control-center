@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { behaviorOf, IDLE_WANDER_MS } from './behavior.ts';
 import { findPath, isFreeAt } from './grid.ts';
-import { GRID, LAYOUT, spotFor, tagLift } from './layout.ts';
+import { GRID, LAYOUT, spotFor } from './layout.ts';
 
 const allSpots = [...LAYOUT.seats, ...LAYOUT.coffeeSpots, ...LAYOUT.loungeSpots, ...LAYOUT.serverSpots];
 
@@ -34,20 +35,23 @@ describe('office layout', () => {
     }
   });
 
-  it('maps zones to spots by desk index', () => {
+  it('maps zones to spots by desk index (wanderers alternate, so each place takes every other desk)', () => {
     expect(spotFor(LAYOUT, 'desk', 3)).toBe(LAYOUT.seats[3]);
     expect(spotFor(LAYOUT, 'desk', 11)).toBe(LAYOUT.seats[3]);
-    expect(spotFor(LAYOUT, 'coffee', 4)).toBe(LAYOUT.coffeeSpots[4 % LAYOUT.coffeeSpots.length]);
-    expect(spotFor(LAYOUT, 'server', 1)).toBe(LAYOUT.serverSpots[1]);
-    expect(spotFor(LAYOUT, 'lounge', 0)).toBe(LAYOUT.loungeSpots[0]);
+    expect(spotFor(LAYOUT, 'server', 5)).toBe(LAYOUT.serverSpots[5]);
+    expect(spotFor(LAYOUT, 'coffee', 4)).toBe(LAYOUT.coffeeSpots[2]);
+    expect(spotFor(LAYOUT, 'lounge', 5)).toBe(LAYOUT.loungeSpots[2]);
   });
 
-  it('lifts the tag of whoever stands further back, so people waiting together keep readable tags', () => {
-    expect(tagLift(LAYOUT, 'desk', 5)).toBe(0);
-    const lifts = LAYOUT.coffeeSpots.map((_, i) => tagLift(LAYOUT, 'coffee', i));
-    const order = LAYOUT.coffeeSpots.map((s, i) => [s.x + s.z, lifts[i]!] as const).sort((a, b) => a[0] - b[0]);
-    for (let i = 1; i < order.length; i += 1) expect(order[i]![1]).toBeLessThan(order[i - 1]![1]);
-    expect(tagLift(LAYOUT, 'coffee', 3)).toBe(tagLift(LAYOUT, 'coffee', 0));
+  it('review focus: never puts two of the eight employees on the same spot', () => {
+    const key = (s: { x: number; z: number }) => `${s.x},${s.z}`;
+    const desks = [...Array(LAYOUT.seats.length).keys()];
+    for (const zone of ['desk', 'server'] as const) expect(new Set(desks.map((d) => key(spotFor(LAYOUT, zone, d)))).size).toBe(desks.length);
+    const wandering = desks.map((d) => {
+      const { zone } = behaviorOf({ lifecycle: 'idle', openToolSince: null, idleSince: 0, ownerTypingAt: null, now: IDLE_WANDER_MS * 2, wanderSeed: d });
+      return `${zone}:${key(spotFor(LAYOUT, zone, d))}`;
+    });
+    expect(new Set(wandering).size).toBe(desks.length);
   });
 });
 

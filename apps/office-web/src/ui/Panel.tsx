@@ -7,6 +7,7 @@ import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
 
 export function Panel({ id }: { id: string }) {
   const view = useOffice((s) => s.views[id]);
+  const synced = useOffice((s) => s.synced);
   const usage = useOffice((s) => s.usage[id]);
   const command = useOffice((s) => s.terminalCommands[id]);
   const select = useOffice((s) => s.select);
@@ -36,7 +37,12 @@ export function Panel({ id }: { id: string }) {
   if (!view) {
     return (
       <aside className="panel">
-        <p className="muted">Çalışan yükleniyor…</p>
+        <header className="panel-head">
+          <p className="muted">{synced ? 'Bu çalışan bulunamadı.' : 'Çalışan yükleniyor…'}</p>
+          <button type="button" className="icon" aria-label="Paneli kapat" onClick={() => select(null)}>
+            ×
+          </button>
+        </header>
       </aside>
     );
   }

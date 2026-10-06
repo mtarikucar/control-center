@@ -40,4 +40,22 @@ describe('HireDialog', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Ofis dolu: 8 masanın hepsi dolu.');
     expect(useOffice.getState().hireOpen).toBe(true);
   });
+
+  it('hires a voxel figure when that is the choice, instead of falling back to a model', async () => {
+    render(<HireDialog />);
+    fireEvent.change(screen.getByLabelText('Ad'), { target: { value: 'Ece' } });
+    fireEvent.change(screen.getByLabelText('Rol tanımı'), { target: { value: 'r' } });
+    fireEvent.change(screen.getByLabelText('Karakter'), { target: { value: 'voxel' } });
+    fireEvent.click(screen.getByRole('button', { name: 'İşe al' }));
+    await waitFor(() => expect(api.hire).toHaveBeenCalledWith(expect.objectContaining({ characterId: 'voxel' })));
+  });
+
+  it('hires a voxel figure when there are no models at all', async () => {
+    useOffice.setState({ manifest: { items: [] } });
+    render(<HireDialog />);
+    fireEvent.change(screen.getByLabelText('Ad'), { target: { value: 'Ece' } });
+    fireEvent.change(screen.getByLabelText('Rol tanımı'), { target: { value: 'r' } });
+    fireEvent.click(screen.getByRole('button', { name: 'İşe al' }));
+    await waitFor(() => expect(api.hire).toHaveBeenCalledWith(expect.objectContaining({ characterId: 'voxel' })));
+  });
 });

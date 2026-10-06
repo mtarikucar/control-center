@@ -1,7 +1,10 @@
 import ReactThreeTestRenderer from '@react-three/test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AnimationClip, Bone, BoxGeometry, Float32BufferAttribute, Group, Skeleton, SkinnedMesh, Uint16BufferAttribute, VectorKeyframeTrack, type Object3D } from 'three';
+import { AnimationClip, Bone, BoxGeometry, Float32BufferAttribute, Group, Skeleton, SkinnedMesh, Uint16BufferAttribute, VectorKeyframeTrack, type Material, type Mesh, type Object3D } from 'three';
 import type { CharacterAsset } from '../assets/manifest.ts';
+
+// test-renderer drives React through act(); tell React this is a test environment.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // A tiny rig: one bone "Hips" driving a skinned box, plus a clip that moves Hips up over one second.
 function rig(): Group {
@@ -45,5 +48,23 @@ describe('CharacterModel', () => {
     await renderer.advanceFrames(3, 0.1);
     expect(hipsY(renderer)).toBeGreaterThan(before + 0.1);
     await renderer.unmount();
+  });
+
+  it('frees its own copies of the materials when it goes away, and leaves the shared model alone', async () => {
+    const materialsOf = (o: Object3D) => {
+      const out: Material[] = [];
+      o.traverse((c) => {
+        if ((c as Mesh).isMesh) out.push((c as Mesh).material as Material);
+      });
+      return out;
+    };
+    const renderer = await ReactThreeTestRenderer.create(<CharacterModel asset={asset} role="sit" faded={false} />);
+    const copies = materialsOf(renderer.scene.children[0]!.instance as Object3D);
+    const shared = materialsOf(loaded[0]!.scene);
+    const disposed: Material[] = [];
+    for (const m of [...copies, ...shared]) m.addEventListener('dispose', () => disposed.push(m));
+    await renderer.unmount();
+    expect(copies.length).toBeGreaterThan(0);
+    expect(disposed).toEqual(copies);
   });
 });

@@ -51,13 +51,19 @@ export function parseManifest(raw: unknown): AssetManifest {
   return { items };
 }
 
+/** The character id of the built-in voxel figure: never a model in the manifest. */
+export const VOXEL_CHARACTER = 'voxel';
+
+/** The office works without models (voxel stand-ins everywhere), so a missing manifest is only worth a console note. */
 export async function loadManifest(fetchFn: typeof fetch = fetch): Promise<AssetManifest> {
   try {
     const res = await fetchFn(`${ASSET_BASE}manifest.json`);
-    return res.ok ? parseManifest(await res.json()) : EMPTY_MANIFEST;
-  } catch {
-    return EMPTY_MANIFEST;
+    if (res.ok) return parseManifest(await res.json());
+    console.warn(`3D manifest yüklenemedi (HTTP ${res.status}); voksel figürler kullanılıyor.`);
+  } catch (err) {
+    console.warn('3D manifest okunamadı; voksel figürler kullanılıyor.', err);
   }
+  return EMPTY_MANIFEST;
 }
 
 export const assetUrl = (file: string): string => `${ASSET_BASE}${file}`;

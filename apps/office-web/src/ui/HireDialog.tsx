@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { MODEL_ALIASES, type ModelAlias } from '@cc/shared';
-import { characterAssets } from '../assets/manifest.ts';
+import { VOXEL_CHARACTER, characterAssets } from '../assets/manifest.ts';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 
@@ -12,7 +12,7 @@ export function HireDialog() {
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [model, setModel] = useState<ModelAlias>('sonnet');
-  const [character, setCharacter] = useState(characters[0]?.id ?? '');
+  const [character, setCharacter] = useState(characters[0]?.id ?? VOXEL_CHARACTER);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -21,7 +21,7 @@ export function HireDialog() {
     setError(null);
     setBusy(true);
     try {
-      const hired = await api.hire({ name, role, model, ...(character ? { characterId: character } : {}) });
+      const hired = await api.hire({ name, role, model, characterId: character });
       setHireOpen(false);
       select(hired.id);
     } catch (err) {
@@ -62,7 +62,7 @@ export function HireDialog() {
                   {c.name}
                 </option>
               ))}
-              <option value="">Voksel figür</option>
+              <option value={VOXEL_CHARACTER}>Voksel figür</option>
             </select>
           </div>
         </div>
