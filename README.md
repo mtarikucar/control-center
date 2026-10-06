@@ -34,6 +34,20 @@ yapın. Sonra yalnız koordinatörle konuşursunuz:
 Çalışanlar ofis araçlarına (`taskFinish`, `taskPass`, `planPropose`, `hire`…) ofis sunucusunun `/mcp` adresinden,
 her oturuma özel bir jetonla erişir.
 
+## Şirket hafızası
+
+Şirket unutmaz; hepsi veri klasöründe (`~/.control-center/company/` ve veritabanı) durur:
+
+- **Karar defteri:** koordinatör ve ekip liderleri önemli seçimleri (ne, neden, alternatifler) kaydeder. Şirket
+  görünümünün **Kararlar** sekmesinden bir kararı **Geri al**abilirsiniz; koordinatöre haber gider.
+- **El kitabı:** çalışma yöntemleri konu konu, sürüm sürüm (`company/playbook/<konu>.md`).
+- **Notlar:** herkesin öğrendiği; tam metin aranır. Bir teslimdeki "öğrendiklerim" de nota dönüşür.
+- **Arşiv:** her teslimin dosyaları ve bir `teslim.md` (`company/archive/<plan>/<tarih>-<görev>/`).
+- **Çalışan dosyası:** koordinatörün her çalışan hakkındaki notları ve bitirdiği işler (panelde "Çalışan dosyası").
+
+**İşten çıkar** önce bir devir görevi verir: çalışan bildiklerini yazar, teslim edince ofis onu çıkarır ve açık işleri
+koordinatöre döner. Beklemek istemezseniz **Hemen çıkar**.
+
 ## office-server
 
 Gereken: Node 24+, pnpm 9, giriş yapılmış `claude` CLI.

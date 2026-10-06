@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { OWNER, type Plan } from '@cc/shared';
 import { createApi } from '../src/api.ts';
@@ -9,7 +11,7 @@ import { Engine } from '../src/engine.ts';
 import { TokenRegistry } from '../src/mcp/tokens.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { QuotaTracker } from '../src/quota.ts';
-import { setup, waitFor } from './helpers.ts';
+import { setup, until, waitFor } from './helpers.ts';
 
 const enabled = process.env.OFFICE_SMOKE === '1';
 
@@ -38,7 +40,7 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
       const coordinator = company.hireCoordinator('sonnet');
       engine.send(
         coordinator.id,
-        'Ofis klasörüne NOTES.md adında, ofisin ne olduğunu iki cümleyle anlatan bir dosya yazdırmak istiyorum. Önce planPropose ile bir plan kartı aç. Onaydan sonra işi kendin yapma: hire ile haiku modelli bir yazar al ve görevi ona ver.',
+        'Ofis klasörüne NOTES.md adında, ofisin ne olduğunu iki cümleyle anlatan bir dosya yazdırmak istiyorum. Önce planPropose ile bir plan kartı aç. Onaydan sonra işi kendin yapma: hire ile haiku modelli bir yazar al ve görevi ona ver. Seçtiğin yaklaşımı decisionRecord ile karar defterine de kaydet.',
       );
       const proposed = await waitFor(s.events, (e) => e.event.type === 'plan.changed' && e.event.change === 'proposed', { timeoutMs: 300_000 });
       const plan = (proposed.event as { plan: Plan }).plan;
@@ -48,6 +50,15 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
       const writer = s.roster.list().find((e) => e.id !== coordinator.id);
       expect(writer, 'the coordinator hired someone').toBeDefined();
       expect((finished.event as { task: { assignee: string; result: { summary: string } | null } }).task).toMatchObject({ assignee: writer!.id });
+      const handed = (finished.event as { task: { id: string; result: { archive?: string } | null } }).task;
+      expect(handed.result?.archive, 'the hand-in was archived').toMatch(/^company\/archive\//);
+      expect(existsSync(join(s.dataDir, handed.result!.archive!, 'teslim.md'))).toBe(true);
+      await waitFor(s.events, (e) => e.event.type === 'decision.recorded', { timeoutMs: 300_000 });
+      // The owner lets the writer go: a hand-over first, then the office fires them.
+      company.beginHandover(writer!.id);
+      await until(() => s.roster.get(writer!.id).lifecycle === 'archived', 600_000);
+      const out = tasks.list({ assignee: writer!.id, statuses: ['done'] }).find((t) => t.kind === 'handover');
+      expect(out?.result?.summary, 'the hand-over was handed in').toBeTruthy();
       expect(company.coordinator()?.id).toBe(coordinator.id);
       expect(OWNER).toBe('owner');
     } finally {
