@@ -2,6 +2,7 @@ import type { BudgetSummary, Spend } from './budget.ts';
 import type { Plan, PlanChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Decision } from './memory.ts';
+import type { Proposal, ProposalChange } from './proposal.ts';
 
 export interface Usage {
   inputTokens: number;
@@ -61,6 +62,7 @@ export type OfficeEvent =
   | { type: 'spend.recorded'; spend: Spend }
   | { type: 'budget.changed'; budget: BudgetSummary }
   | { type: 'model.changed'; model: ModelAlias }
+  | { type: 'proposal.changed'; change: ProposalChange; proposal: Proposal }
   | { type: 'error'; message: string };
 
 export type OfficeEventType = OfficeEvent['type'];
@@ -94,6 +96,7 @@ export interface OfficeSnapshot {
   /** Open tasks and the most recent finished ones (absent from servers without the company layer). */
   tasks?: Task[];
   plans?: Plan[];
+  proposals?: Proposal[];
   /** The constitution, the reserve and the money (absent from servers without the company layer). */
   budget?: BudgetSummary;
 }

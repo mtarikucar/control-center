@@ -10,6 +10,7 @@ const PLAN_CHANGE: Record<PlanChange, string> = {
   declined: 'vazgeçildi',
   done: 'açık görevi kalmadı',
   reopened: 'yeniden açıldı',
+  kept: 'revizyon reddedildi, onaylı sürümüyle sürüyor',
 };
 
 export function EventItem({ stored }: { stored: StoredEvent }) {

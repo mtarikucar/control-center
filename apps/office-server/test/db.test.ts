@@ -16,14 +16,15 @@ function tables(db: Db): string[] {
   return rows.map((r) => r.name);
 }
 const V4_TABLES = [...V3_TABLES, 'constitution', 'spend'].sort();
+const V5_TABLES = [...V4_TABLES, 'proposals'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(4);
-    expect(tables(db)).toEqual(V4_TABLES);
+    expect(migrateUp(db)).toBe(5);
+    expect(tables(db)).toEqual(V5_TABLES);
   });
 
   it('round-trips up → down → up', () => {
@@ -32,14 +33,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(4);
-    expect(tables(db)).toEqual(V4_TABLES);
+    expect(migrateUp(db)).toBe(5);
+    expect(tables(db)).toEqual(V5_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(4);
+    expect(migrateUp(db)).toBe(5);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -105,13 +106,30 @@ describe('migrations', () => {
       `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
        VALUES ('t1', NULL, 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'waiting', 0, 1)`,
     ).run();
-    migrateUp(db);
+    migrateUp(db, upTo(4));
     expect(tables(db)).toEqual(V4_TABLES);
     expect({ ...(db.prepare('SELECT cost_usd, tokens FROM tasks').get() as object) }).toEqual({ cost_usd: 0, tokens: 0 });
     expect(migrateDown(db, 3)).toBe(3);
     expect(tables(db)).toEqual(V3_TABLES);
     expect(columns(db, 'tasks')).not.toContain('cost_usd');
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(4);
+    expect(migrateUp(db, upTo(4))).toBe(4);
+  });
+
+  it('v5 adds proposals and the approved snapshot of plans; v5 down restores v4 and keeps plans', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(4));
+    db.prepare(
+      `INSERT INTO plans (id, title, goal, approach, people, steps, risks, status, version, proposed_by, created_at, updated_at)
+       VALUES ('p1', 'P', 'g', 'a', '', '[]', '', 'approved', 1, 'c', 1, 1)`,
+    ).run();
+    migrateUp(db);
+    expect(tables(db)).toEqual(V5_TABLES);
+    expect({ ...(db.prepare('SELECT approved_snapshot FROM plans').get() as object) }).toEqual({ approved_snapshot: null });
+    expect(migrateDown(db, 4)).toBe(4);
+    expect(tables(db)).toEqual(V4_TABLES);
+    expect(columns(db, 'plans')).not.toContain('approved_snapshot');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM plans').get()).toMatchObject({ n: 1 });
+    expect(migrateUp(db)).toBe(5);
   });
 });
