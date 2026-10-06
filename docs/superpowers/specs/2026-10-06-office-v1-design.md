@@ -89,7 +89,7 @@ Masalar repo içinde olsaydı çalışanlar bu reponun geliştirme talimatların
 ### 4.1 roster — çalışan kartları
 
 Kart alanları: `id`, `slug`, `name`, `role` (serbest metin rol tanımı), `model` (`opus`|`sonnet`|`haiku`,
-varsayılan `sonnet`), `characterId` (manifest'teki karakter), `deskIndex`, `sessionId`, `lifecycle`
+varsayılan `sonnet`), `characterId` (manifest'teki karakter ya da `voxel` = yerleşik voksel figür), `deskIndex`, `sessionId`, `lifecycle`
 (§6), `createdAt`. Rol tanımı aynı zamanda masadaki `CLAUDE.md` dosyasıdır; dosya düzenlenirse bir sonraki
 başlatmada geçerli olur.
 
@@ -215,16 +215,19 @@ Karakter davranışı olaylardan türetilen saf bir fonksiyondur (olaylar → `{
 | `limited` / `error` | Masasında durur, başının üstünde kırmızı işaret; `limited`'da açılma saati |
 | `stopped` / `in_terminal` | Soluk görünür; `in_terminal`'de terminal simgesi |
 
-Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet. Toplantı odası v1'de kullanılmaz.
+Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet (iki satırlık etiket). Etiketler ekranda üst
+üste binmez: kameraya en yakın olan yerinde kalır, arkadakiler gerektiği kadar yukarı kayar (her karede, her
+yakınlaştırma ve açıda). Her masanın kahve/oturma/server noktası kendine aittir; iki çalışan aynı noktada durmaz.
+Toplantı odası v1'de kullanılmaz.
 
 ## 7. office-web
 
 - **Sahne:** referans görsele göre yerleşim (8 masalık açık alan, cam toplantı odası, server odası,
   kahve köşesi, oturma alanı, resepsiyon, bitkili kitaplık). Bina (zemin, duvar, pencere, cam bölme, halı)
   kodla voksel kutulardan kurulur. Eşyalar ve karakterler `assets/3d/manifest.json`'dan yüklenir.
-- **Yerleşim verisi:** `layout.json` — bölgeler, masa oturma noktaları, kahve/oturma/server noktaları,
+- **Yerleşim verisi:** `office/layout.ts` — bölgeler, masa oturma noktaları, kahve/oturma/server noktaları,
   yürüme ızgarası. Karakterler ızgara üzerinde en kısa yolla yürür (A*).
-- **Kamera:** referanstaki gibi yukarıdan izometrik açı; yakınlaştırma ve kaydırma, sınırlı döndürme.
+- **Kamera:** referanstaki gibi yukarıdan izometrik açı; yakınlaştırma ve kaydırma, sınırlı döndürme (yalnız alçak duvarlı güney–doğu tarafında).
 - **Karakter paneli:** canlı akış (metin; açılır kapanır komut kutuları; dokunulan dosyalar), mesaj kutusu,
   "Yan soru" anahtarı, Durdur / Devam / Terminalde aç, model–token–maliyet–oturum no.
 - **İşe alma formu** ve köşede **kota göstergesi**.
