@@ -85,10 +85,15 @@ describe('migrations', () => {
   it('v3 keeps the notes index in step with the notes table', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    db.prepare("INSERT INTO notes (ts, by_id, title, text, tags, source) VALUES (1, 'e1', 'Seslendirme', 'ElevenLabs Türkçe iyi', '[]', NULL)").run();
-    const hits = () => db.prepare("SELECT rowid FROM notes_fts WHERE notes_fts MATCH 'turkce'").all().length;
-    expect(hits()).toBe(1);
+    db.prepare(
+      "INSERT INTO notes (ts, by_id, title, text, tags, source, ft_title, ft_text, ft_tags) VALUES (1, 'e1', 'Seslendirme', 'ElevenLabs Türkçe iyi', '[]', NULL, 'seslendirme', 'elevenlabs turkce iyi', '')",
+    ).run();
+    const hits = (word: string) => db.prepare('SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?').all(word).length;
+    expect(hits('turkce')).toBe(1);
+    db.prepare("UPDATE notes SET text = 'Polly', ft_text = 'polly'").run();
+    expect(hits('turkce')).toBe(0);
+    expect(hits('polly')).toBe(1);
     db.prepare('DELETE FROM notes').run();
-    expect(hits()).toBe(0);
+    expect(hits('polly')).toBe(0);
   });
 });

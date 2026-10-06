@@ -18,6 +18,16 @@ function sizeOf(path: string, budget: number): number {
   return total;
 }
 
+/** Inside a copied folder, only files, folders and links (never a device or pipe). */
+function copyable(path: string): boolean {
+  try {
+    const st = lstatSync(path);
+    return st.isFile() || st.isDirectory() || st.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Copies a hand-in's outputs to company/archive/<plan or "plansiz">/<date>-<task id>-<title>/ and writes teslim.md:
  * what was done, what was learned, and what happened to each output. Never throws for an output it cannot copy.
@@ -36,6 +46,12 @@ export function archiveTask(o: { dataDir: string; desk: string; task: Task; resu
       report.push(`- ${output} — bulunamadı`);
       continue;
     }
+    const kind = lstatSync(src);
+    if (!kind.isFile() && !kind.isDirectory() && !kind.isSymbolicLink()) {
+      // A device or pipe would never finish copying (and stall the whole office): leave it where it is.
+      report.push(`- ${output} — dosya ya da klasör değil, kopyalanmadı`);
+      continue;
+    }
     let size: number;
     try {
       size = sizeOf(src, budget);
@@ -52,7 +68,7 @@ export function archiveTask(o: { dataDir: string; desk: string; task: Task; resu
     for (let n = 2; used.has(name); n += 1) name = `${n}-${base}`;
     used.add(name);
     try {
-      cpSync(src, join(dir, name), { recursive: true, dereference: false, force: true });
+      cpSync(src, join(dir, name), { recursive: true, dereference: false, force: true, filter: copyable });
       budget -= size;
       report.push(`- ${output} → ${name}`);
     } catch (err) {

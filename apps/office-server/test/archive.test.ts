@@ -52,4 +52,16 @@ describe('archiveTask', () => {
     expect(teslim).toContain('buyuk.bin — arşive sığmadı');
     expect(teslim).toMatch(/kopyalanamadı|arşive sığmadı/);
   });
+
+
+  it('important: never copies a device or pipe (it would never end), and says so', () => {
+    const dataDir = tempDir();
+    const desk = join(dataDir, 'desks', 'ada');
+    mkdirSync(desk, { recursive: true });
+    const started = Date.now();
+    const dir = archiveTask({ dataDir, desk, task: task(), planTitle: null, by: 'Ada', now: 0, result: { summary: 's', outputs: ['/dev/zero'], learned: '' } });
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(readFileSync(join(dir, 'teslim.md'), 'utf8')).toContain('/dev/zero — dosya ya da klasör değil');
+    expect(existsSync(join(dir, 'zero'))).toBe(false);
+  });
 });

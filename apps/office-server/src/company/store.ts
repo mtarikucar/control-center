@@ -144,6 +144,20 @@ export class TaskStore {
     return row ? taskFromRow(row) : null;
   }
 
+  /** The owner's hand-over for this person is in (one query: a long track record must not hide it). */
+  handoverDone(assignee: string): boolean {
+    return (
+      this.#db.prepare("SELECT 1 FROM tasks WHERE assignee = ? AND kind = 'handover' AND requester = 'owner' AND status = 'done' LIMIT 1").get(assignee) !==
+      undefined
+    );
+  }
+
+  /** When this person last started a task other than `exceptId` (null: never). */
+  lastStartedAt(assignee: string, exceptId: string): number | null {
+    const row = this.#db.prepare('SELECT MAX(started_at) AS t FROM tasks WHERE assignee = ? AND id != ?').get(assignee, exceptId) as unknown as { t: number | null };
+    return row.t;
+  }
+
   createdSince(requester: string, since: number): number {
     const row = this.#db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE requester = ? AND created_at >= ?').get(requester, since) as unknown as { n: number };
     return row.n;

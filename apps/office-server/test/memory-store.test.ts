@@ -52,6 +52,13 @@ describe('NoteStore', () => {
     expect(notes.list()[0]).toMatchObject({ tags: [], source: 'task:t1' });
   });
 
+  it('important: finds Turkish words typed without ı/ş or in capitals, and shows the original text', () => {
+    const { notes } = stores();
+    notes.create({ by: 'e1', title: 'Yazılım', text: 'kullanıcı satış tasarım ışık', tags: ['Arayüz'], source: null });
+    for (const q of ['yazilim', 'YAZILIM', 'kullanici', 'KULLANICI', 'satis', 'SATIŞ', 'tasarim', 'isik', 'ışık', 'arayuz']) expect(notes.search(q), q).toHaveLength(1);
+    expect(notes.search('kullanici')[0]?.snippet).toContain('kullanıcı');
+  });
+
   it('review focus: FTS syntax in a query is searched as words, never an SQL error', () => {
     const { notes } = stores();
     notes.create({ by: 'e1', title: 'NEAR plan', text: 'a "quoted" word', tags: [], source: null });
@@ -60,7 +67,7 @@ describe('NoteStore', () => {
     expect(notes.search('(plan) OR')).toEqual([]);
     expect(notes.search('*')).toEqual([]);
     expect(ftsQuery('  ')).toBeNull();
-    expect(ftsQuery('ses aracı')).toBe('"ses"* "aracı"*');
+    expect(ftsQuery('ses ARACI')).toBe('"ses"* "araci"*');
   });
 });
 

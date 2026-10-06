@@ -7,7 +7,7 @@ import type { EventStore } from '../event-store.ts';
 import { slugify, type Roster } from '../roster.ts';
 import type { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './memory-store.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
-import { clean, fold, lines, words } from './text.ts';
+import { clean, fold, lines, snippetOf, words } from './text.ts';
 
 export interface MemoryDeps {
   roster: Roster;
@@ -25,13 +25,6 @@ export interface MemoryDeps {
 function matches(haystack: string, ws: string[]): boolean {
   const h = fold(haystack);
   return ws.every((w) => h.includes(w));
-}
-
-function snippetOf(text: string, ws: string[], width = 180): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  const at = Math.max(0, fold(flat).indexOf(ws[0] ?? ''));
-  const start = Math.max(0, at - 50);
-  return `${start > 0 ? '…' : ''}${flat.slice(start, start + width)}${start + width < flat.length ? '…' : ''}`;
 }
 
 /** The company's memory: decisions, the playbook, knowledge notes and employee files (spec §5). */

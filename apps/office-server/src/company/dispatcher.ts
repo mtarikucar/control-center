@@ -84,16 +84,17 @@ export class Dispatcher {
       return;
     }
     const pending = this.#d.notices.pending(id);
-    const current = this.#d.tasks.inProgressOf(id);
-    const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting'] }).find((t) => t.kind === 'handover');
+    // Someone the owner is letting go gets nothing but their hand-over, even while it is blocked.
+    const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
+    const focus = handover && handover.status !== 'waiting' ? handover : this.#d.tasks.inProgressOf(id);
     let body = '';
     let started: Task | null = null;
-    if (handover) {
+    if (handover?.status === 'waiting') {
       // Leaving comes first, even with another task open: that task goes back to the coordinator afterwards.
       started = this.#d.company.start(handover.id);
-    } else if (current) {
-      if (!current.nudged) body = this.#nudge(current);
-      else this.#escalate(id, current);
+    } else if (focus) {
+      if (!focus.nudged) body = this.#nudge(focus);
+      else this.#escalate(id, focus);
     } else {
       const next = this.#d.tasks.nextFor(id);
       if (next) started = this.#d.company.start(next.id);
@@ -108,7 +109,7 @@ export class Dispatcher {
       if (started) this.#d.tasks.update(started.id, { status: 'waiting', startedAt: null });
       return;
     }
-    if (!started && current && !current.nudged) this.#d.tasks.update(current.id, { nudged: true });
+    if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
   }
 
@@ -126,11 +127,7 @@ export class Dispatcher {
   #briefChanged(task: Task): boolean {
     const changed = this.#d.company.briefUpdatedAt();
     if (changed === 0) return false;
-    const earlier = this.#d.tasks
-      .list({ assignee: task.assignee })
-      .filter((t) => t.id !== task.id && t.startedAt !== null)
-      .map((t) => t.startedAt as number);
-    const since = earlier.length ? Math.max(...earlier) : this.#d.roster.get(task.assignee).createdAt;
+    const since = this.#d.tasks.lastStartedAt(task.assignee, task.id) ?? this.#d.roster.get(task.assignee).createdAt;
     return changed >= since;
   }
 
@@ -161,9 +158,12 @@ ${task.description || '(açıklama yok)'}${done}
     const coordinator = this.#d.company.coordinator();
     if (!coordinator || coordinator.id === id) return;
     this.#escalated.add(task.id);
+    const name = this.#d.company.nameOf(id);
     this.#d.notices.add(
       coordinator.id,
-      `${this.#d.company.nameOf(id)} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
+      task.kind === 'handover'
+        ? `${name} devir görevini hatırlatmaya rağmen teslim etmedi. Devir başkasına verilemez: ona sor, gerekirse reportToOwner ile sahibine bildir (sahibi Hemen çıkar ile devri atlayabilir).`
+        : `${name} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
     );
     this.#schedule(coordinator.id);
   }

@@ -154,4 +154,22 @@ describe('Dispatcher — hand-over and the brief', () => {
     expect(await run('iki')).toContain('Şirket özeti değişti');
     expect(await run('üç')).not.toContain('Şirket özeti değişti');
   });
+
+
+  it('important: a blocked hand-over still means leaving: no new work, one reminder, then the coordinator hears (no taskAssign)', async () => {
+    const t = makeFull();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    const handover = t.company.beginHandover(ada.id);
+    await until(() => t.tasks.get(handover.id).status === 'in_progress', 8000);
+    t.company.update(ada.id, handover.id, { blocked: true, note: 'ne yazacağımı bilmiyorum' });
+    const work = t.company.createTask(coord.id, { assignee: ada.id, title: 'Yeni iş' });
+    const escalated = () => systemMessages(t.events.list({ limit: 5000 }), coord.id).find((m) => m.includes('devir görevini'));
+    await until(() => escalated() !== undefined, 8000);
+    expect(escalated()).toContain('Hemen çıkar');
+    expect(escalated()).not.toContain('taskAssign ile başkasına ver');
+    await sleep(500);
+    expect(t.tasks.get(work.id).status).toBe('waiting');
+    expect(systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.includes('Yeni iş'))).toBe(false);
+  });
 });

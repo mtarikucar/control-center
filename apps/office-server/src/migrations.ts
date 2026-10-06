@@ -151,16 +151,23 @@ export const MIGRATIONS: Migration[] = [
         title TEXT NOT NULL,
         text TEXT NOT NULL,
         tags TEXT NOT NULL,
-        source TEXT
+        source TEXT,
+        ft_title TEXT NOT NULL,
+        ft_text TEXT NOT NULL,
+        ft_tags TEXT NOT NULL
       );
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-        title, text, tags, content = 'notes', content_rowid = 'id', tokenize = 'unicode61 remove_diacritics 2'
+        ft_title, ft_text, ft_tags, content = 'notes', content_rowid = 'id', tokenize = 'unicode61 remove_diacritics 2'
       );
       CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
-        INSERT INTO notes_fts (rowid, title, text, tags) VALUES (new.id, new.title, new.text, new.tags);
+        INSERT INTO notes_fts (rowid, ft_title, ft_text, ft_tags) VALUES (new.id, new.ft_title, new.ft_text, new.ft_tags);
       END;
       CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
-        INSERT INTO notes_fts (notes_fts, rowid, title, text, tags) VALUES ('delete', old.id, old.title, old.text, old.tags);
+        INSERT INTO notes_fts (notes_fts, rowid, ft_title, ft_text, ft_tags) VALUES ('delete', old.id, old.ft_title, old.ft_text, old.ft_tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
+        INSERT INTO notes_fts (notes_fts, rowid, ft_title, ft_text, ft_tags) VALUES ('delete', old.id, old.ft_title, old.ft_text, old.ft_tags);
+        INSERT INTO notes_fts (rowid, ft_title, ft_text, ft_tags) VALUES (new.id, new.ft_title, new.ft_text, new.ft_tags);
       END;
       CREATE TABLE IF NOT EXISTS employee_notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +180,7 @@ export const MIGRATIONS: Migration[] = [
     down: `
       DROP INDEX IF EXISTS employee_notes_employee;
       DROP TABLE IF EXISTS employee_notes;
+      DROP TRIGGER IF EXISTS notes_au;
       DROP TRIGGER IF EXISTS notes_ad;
       DROP TRIGGER IF EXISTS notes_ai;
       DROP TABLE IF EXISTS notes_fts;

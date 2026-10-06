@@ -341,3 +341,26 @@ describe('Company — hand-over', () => {
     expect(note).not.toContain('Devir');
   });
 });
+
+describe('Company — final review (phase 2)', () => {
+  it('critical: a hand-over cannot be given to someone else, so only the person the owner chose leaves', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, bob] = [t.company.hire(c.id, { name: 'Ada', role: 'r' }), t.company.hire(c.id, { name: 'Bob', role: 'r' })];
+    const handover = t.company.beginHandover(ada.id);
+    t.company.start(handover.id);
+    t.tasks.update(handover.id, { nudged: true });
+    expect(() => t.company.assign(c.id, handover.id, bob.id)).toThrow(/Devir görevi başkasına verilemez/);
+    expect(t.tasks.get(handover.id).assignee).toBe(ada.id);
+    expect(t.company.handedOver(bob.id)).toBe(false);
+  });
+
+  it('knows a hand-over is in however many tasks the person finished before', () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    for (let i = 0; i < 1001; i += 1) t.tasks.update(t.tasks.create({ planId: null, title: `iş ${i}`, description: '', done: [], requester: OWNER, assignee: ada.id, priority: 3, dependsOn: [], chainDepth: 0 }).id, { status: 'done' });
+    const handover = t.company.beginHandover(ada.id);
+    t.tasks.update(handover.id, { status: 'done' });
+    expect(t.company.handedOver(ada.id)).toBe(true);
+  });
+});

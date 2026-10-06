@@ -22,3 +22,11 @@ export function fold(s: string): string {
 export function words(s: string): string[] {
   return fold(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(0, 8);
 }
+
+/** About `width` characters of `text` around the first word of `ws` (folded words, as from `words()`). */
+export function snippetOf(text: string, ws: string[], width = 180): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const at = Math.max(0, fold(flat).indexOf(ws[0] ?? ''));
+  const start = Math.max(0, at - 50);
+  return `${start > 0 ? '…' : ''}${flat.slice(start, start + width)}${start + width < flat.length ? '…' : ''}`;
+}

@@ -2,14 +2,15 @@ import { randomUUID } from 'node:crypto';
 import type { Decision, EmployeeNote, Note, PlaybookEntry } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
+import { fold, snippetOf, words } from './text.ts';
 
 /**
- * A user's query as an FTS5 expression that cannot be a syntax error: every word quoted and prefix-matched, all
- * required. Null when the query has no words.
+ * A user's query as an FTS5 expression that cannot be a syntax error: every word folded (Turkish ı/İ, ş, ç… — the
+ * index holds folded text too), quoted and prefix-matched, all required. Null when the query has no words.
  */
 export function ftsQuery(query: string): string | null {
-  const words = query.normalize('NFC').split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(0, 8);
-  return words.length ? words.map((w) => `"${w}"*`).join(' ') : null;
+  const ws = words(query);
+  return ws.length ? ws.map((w) => `"${w}"*`).join(' ') : null;
 }
 
 interface DecisionRow {
@@ -152,8 +153,8 @@ export class NoteStore {
   create(n: Omit<Note, 'id' | 'ts'>): Note {
     const ts = this.#now();
     const r = this.#db
-      .prepare('INSERT INTO notes (ts, by_id, title, text, tags, source) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(ts, n.by, n.title, n.text, JSON.stringify(n.tags), n.source);
+      .prepare('INSERT INTO notes (ts, by_id, title, text, tags, source, ft_title, ft_text, ft_tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ts, n.by, n.title, n.text, JSON.stringify(n.tags), n.source, fold(n.title), fold(n.text), fold(n.tags.join(' ')));
     return { ...n, id: Number(r.lastInsertRowid), ts };
   }
 
@@ -166,13 +167,11 @@ export class NoteStore {
     const match = ftsQuery(query);
     if (!match) return [];
     const rows = this.#db
-      .prepare(
-        `SELECT n.*, snippet(notes_fts, -1, '«', '»', '…', 14) AS snip
-           FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid
-          WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?`,
-      )
-      .all(match, limit) as unknown as Array<NoteRow & { snip: string }>;
-    return rows.map((r) => ({ note: noteFromRow(r), snippet: r.snip.replace(/[«»]/g, '') }));
+      .prepare('SELECT n.* FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?')
+      .all(match, limit) as unknown as NoteRow[];
+    // The index holds folded text; the snippet comes from the original, so the owner reads what was written.
+    const ws = words(query);
+    return rows.map((r) => ({ note: noteFromRow(r), snippet: snippetOf(r.text, ws) }));
   }
 }
 

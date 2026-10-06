@@ -213,6 +213,8 @@ export class Company {
   assign(by: string, taskId: string, assignee: string): Task {
     this.#assertCoordinator(by);
     const task = this.#d.tasks.get(taskId);
+    // Finishing a hand-over lets its holder go: moving it would fire someone the owner never chose.
+    if (task.kind === 'handover') throw new ConflictError('Devir görevi başkasına verilemez; sahibi beklemek istemezse Hemen çıkar ile devri atlayabilir.');
     const holder = this.#person(task.assignee);
     // A running task stays with its assignee — unless they were fired or left it open after the office's reminder.
     if (task.status === 'in_progress' && !task.nudged && holder !== null && holder.lifecycle !== 'archived') {
@@ -265,7 +267,7 @@ export class Company {
 
   /** The hand-over is in: the office may let them go. */
   handedOver(id: string): boolean {
-    return this.#d.tasks.list({ assignee: id, statuses: ['done'] }).some((t) => t.kind === 'handover');
+    return this.#d.tasks.handoverDone(id);
   }
 
   /** When the company brief last changed (0 = never written). */
