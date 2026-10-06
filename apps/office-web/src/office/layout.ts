@@ -122,19 +122,29 @@ export const LAYOUT: Layout = {
     { x1: 12.2, z1: 14.6, x2: 16.8, z2: 17.6, color: '#dccdb4' },
   ],
   seats,
+  // Half the desks wander to coffee and half to the lounge (behaviorOf), so each needs four places; anyone can be
+  // in the server room, so it has one per desk.
   coffeeSpots: [
     { x: 20.9, z: 8.6, rotY: PI / 2 },
     { x: 20.9, z: 9.6, rotY: PI / 2 },
     { x: 20.9, z: 10.6, rotY: PI / 2 },
+    { x: 21.4, z: 7.8, rotY: PI / 4 },
   ],
   loungeSpots: [
     { x: 5.4, z: 14.6, rotY: -PI / 2 },
     { x: 1.4, z: 14.4, rotY: PI / 2 },
     { x: 5.4, z: 16.0, rotY: -PI / 2 },
+    { x: 1.4, z: 15.8, rotY: PI / 2 },
   ],
   serverSpots: [
-    { x: 21.8, z: 1.8, rotY: PI / 2 },
-    { x: 21.8, z: 3.2, rotY: PI / 2 },
+    { x: 21.7, z: 1.4, rotY: PI / 2 },
+    { x: 21.7, z: 2.6, rotY: PI / 2 },
+    { x: 21.7, z: 3.8, rotY: PI / 2 },
+    { x: 21.7, z: 5.0, rotY: PI / 2 },
+    { x: 20.5, z: 1.4, rotY: PI / 2 },
+    { x: 20.5, z: 2.6, rotY: PI / 2 },
+    { x: 20.5, z: 3.8, rotY: PI / 2 },
+    { x: 20.5, z: 5.0, rotY: PI / 2 },
   ],
 };
 
@@ -160,21 +170,12 @@ export function obstaclesOf(layout: Layout): Rect[] {
 
 export const GRID = buildGrid(LAYOUT.width, LAYOUT.depth, LAYOUT.cell, obstaclesOf(LAYOUT));
 
-export function spotFor(layout: Layout, zone: Zone, index: number): Spot {
-  const list = zone === 'desk' ? layout.seats : zone === 'coffee' ? layout.coffeeSpots : zone === 'lounge' ? layout.loungeSpots : layout.serverSpots;
-  return list[((index % list.length) + list.length) % list.length]!;
-}
-
-const TAG_STEP = 0.45;
-
 /**
- * Extra height for a character's tag at a shared place: the further from the camera (smaller x + z), the higher,
- * so tags of people standing together stack instead of covering each other. Desks are spread out: no lift.
+ * The employee at desk `deskIndex`'s place in `zone`. Wanderers alternate by desk (even → coffee, odd → lounge, see
+ * behaviorOf), so those places take every other desk and no two employees ever share one.
  */
-export function tagLift(layout: Layout, zone: Zone, index: number): number {
-  if (zone === 'desk') return 0;
-  const list = zone === 'coffee' ? layout.coffeeSpots : zone === 'lounge' ? layout.loungeSpots : layout.serverSpots;
-  const spot = spotFor(layout, zone, index);
-  const nearer = list.filter((s) => s.x + s.z > spot.x + spot.z).length;
-  return nearer * TAG_STEP;
+export function spotFor(layout: Layout, zone: Zone, deskIndex: number): Spot {
+  const list = zone === 'desk' ? layout.seats : zone === 'coffee' ? layout.coffeeSpots : zone === 'lounge' ? layout.loungeSpots : layout.serverSpots;
+  const index = zone === 'coffee' || zone === 'lounge' ? Math.floor(deskIndex / 2) : deskIndex;
+  return list[((index % list.length) + list.length) % list.length]!;
 }

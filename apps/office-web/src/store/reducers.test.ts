@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Employee, OfficeEvent, OfficeSnapshot, StoredEvent } from '@cc/shared';
-import { EMPTY_DATA, MAX_EVENTS, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
+import { EMPTY_DATA, MAX_EVENTS, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
 
 const employee = (over: Partial<Employee> = {}): Employee => ({
   id: 'e1', slug: 'ada', name: 'Ada', role: 'r', model: 'haiku', characterId: 'coder', deskIndex: 0,
@@ -40,7 +40,7 @@ describe('applyEvent', () => {
     d = applyEvent(d, stored({ type: 'tool.finished', toolUseId: 't1', isError: false, output: '' }));
     expect(openToolSince(d.views.e1!)).toBeNull();
     d = applyEvent(d, stored({ type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd: 0.01, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0.01 }, 'e1', 3000));
-    expect(d.views.e1?.lastTurnFinishedAt).toBe(3000);
+    expect(d.views.e1?.idleSince).toBe(3000);
     expect(d.usage.e1?.today).toMatchObject({ inputTokens: 10, outputTokens: 20, costUsd: 0.01 });
     d = applyEvent(d, stored({ type: 'side.answer', text: 'a', ok: true, usage, costUsd: 0.002 }));
     expect(d.usage.e1?.total.costUsd).toBeCloseTo(0.012);
@@ -49,7 +49,7 @@ describe('applyEvent', () => {
   it('keeps the turn open while claude has queued turns', () => {
     let d = applyEvent(base(), stored({ type: 'tool.started', toolUseId: 't1', name: 'Bash', input: {} }, 'e1', 2000));
     d = applyEvent(d, stored({ type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd: 0, numTurns: 1, queuedTurns: 1, sessionUsage: null, sessionCostUsd: 0 }, 'e1', 3000));
-    expect(d.views.e1?.lastTurnFinishedAt).toBeNull();
+    expect(d.views.e1?.idleSince).toBeNull();
     expect(openToolSince(d.views.e1!)).toBe(2000);
   });
 
@@ -95,7 +95,7 @@ describe('mergeEvents', () => {
     const view = mergeEvents(d.views.e1!, history);
     expect(view.events.map((e) => e.seq)).toEqual([1, 2, live.seq]);
     expect(view.eventsLoaded).toBe(true);
-    expect(view.lastTurnFinishedAt).toBe(200);
+    expect(view.idleSince).toBe(200);
     expect(openToolSince(view)).toBeNull();
   });
 });
@@ -129,3 +129,46 @@ describe('usage watermark', () => {
   });
 });
 
+describe('idle clock and running tools', () => {
+  const base = () => applySnapshot(EMPTY_DATA, snapshot());
+
+  it('starts the idle clock when the employee becomes idle, not only when a turn ends', () => {
+    const d = applyEvent(base(), stored({ type: 'lifecycle.changed', from: 'interrupted', to: 'idle', reason: 'devam' }, 'e1', 5000));
+    expect(d.views.e1?.idleSince).toBe(5000);
+  });
+
+  it('forgets running tools once the employee stops working (a crash never reports them finished)', () => {
+    let d = base();
+    d = applyEvent(d, stored({ type: 'lifecycle.changed', from: 'idle', to: 'working', reason: 'x' }));
+    d = applyEvent(d, stored({ type: 'tool.started', toolUseId: 't1', name: 'Bash', input: {} }, 'e1', 2000));
+    d = applyEvent(d, stored({ type: 'lifecycle.changed', from: 'working', to: 'error', reason: 'çöktü' }));
+    expect(openToolSince(d.views.e1!)).toBeNull();
+  });
+
+  it('derives both from loaded history too', () => {
+    const view = base().views.e1!;
+    const merged = mergeEvents(view, [
+      { seq: 1, employeeId: 'e1', ts: 100, event: { type: 'tool.started', toolUseId: 't1', name: 'Bash', input: {} } },
+      { seq: 2, employeeId: 'e1', ts: 200, event: { type: 'lifecycle.changed', from: 'working', to: 'interrupted', reason: 'x' } },
+      { seq: 3, employeeId: 'e1', ts: 300, event: { type: 'lifecycle.changed', from: 'interrupted', to: 'idle', reason: 'x' } },
+    ]);
+    expect(openToolSince(merged)).toBeNull();
+    expect(merged.idleSince).toBe(300);
+  });
+
+  it('knows when it has the whole roster', () => {
+    expect(EMPTY_DATA.synced).toBe(false);
+    expect(applySnapshot(EMPTY_DATA, snapshot()).synced).toBe(true);
+  });
+});
+
+describe('addEmployee', () => {
+  it('shows a just-hired employee before the next snapshot, and leaves a known one alone', () => {
+    const d = applySnapshot(EMPTY_DATA, snapshot());
+    const withNew = addEmployee(d, employee({ id: 'e2', name: 'Can' }));
+    expect(withNew.views.e2?.employee.name).toBe('Can');
+    expect(withNew.views.e2?.eventsLoaded).toBe(false);
+    const withEvent = applyEvent(d, stored({ type: 'turn.started' }));
+    expect(addEmployee(withEvent, employee()).views.e1).toBe(withEvent.views.e1);
+  });
+});

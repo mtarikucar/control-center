@@ -11,6 +11,26 @@ import type { Roster } from './roster.ts';
 
 export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam et.';
 export const CONTINUE_AFTER_RESTART = 'Ofis yeniden başladı; yarım kalan işine kaldığın yerden devam et.';
+/**
+ * Put before a side question asked while the employee works: the fork sees the open tool call cut off ("interrupted")
+ * and would otherwise answer as if the work had stopped.
+ */
+export const SIDE_QUESTION_MID_WORK =
+  '[Ofis notu — yan soru: asıl oturumun şu an çalışıyor ve işine devam ediyor. Bu kopyada son aracın "kesildi" görünmesi yalnızca bu yan soruya ait; iş durmadı. Sorunun dilinde, kısaca cevap ver.]';
+
+const clip = (text: string, limit: number): string => {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+};
+
+/** "Bash — npm test" style: the tool and its most telling input field. */
+function describeTool(name: string, input: unknown): string {
+  if (typeof input !== 'object' || input === null) return name;
+  const record = input as Record<string, unknown>;
+  const key = ['command', 'file_path', 'notebook_path', 'pattern', 'url', 'query', 'description'].find((k) => typeof record[k] === 'string');
+  return key ? `${name} — ${clip(record[key] as string, 200)}` : name;
+}
+
 export const CONTINUE_AFTER_CRASH =
   'Oturumun beklenmedik şekilde kapandı ve yeniden açıldı; yarım kalan işine kaldığın yerden devam et.';
 
@@ -53,6 +73,8 @@ interface Runtime {
   consumedInTurn: boolean;
   /** claude's running totals at the last result; null until loaded from the event log. */
   totals: Totals | null;
+  /** Reset of the window that rejected the last request, when claude named it. */
+  limitAt: number | null;
 }
 
 export class Engine {
@@ -68,6 +90,7 @@ export class Engine {
   readonly #stopTimeoutMs: number;
   readonly #sideQuestionTimeoutMs: number;
   readonly #runtimes = new Map<string, Runtime>();
+  readonly #sideRuns = new Set<AbortController>();
 
   constructor(o: EngineOptions) {
     this.#roster = o.roster;
@@ -96,6 +119,7 @@ export class Engine {
     this.#assertReachable(employee);
     const rt = this.#runtime(id);
     this.#assertNotBusy(rt);
+    if (employee.lastError !== null || employee.limitResetsAt !== null) this.#roster.update(id, { lastError: null, limitResetsAt: null });
     if (!rt.proc || rt.proc.exited) this.#start(employee, 'mesaj geldi');
     this.#clearLimitTimer(rt);
     const proc = rt.proc;
@@ -122,20 +146,42 @@ export class Engine {
     if (employee.lifecycle === 'archived') throw new ConflictError('Bu çalışan işten çıkarıldı.');
     if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; önce normal bir mesaj gönder.');
     this.#emit(id, { type: 'side.question', text: question });
+    const input = this.#runtime(id).turnActive ? `${this.#workNote(id)}\n\n${question}` : question;
     const atFork = this.#totals(id);
+    const abort = new AbortController();
+    this.#sideRuns.add(abort);
     const result = await runOnce({
+      signal: abort.signal,
       command: this.#command,
       args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
       cwd: prepareDesk(this.#dataDir, employee),
       env: this.#env,
-      input: question,
+      input,
       timeoutMs: this.#sideQuestionTimeoutMs,
-    });
+    }).finally(() => this.#sideRuns.delete(abort));
     // The fork's running totals start from the parent's, so only the difference is this question's cost.
     const usage = result.sessionUsage ? usageSince(result.sessionUsage, atFork.usage) : result.usage;
     const costUsd = result.sessionCostUsd >= atFork.costUsd ? result.sessionCostUsd - atFork.costUsd : result.sessionCostUsd;
     this.#emit(id, { type: 'side.answer', text: result.text, ok: result.ok, usage, costUsd });
     return { ok: result.ok, answer: result.text };
+  }
+
+  /** What the employee is doing right now, from this turn's events: the owner's asks and the tools still running. */
+  #workNote(id: string): string {
+    const after = this.#events.latest(id, 'turn.finished')?.seq ?? 0;
+    const current = this.#events.list({ after, employeeId: id, limit: 500 });
+    const asks: string[] = [];
+    const open = new Map<string, string>();
+    for (const s of current) {
+      const ev = s.event;
+      if (ev.type === 'message.user') asks.push(`«${clip(ev.text, 300)}»`);
+      else if (ev.type === 'tool.started') open.set(ev.toolUseId, describeTool(ev.name, ev.input));
+      else if (ev.type === 'tool.finished') open.delete(ev.toolUseId);
+    }
+    const lines = [SIDE_QUESTION_MID_WORK];
+    if (asks.length > 0) lines.push(`Şu anki iş: ${asks.join(' · ')}`);
+    if (open.size > 0) lines.push(`Çalışan araç: ${[...open.values()].join(' · ')}`);
+    return lines.join('\n');
   }
 
   stop(id: string): Promise<Employee> {
@@ -171,7 +217,9 @@ export class Engine {
   returnFromTerminal(id: string): Employee {
     const employee = this.#roster.get(id);
     if (employee.lifecycle !== 'in_terminal') throw new ConflictError('Bu çalışan terminalde değil.');
-    return this.#setLifecycle(employee, 'stopped', 'terminalden ofise döndü');
+    // Back at the desk and ready: the office picks the same session up again (an idle process spends no tokens).
+    this.#runtime(id).crashes = [];
+    return this.#start(employee, 'terminalden ofise döndü');
   }
 
   fire(id: string): Promise<void> {
@@ -195,6 +243,7 @@ export class Engine {
 
   /** Closes every session but keeps lifecycles, so the next `recover()` can pick up where we left. */
   async shutdown(): Promise<void> {
+    for (const run of this.#sideRuns) run.abort();
     await Promise.all(
       [...this.#runtimes.values()].map(async (rt) => {
         this.#clearLimitTimer(rt);
@@ -238,6 +287,7 @@ export class Engine {
       if (event.type === 'session.started' && !this.#roster.get(id).sessionStarted) this.#roster.update(id, { sessionStarted: true });
       if (event.type === 'quota.updated') {
         rt.quotaStatus = event.status;
+        rt.limitAt = event.limitResetsAt ?? null;
         rt.windows = { fiveHour: event.fiveHour ?? rt.windows.fiveHour, sevenDay: event.sevenDay ?? rt.windows.sevenDay };
       }
       if (event.type === 'turn.finished') {
@@ -270,6 +320,11 @@ export class Engine {
 
   #onTurnFinished(id: string, ok: boolean, queuedTurns: number): void {
     const rt = this.#runtime(id);
+    // A turn that went through proves the subscription is open again, even if claude sent no fresh reading.
+    if (ok) {
+      rt.quotaStatus = '';
+      rt.limitAt = null;
+    }
     const rejected = !ok && rt.quotaStatus === 'rejected';
     // claude still holds queued user turns: the work goes on and a later result closes it.
     if (queuedTurns > 0 && !rejected && !rt.expectingExit) return;
@@ -366,6 +421,7 @@ export class Engine {
   }
 
   #limitResetTime(rt: Runtime): number {
+    if (rt.limitAt !== null && rt.limitAt > this.#now()) return rt.limitAt;
     const windows = [rt.windows.fiveHour, rt.windows.sevenDay].filter((w): w is QuotaWindow => w !== null);
     const full = windows.filter((w) => w.utilization >= 1);
     const candidates = (full.length > 0 ? full : windows.slice(0, 1)).map((w) => w.resetsAt);
@@ -445,6 +501,7 @@ export class Engine {
         unread: [],
         consumedInTurn: false,
         totals: null,
+        limitAt: null,
       };
       this.#runtimes.set(id, rt);
     }

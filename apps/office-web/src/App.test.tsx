@@ -22,8 +22,8 @@ describe('App', () => {
     act(() => {
       useOffice.setState({
         views: {
-          ada: { employee: person('ada', 'Ada'), events: [], openTools: {}, lastTurnFinishedAt: null, eventsLoaded: true },
-          can: { employee: person('can', 'Can'), events: [], openTools: {}, lastTurnFinishedAt: null, eventsLoaded: true },
+          ada: { employee: person('ada', 'Ada'), events: [], openTools: {}, idleSince: null, eventsLoaded: true },
+          can: { employee: person('can', 'Can'), events: [], openTools: {}, idleSince: null, eventsLoaded: true },
         },
         selectedId: 'ada',
       });

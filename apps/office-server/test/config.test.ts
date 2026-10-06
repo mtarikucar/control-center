@@ -1,5 +1,5 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REPO_ROOT, loadConfig } from '../src/config.ts';
 
@@ -31,6 +31,16 @@ describe('loadConfig', () => {
     expect(c.allowedOrigins).toEqual(['http://a.test', 'http://b.test']);
     expect(c.webDir).toBe('/tmp/web');
     expect(c.assetsDir).toBe('/tmp/assets');
+  });
+
+  it('resolves a relative data directory', () => {
+    // Tests run inside the repo, so point the relative path outside it (into the temp directory).
+    const rel = relative(process.cwd(), join(tmpdir(), 'cc-rel-office'));
+    expect(loadConfig({ OFFICE_DATA_DIR: rel }).dataDir).toBe(join(tmpdir(), 'cc-rel-office'));
+  });
+
+  it('resolves a relative data directory from where the owner ran pnpm, not the package folder', () => {
+    expect(loadConfig({ OFFICE_DATA_DIR: 'rel-office', INIT_CWD: tmpdir() }).dataDir).toBe(join(tmpdir(), 'rel-office'));
   });
 
   it('refuses a data directory inside the repository', () => {

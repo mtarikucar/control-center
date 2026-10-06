@@ -127,4 +127,56 @@ describe('Engine — resilience', () => {
     expect(answer.usage.inputTokens).toBe(10);
     expect(t.roster.get(e.id).lifecycle).toBe('idle');
   });
+
+  it('a per-model weekly limit waits for that window, not the five-hour one', async () => {
+    const t = make({ env: { FAKE_CLAUDE_LIMIT_TYPE: 'seven_day_opus', FAKE_CLAUDE_LIMIT_RESET_SEC: '7200' } });
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'LIMIT hit');
+    await waitFor(t.events, (x) => x.event.type === 'lifecycle.changed' && x.event.to === 'limited');
+    expect(Math.abs((t.roster.get(e.id).limitResetsAt ?? 0) - (Date.now() + 7_200_000))).toBeLessThan(10_000);
+  });
+
+  it('a limit from an earlier turn does not park the employee when a later turn fails for another reason', async () => {
+    const t = make({ env: { FAKE_CLAUDE_LIMIT_TYPE: 'seven_day_opus', FAKE_CLAUDE_LIMIT_RESET_SEC: '7200' } });
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'LIMIT hit');
+    await waitFor(t.events, (x) => x.event.type === 'lifecycle.changed' && x.event.to === 'limited');
+    // Succeeds, but claude sends no fresh quota reading with it.
+    t.engine.send(e.id, 'WHAT DID I SAY');
+    const ok = await waitFor(t.events, (x) => x.event.type === 'turn.finished' && x.event.ok);
+    t.engine.send(e.id, 'OOPS');
+    const failed = await waitFor(t.events, (x) => x.event.type === 'turn.finished' && !x.event.ok, { after: ok.seq });
+    await waitFor(t.events, (x) => x.event.type === 'lifecycle.changed', { after: failed.seq });
+    expect(t.roster.get(e.id)).toMatchObject({ lifecycle: 'idle', limitResetsAt: null });
+  });
+
+  it('tells a side question asked mid-work that the work goes on, and what it is', async () => {
+    // A fork of a session mid-turn sees the open tool call cut off and would answer as if the work had stopped.
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'merhaba');
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished');
+    t.engine.send(e.id, 'SLOW raporu hazırla');
+    await waitFor(t.events, (x) => x.event.type === 'tool.started');
+    const { answer } = await t.engine.sideQuestion(e.id, 'ne yapıyorsun?');
+    expect(answer).toMatch(/devam ediyor/);
+    expect(answer).toContain('SLOW raporu hazırla');
+    expect(answer).toContain('Bash');
+    expect(answer).toContain('sleep 1');
+    expect(answer).toMatch(/ne yapıyorsun\?\|history/);
+    const asked = t.events.list({ employeeId: e.id, limit: 500 }).filter((x) => x.event.type === 'side.question');
+    expect(asked.at(-1)?.event).toMatchObject({ text: 'ne yapıyorsun?' });
+  });
+
+  it('shutdown also ends a side question that hangs', async () => {
+    const t = make({ env: { FAKE_CLAUDE_SIDE_HANG: '1' } });
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'merhaba');
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished');
+    const pending = t.engine.sideQuestion(e.id, 'ne yapıyorsun?');
+    await new Promise((r) => setTimeout(r, 300));
+    await t.engine.shutdown();
+    const answer = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still hanging'), 3000))]);
+    expect(answer).toMatchObject({ ok: false });
+  });
 });

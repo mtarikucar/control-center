@@ -25,6 +25,16 @@ export function CharacterModel({ asset, role, faded }: { asset: CharacterAsset; 
     });
     return copy;
   }, [base]);
+  // The materials are this instance's own copies (geometry stays shared with the cached model): free them with it.
+  useEffect(
+    () => () =>
+      model.traverse((o) => {
+        const mesh = o as Mesh;
+        if (!mesh.isMesh) return;
+        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) m.dispose();
+      }),
+    [model],
+  );
   const fit = useMemo(() => fitToHeight(boundsOf(model), asset.height), [model, asset.height]);
 
   const clips = useMemo(() => {

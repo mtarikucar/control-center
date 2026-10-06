@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import type { ServerMessage } from '@cc/shared';
+import type { Employee, ServerMessage } from '@cc/shared';
 import { EMPTY_MANIFEST, type AssetManifest } from '../assets/manifest.ts';
 import { api } from '../net/api.ts';
-import { EMPTY_DATA, applyEvent, applySnapshot, mergeEvents, needsRefresh, type OfficeData } from './reducers.ts';
+import { EMPTY_DATA, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, type OfficeData } from './reducers.ts';
 
 export interface OfficeStore extends OfficeData {
   connected: boolean;
@@ -16,6 +16,8 @@ export interface OfficeStore extends OfficeData {
   setConnected: (connected: boolean) => void;
   refresh: () => Promise<void>;
   select: (id: string | null) => void;
+  /** Show a just-hired employee at once; the next snapshot brings the rest. */
+  admit: (employee: Employee) => void;
   loadEvents: (id: string) => Promise<void>;
   markTyping: (id: string) => void;
   setManifest: (m: AssetManifest) => void;
@@ -74,6 +76,7 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
       // The next live snapshot brings the office back in sync.
     }
   },
+  admit: (employee) => set((s) => addEmployee(s, employee)),
   select(id) {
     set({ selectedId: id });
     const view = id ? get().views[id] : undefined;

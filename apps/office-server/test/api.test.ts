@@ -94,7 +94,7 @@ describe('API', () => {
     const terminal = await call(port, 'POST', `/api/employees/${e.id}/terminal`);
     expect(terminal.body.command).toContain(`claude --resume ${e.sessionId}`);
     expect((await call(port, 'POST', `/api/employees/${e.id}/messages`, { body: { text: 'x' } })).status).toBe(409);
-    expect((await call(port, 'DELETE', `/api/employees/${e.id}/terminal`)).body.lifecycle).toBe('stopped');
+    expect((await call(port, 'DELETE', `/api/employees/${e.id}/terminal`)).body.lifecycle).toBe('idle');
     expect((await call(port, 'DELETE', `/api/employees/${e.id}`)).status).toBe(204);
   });
 
@@ -105,6 +105,21 @@ describe('API', () => {
     expect((await call(port, 'POST', '/api/employees', { headers: { 'content-type': 'application/json' }, body: undefined })).status).toBe(400);
     expect((await call(port, 'GET', '/api/employees/00000000-0000-0000-0000-000000000000/events')).status).toBe(404);
     expect((await call(port, 'GET', '/api/nope')).status).toBe(404);
+  });
+
+  it('rejects a body that is not an object with a Turkish 400', async () => {
+    const { port } = await start();
+    expect(await call(port, 'POST', '/api/employees', { body: null })).toEqual({ status: 400, body: { error: 'Geçersiz istek gövdesi.' } });
+  });
+
+  it('a client reconnecting with an after from a reset database still gets live events', async () => {
+    const { port } = await start();
+    const ws = openWs(port, '/ws?after=999999');
+    await ws.opened;
+    await ws.waitUntil((ms) => ms.length > 0);
+    await call(port, 'POST', '/api/employees', { body: { name: 'Ada', role: 'r' } });
+    const messages = await ws.waitUntil((ms) => ms.some((m) => m.type === 'event' && m.event.event.type === 'employee.hired'));
+    expect(messages.some((m) => m.type === 'event')).toBe(true);
   });
 
   it('review focus: rejects cross-site, rebinding and non-JSON requests', async () => {

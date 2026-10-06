@@ -57,6 +57,16 @@ describe('ClaudeProcess', () => {
     expect(proc.exited).toBe(true);
   });
 
+  it('kills a claude that ignores the end of its input and SIGTERM', async () => {
+    const { proc, lines, exits } = spawnFake({ FAKE_CLAUDE_IGNORE_TERM: '1' });
+    proc.sendUser('merhaba');
+    await until(() => lines.some((l) => l.type === 'result'));
+    const started = Date.now();
+    await Promise.race([proc.close(200), new Promise((r) => setTimeout(r, 3000))]);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(exits[0]?.signal).toBe('SIGKILL');
+  });
+
   it('reports a missing binary as an exit instead of throwing', async () => {
     const exits: string[] = [];
     const proc = new ClaudeProcess(

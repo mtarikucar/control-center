@@ -1,6 +1,6 @@
 import { Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { Group } from 'three';
 import type { Employee, EmployeeUsage } from '@cc/shared';
 import type { CharacterAsset } from '../assets/manifest.ts';
@@ -14,6 +14,7 @@ import { limitNote } from '../ui/labels.ts';
 import { CharacterModel } from './CharacterModel.tsx';
 import { roleFor } from './clips.ts';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
+import { TAG_HEIGHT, registerTag } from './TagLayout.tsx';
 import { VoxelFigure } from './VoxelFigure.tsx';
 
 const WALK_SPEED = 1.4;
@@ -25,10 +26,9 @@ interface Props {
   asset: CharacterAsset | null;
   usage: EmployeeUsage | undefined;
   selected: boolean;
-  tagHeight: number;
 }
 
-export function Character({ employee, behavior, spot, asset, usage, selected, tagHeight }: Props) {
+export function Character({ employee, behavior, spot, asset, usage, selected }: Props) {
   const select = useOffice((s) => s.select);
   const group = useRef<Group>(null);
   const motion = useRef<{ pos: Pt; heading: number; path: Pt[]; moving: boolean; goal: string }>({
@@ -43,6 +43,8 @@ export function Character({ employee, behavior, spot, asset, usage, selected, ta
   // happens to the first character; mounting the tag one render later avoids that.
   const [tagReady, setTagReady] = useState(false);
   useEffect(() => setTagReady(true), []);
+  // drei renders the tag in its own React root, so a callback ref is the reliable way to know its element.
+  const tagRef = useCallback((el: HTMLButtonElement | null) => (el ? registerTag(employee.id, group, el) : undefined), [employee.id]);
   const goal = `${spot.x},${spot.z},${spot.rotY}`;
 
   useEffect(() => {
@@ -103,16 +105,24 @@ export function Character({ employee, behavior, spot, asset, usage, selected, ta
         </mesh>
       )}
       {tagReady && (
-      <Html position={[0, tagHeight, 0]} center zIndexRange={[20, 0]}>
-        <button type="button" className={`tag ${behavior.marker} ${selected ? 'selected' : ''}`} onClick={() => select(employee.id)}>
-          <span className={`dot ${employee.lifecycle}`} aria-hidden="true" />
-          <strong>{employee.name}</strong>
+      <Html position={[0, TAG_HEIGHT, 0]} center zIndexRange={[20, 0]}>
+        {/* Two short lines instead of one long one: eight desks sit close together on screen. */}
+        <button
+          type="button"
+          className={`tag ${behavior.marker} ${selected ? 'selected' : ''}`}
+          ref={tagRef}
+          onClick={() => select(employee.id)}
+        >
+          <span className="tag-line">
+            <span className={`dot ${employee.lifecycle}`} aria-hidden="true" />
+            <strong className="tag-name">{employee.name}</strong>
+            {behavior.marker === 'alert' && <span aria-label="dikkat">⚠</span>}
+            {behavior.marker === 'terminal' && <span aria-label="terminalde">⌨</span>}
+          </span>
           <span className="tag-usage">
             {formatTokens(tokensOf(today))} · {formatCost(today?.costUsd ?? 0)}
           </span>
-          {behavior.marker === 'alert' && <span aria-label="dikkat">⚠</span>}
           {limitNote(employee, Date.now()) && <span className="tag-usage">{limitNote(employee, Date.now())}</span>}
-          {behavior.marker === 'terminal' && <span aria-label="terminalde">⌨</span>}
         </button>
       </Html>
       )}

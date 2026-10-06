@@ -89,7 +89,7 @@ Masalar repo içinde olsaydı çalışanlar bu reponun geliştirme talimatların
 ### 4.1 roster — çalışan kartları
 
 Kart alanları: `id`, `slug`, `name`, `role` (serbest metin rol tanımı), `model` (`opus`|`sonnet`|`haiku`,
-varsayılan `sonnet`), `characterId` (manifest'teki karakter), `deskIndex`, `sessionId`, `lifecycle`
+varsayılan `sonnet`), `characterId` (manifest'teki karakter ya da `voxel` = yerleşik voksel figür), `deskIndex`, `sessionId`, `lifecycle`
 (§6), `createdAt`. Rol tanımı aynı zamanda masadaki `CLAUDE.md` dosyasıdır; dosya düzenlenirse bir sonraki
 başlatmada geçerli olur.
 
@@ -125,15 +125,18 @@ cwd = ~/.control-center/desks/<slug>
 - **Yan soru (`/btw`):** ayrı, tek seferlik bir süreç: `claude -p --resume <sessionId> --fork-session
   --setting-sources user,project,local --settings <aynı çalışan ayarları> --strict-mcp-config --tools ""`;
   soru stdin'den verilir (`--tools` kendinden sonraki argümanları yuttuğu için en sonda). Cevap panelde "yan cevap" olarak
-  görünür, asıl konuşmaya eklenmez, asıl iş bölünmez (doğrulandı, ~6 sn). Kopya oturum o an süren adımı
-  "yarıda kalmış" sanabilir; kabul edilen küçük kusur.
+  görünür, asıl konuşmaya eklenmez, asıl iş bölünmez (doğrulandı, ~6 sn). Kopya oturum o an süren aracı
+  "kesildi" görür (claude açık kalan aracı öyle kapatır) ve işin durduğunu sanır; bu yüzden çalışan çalışırken
+  sorunun önüne bir ofis notu eklenir: iş sürüyor, şu anki iş (bu turdaki mesajlar) ve çalışan araç. Kayda yalnızca
+  sahibinin sorusu yazılır.
 - **Durdur:** stdin'e `{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}` yazılır;
   tur hemen `error_during_execution` ile biter, süreç açık kalır ve sonraki mesajı alır (doğrulandı). Ardından
   süreç kapatılır, oturum korunur.
 - **Devam:** `--resume <sessionId>` ile yeniden açılır; bağlam korunur (doğrulandı).
 - **Terminalde aç:** engine süreci kapatır, kartı `in_terminal` yapar ve sahibine
   `cd <masa> && claude --resume <sessionId>` komutunu verir. `in_terminal` iken engine o çalışan için
-  süreç başlatmaz (aynı oturuma iki yazar olmaz). "Ofise geri al" ile kilit kalkar.
+  süreç başlatmaz (aynı oturuma iki yazar olmaz). "Ofise geri al" ile kilit kalkar ve çalışan aynı oturumla
+  masasına hazır (`idle`) döner; boşta süreç token harcamaz.
 - **Kaynak:** boşta süreç token harcamaz; bütün bağlantılarıyla ~475 MB bellek tutar (ölçüldü; 8 çalışan
   ≈ 3,8 GB). v1'de süreçler açık kalır.
 - **Görünürlük:** başsız oturumlar da bir mesajlaşma soketi açar ve sahibinin diğer Claude oturumlarının
@@ -215,16 +218,19 @@ Karakter davranışı olaylardan türetilen saf bir fonksiyondur (olaylar → `{
 | `limited` / `error` | Masasında durur, başının üstünde kırmızı işaret; `limited`'da açılma saati |
 | `stopped` / `in_terminal` | Soluk görünür; `in_terminal`'de terminal simgesi |
 
-Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet. Toplantı odası v1'de kullanılmaz.
+Karakterin üstünde: ad, durum ışığı, bugünkü token ve maliyet (iki satırlık etiket). Etiketler ekranda üst
+üste binmez: kameraya en yakın olan yerinde kalır, arkadakiler gerektiği kadar yukarı kayar (her karede, her
+yakınlaştırma ve açıda). Her masanın kahve/oturma/server noktası kendine aittir; iki çalışan aynı noktada durmaz.
+Toplantı odası v1'de kullanılmaz.
 
 ## 7. office-web
 
 - **Sahne:** referans görsele göre yerleşim (8 masalık açık alan, cam toplantı odası, server odası,
   kahve köşesi, oturma alanı, resepsiyon, bitkili kitaplık). Bina (zemin, duvar, pencere, cam bölme, halı)
   kodla voksel kutulardan kurulur. Eşyalar ve karakterler `assets/3d/manifest.json`'dan yüklenir.
-- **Yerleşim verisi:** `layout.json` — bölgeler, masa oturma noktaları, kahve/oturma/server noktaları,
+- **Yerleşim verisi:** `office/layout.ts` — bölgeler, masa oturma noktaları, kahve/oturma/server noktaları,
   yürüme ızgarası. Karakterler ızgara üzerinde en kısa yolla yürür (A*).
-- **Kamera:** referanstaki gibi yukarıdan izometrik açı; yakınlaştırma ve kaydırma, sınırlı döndürme.
+- **Kamera:** referanstaki gibi yukarıdan izometrik açı; yakınlaştırma ve kaydırma, sınırlı döndürme (yalnız alçak duvarlı güney–doğu tarafında).
 - **Karakter paneli:** canlı akış (metin; açılır kapanır komut kutuları; dokunulan dosyalar), mesaj kutusu,
   "Yan soru" anahtarı, Durdur / Devam / Terminalde aç, model–token–maliyet–oturum no.
 - **İşe alma formu** ve köşede **kota göstergesi**.

@@ -1,8 +1,10 @@
+import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { createApi } from './api.ts';
 import { loadConfig } from './config.ts';
 import { migrateUp, openDb } from './db.ts';
+import { deskDir } from './desk.ts';
 import { Engine } from './engine.ts';
 import { EventStore } from './event-store.ts';
 import { acquireLock } from './lock.ts';
@@ -21,7 +23,7 @@ try {
 const db = openDb(join(config.dataDir, 'office.db'));
 migrateUp(db);
 const events = new EventStore(db);
-const roster = new Roster(db, config.deskCount);
+const roster = new Roster(db, config.deskCount, Date.now, (slug) => existsSync(deskDir(config.dataDir, slug)));
 const quota = new QuotaTracker(db, events);
 const engine = new Engine({ roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand });
 

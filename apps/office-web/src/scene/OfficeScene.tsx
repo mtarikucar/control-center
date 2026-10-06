@@ -2,6 +2,7 @@ import { MapControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { LAYOUT } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
+import { AZIMUTH, CAMERA_POSITION } from './camera.ts';
 import { CharactersLayer } from './CharactersLayer.tsx';
 import { FurnitureLayer } from './FurnitureLayer.tsx';
 import { Room } from './Room.tsx';
@@ -14,7 +15,7 @@ export function OfficeScene() {
       orthographic
       shadows
       dpr={[1, 2]}
-      camera={{ position: [22, 26, 22], zoom: 34, near: -200, far: 400 }}
+      camera={{ position: [...CAMERA_POSITION], zoom: 34, near: -200, far: 400 }}
       onPointerMissed={() => select(null)}
     >
       <color attach="background" args={['#e6e9ef']} />
@@ -36,7 +37,17 @@ export function OfficeScene() {
         <FurnitureLayer />
         <CharactersLayer />
       </group>
-      <MapControls makeDefault target={[0, 0, 0]} enableDamping maxPolarAngle={Math.PI / 2.6} minPolarAngle={Math.PI / 6} minZoom={16} maxZoom={140} />
+      <MapControls
+        makeDefault
+        target={[0, 0, 0]}
+        enableDamping
+        maxPolarAngle={Math.PI / 2.6}
+        minPolarAngle={Math.PI / 6}
+        minAzimuthAngle={AZIMUTH.min}
+        maxAzimuthAngle={AZIMUTH.max}
+        minZoom={16}
+        maxZoom={140}
+      />
     </Canvas>
   );
 }

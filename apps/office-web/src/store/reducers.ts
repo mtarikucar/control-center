@@ -7,7 +7,8 @@ export interface EmployeeView {
   events: StoredEvent[];
   /** toolUseId → when it started; a tool is open until its result arrives or the turn ends. */
   openTools: Record<string, number>;
-  lastTurnFinishedAt: number | null;
+  /** When the employee last became idle (a turn ended or the lifecycle went idle); drives wandering. */
+  idleSince: number | null;
   eventsLoaded: boolean;
 }
 
@@ -19,9 +20,11 @@ export interface OfficeData {
   quota: QuotaState | null;
   usage: Record<string, EmployeeUsage>;
   views: Record<string, EmployeeView>;
+  /** A snapshot has arrived, so `views` lists everyone: an id missing from it is not an employee. */
+  synced: boolean;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {} };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
 
@@ -49,12 +52,18 @@ export function applySnapshot(d: OfficeData, s: OfficeSnapshot, source: 'live' |
   const views: Record<string, EmployeeView> = {};
   for (const employee of s.employees) {
     const prev = d.views[employee.id];
-    views[employee.id] = prev
-      ? { ...prev, employee }
-      : { employee, events: [], openTools: {}, lastTurnFinishedAt: null, eventsLoaded: false };
+    views[employee.id] = prev ? { ...prev, employee } : freshView(employee);
   }
   const lastSeq = source === 'live' ? Math.max(d.lastSeq, s.lastSeq) : d.lastSeq;
-  return { lastSeq, usageSeq: s.lastSeq, quota: s.quota, usage: s.usage, views };
+  return { lastSeq, usageSeq: s.lastSeq, quota: s.quota, usage: s.usage, views, synced: true };
+}
+
+const freshView = (employee: Employee): EmployeeView => ({ employee, events: [], openTools: {}, idleSince: null, eventsLoaded: false });
+
+/** A just-hired employee, shown before the next snapshot lists them. */
+export function addEmployee(d: OfficeData, employee: Employee): OfficeData {
+  if (d.views[employee.id]) return d;
+  return { ...d, views: { ...d.views, [employee.id]: freshView(employee) } };
 }
 
 export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
@@ -74,6 +83,9 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   switch (ev.type) {
     case 'lifecycle.changed':
       v = { ...v, employee: { ...v.employee, lifecycle: ev.to } };
+      // Only a working employee runs tools; a crash or stop never reports the open ones finished.
+      if (ev.to !== 'working') v = { ...v, openTools: {} };
+      if (ev.to === 'idle') v = { ...v, idleSince: s.ts };
       break;
     case 'session.started':
       v = { ...v, employee: { ...v.employee, sessionStarted: true } };
@@ -88,7 +100,7 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
       break;
     }
     case 'turn.finished':
-      if (ev.queuedTurns === 0) v = { ...v, openTools: {}, lastTurnFinishedAt: s.ts };
+      if (ev.queuedTurns === 0) v = { ...v, openTools: {}, idleSince: s.ts };
       if (s.seq > d.usageSeq) usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd) };
       break;
     case 'side.answer':
@@ -105,7 +117,7 @@ export function mergeEvents(view: EmployeeView, loaded: StoredEvent[]): Employee
   const bySeq = new Map<number, StoredEvent>();
   for (const e of [...loaded, ...view.events]) bySeq.set(e.seq, e);
   const events = [...bySeq.values()].sort((a, b) => a.seq - b.seq).slice(-MAX_EVENTS);
-  let lastTurnFinishedAt = view.lastTurnFinishedAt;
+  let idleSince = view.idleSince;
   let openTools: Record<string, number> = {};
   for (const e of events) {
     if (e.event.type === 'tool.started') openTools = { ...openTools, [e.event.toolUseId]: e.ts };
@@ -114,10 +126,13 @@ export function mergeEvents(view: EmployeeView, loaded: StoredEvent[]): Employee
       delete openTools[e.event.toolUseId];
     } else if (e.event.type === 'turn.finished' && e.event.queuedTurns === 0) {
       openTools = {};
-      lastTurnFinishedAt = Math.max(lastTurnFinishedAt ?? 0, e.ts);
+      idleSince = Math.max(idleSince ?? 0, e.ts);
+    } else if (e.event.type === 'lifecycle.changed') {
+      if (e.event.to !== 'working') openTools = {};
+      if (e.event.to === 'idle') idleSince = Math.max(idleSince ?? 0, e.ts);
     }
   }
-  return { ...view, events, openTools, lastTurnFinishedAt, eventsLoaded: true };
+  return { ...view, events, openTools, idleSince, eventsLoaded: true };
 }
 
 /** Events that change employee fields only the snapshot carries (who exists, lastError, limitResetsAt). */

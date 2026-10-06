@@ -58,6 +58,21 @@ const result = (extra = {}) => {
 };
 const rateLimit = (status, resetsInSec) => {
   const resetsAt = Math.floor(Date.now() / 1000) + resetsInSec;
+  const limitType = process.env.FAKE_CLAUDE_LIMIT_TYPE;
+  if (status === 'rejected' && limitType) {
+    // A per-model weekly limit: the unified windows are not full, the top-level fields name the limiting window.
+    const now = Math.floor(Date.now() / 1000);
+    out({
+      type: 'rate_limit_event',
+      rate_limit_info: {
+        status,
+        resetsAt,
+        rateLimitType: limitType,
+        unifiedWindows: { five_hour: { utilization: 0.3, resetsAt: now + 5000 }, seven_day: { utilization: 0.5, resetsAt: now + 90_000 } },
+      },
+    });
+    return;
+  }
   out({
     type: 'rate_limit_event',
     rate_limit_info: {
@@ -73,7 +88,14 @@ const rateLimit = (status, resetsInSec) => {
 };
 const say = (text) => out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
 
+if (process.env.FAKE_CLAUDE_IGNORE_TERM) {
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1000);
+}
+
 if (opt('--output-format') === 'json') {
+  if (process.env.FAKE_CLAUDE_SIDE_HANG) setInterval(() => {}, 1000);
+  if (process.env.FAKE_CLAUDE_SIDE_HANG) await new Promise(() => {});
   let prompt = '';
   for await (const chunk of process.stdin) prompt += chunk;
   const forkTotals = add(state.totals, 0.002); // a fork starts from the parent's running total
@@ -102,6 +124,16 @@ async function turn(text, uuid) {
   if (text.includes('LIMIT')) {
     rateLimit('rejected', Number(process.env.FAKE_CLAUDE_LIMIT_RESET_SEC ?? '2'));
     result({ subtype: 'error_during_execution', is_error: true, result: 'usage limit reached' });
+    return;
+  }
+  if (text.includes('OOPS')) {
+    // Fails for a reason other than the subscription (e.g. the API is overloaded): no rate-limit event.
+    result({ subtype: 'error_during_execution', is_error: true, result: 'overloaded' });
+    return;
+  }
+  if (text.includes('BIGWRITE')) {
+    out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_big', name: 'Write', input: { file_path: '/d/a.txt', content: 'x'.repeat(10_000) } }] } });
+    result();
     return;
   }
   if (text.includes('SLOW')) {
@@ -161,5 +193,6 @@ createInterface({ input: process.stdin })
     });
   })
   .on('close', () => {
+    if (process.env.FAKE_CLAUDE_IGNORE_TERM) return; // a hung claude: only SIGKILL ends it
     chain.then(() => process.exit(0));
   });

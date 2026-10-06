@@ -73,13 +73,15 @@ export class ClaudeProcess {
     this.#write({ type: 'control_request', request_id: `interrupt-${this.#requests}`, request: { subtype: 'interrupt' } });
   }
 
-  /** Ends stdin so claude exits after the current turn; SIGTERM after `graceMs`. */
+  /** Ends stdin so claude exits after the current turn; SIGTERM after `graceMs`, SIGKILL after twice that. */
   close(graceMs = 5000): Promise<void> {
     if (this.#exited) return Promise.resolve();
     return new Promise((resolve) => {
-      const timer = setTimeout(() => this.#child.kill('SIGTERM'), graceMs);
+      const term = setTimeout(() => this.#child.kill('SIGTERM'), graceMs);
+      const kill = setTimeout(() => this.#child.kill('SIGKILL'), graceMs * 2);
       this.#child.once('close', () => {
-        clearTimeout(timer);
+        clearTimeout(term);
+        clearTimeout(kill);
         resolve();
       });
       this.#child.stdin.end();

@@ -24,7 +24,8 @@ function insideRepo(dir: string): boolean {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfficeConfig {
-  const dataDir = env.OFFICE_DATA_DIR ?? join(homedir(), '.control-center');
+  // pnpm runs scripts in the package folder; a relative path means relative to where the owner typed the command.
+  const dataDir = resolve(env.INIT_CWD ?? process.cwd(), env.OFFICE_DATA_DIR ?? join(homedir(), '.control-center'));
   if (insideRepo(dataDir)) {
     throw new Error(`OFFICE_DATA_DIR repo içinde olamaz (${dataDir}); çalışanlar reponun talimatlarını devralırdı.`);
   }
