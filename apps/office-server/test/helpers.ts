@@ -2,7 +2,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { StoredEvent } from '@cc/shared';
-import type { EventStore } from '../src/event-store.ts';
+import { rmSync } from 'node:fs';
+import { migrateUp, openDb, type Db } from '../src/db.ts';
+import { EventStore } from '../src/event-store.ts';
+import { Roster } from '../src/roster.ts';
 
 export function tempDir(prefix = 'cc-test-'): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -37,4 +40,21 @@ export function waitFor(
       resolve(e);
     });
   });
+}
+
+export interface TestSetup {
+  dataDir: string;
+  db: Db;
+  events: EventStore;
+  roster: Roster;
+  cleanup: () => void;
+}
+
+export function setup(deskCount = 8): TestSetup {
+  const dataDir = tempDir();
+  const db = openDb(':memory:');
+  migrateUp(db);
+  const events = new EventStore(db);
+  const roster = new Roster(db, deskCount);
+  return { dataDir, db, events, roster, cleanup: () => rmSync(dataDir, { recursive: true, force: true }) };
 }
