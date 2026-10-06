@@ -1,4 +1,4 @@
-import type { BudgetSummary, Constitution, Decision, Employee, EmployeeFile, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Spend, StoredEvent, Task } from '@cc/shared';
+import type { BudgetSummary, Constitution, Decision, Employee, EmployeeFile, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -45,6 +45,9 @@ export const api = {
   budget: () => request<BudgetSummary>('GET', '/api/budget'),
   spending: (planId?: string) => request<Spend[]>('GET', `/api/budget/spend${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`),
   setConstitution: (patch: Record<string, number | null>) => request<Constitution>('POST', '/api/constitution', patch),
+  proposals: () => request<Proposal[]>('GET', '/api/proposals'),
+  approveProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/approve`, note ? { note } : {}),
+  rejectProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/reject`, note ? { note } : {}),
   decisions: () => request<Decision[]>('GET', '/api/memory/decisions'),
   revertDecision: (id: string) => request<Decision>('POST', `/api/decisions/${encodeURIComponent(id)}/revert`),
   playbook: () => request<PlaybookEntry[]>('GET', '/api/memory/playbook'),

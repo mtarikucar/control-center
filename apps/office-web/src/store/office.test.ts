@@ -40,5 +40,12 @@ describe('office store', () => {
       vi.useRealTimers();
     }
   });
-});
 
+  it('forgets the unseen reports of the panel the owner opens, and of the one already open', () => {
+    useOffice.setState({ unseenReports: { e1: 2 } });
+    useOffice.getState().select('e1');
+    expect(useOffice.getState().unseenReports.e1).toBeUndefined();
+    useOffice.getState().receive({ type: 'event', event: { seq: 999, employeeId: 'e1', ts: 1, event: { type: 'company.report', text: 'üç' } } });
+    expect(useOffice.getState().unseenReports.e1).toBeUndefined();
+  });
+});
