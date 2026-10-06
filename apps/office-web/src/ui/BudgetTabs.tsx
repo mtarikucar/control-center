@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { BudgetSummary, Constitution } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
@@ -124,8 +124,10 @@ export function ConstitutionTab() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // While the owner is typing, a budget update (someone's spending) must not reset the form.
+  const dirty = useRef(false);
   useEffect(() => {
-    if (current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, current[f.key] === null ? '' : String(current[f.key])])));
+    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, current[f.key] === null ? '' : String(current[f.key])])));
   }, [current]);
   if (!current) return <p className="muted">Yükleniyor…</p>;
   const save = async (e: FormEvent) => {
@@ -136,10 +138,22 @@ export function ConstitutionTab() {
     const patch: Record<string, number | null> = {};
     for (const f of FIELDS) {
       const raw = (draft[f.key] ?? '').trim().replace(',', '.');
-      patch[f.key] = raw === '' && f.nullable ? null : Number(raw);
+      if (raw === '' && f.nullable) {
+        patch[f.key] = null;
+        continue;
+      }
+      // "50 dolar" or an emptied field must not slip through as no cap or 0 %: say so and send nothing.
+      const value = raw === '' ? Number.NaN : Number(raw);
+      if (!Number.isFinite(value)) {
+        setError(`${f.label}: bir sayı girin.`);
+        setBusy(false);
+        return;
+      }
+      patch[f.key] = value;
     }
     try {
       await api.setConstitution(patch);
+      dirty.current = false;
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -152,7 +166,10 @@ export function ConstitutionTab() {
       {FIELDS.map((f) => (
         <label key={f.key}>
           <span>{f.label}</span>
-          <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })} />
+          <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => {
+              dirty.current = true;
+              setDraft({ ...draft, [f.key]: e.target.value });
+            }} />
           <small className="muted">{f.hint}</small>
         </label>
       ))}

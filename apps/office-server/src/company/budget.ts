@@ -57,7 +57,7 @@ export class Budget {
   setConstitution(patch: Record<string, unknown>): Constitution {
     const checked: Partial<Constitution> = {};
     for (const [key, value] of Object.entries(patch)) {
-      if (!(key in DEFAULT_CONSTITUTION)) throw new ValidationError(`Bilinmeyen anayasa maddesi: ${key}`);
+      if (!Object.hasOwn(DEFAULT_CONSTITUTION, key)) throw new ValidationError(`Bilinmeyen anayasa maddesi: ${key}`);
       const rule = RULES[key as keyof Constitution];
       if (value === null && rule.nullable) {
         (checked as Record<string, unknown>)[key] = null;

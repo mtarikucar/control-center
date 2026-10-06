@@ -41,6 +41,13 @@ describe('Budget — constitution', () => {
     }
     expect(t.budget.constitution()).toEqual(DEFAULT_CONSTITUTION);
   });
+
+  it('review focus: names from the object prototype are unknown settings too, refused in Turkish', () => {
+    const t = make();
+    for (const key of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(() => t.budget.setConstitution(JSON.parse(`{"${key}": 1}`)), key).toThrow(/Bilinmeyen anayasa maddesi/);
+    }
+  });
 });
 
 describe('Budget — the owner’s reserve', () => {

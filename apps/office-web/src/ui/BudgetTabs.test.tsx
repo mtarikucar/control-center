@@ -68,4 +68,24 @@ describe('ConstitutionTab', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
     expect(screen.getByRole('alert').textContent).toMatch(/1 ile 8/);
   });
+
+
+  it('important: refuses a money cap that is not a number and an emptied required field, sending nothing', async () => {
+    render(<ConstitutionTab />);
+    fireEvent.change(screen.getByLabelText('Aylık para sınırı (USD)'), { target: { value: '50 dolar' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(screen.getByRole('alert').textContent).toMatch(/Aylık para sınırı \(USD\): bir sayı girin/);
+    fireEvent.change(screen.getByLabelText('Aylık para sınırı (USD)'), { target: { value: '50' } });
+    fireEvent.change(screen.getByLabelText('Sahibinin kota payı (%)'), { target: { value: '' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(screen.getByRole('alert').textContent).toMatch(/Sahibinin kota payı \(%\): bir sayı girin/);
+    expect(api.setConstitution).not.toHaveBeenCalled();
+  });
+
+  it('important: keeps what the owner is typing when the budget changes underneath', () => {
+    render(<ConstitutionTab />);
+    fireEvent.change(screen.getByLabelText('Sahibinin kota payı (%)'), { target: { value: '40' } });
+    act(() => useOffice.setState({ budget: summary({ month: { key: '2026-10', usd: 99 } }) }));
+    expect((screen.getByLabelText('Sahibinin kota payı (%)') as HTMLInputElement).value).toBe('40');
+  });
 });
