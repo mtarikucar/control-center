@@ -1,6 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
+import { OWNER } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Company } from '../src/company/company.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
@@ -72,5 +73,15 @@ describe('company API', () => {
     const office = await call(t.port, 'GET', '/api/office');
     expect(office.body.plans.map((p: { title: string }) => p.title).sort()).toEqual(['A', 'B']);
     expect(office.body.tasks.map((x: { title: string }) => x.title)).toEqual(['iş']);
+  });
+
+  it('final review: firing someone mid-task puts their tasks back in the queue', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'x' });
+    t.company.start(task.id);
+    expect((await call(t.port, 'DELETE', `/api/employees/${ada.id}`)).status).toBe(204);
+    expect(t.tasks.get(task.id)).toMatchObject({ status: 'waiting', startedAt: null });
   });
 });

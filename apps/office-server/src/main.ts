@@ -38,7 +38,7 @@ const tasks = new TaskStore(db);
 const plans = new PlanStore(db);
 const notices = new NoticeStore(db);
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id) });
 const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine });
 
 const api = createApi(

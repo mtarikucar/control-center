@@ -33,6 +33,8 @@ export class Dispatcher {
   readonly #d: DispatcherDeps;
   readonly #defer: (fn: () => void) => void;
   readonly #queued = new Set<string>();
+  /** Stalled tasks the coordinator has been told about (once per office run). */
+  readonly #escalated = new Set<string>();
   #sweepQueued = false;
 
   constructor(d: DispatcherDeps) {
@@ -80,6 +82,7 @@ export class Dispatcher {
     let started: Task | null = null;
     if (current) {
       if (!current.nudged) body = this.#nudge(current);
+      else this.#escalate(id, current);
     } else {
       const next = this.#d.tasks.nextFor(id);
       if (next) started = this.#d.company.start(next.id);
@@ -116,6 +119,19 @@ Görev no: ${task.id}${plan}
 ${task.description || '(açıklama yok)'}${done}
 
 İş bitince \`taskFinish\` ile teslim et (görev no, kısa özet, ürettiğin dosyalar, öğrendiklerin). Takılırsan \`taskUpdate\` ile "blocked" yap ve nedenini yaz; başka birinin yapması gereken bir parça çıkarsa \`taskPass\` kullan.`;
+  }
+
+  /** Still open after the reminder: the queue behind it is stuck, so the coordinator decides (ask, or taskAssign). */
+  #escalate(id: string, task: Task): void {
+    if (this.#escalated.has(task.id)) return;
+    const coordinator = this.#d.company.coordinator();
+    if (!coordinator || coordinator.id === id) return;
+    this.#escalated.add(task.id);
+    this.#d.notices.add(
+      coordinator.id,
+      `${this.#d.company.nameOf(id)} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
+    );
+    this.#schedule(coordinator.id);
   }
 
   #nudge(task: Task): string {

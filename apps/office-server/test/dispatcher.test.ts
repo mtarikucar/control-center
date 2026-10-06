@@ -85,4 +85,16 @@ describe('Dispatcher', () => {
     expect(t.tasks.get(task.id).status).toBe('waiting');
     expect(systemMessages(t.events.list({ limit: 5000 }), ada.id)).toEqual([]);
   });
+
+  it('final review: tells the coordinator once when someone stalls after the reminder', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    t.company.createTask(c.id, { assignee: ada.id, title: 'Uzun iş' });
+    const escalations = () => systemMessages(t.events.list({ limit: 5000 }), c.id).filter((m) => m.includes('teslim etmedi'));
+    await until(() => escalations().length > 0, 8000);
+    await sleep(800);
+    expect(escalations()).toHaveLength(1);
+    expect(escalations()[0]).toContain('Uzun iş');
+  });
 });

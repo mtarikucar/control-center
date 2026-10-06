@@ -20,8 +20,9 @@ function make(characters: string[] = ['coder', 'designer']) {
   const tasks = new TaskStore(s.db);
   const plans = new PlanStore(s.db);
   const notices = new NoticeStore(s.db);
-  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters });
-  return { ...s, engine: f.engine, tasks, plans, notices, company };
+  const reloaded: string[] = [];
+  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, reload: (id) => void reloaded.push(id) });
+  return { ...s, engine: f.engine, tasks, plans, notices, company, reloaded };
 }
 
 const ofType = (events: StoredEvent[], type: string) => events.filter((e) => e.event.type === type);
@@ -210,5 +211,76 @@ describe('Company — brief and status', () => {
     t.company.start(task.id);
     expect(t.company.status().find((l) => l.id === ada.id)).toMatchObject({ name: 'Ada', title: 'Yazar', kind: 'member', task: 'Blog yazısı' });
     expect(() => t.company.updateBrief(ada.id, 'x')).toThrow(/Yalnız koordinatör/);
+  });
+});
+
+describe('Company — final review', () => {
+  it('appointing a coordinator reloads both sessions and tells each what changed', () => {
+    const t = make();
+    const old = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    t.company.appointCoordinator(ada.id);
+    expect([...t.reloaded].sort()).toEqual([old.id, ada.id].sort());
+    expect(t.notices.pending(ada.id).at(-1)?.text).toMatch(/koordinatörüsün/);
+    expect(t.notices.pending(old.id).at(-1)?.text).toContain('Ada');
+  });
+
+  it('the current coordinator hears about a plan its predecessor proposed', () => {
+    const t = make();
+    const old = t.company.hireCoordinator();
+    const plan = t.company.propose(old.id, { title: 'P', goal: 'g', approach: 'a' });
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    t.company.appointCoordinator(ada.id);
+    t.company.approve(plan.id);
+    expect(t.notices.pending(ada.id).some((n) => n.text.includes('Plan onaylandı'))).toBe(true);
+    expect(t.notices.pending(old.id).some((n) => n.text.includes('Plan onaylandı'))).toBe(false);
+  });
+
+  it('a fired employee’s open tasks wait again and the coordinator is told to hand them out', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, can] = [t.company.hire(c.id, { name: 'Ada', role: 'r' }), t.company.hire(c.id, { name: 'Can', role: 'r' })];
+    const running = t.company.createTask(c.id, { assignee: ada.id, title: 'yarım kalacak' });
+    t.company.start(running.id);
+    t.company.createTask(c.id, { assignee: ada.id, title: 'sırada' });
+    await t.engine.fire(ada.id);
+    t.company.releaseTasksOf(ada.id);
+    expect(t.tasks.get(running.id)).toMatchObject({ status: 'waiting', startedAt: null });
+    const note = t.notices.pending(c.id).at(-1)!.text;
+    expect(note).toContain('yarım kalacak');
+    expect(note).toContain('sırada');
+    expect(note).toContain('taskAssign');
+    expect(t.company.assign(c.id, running.id, can.id).assignee).toBe(can.id);
+  });
+
+  it('a task can be taken from someone who stalled after the reminder, and they are told', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, can] = [t.company.hire(c.id, { name: 'Ada', role: 'r' }), t.company.hire(c.id, { name: 'Can', role: 'r' })];
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'takılan' });
+    t.company.start(task.id);
+    t.tasks.update(task.id, { nudged: true });
+    expect(t.company.assign(c.id, task.id, can.id)).toMatchObject({ assignee: can.id, status: 'waiting', startedAt: null });
+    expect(t.notices.pending(ada.id).at(-1)?.text).toContain('Can');
+  });
+
+  it('a task on a plan whose tasks all finished reopens it; draft and declined plans say why not', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const plan = t.company.propose(c.id, { title: 'Lansman', goal: 'g', approach: 'a', steps: ['metin', 'görsel'] });
+    t.company.approve(plan.id);
+    const first = t.company.createTask(c.id, { assignee: ada.id, title: 'metin', planId: plan.id });
+    t.company.start(first.id);
+    t.company.finish(ada.id, first.id, { summary: 'tamam', outputs: [], learned: '' });
+    expect(t.plans.get(plan.id).status).toBe('done');
+    t.company.createTask(c.id, { assignee: ada.id, title: 'görsel', planId: plan.id });
+    expect(t.plans.get(plan.id).status).toBe('approved');
+    expect(ofType(t.events.list({ limit: 500 }), 'plan.changed').map((e) => (e.event as { change: string }).change)).toContain('reopened');
+    const draft = t.company.propose(c.id, { title: 'Taslak', goal: 'g', approach: 'a' });
+    expect(() => t.company.createTask(c.id, { assignee: ada.id, title: 'x', planId: draft.id })).toThrow(/henüz onaylanmadı/);
+    const declined = t.company.propose(c.id, { title: 'Red', goal: 'g', approach: 'a' });
+    t.company.decline(declined.id);
+    expect(() => t.company.createTask(c.id, { assignee: ada.id, title: 'x', planId: declined.id })).toThrow(/vazgeçildi/);
   });
 });

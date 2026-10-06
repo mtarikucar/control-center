@@ -57,4 +57,20 @@ describe('Engine — office tools', () => {
     await t.engine.stop(e.id);
     expect(t.engine.ready(e.id)).toBe(false);
   });
+
+  it('final review: reload restarts an idle session at once and a busy one after its turn, with a new token', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    await readArgv(t.argvLog, 1);
+    t.engine.reload(e.id);
+    const runs = await readArgv(t.argvLog, 2);
+    await until(() => t.engine.ready(e.id));
+    t.engine.send(e.id, 'SLOW iş');
+    t.engine.reload(e.id);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await readArgv(t.argvLog, 2)).toHaveLength(2);
+    const after = await readArgv(t.argvLog, 3, 8000);
+    expect(tokenIn(after[2]!.args)).not.toBe(tokenIn(runs[1]!.args));
+    await until(() => t.engine.ready(e.id), 8000);
+  });
 });

@@ -1,7 +1,16 @@
-import type { StoredEvent } from '@cc/shared';
+import type { PlanChange, StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, summarizeToolInput } from './format.ts';
 import { lifecycleLabel } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
+
+const PLAN_CHANGE: Record<PlanChange, string> = {
+  proposed: 'önerildi',
+  revised: 'güncellendi',
+  approved: 'onaylandı',
+  declined: 'vazgeçildi',
+  done: 'açık görevi kalmadı',
+  reopened: 'yeniden açıldı',
+};
 
 export function EventItem({ stored }: { stored: StoredEvent }) {
   const e = stored.event;
@@ -77,7 +86,7 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       if (e.change === 'proposed' || e.change === 'revised') return <PlanCard plan={e.plan} />;
       return (
         <div className="note">
-          Plan “{e.plan.title}”: {e.change === 'approved' ? 'onaylandı' : e.change === 'declined' ? 'vazgeçildi' : 'bitti'}
+          Plan “{e.plan.title}”: {PLAN_CHANGE[e.change]}
         </div>
       );
     case 'company.report':

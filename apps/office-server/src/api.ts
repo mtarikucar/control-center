@@ -139,6 +139,7 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     const action = match[2];
     if (method === 'DELETE' && action === undefined) {
       await d.engine.fire(id);
+      d.company?.service.releaseTasksOf(id);
       return sendEmpty(res, 204);
     }
     if (method === 'POST' && action === 'messages') {

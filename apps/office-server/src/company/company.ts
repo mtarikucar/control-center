@@ -24,6 +24,8 @@ export interface CompanyDeps {
   hire: (input: HireInput) => Employee;
   /** Character ids from the asset manifest. */
   characters: () => string[];
+  /** Restarts a session so it reads a new role card and tool list (Engine.reload); absent in tests that do not care. */
+  reload?: (id: string) => void;
   now?: () => number;
 }
 
@@ -141,10 +143,20 @@ export class Company {
       const demoted = this.#d.roster.update(previous.id, { kind: 'member' });
       writeRoleCard(this.#d.dataDir, demoted);
       this.#emit(demoted.id, { type: 'role.changed', kind: demoted.kind, title: demoted.title, team: demoted.team });
+      this.#d.notices.add(demoted.id, `Koordinatörlük ${target.name} adlı çalışana geçti; artık ekipte çalışansın. Rol kartın yenilendi.`);
+      this.#d.reload?.(demoted.id);
     }
     const next = this.#d.roster.update(id, { kind: 'coordinator', reportsTo: null });
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(next.id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
+    if (previous?.id !== id) {
+      this.#d.notices.add(
+        id,
+        'Artık şirketin koordinatörüsün. Rol kartın ve araçların yenilendi (planPropose, hire, taskCreate, taskAssign…); durumu officeStatus, myTasks ve briefRead ile öğren.',
+      );
+      // A session reads its card and tool list only at start: without this the new coordinator has no coordinator tools.
+      this.#d.reload?.(id);
+    }
     return next;
   }
 
@@ -174,7 +186,8 @@ export class Company {
     const planId = input.planId ?? null;
     if (planId !== null) {
       const plan = this.#d.plans.get(planId);
-      if (plan.status !== 'approved') throw new ConflictError(`“${plan.title}” planı henüz onaylanmadı; görevleri onaydan sonra aç.`);
+      if (plan.status === 'draft') throw new ConflictError(`“${plan.title}” planı henüz onaylanmadı; görevleri onaydan sonra aç.`);
+      if (plan.status === 'declined') throw new ConflictError(`“${plan.title}” planından vazgeçildi; gerekiyorsa yeni bir plan öner.`);
       if (this.#d.tasks.openInPlan(planId) >= LIMITS.perPlanOpen) throw new ConflictError(`Bu planda en fazla ${LIMITS.perPlanOpen} açık görev olabilir.`);
     }
     const dependsOn = (input.dependsOn ?? []).filter(Boolean);
@@ -191,19 +204,38 @@ export class Company {
     }
     const task = this.#d.tasks.create({ planId, title, description, done, requester: by, assignee: assignee.id, priority, dependsOn, chainDepth: Math.max(0, chainDepth) });
     this.#taskEvent('created', task);
+    if (planId !== null) this.#reopenPlan(planId);
     return task;
   }
 
   assign(by: string, taskId: string, assignee: string): Task {
     this.#assertCoordinator(by);
     const task = this.#d.tasks.get(taskId);
-    if (task.status === 'in_progress') throw new ConflictError('Bu görev şu an sürüyor; bitmeden başkasına verilemez.');
+    const holder = this.#person(task.assignee);
+    // A running task stays with its assignee — unless they were fired or left it open after the office's reminder.
+    if (task.status === 'in_progress' && !task.nudged && holder !== null && holder.lifecycle !== 'archived') {
+      throw new ConflictError('Bu görev şu an sürüyor; bitmeden başkasına verilemez.');
+    }
     if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev kapandı.');
     const target = this.#d.roster.get(assignee);
     if (target.lifecycle === 'archived') throw new ConflictError(`${target.name} işten çıkarıldı.`);
-    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', nudged: false });
+    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false });
+    if (holder && holder.id !== target.id && holder.lifecycle !== 'archived') {
+      this.#d.notices.add(holder.id, `“${task.title}” görevi (no ${task.id}) ${target.name} adlı çalışana verildi; üzerinde çalışmayı bırak.`);
+    }
     this.#taskEvent('assigned', next);
     return next;
+  }
+
+  /** Someone was fired: their open tasks wait again, and the coordinator hands them out (spec §10). */
+  releaseTasksOf(id: string): void {
+    const open = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] });
+    if (open.length === 0) return;
+    for (const task of open) {
+      if (task.status !== 'waiting') this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null, nudged: false }));
+    }
+    const list = open.map((t) => `“${t.title}” (no ${t.id})`).join(', ');
+    this.#tellCoordinator(id, `${this.nameOf(id)} işten çıkarıldı; açık görevleri sahipsiz bekliyor: ${list}. taskAssign ile yeniden dağıt.`);
   }
 
   reprioritize(by: string, taskId: string, priority: number): Task {
@@ -268,7 +300,7 @@ export class Company {
   revise(by: string, planId: string, draft: Partial<PlanDraft>): Plan {
     this.#assertCoordinator(by);
     const current = this.#d.plans.get(planId);
-    if (current.status === 'done' || current.status === 'declined') throw new ConflictError('Bu plan kapandı; yeni bir plan öner.');
+    if (current.status === 'declined') throw new ConflictError('Bu plandan vazgeçildi; yeni bir plan öner.');
     const merged = this.#draft({
       title: draft.title ?? current.title,
       goal: draft.goal ?? current.goal,
@@ -280,7 +312,7 @@ export class Company {
       days: draft.days === undefined ? current.days : draft.days,
       risks: draft.risks ?? current.risks,
     });
-    // A revision of an approved plan is a new proposal: it waits for the owner again (rule B, big change).
+    // A revision of an approved (or finished) plan is a new proposal: it waits for the owner again (rule B, big change).
     const plan = this.#d.plans.update(planId, { ...merged, version: current.version + 1, status: 'draft', approvedAt: null });
     this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
     return plan;
@@ -290,8 +322,9 @@ export class Company {
     const current = this.#d.plans.get(planId);
     if (current.status !== 'draft') throw new ConflictError('Yalnız taslak bir plan onaylanabilir.');
     const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now() });
-    this.#d.notices.add(current.proposedBy, `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
-    this.#emit(current.proposedBy, { type: 'plan.changed', change: 'approved', plan });
+    const desk = this.#planDesk(plan);
+    this.#d.notices.add(desk, `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
+    this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
     return plan;
   }
 
@@ -299,8 +332,9 @@ export class Company {
     const current = this.#d.plans.get(planId);
     if (current.status !== 'draft') throw new ConflictError('Yalnız taslak bir plan reddedilebilir.');
     const plan = this.#d.plans.update(planId, { status: 'declined' });
-    this.#d.notices.add(current.proposedBy, `Sahibi planı onaylamadı: “${plan.title}”. Ne istediğini sor, gerekirse yeni bir plan öner.`);
-    this.#emit(current.proposedBy, { type: 'plan.changed', change: 'declined', plan });
+    const desk = this.#planDesk(plan);
+    this.#d.notices.add(desk, `Sahibi planı onaylamadı: “${plan.title}”. Ne istediğini sor, gerekirse yeni bir plan öner.`);
+    this.#emit(desk, { type: 'plan.changed', change: 'declined', plan });
     return plan;
   }
 
@@ -342,8 +376,33 @@ export class Company {
     const plan = this.#d.plans.get(planId);
     if (plan.status !== 'approved' || this.#d.tasks.openInPlan(planId) > 0) return;
     const done = this.#d.plans.update(planId, { status: 'done' });
-    this.#d.notices.add(plan.proposedBy, `“${plan.title}” planının bütün görevleri bitti. Sonucu reportToOwner ile sahibine raporla.`);
-    this.#emit(plan.proposedBy, { type: 'plan.changed', change: 'done', plan: done });
+    const desk = this.#planDesk(done);
+    this.#d.notices.add(
+      desk,
+      `“${plan.title}” planının açık görevi kalmadı. İş bittiyse sonucu reportToOwner ile sahibine raporla; sürüyorsa bu plana yeni görev açabilirsin (plan yeniden açılır).`,
+    );
+    this.#emit(desk, { type: 'plan.changed', change: 'done', plan: done });
+  }
+
+  /** The coordinator opens a plan's tasks as the work unfolds: a new task on a plan whose tasks had all finished. */
+  #reopenPlan(planId: string): void {
+    const plan = this.#d.plans.get(planId);
+    if (plan.status !== 'done') return;
+    const reopened = this.#d.plans.update(planId, { status: 'approved' });
+    this.#emit(this.#planDesk(reopened), { type: 'plan.changed', change: 'reopened', plan: reopened });
+  }
+
+  /** Where plan news goes: today's coordinator (the one who proposed it may since have been replaced). */
+  #planDesk(plan: Plan): string {
+    return this.coordinator()?.id ?? plan.proposedBy;
+  }
+
+  #person(id: string): Employee | null {
+    try {
+      return this.#d.roster.get(id);
+    } catch {
+      return null;
+    }
   }
 
   #leastUsedCharacter(characters: string[]): string {
