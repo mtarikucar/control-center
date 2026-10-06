@@ -18,17 +18,20 @@ export function Panel({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const stream = useRef<HTMLDivElement>(null);
+  /** Follow new events only while the owner is at (or near) the bottom of the stream. */
+  const stickToBottom = useRef(true);
   const exists = view !== undefined;
   const loaded = view?.eventsLoaded ?? false;
-  const count = view?.events.length ?? 0;
+  // The list is capped, so its length stops changing; the newest seq does not.
+  const newestSeq = view?.events.at(-1)?.seq ?? 0;
 
   useEffect(() => {
     if (exists && !loaded) void loadEvents(id);
   }, [id, exists, loaded, loadEvents]);
   useEffect(() => {
     const el = stream.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [count]);
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+  }, [newestSeq]);
 
   if (!view) {
     return (
@@ -141,7 +144,14 @@ export function Panel({ id }: { id: string }) {
         </div>
       )}
       {e.lastError && <p className="error">{e.lastError}</p>}
-      <div className="stream" ref={stream}>
+      <div
+        className="stream"
+        ref={stream}
+        onScroll={(ev) => {
+          const el = ev.currentTarget;
+          stickToBottom.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+        }}
+      >
         {view.events.map((stored) => (
           <EventItem key={stored.seq} stored={stored} />
         ))}
