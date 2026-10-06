@@ -43,4 +43,11 @@ describe('EventItem', () => {
     rerender(<EventItem stored={{ seq: 4, employeeId: 'c', ts: 0, event: { type: 'note.written', id: 3, title: 'Seslendirme', tags: [] } }} />);
     expect(screen.getByText('Not: Seslendirme')).toBeTruthy();
   });
+
+  it('notes spending and model changes in the feed', () => {
+    const { rerender } = render(<EventItem stored={{ seq: 1, employeeId: 'e1', ts: 0, event: { type: 'spend.recorded', spend: { id: 's', ts: 0, by: 'e1', service: 'Canva', usd: 12.5, purpose: 'görsel', planId: null } } }} />);
+    expect(screen.getByText('Harcama: Canva $12.5 — görsel')).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 2, employeeId: 'e1', ts: 0, event: { type: 'model.changed', model: 'sonnet' } }} />);
+    expect(screen.getByText('Model: sonnet')).toBeTruthy();
+  });
 });
