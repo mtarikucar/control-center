@@ -216,18 +216,21 @@ export class Engine {
         rt.windows = { fiveHour: event.fiveHour ?? rt.windows.fiveHour, sevenDay: event.sevenDay ?? rt.windows.sevenDay };
       }
       this.#emit(id, event);
-      if (event.type === 'turn.finished') this.#onTurnFinished(id, event.ok);
+      if (event.type === 'turn.finished') this.#onTurnFinished(id, event.ok, event.queuedTurns);
     }
   }
 
-  #onTurnFinished(id: string, ok: boolean): void {
+  #onTurnFinished(id: string, ok: boolean, queuedTurns: number): void {
     const rt = this.#runtime(id);
+    const rejected = !ok && rt.quotaStatus === 'rejected';
+    // claude still holds queued user turns: the work goes on and a later result closes it.
+    if (queuedTurns > 0 && !rejected && !rt.expectingExit) return;
     rt.turnActive = false;
     for (const resolve of rt.turnWaiters.splice(0)) resolve();
     if (rt.expectingExit) return;
     const employee = this.#roster.get(id);
     if (employee.lifecycle !== 'working') return;
-    if (!ok && rt.quotaStatus === 'rejected') {
+    if (rejected) {
       const resetsAt = this.#limitResetTime(rt);
       this.#setLifecycle(this.#roster.update(id, { limitResetsAt: resetsAt }), 'limited', 'abonelik limiti doldu');
       this.#scheduleLimitContinue(id, resetsAt);

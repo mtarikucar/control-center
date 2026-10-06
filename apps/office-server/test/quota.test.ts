@@ -38,11 +38,11 @@ describe('QuotaTracker', () => {
   it('sums usage per employee for today and in total, including side answers', () => {
     const { events, quota, setClock } = make();
     setClock(YESTERDAY);
-    events.append('e1', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(100), costUsd: 1, numTurns: 1 });
+    events.append('e1', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(100), costUsd: 1, numTurns: 1, queuedTurns: 0 });
     setClock(TODAY_NOON);
-    events.append('e1', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(10), costUsd: 0.5, numTurns: 1 });
+    events.append('e1', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(10), costUsd: 0.5, numTurns: 1, queuedTurns: 0 });
     events.append('e1', { type: 'side.answer', text: 'x', ok: true, usage: usage(1), costUsd: 0.1 });
-    events.append('e2', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(7), costUsd: 9, numTurns: 1 });
+    events.append('e2', { type: 'turn.finished', ok: true, subtype: 'success', usage: usage(7), costUsd: 9, numTurns: 1, queuedTurns: 0 });
     events.append('e1', { type: 'message.assistant', text: 'sayılmaz' });
 
     const e1 = quota.usage('e1');

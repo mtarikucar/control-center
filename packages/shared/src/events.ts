@@ -19,7 +19,16 @@ export type OfficeEvent =
   | { type: 'employee.fired' }
   | { type: 'session.started'; model: string; mcp: { name: string; status: string }[] }
   | { type: 'turn.started' }
-  | { type: 'turn.finished'; ok: boolean; subtype: string; usage: Usage; costUsd: number; numTurns: number }
+  | {
+      type: 'turn.finished';
+      ok: boolean;
+      subtype: string;
+      usage: Usage;
+      costUsd: number;
+      numTurns: number;
+      /** > 0: claude already holds more user turns and will produce more results without a new message. */
+      queuedTurns: number;
+    }
   | { type: 'message.user'; text: string; source: 'owner' | 'system' }
   | { type: 'message.assistant'; text: string }
   | { type: 'tool.started'; toolUseId: string; name: string; input: unknown }

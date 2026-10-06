@@ -116,6 +116,7 @@ describe('normalize', () => {
         usage: { inputTokens: 18, outputTokens: 384, cacheReadTokens: 35213, cacheCreationTokens: 8115 },
         costUsd: 0.0216893,
         numTurns: 4,
+        queuedTurns: 0,
       },
     ]);
     const interrupted = { type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 1, result: null };
@@ -127,8 +128,13 @@ describe('normalize', () => {
         usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
         costUsd: 0,
         numTurns: 1,
+        queuedTurns: 0,
       },
     ]);
+  });
+
+  it('reports follow-up turns claude has queued', () => {
+    expect(normalize({ ...RESULT, queued_turn_count: 2 })[0]).toMatchObject({ type: 'turn.finished', queuedTurns: 2 });
   });
 
   it('ignores everything else', () => {

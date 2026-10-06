@@ -72,6 +72,7 @@ export function normalize(raw: unknown): OfficeEvent[] {
           usage: usageOf(raw.usage),
           costUsd: num(raw.total_cost_usd),
           numTurns: num(raw.num_turns),
+          queuedTurns: num(raw.queued_turn_count),
         },
       ];
     case 'rate_limit_event': {

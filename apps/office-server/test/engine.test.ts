@@ -58,6 +58,21 @@ describe('Engine — core', () => {
     expect(t.events.list().filter((x) => x.event.type === 'turn.started')).toHaveLength(1);
   });
 
+  it('a message that lands after the last tool step is answered in a follow-up turn while the employee stays working', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'SLOW job');
+    await waitFor(t.events, (x) => x.event.type === 'tool.finished');
+    t.engine.send(e.id, 'geç kalan');
+    const first = await waitFor(t.events, (x) => x.event.type === 'turn.finished');
+    expect(first.event).toMatchObject({ ok: true, queuedTurns: 1 });
+    expect(t.roster.get(e.id).lifecycle).toBe('working');
+    const late = await waitFor(t.events, (x) => x.event.type === 'message.assistant' && x.event.text === 'echo: geç kalan');
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished', { after: late.seq });
+    expect(t.roster.get(e.id).lifecycle).toBe('idle');
+    expect(t.events.list().filter((x) => x.event.type === 'turn.started')).toHaveLength(1);
+  });
+
   it('stop interrupts the running turn and leaves the employee stopped', async () => {
     const t = make();
     const e = t.engine.hire({ name: 'Ada', role: 'r' });

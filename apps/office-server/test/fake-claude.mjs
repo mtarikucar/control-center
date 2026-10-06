@@ -24,8 +24,9 @@ const remember = (text) => {
 const out = (obj) => process.stdout.write(`${JSON.stringify({ ...obj, session_id: sessionId })}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const usage = { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 };
+let queued = 0;
 const result = (extra = {}) =>
-  out({ type: 'result', subtype: 'success', is_error: false, num_turns: 1, total_cost_usd: 0.01, usage, result: '', ...extra });
+  out({ type: 'result', subtype: 'success', is_error: false, num_turns: 1, total_cost_usd: 0.01, usage, result: '', queued_turn_count: queued, ...extra });
 const rateLimit = (status, resetsInSec) => {
   const resetsAt = Math.floor(Date.now() / 1000) + resetsInSec;
   out({
@@ -83,6 +84,8 @@ async function turn(text) {
       return;
     }
     out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_fake1', is_error: false, content: 'done' }] } });
+    // Writing the final answer: a message arriving now is not injected but queued for a follow-up turn.
+    await sleep(Number(process.env.FAKE_CLAUDE_FINAL_MS ?? '300'));
     say(`slow-done${injected.length ? ` saw:${injected.join(',')}` : ''}`);
     rateLimit('allowed', 3600);
     result({ num_turns: 2, result: 'slow-done' });
@@ -119,7 +122,11 @@ createInterface({ input: process.stdin })
       remember(text);
       return;
     }
-    chain = chain.then(() => turn(text));
+    queued += 1;
+    chain = chain.then(() => {
+      queued -= 1;
+      return turn(text);
+    });
   })
   .on('close', () => {
     chain.then(() => process.exit(0));
