@@ -5,6 +5,8 @@ import type { HireInput, OfficeSnapshot, ServerMessage } from '@cc/shared';
 import type { Engine } from './engine.ts';
 import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } from './errors.ts';
 import type { EventStore } from './event-store.ts';
+import { handleMcp, type McpTool } from './mcp/protocol.ts';
+import type { TokenRegistry } from './mcp/tokens.ts';
 import type { QuotaTracker } from './quota.ts';
 import type { Roster } from './roster.ts';
 import { resolveInside, sendFile } from './static.ts';
@@ -14,6 +16,8 @@ export interface ApiDeps {
   roster: Roster;
   events: EventStore;
   quota: QuotaTracker;
+  /** The office tools employees call over MCP (absent: no /mcp route). */
+  mcp?: { tokens: TokenRegistry; tools: McpTool[] };
 }
 
 export interface ApiOptions {
@@ -91,6 +95,13 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
   checkRequest(req, portOf(server), opts.allowedOrigins);
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', 'http://localhost');
+  if (url.pathname === '/mcp' && d.mcp) {
+    // Claude Code sends JSON; a GET (event stream) is answered 405 inside handleMcp.
+    const body = method === 'POST' ? await readJson(req) : null;
+    const out = await handleMcp({ method, authorization: req.headers.authorization, body, tokens: d.mcp.tokens, roster: d.roster, tools: d.mcp.tools });
+    if (out.body === undefined) return sendEmpty(res, out.status);
+    return sendJson(res, out.status, out.body);
+  }
   if (method === 'POST' && !(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new UnsupportedMediaTypeError('İstek gövdesi application/json olmalı.');
   }
