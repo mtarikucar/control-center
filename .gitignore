@@ -10,5 +10,4 @@ __pycache__/
 .venv/
 
 # one-off Meshy downloads (the curated models live in assets/3d/furniture, characters, manifest.json)
-assets/3d/raw/
-assets/3d/pilot/
+assets/meshy/

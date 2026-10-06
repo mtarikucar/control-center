@@ -61,6 +61,15 @@ describe('Engine — core', () => {
     expect(third.sessionCostUsd).toBeCloseTo(0.03);
   });
 
+  it('a new message clears a stale error and limit time', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.roster.update(e.id, { lastError: 'eski hata', limitResetsAt: 123 });
+    t.engine.send(e.id, 'merhaba');
+    expect(t.roster.get(e.id)).toMatchObject({ lastError: null, limitResetsAt: null });
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished');
+  });
+
   it('rejects an empty message', () => {
     const t = make();
     const e = t.engine.hire({ name: 'Ada', role: 'r' });

@@ -127,4 +127,24 @@ describe('Engine — resilience', () => {
     expect(answer.usage.inputTokens).toBe(10);
     expect(t.roster.get(e.id).lifecycle).toBe('idle');
   });
+
+  it('a per-model weekly limit waits for that window, not the five-hour one', async () => {
+    const t = make({ env: { FAKE_CLAUDE_LIMIT_TYPE: 'seven_day_opus', FAKE_CLAUDE_LIMIT_RESET_SEC: '7200' } });
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'LIMIT hit');
+    await waitFor(t.events, (x) => x.event.type === 'lifecycle.changed' && x.event.to === 'limited');
+    expect(Math.abs((t.roster.get(e.id).limitResetsAt ?? 0) - (Date.now() + 7_200_000))).toBeLessThan(10_000);
+  });
+
+  it('shutdown also ends a side question that hangs', async () => {
+    const t = make({ env: { FAKE_CLAUDE_SIDE_HANG: '1' } });
+    const e = t.engine.hire({ name: 'Ada', role: 'r' });
+    t.engine.send(e.id, 'merhaba');
+    await waitFor(t.events, (x) => x.event.type === 'turn.finished');
+    const pending = t.engine.sideQuestion(e.id, 'ne yapıyorsun?');
+    await new Promise((r) => setTimeout(r, 300));
+    await t.engine.shutdown();
+    const answer = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still hanging'), 3000))]);
+    expect(answer).toMatchObject({ ok: false });
+  });
 });

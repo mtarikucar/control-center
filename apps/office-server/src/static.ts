@@ -1,5 +1,5 @@
 import { accessSync, constants, createReadStream, statSync } from 'node:fs';
-import type { ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream';
 
@@ -33,23 +33,41 @@ export function resolveInside(root: string, urlPath: string): string | null {
   return full === base || full.startsWith(base + sep) ? full : null;
 }
 
-/** Streams a readable regular file; false when there is none to send (caller decides what 404 looks like). */
-export function sendFile(res: ServerResponse, file: string): boolean {
+/**
+ * Streams a readable regular file (headers only for HEAD); false when there is none to send (caller decides what
+ * 404 looks like). An ETag lets the browser revalidate the ~100 MB of models instead of downloading them again.
+ */
+export function sendFile(req: IncomingMessage, res: ServerResponse, file: string): boolean {
   let size: number;
+  let etag: string;
+  let modified: string;
   try {
     const st = statSync(file);
     if (!st.isFile()) return false;
     accessSync(file, constants.R_OK);
     size = st.size;
+    etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`;
+    modified = st.mtime.toUTCString();
   } catch {
     return false;
   }
-  res.writeHead(200, {
+  const headers = {
     'content-type': TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
     'x-content-type-options': 'nosniff',
     'cache-control': 'no-cache',
-  });
+    etag,
+    'last-modified': modified,
+  };
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, headers);
+    res.end();
+    return true;
+  }
+  res.writeHead(200, { ...headers, 'content-length': size });
+  if (req.method === 'HEAD') {
+    res.end();
+    return true;
+  }
   // pipeline closes the file when the client goes away and never lets a read error escape as an 'error' event.
   pipeline(createReadStream(file), res, () => {});
   return true;

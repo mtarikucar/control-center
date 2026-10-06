@@ -50,6 +50,14 @@ export function truncate(text: string, limit = TOOL_OUTPUT_LIMIT): string {
   return `${text.slice(0, limit)}\n… (${text.length - limit} karakter kısaltıldı)`;
 }
 
+const INPUT_FIELD_LIMIT = 2000;
+
+/** Tool inputs can carry whole files (Write/Edit); keep every field but shorten long text. */
+function shortenInput(input: unknown): unknown {
+  if (!isObj(input)) return input ?? null;
+  return Object.fromEntries(Object.entries(input).map(([k, v]) => [k, typeof v === 'string' ? truncate(v, INPUT_FIELD_LIMIT) : v]));
+}
+
 function windowOf(raw: unknown): QuotaWindow | null {
   if (!isObj(raw) || typeof raw.resetsAt !== 'number') return null;
   return { utilization: num(raw.utilization), resetsAt: raw.resetsAt * 1000 };
@@ -87,7 +95,7 @@ export function normalize(raw: unknown): OfficeEvent[] {
     case 'assistant':
       return blocks(raw.message).flatMap((b): OfficeEvent[] => {
         if (b.type === 'text' && str(b.text)) return [{ type: 'message.assistant', text: str(b.text) }];
-        if (b.type === 'tool_use') return [{ type: 'tool.started', toolUseId: str(b.id), name: str(b.name), input: b.input ?? null }];
+        if (b.type === 'tool_use') return [{ type: 'tool.started', toolUseId: str(b.id), name: str(b.name), input: shortenInput(b.input) }];
         return [];
       });
     case 'user':
@@ -120,7 +128,8 @@ export function normalize(raw: unknown): OfficeEvent[] {
         if (info.rateLimitType === 'seven_day') sevenDay = fallback;
         else fiveHour = fallback;
       }
-      return [{ type: 'quota.updated', status: str(info.status), fiveHour, sevenDay }];
+      const limitResetsAt = info.status === 'rejected' && typeof info.resetsAt === 'number' ? info.resetsAt * 1000 : null;
+      return [{ type: 'quota.updated', status: str(info.status), fiveHour, sevenDay, limitResetsAt }];
     }
     default:
       return [];

@@ -19,6 +19,8 @@ export interface OnceOptions {
   env?: NodeJS.ProcessEnv;
   input: string;
   timeoutMs: number;
+  /** Aborting kills the run (office shutdown). */
+  signal?: AbortSignal;
 }
 
 /** Runs `claude -p --output-format json` once with `input` on stdin. Never rejects. */
@@ -31,6 +33,7 @@ export function runOnce(o: OnceOptions): Promise<OnceResult> {
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), o.timeoutMs);
+    o.signal?.addEventListener('abort', () => child.kill('SIGKILL'), { once: true });
     child.stdout.on('data', (c: Buffer) => {
       stdout += c.toString('utf8');
     });

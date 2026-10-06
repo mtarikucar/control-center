@@ -38,7 +38,14 @@ export type OfficeEvent =
   | { type: 'tool.finished'; toolUseId: string; isError: boolean; output: string }
   | { type: 'side.question'; text: string }
   | { type: 'side.answer'; text: string; ok: boolean; usage: Usage; costUsd: number }
-  | { type: 'quota.updated'; status: string; fiveHour: QuotaWindow | null; sevenDay: QuotaWindow | null }
+  | {
+      type: 'quota.updated';
+      status: string;
+      fiveHour: QuotaWindow | null;
+      sevenDay: QuotaWindow | null;
+      /** When rejected: the reset of the window that is actually limiting (may be a per-model weekly one). */
+      limitResetsAt?: number | null;
+    }
   | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string }
   | { type: 'error'; message: string };
 

@@ -107,6 +107,21 @@ describe('API', () => {
     expect((await call(port, 'GET', '/api/nope')).status).toBe(404);
   });
 
+  it('rejects a body that is not an object with a Turkish 400', async () => {
+    const { port } = await start();
+    expect(await call(port, 'POST', '/api/employees', { body: null })).toEqual({ status: 400, body: { error: 'Geçersiz istek gövdesi.' } });
+  });
+
+  it('a client reconnecting with an after from a reset database still gets live events', async () => {
+    const { port } = await start();
+    const ws = openWs(port, '/ws?after=999999');
+    await ws.opened;
+    await ws.waitUntil((ms) => ms.length > 0);
+    await call(port, 'POST', '/api/employees', { body: { name: 'Ada', role: 'r' } });
+    const messages = await ws.waitUntil((ms) => ms.some((m) => m.type === 'event' && m.event.event.type === 'employee.hired'));
+    expect(messages.some((m) => m.type === 'event')).toBe(true);
+  });
+
   it('review focus: rejects cross-site, rebinding and non-JSON requests', async () => {
     const { port } = await start();
     const hire = { body: { name: 'X', role: 'r' } };

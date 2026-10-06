@@ -55,6 +55,12 @@ describe('Roster', () => {
     expect(roster.create({ name: 'Ayşe', role: 'r' }).slug).toBe('ayse-3');
   });
 
+  it('skips slugs whose desk folder is still on disk', () => {
+    const { db } = setup();
+    const roster = new Roster(db, 8, Date.now, (slug) => slug === 'ada');
+    expect(roster.create({ name: 'Ada', role: 'r' }).slug).toBe('ada-2');
+  });
+
   it('updates and persists fields', () => {
     const { roster } = setup();
     const a = roster.create({ name: 'Ada', role: 'r' });

@@ -98,13 +98,14 @@ describe('normalize', () => {
         status: 'allowed',
         fiveHour: { utilization: 0.01, resetsAt: 1791290400000 },
         sevenDay: { utilization: 0, resetsAt: 1791878400000 },
+        limitResetsAt: null,
       },
     ]);
   });
 
   it('falls back to resetsAt when unifiedWindows is missing', () => {
     const raw = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 100, rateLimitType: 'seven_day' } };
-    expect(normalize(raw)).toEqual([{ type: 'quota.updated', status: 'rejected', fiveHour: null, sevenDay: { utilization: 1, resetsAt: 100_000 } }]);
+    expect(normalize(raw)).toEqual([{ type: 'quota.updated', status: 'rejected', fiveHour: null, sevenDay: { utilization: 1, resetsAt: 100_000 }, limitResetsAt: 100_000 }]);
   });
 
   it('maps result to turn.finished, including an interrupted turn', () => {
@@ -164,5 +165,21 @@ describe('normalize', () => {
     expect(normalize(null)).toEqual([]);
     expect(normalize('metin')).toEqual([]);
     expect(normalize([1, 2])).toEqual([]);
+  });
+
+  it('names the limiting window when a per-model limit rejects', () => {
+    const raw = {
+      type: 'rate_limit_event',
+      rate_limit_info: { status: 'rejected', resetsAt: 500, rateLimitType: 'seven_day_opus', unifiedWindows: { five_hour: { utilization: 0.3, resetsAt: 100 }, seven_day: { utilization: 0.5, resetsAt: 200 } } },
+    };
+    expect(normalize(raw)[0]).toMatchObject({ type: 'quota.updated', status: 'rejected', limitResetsAt: 500_000 });
+  });
+
+  it('shortens long text fields of a tool input and keeps the short ones', () => {
+    const [event] = normalize(assistant([{ type: 'tool_use', id: 't', name: 'Write', input: { file_path: '/d/a.txt', content: 'x'.repeat(10_000) } }]));
+    const input = (event as { input: Record<string, string> }).input;
+    expect(input.file_path).toBe('/d/a.txt');
+    expect(input.content!.length).toBeLessThan(2100);
+    expect(input.content).toContain('kısaltıldı');
   });
 });

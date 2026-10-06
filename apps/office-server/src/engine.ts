@@ -53,6 +53,8 @@ interface Runtime {
   consumedInTurn: boolean;
   /** claude's running totals at the last result; null until loaded from the event log. */
   totals: Totals | null;
+  /** Reset of the window that rejected the last request, when claude named it. */
+  limitAt: number | null;
 }
 
 export class Engine {
@@ -68,6 +70,7 @@ export class Engine {
   readonly #stopTimeoutMs: number;
   readonly #sideQuestionTimeoutMs: number;
   readonly #runtimes = new Map<string, Runtime>();
+  readonly #sideRuns = new Set<AbortController>();
 
   constructor(o: EngineOptions) {
     this.#roster = o.roster;
@@ -96,6 +99,7 @@ export class Engine {
     this.#assertReachable(employee);
     const rt = this.#runtime(id);
     this.#assertNotBusy(rt);
+    if (employee.lastError !== null || employee.limitResetsAt !== null) this.#roster.update(id, { lastError: null, limitResetsAt: null });
     if (!rt.proc || rt.proc.exited) this.#start(employee, 'mesaj geldi');
     this.#clearLimitTimer(rt);
     const proc = rt.proc;
@@ -123,14 +127,17 @@ export class Engine {
     if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; önce normal bir mesaj gönder.');
     this.#emit(id, { type: 'side.question', text: question });
     const atFork = this.#totals(id);
+    const abort = new AbortController();
+    this.#sideRuns.add(abort);
     const result = await runOnce({
+      signal: abort.signal,
       command: this.#command,
       args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
       cwd: prepareDesk(this.#dataDir, employee),
       env: this.#env,
       input: question,
       timeoutMs: this.#sideQuestionTimeoutMs,
-    });
+    }).finally(() => this.#sideRuns.delete(abort));
     // The fork's running totals start from the parent's, so only the difference is this question's cost.
     const usage = result.sessionUsage ? usageSince(result.sessionUsage, atFork.usage) : result.usage;
     const costUsd = result.sessionCostUsd >= atFork.costUsd ? result.sessionCostUsd - atFork.costUsd : result.sessionCostUsd;
@@ -195,6 +202,7 @@ export class Engine {
 
   /** Closes every session but keeps lifecycles, so the next `recover()` can pick up where we left. */
   async shutdown(): Promise<void> {
+    for (const run of this.#sideRuns) run.abort();
     await Promise.all(
       [...this.#runtimes.values()].map(async (rt) => {
         this.#clearLimitTimer(rt);
@@ -238,6 +246,7 @@ export class Engine {
       if (event.type === 'session.started' && !this.#roster.get(id).sessionStarted) this.#roster.update(id, { sessionStarted: true });
       if (event.type === 'quota.updated') {
         rt.quotaStatus = event.status;
+        rt.limitAt = event.limitResetsAt ?? null;
         rt.windows = { fiveHour: event.fiveHour ?? rt.windows.fiveHour, sevenDay: event.sevenDay ?? rt.windows.sevenDay };
       }
       if (event.type === 'turn.finished') {
@@ -366,6 +375,7 @@ export class Engine {
   }
 
   #limitResetTime(rt: Runtime): number {
+    if (rt.limitAt !== null) return rt.limitAt;
     const windows = [rt.windows.fiveHour, rt.windows.sevenDay].filter((w): w is QuotaWindow => w !== null);
     const full = windows.filter((w) => w.utilization >= 1);
     const candidates = (full.length > 0 ? full : windows.slice(0, 1)).map((w) => w.resetsAt);
@@ -445,6 +455,7 @@ export class Engine {
         unread: [],
         consumedInTurn: false,
         totals: null,
+        limitAt: null,
       };
       this.#runtimes.set(id, rt);
     }

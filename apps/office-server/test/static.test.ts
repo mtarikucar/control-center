@@ -14,12 +14,12 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
-function get(port: number, path: string): Promise<{ status: number; type: string; body: string }> {
+function get(port: number, path: string, method = 'GET', headers: Record<string, string> = {}): Promise<{ status: number; type: string; body: string; headers: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: '127.0.0.1', port, method: 'GET', path }, (res) => {
+    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers }, (res) => {
       let body = '';
       res.on('data', (c) => (body += c));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, type: String(res.headers['content-type'] ?? ''), body }));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, type: String(res.headers['content-type'] ?? ''), body, headers: res.headers }));
     });
     req.on('error', reject);
     req.end();
@@ -121,5 +121,14 @@ describe('static serving', () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(openFiles() - before).toBeLessThanOrEqual(2);
   });
-});
 
+  it('answers HEAD and lets the browser reuse an unchanged model', async () => {
+    const port = await start();
+    const head = await get(port, '/assets3d/furniture/desk.glb', 'HEAD');
+    expect(head).toMatchObject({ status: 200, type: 'model/gltf-binary', body: '' });
+    expect(head.headers['content-length']).toBe('4');
+    const etag = String(head.headers.etag ?? '');
+    expect(etag).not.toBe('');
+    expect((await get(port, '/assets3d/furniture/desk.glb', 'GET', { 'if-none-match': etag })).status).toBe(304);
+  });
+});

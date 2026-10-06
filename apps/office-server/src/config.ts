@@ -24,7 +24,7 @@ function insideRepo(dir: string): boolean {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfficeConfig {
-  const dataDir = env.OFFICE_DATA_DIR ?? join(homedir(), '.control-center');
+  const dataDir = resolve(env.OFFICE_DATA_DIR ?? join(homedir(), '.control-center'));
   if (insideRepo(dataDir)) {
     throw new Error(`OFFICE_DATA_DIR repo içinde olamaz (${dataDir}); çalışanlar reponun talimatlarını devralırdı.`);
   }

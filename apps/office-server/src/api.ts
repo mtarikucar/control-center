@@ -95,7 +95,11 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     throw new UnsupportedMediaTypeError('İstek gövdesi application/json olmalı.');
   }
   if (method === 'GET' && url.pathname === '/api/office') return sendJson(res, 200, snapshot(d));
-  if (method === 'POST' && url.pathname === '/api/employees') return sendJson(res, 201, d.engine.hire((await readJson(req)) as HireInput));
+  if (method === 'POST' && url.pathname === '/api/employees') {
+    const body = await readJson(req);
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
+    return sendJson(res, 201, d.engine.hire(body as HireInput));
+  }
 
   const match = EMPLOYEE_ROUTE.exec(url.pathname);
   if (match) {
@@ -123,21 +127,21 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       return sendJson(res, 200, d.events.list({ employeeId: id, after, limit }));
     }
   }
-  if (method === 'GET' && !url.pathname.startsWith('/api/')) return serveStatic(opts, url.pathname, res);
+  if ((method === 'GET' || method === 'HEAD') && !url.pathname.startsWith('/api/')) return serveStatic(opts, url.pathname, req, res);
   sendJson(res, 404, { error: 'Bulunamadı.' });
 }
 
-function serveStatic(opts: ApiOptions, pathname: string, res: ServerResponse): void {
+function serveStatic(opts: ApiOptions, pathname: string, req: IncomingMessage, res: ServerResponse): void {
   if (pathname.startsWith('/assets3d/')) {
     const file = opts.assetsDir ? resolveInside(opts.assetsDir, pathname.slice('/assets3d'.length)) : null;
-    if (file && sendFile(res, file)) return;
+    if (file && sendFile(req, res, file)) return;
     return sendJson(res, 404, { error: 'Model bulunamadı.' });
   }
   if (opts.webDir) {
     const file = resolveInside(opts.webDir, pathname === '/' ? '/index.html' : pathname);
-    if (file && sendFile(res, file)) return;
+    if (file && sendFile(req, res, file)) return;
     const index = resolveInside(opts.webDir, '/index.html');
-    if (index && sendFile(res, index)) return;
+    if (index && sendFile(req, res, index)) return;
   }
   sendJson(res, 404, { error: 'Arayüz derlenmemiş: önce `pnpm --filter @cc/office-web build` çalıştır.' });
 }
@@ -148,7 +152,8 @@ function attach(d: ApiDeps, ws: WebSocket, after: number): void {
   };
   const snap = snapshot(d);
   send({ type: 'snapshot', snapshot: snap });
-  let last = after > 0 ? after : snap.lastSeq;
+  // An `after` beyond the log (e.g. the database was reset) must not silence the feed: start from now.
+  let last = after > 0 ? Math.min(after, snap.lastSeq) : snap.lastSeq;
   if (after > 0) {
     for (;;) {
       const page = d.events.list({ after: last, limit: 5000 });

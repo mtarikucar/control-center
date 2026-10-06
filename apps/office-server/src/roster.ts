@@ -57,11 +57,14 @@ export class Roster {
   readonly #db: Db;
   readonly #deskCount: number;
   readonly #now: () => number;
+  readonly #slugTaken: (slug: string) => boolean;
 
-  constructor(db: Db, deskCount: number, now: () => number = Date.now) {
+  /** `slugTaken` reports slugs in use outside the database, e.g. desk folders left by an earlier database. */
+  constructor(db: Db, deskCount: number, now: () => number = Date.now, slugTaken: (slug: string) => boolean = () => false) {
     this.#db = db;
     this.#deskCount = deskCount;
     this.#now = now;
+    this.#slugTaken = slugTaken;
   }
 
   create(input: HireInput): Employee {
@@ -126,7 +129,8 @@ export class Roster {
   /** Slugs are unique across archived employees too, because desk folders are never deleted. */
   #uniqueSlug(base: string): string {
     let slug = base;
-    for (let n = 2; this.#db.prepare('SELECT 1 FROM employees WHERE slug = ?').get(slug) !== undefined; n += 1) {
+    const taken = (s: string) => this.#db.prepare('SELECT 1 FROM employees WHERE slug = ?').get(s) !== undefined || this.#slugTaken(s);
+    for (let n = 2; taken(slug); n += 1) {
       slug = `${base}-${n}`;
     }
     return slug;
