@@ -69,5 +69,5 @@ export interface Plan {
 }
 
 export type TaskChange = 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized';
-/** `reopened`: a done plan got a new task (the coordinator opens a plan's tasks as the work unfolds). */
-export type PlanChange = 'proposed' | 'revised' | 'approved' | 'declined' | 'done' | 'reopened';
+/** `reopened`: a done plan got a new task. `kept`: the owner declined a revision; the plan goes on as approved. */
+export type PlanChange = 'proposed' | 'revised' | 'approved' | 'declined' | 'done' | 'reopened' | 'kept';

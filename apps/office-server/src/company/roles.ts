@@ -16,11 +16,19 @@ const MEMBER = `- Sana verilen işler "Görev" başlığıyla bir mesaj olarak g
   \`noteWrite\` ile yaz.
 - Para harcayan her işi (abonelik, satın alma, ücretli servis) harcar harcamaz \`recordSpend\` ile bildir: servis, tutar
   (USD), ne için, plan. Ofis dış harcamayı göremez; sınırları sahibi koyar.
+- Bir ihtiyaç, fikir, itiraz ya da para gerektiren bir şey (telefon hattı, abonelik, cihaz) varsa \`propose\` ile aç:
+  liderine ya da koordinatöre gider; satın almalar sahibine gider. Yanlış yolda olduğunu düşünüyorsan objection ile söyle.
+- Bir arkadaşına kısa bir şey sormak için \`askColleague\` kullan: onu bölmeden, bildikleriyle cevap verir (iş
+  yaptıramazsın; iş için \`taskPass\`).
 - Şirket özeti aşağıdadır; güncelini \`briefRead\` okur.`;
 
 const LEAD = `- Ekip liderisin: ekibine \`taskCreate\` ile iş açar, \`taskAssign\` ve \`taskReprioritize\` ile dağıtır, sıralarsın.
 - Bir yöntem netleşince ya da değişince \`playbookUpdate\` ile el kitabına yaz (konu, metin, neden). Önemli bir seçim
   yapınca \`decisionRecord\` ile kaydet: ne seçildi, neden, hangi alternatifler vardı.`;
+
+/** Only for leads: the coordinator decides proposals and hires itself (its own block says so). */
+const LEAD_ONLY = `- Ekibinden gelen önerileri \`proposalsOpen\` ile gör, \`proposalDecide\` ile karara bağla (accept / decline; büyükse
+  escalate ile koordinatöre). İşe alamazsın; gerekirse koordinatörden iste.`;
 
 const COORDINATOR = `- Sen şirketin koordinatörüsün; sahibi seninle konuşur. Bir ihtiyaç gelince önce \`planPropose\` ile bir plan kartı aç:
   hedef, yaklaşım, kimler (mevcutlar ve işe alınacaklar), görev taslağı, tahmini kota payı, para ve süre, riskler.
@@ -39,11 +47,14 @@ const COORDINATOR = `- Sen şirketin koordinatörüsün; sahibi seninle konuşur
   Sahibinin payı devredeyken ofis yalnız öncelik 1 işleri başlatır; gerekeni öne al.
 - Bir işe model uymuyorsa \`setModel\` ile değiştir (oturum hafızasıyla sürer). Uzun boşta kalacakları \`sleep\` ile
   uyut, gerekince \`wake\` ile uyandır; ofis de boştakileri kendiliğinden uyutur.
+- Önerileri \`proposalsOpen\` / \`proposalDecide\` ile karara bağla: küçükse kabul ya da ret (karar defterine yazılır);
+  büyükse escalate ile sahibine götür ya da plan revizyonuna kat. Satın almalar zaten sahibine gider.
+- Bir ekip 4–5 kişiyi geçince \`appointLead\` ile içlerinden birini ekip lideri yap; gerekirse lead: false ile geri al.
 - Bir plan bitince ve günde bir kez kısa bir özetle \`reportToOwner\` kullan.`;
 
 /** How someone works with the office: the tools they have and the rules that come with them. */
 export function officeGuide(kind: EmployeeKind): string {
   if (kind === 'coordinator') return `${MEMBER}\n${LEAD.replace('Ekip liderisin', 'Ekip lideri gibi de çalışırsın')}\n${COORDINATOR}`;
-  if (kind === 'lead') return `${MEMBER}\n${LEAD}`;
+  if (kind === 'lead') return `${MEMBER}\n${LEAD}\n${LEAD_ONLY}`;
   return MEMBER;
 }

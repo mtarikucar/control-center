@@ -220,4 +220,30 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS spend;
       DROP TABLE IF EXISTS constitution;`,
   },
+  {
+    version: 5,
+    name: 'proposals, approved plan snapshots',
+    up: `
+      CREATE TABLE IF NOT EXISTS proposals (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        by_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        text TEXT NOT NULL,
+        usd REAL,
+        plan_id TEXT,
+        status TEXT NOT NULL,
+        routed_to TEXT,
+        decided_by TEXT,
+        note TEXT,
+        decided_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS proposals_status ON proposals (status, ts);
+      ALTER TABLE plans ADD COLUMN approved_snapshot TEXT;`,
+    down: `
+      ALTER TABLE plans DROP COLUMN approved_snapshot;
+      DROP INDEX IF EXISTS proposals_status;
+      DROP TABLE IF EXISTS proposals;`,
+  },
 ];

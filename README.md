@@ -62,6 +62,18 @@ pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, bo
 - **Uyku:** işi olmayan çalışan bir süre sonra uyur (oturumu korunur); görevi gelince ya da siz yazınca uyanır.
 - Koordinatör `budgetStatus` ile bütçeyi görür, `setModel` ile birinin modelini değiştirir, `sleep`/`wake` kullanır.
 
+## Öneriler ve ekip liderleri
+
+- Çalışanlar **ihtiyaç**, **fikir**, **itiraz** ("yanlış yoldayız") ve **satın alma** taleplerini `propose` ile açar.
+  Liderleri ya da koordinatör karara bağlar (karar defterine yazılır) ya da büyükse size getirir. **Satın almalar her
+  zaman size gelir**: Şirket görünümünün **Öneriler** sekmesinde (ve koordinatörün sohbetinde) Onayla / Reddet. Şirket
+  düğmesindeki sayı sizi bekleyen plan ve talepleri gösterir.
+- `askColleague`: bir çalışan arkadaşına onu bölmeden soru sorar.
+- Bir ekip büyüyünce koordinatör `appointLead` ile ekip lideri atar; lider kendi ekibine iş açar ve dağıtır, etiketinde
+  ★ görünür.
+- Bir revizyonu reddederseniz plan onaylı sürümüyle sürer. Koordinatör her gün kısa bir özet raporlar; okunmamış rapor
+  etiketinde 📋 olarak görünür. Koordinatör sizinle plan konuşurken toplantı odasına geçer.
+
 ## office-server
 
 Gereken: Node 24+, pnpm 9, giriş yapılmış `claude` CLI.

@@ -1,6 +1,6 @@
 import type { Lifecycle } from '@cc/shared';
 
-export type Zone = 'desk' | 'server' | 'coffee' | 'lounge';
+export type Zone = 'desk' | 'server' | 'coffee' | 'lounge' | 'meeting';
 export type Activity = 'typing' | 'sit' | 'talkSeated' | 'idle' | 'drink';
 export type Marker = 'none' | 'alert' | 'faded' | 'terminal';
 
@@ -24,12 +24,15 @@ export interface BehaviorInput {
   now: number;
   /** Stable per employee (desk index) so the same person keeps wandering to the same place. */
   wanderSeed: number;
+  /** The coordinator is discussing a plan with the owner (a draft of theirs waits): it stands at the meeting table. */
+  planning?: boolean;
 }
 
 const at = (zone: Zone, activity: Activity, marker: Marker = 'none'): Behavior => ({ zone, activity, marker });
 
 /** Spec §6: what the character does for a given employee state. Pure, so the scene only renders it. */
 export function behaviorOf(i: BehaviorInput): Behavior {
+  if (i.planning && (i.lifecycle === 'working' || i.lifecycle === 'idle')) return at('meeting', 'idle');
   const ownerTyping = i.ownerTypingAt !== null && i.now - i.ownerTypingAt < TYPING_FRESH_MS;
   switch (i.lifecycle) {
     case 'working':

@@ -90,4 +90,11 @@ describe('office layout', () => {
       expect(p.y, p.assetId).toBe(0);
     }
   });
+
+
+  it('the meeting spot is free and reachable from every desk', () => {
+    const spot = spotFor(LAYOUT, 'meeting', 3);
+    expect(isFreeAt(GRID, spot)).toBe(true);
+    for (const seat of LAYOUT.seats) expect(findPath(GRID, seat, spot).length).toBeGreaterThan(0);
+  });
 });

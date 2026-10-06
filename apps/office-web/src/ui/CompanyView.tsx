@@ -5,10 +5,12 @@ import { useOffice } from '../store/office.ts';
 import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
 import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
+import { ProposalCard } from './ProposalCard.tsx';
 
 const TABS = [
   ['org', 'Örgüt'],
   ['tasks', 'Görevler'],
+  ['proposals', 'Öneriler'],
   ['decisions', 'Kararlar'],
   ['playbook', 'El kitabı'],
   ['notes', 'Notlar'],
@@ -75,6 +77,31 @@ function PersonCard({ e, current, onOpen }: { e: Employee; current: Task | undef
       <span className="muted">{lifecycleLabel(e.lifecycle)}</span>
       {current && <span className="org-task">şu an: {current.title}</span>}
     </button>
+  );
+}
+
+function ProposalsTab() {
+  const proposals = useOffice((s) => s.proposals);
+  const all = Object.values(proposals).sort((a, b) => b.ts - a.ts);
+  const owner = all.filter((p) => p.status === 'owner');
+  const open = all.filter((p) => p.status === 'open');
+  const decided = all.filter((p) => p.status === 'accepted' || p.status === 'declined').slice(0, 20);
+  if (all.length === 0) return <p className="muted">Henüz öneri yok. Çalışanlar ihtiyaç, fikir, itiraz ve satın alma taleplerini buraya getirir.</p>;
+  const section = (label: string, items: typeof all) =>
+    items.length > 0 && (
+      <section aria-label={label} className="proposal-list">
+        <h3>{label}</h3>
+        {items.map((p) => (
+          <ProposalCard key={p.id} proposal={p} />
+        ))}
+      </section>
+    );
+  return (
+    <div className="proposals">
+      {section('Senin kararını bekleyenler', owner)}
+      {section('Ekipte karar bekleyenler', open)}
+      {section('Karara bağlananlar', decided)}
+    </div>
   );
 }
 
@@ -195,6 +222,8 @@ export function CompanyView() {
               })}
             </div>
           </div>
+        ) : tab === 'proposals' ? (
+          <ProposalsTab />
         ) : tab === 'decisions' ? (
           <DecisionsTab />
         ) : tab === 'playbook' ? (

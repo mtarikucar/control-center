@@ -63,6 +63,12 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
       return;
     }
     set((s) => applyEvent(s, m.event));
+    // A report arriving in the panel the owner has open is read as it arrives.
+    const open = get().selectedId;
+    if (m.event.event.type === 'company.report' && open && m.event.employeeId === open && get().unseenReports[open]) {
+      const { [open]: _read, ...rest } = get().unseenReports;
+      set({ unseenReports: rest });
+    }
     if (needsRefresh(m.event)) {
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => void get().refresh(), 150);
@@ -82,6 +88,10 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
   admit: (employee) => set((s) => addEmployee(s, employee)),
   select(id) {
     set({ selectedId: id });
+    if (id && get().unseenReports[id]) {
+      const { [id]: _seen, ...rest } = get().unseenReports;
+      set({ unseenReports: rest });
+    }
     const view = id ? get().views[id] : undefined;
     if (id && view && !view.eventsLoaded) void get().loadEvents(id);
   },

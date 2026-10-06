@@ -1,4 +1,4 @@
-import type { BudgetSummary, Employee, EmployeeUsage, OfficeSnapshot, Plan, QuotaState, StoredEvent, Task, Usage, UsageTotals } from '@cc/shared';
+import type { BudgetSummary, Employee, EmployeeUsage, OfficeSnapshot, Plan, Proposal, QuotaState, StoredEvent, Task, Usage, UsageTotals } from '@cc/shared';
 
 export const MAX_EVENTS = 500;
 
@@ -29,9 +29,14 @@ export interface OfficeData {
   memoryRev: number;
   /** The constitution, the reserve and the money (null: an office without the company layer). */
   budget: BudgetSummary | null;
+  proposals: Record<string, Proposal>;
+  /** A colleague passed work: the receiver's tag says so for a few seconds. */
+  pings: Record<string, { text: string; at: number }>;
+  /** Reports the owner has not read yet, per employee (the coordinator's tag shows them). */
+  unseenReports: Record<string, number>;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, pings: {}, unseenReports: {} };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
 
@@ -73,6 +78,9 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     synced: true,
     memoryRev: d.memoryRev,
     budget: s.budget ?? null,
+    proposals: Object.fromEntries((s.proposals ?? []).map((p) => [p.id, p])),
+    pings: d.pings,
+    unseenReports: d.unseenReports,
     tasks: Object.fromEntries((s.tasks ?? []).map((t) => [t.id, t])),
     plans: Object.fromEntries((s.plans ?? []).map((p) => [p.id, p])),
   };
@@ -98,6 +106,11 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: ev.plan };
   if (ev.type === 'decision.recorded' || ev.type === 'playbook.updated' || ev.type === 'note.written') next.memoryRev = d.memoryRev + 1;
   if (ev.type === 'budget.changed') next.budget = ev.budget;
+  if (ev.type === 'proposal.changed') next.proposals = { ...d.proposals, [ev.proposal.id]: ev.proposal };
+  if (ev.type === 'task.changed' && ev.change === 'created' && ev.task.requester !== 'owner' && ev.task.requester !== ev.task.assignee) {
+    next.pings = { ...d.pings, [ev.task.assignee]: { text: `Yeni iş: ${ev.task.title}`, at: s.ts } };
+  }
+  if (ev.type === 'company.report' && s.employeeId) next.unseenReports = { ...d.unseenReports, [s.employeeId]: (d.unseenReports[s.employeeId] ?? 0) + 1 };
   const id = s.employeeId;
   const view = id ? d.views[id] : undefined;
   if (!id || !view) return next;

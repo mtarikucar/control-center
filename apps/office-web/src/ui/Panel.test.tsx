@@ -81,6 +81,8 @@ describe('Panel', () => {
     render(<Panel id="e1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Durdur' }));
     await waitFor(() => expect(api.stop).toHaveBeenCalledWith('e1'));
+    // The actions stay disabled until the stop has finished; under load a click before that is ignored.
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Terminalde aç' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Terminalde aç' }));
     await waitFor(() => expect(screen.getByText("cd '/d/ada' && claude --resume s1")).toBeTruthy());
   });

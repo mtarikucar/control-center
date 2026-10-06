@@ -8,6 +8,9 @@ export function TopBar() {
   const setHireOpen = useOffice((s) => s.setHireOpen);
   const setCompanyOpen = useOffice((s) => s.setCompanyOpen);
   const reserve = useOffice((s) => s.budget?.reserve.active ?? false);
+  const waiting = useOffice(
+    (s) => Object.values(s.plans).filter((p) => p.status === 'draft').length + Object.values(s.proposals).filter((p) => p.status === 'owner').length,
+  );
   return (
     <header className="topbar">
       <div className="brand">
@@ -23,6 +26,11 @@ export function TopBar() {
       )}
       <button type="button" onClick={() => setCompanyOpen(true)}>
         Şirket
+        {waiting > 0 && (
+          <span className="count" aria-label={`${waiting} karar bekliyor`}>
+            {waiting}
+          </span>
+        )}
       </button>
       <button type="button" className="primary" onClick={() => setHireOpen(true)}>
         + Çalışan al

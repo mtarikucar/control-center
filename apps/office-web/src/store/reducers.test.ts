@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Employee, OfficeEvent, OfficeSnapshot, Plan, StoredEvent, Task } from '@cc/shared';
+import type { Employee, OfficeEvent, OfficeSnapshot, Plan, Proposal, StoredEvent, Task } from '@cc/shared';
 import { EMPTY_DATA, MAX_EVENTS, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
 
 const employee = (over: Partial<Employee> = {}): Employee => ({
@@ -246,5 +246,38 @@ describe('budget', () => {
     d = applyEvent(d, stored({ type: 'model.changed', model: 'opus' }));
     expect(d.views.e1?.employee.model).toBe('opus');
     expect(applySnapshot(EMPTY_DATA, snapshot()).budget).toBeNull();
+  });
+});
+
+describe('proposals, passes and reports', () => {
+  const proposal = (over: Partial<Proposal> = {}): Proposal => ({
+    id: 'q1', ts: 1, by: 'e1', kind: 'purchase', title: 'Telefon hattı', text: 't', usd: 12, planId: null, status: 'owner', routedTo: null,
+    decidedBy: null, note: null, decidedAt: null, ...over,
+  });
+  const task = (over: Partial<Task> = {}): Task => ({
+    id: 't7', kind: 'work', planId: null, title: 'Slogan', description: '', done: [], requester: 'e2', assignee: 'e1', priority: 3, dependsOn: [],
+    status: 'waiting', chainDepth: 1, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null, ...over,
+  });
+
+  it('keeps proposals from the snapshot and the feed', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ proposals: [proposal()] }));
+    expect(d.proposals.q1?.status).toBe('owner');
+    d = applyEvent(d, stored({ type: 'proposal.changed', change: 'accepted', proposal: proposal({ status: 'accepted' }) }));
+    expect(d.proposals.q1?.status).toBe('accepted');
+  });
+
+  it('notes a pass on the receiver, but not the owner’s own tasks', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot());
+    d = applyEvent(d, stored({ type: 'task.changed', change: 'created', task: task() }, 'e1', 5000));
+    expect(d.pings.e1).toEqual({ text: 'Yeni iş: Slogan', at: 5000 });
+    d = applyEvent(d, stored({ type: 'task.changed', change: 'created', task: task({ id: 't8', requester: 'owner', title: 'Sahibin işi' }) }, 'e1', 6000));
+    expect(d.pings.e1?.text).toBe('Yeni iş: Slogan');
+  });
+
+  it('counts reports not yet seen', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot());
+    d = applyEvent(d, stored({ type: 'company.report', text: 'bir' }));
+    d = applyEvent(d, stored({ type: 'company.report', text: 'iki' }));
+    expect(d.unseenReports.e1).toBe(2);
   });
 });

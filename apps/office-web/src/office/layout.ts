@@ -83,6 +83,7 @@ export interface Layout {
   coffeeSpots: Spot[];
   loungeSpots: Spot[];
   serverSpots: Spot[];
+  meetingSpots: Spot[];
 }
 
 const PI = Math.PI;
@@ -260,6 +261,8 @@ export const LAYOUT: Layout = {
     { x: 16.7, z: 3.3, rotY: PI },
     { x: 17.4, z: 3.3, rotY: PI },
   ],
+  // South of the meeting table, facing it (reachable through the glass room's door; checked by the layout test).
+  meetingSpots: [{ x: 10.5, z: 3.3, rotY: PI }],
 };
 
 const WALL_MARGIN = 0.35;
@@ -289,7 +292,7 @@ export const GRID = buildGrid(LAYOUT.width, LAYOUT.depth, LAYOUT.cell, obstacles
  * behaviorOf), so those places take every other desk and no two employees ever share one.
  */
 export function spotFor(layout: Layout, zone: Zone, deskIndex: number): Spot {
-  const list = zone === 'desk' ? layout.seats : zone === 'coffee' ? layout.coffeeSpots : zone === 'lounge' ? layout.loungeSpots : layout.serverSpots;
+  const list = zone === 'desk' ? layout.seats : zone === 'coffee' ? layout.coffeeSpots : zone === 'lounge' ? layout.loungeSpots : zone === 'meeting' ? layout.meetingSpots : layout.serverSpots;
   const index = zone === 'coffee' || zone === 'lounge' ? Math.floor(deskIndex / 2) : deskIndex;
   return list[((index % list.length) + list.length) % list.length]!;
 }

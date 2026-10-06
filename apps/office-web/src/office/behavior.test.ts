@@ -37,4 +37,11 @@ describe('behaviorOf (spec §6)', () => {
     expect(input('stopped')).toEqual({ zone: 'desk', activity: 'sit', marker: 'faded' });
     expect(input('in_terminal')).toEqual({ zone: 'desk', activity: 'sit', marker: 'terminal' });
   });
+
+
+  it('sends a coordinator discussing a plan to the meeting room, working or between turns', () => {
+    expect(input('working', { planning: true })).toEqual({ zone: 'meeting', activity: 'idle', marker: 'none' });
+    expect(input('idle', { planning: true })).toEqual({ zone: 'meeting', activity: 'idle', marker: 'none' });
+    expect(input('stopped', { planning: true }).zone).toBe('desk');
+  });
 });

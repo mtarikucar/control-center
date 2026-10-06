@@ -32,9 +32,11 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
     const { ConstitutionStore, SpendStore } = await import('../src/company/budget-store.ts');
     const quota = new QuotaTracker(s.db, s.events);
     const budget = new Budget({ constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8 });
-    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id), constitution: () => budget.constitution() });
+    const { ProposalStore } = await import('../src/company/proposal-store.ts');
+    const proposals = new ProposalStore(s.db);
+    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id), constitution: () => budget.constitution(), proposals });
     const api = createApi(
-      { engine, roster: s.roster, events: s.events, quota, mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine }) }, company: { service: company, tasks, plans, memory, budget } },
+      { engine, roster: s.roster, events: s.events, quota, mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
       { allowedOrigins: [] },
     );
     await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
@@ -59,6 +61,17 @@ describe.skipIf(!enabled)('company with the real claude CLI (coordinator on sonn
       expect(existsSync(join(s.dataDir, handed.result!.archive!, 'teslim.md'))).toBe(true);
       await waitFor(s.events, (e) => e.event.type === 'decision.recorded', { timeoutMs: 300_000 });
       // The owner lets the writer go: a hand-over first, then the office fires them.
+      // A purchase goes to the owner, who approves it.
+      const asked = s.events.lastSeq();
+      engine.send(writer!.id, 'Müşterilerin bizi araması için bir telefon hattı lazım. Bunu propose ile satın alma talebi olarak aç (tahmini 12 USD/ay).');
+      const raised = await waitFor(s.events, (e) => e.event.type === 'proposal.changed' && e.event.proposal.kind === 'purchase', { after: asked, timeoutMs: 300_000 });
+      const purchase = (raised.event as { proposal: { id: string; status: string } }).proposal;
+      expect(purchase.status).toBe('owner');
+      expect(company.ownerDecideProposal(purchase.id, true).status).toBe('accepted');
+      // The coordinator asks the writer without interrupting them.
+      const asking = s.events.lastSeq();
+      engine.send(coordinator.id, 'askColleague ile yazara NOTES.md dosyasına ne yazdığını sor ve cevabı bana tek cümleyle söyle.');
+      await waitFor(s.events, (e) => e.employeeId === writer!.id && e.event.type === 'side.question', { after: asking, timeoutMs: 300_000 });
       // The coordinator's setModel goes on with the same session on the new model (spec §3.3: --resume + --model);
       // the restarted session reports itself with its first message, the hand-over.
       const mark = s.events.lastSeq();

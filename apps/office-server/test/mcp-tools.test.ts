@@ -31,11 +31,13 @@ describe('office tools', () => {
   it('splits the tools between everyone, leads and the coordinator', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
-    expect(names('member')).toEqual(['briefRead', 'decisionsRead', 'memorySearch', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'recordSpend', 'taskFinish', 'taskPass', 'taskUpdate']);
-    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate']);
+    expect(names('member')).toEqual([
+      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend',
+      'taskFinish', 'taskPass', 'taskUpdate',
+    ]);
+    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'setModel', 'sleep',
-      'taskAssign', 'taskCreate', 'taskReprioritize', 'wake',
+      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
@@ -168,5 +170,46 @@ describe('office tools', () => {
     expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
     expect(await t.call(c, 'wake', { employee: ada.id })).toBe('Ada uyandı.');
     await expect(t.call(c, 'sleep', { employee: c.id })).rejects.toThrow(/Kendini uyutamazsın/);
+  });
+
+  it('lets anyone propose and the decider see and settle it; a purchase says it went to the owner', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    expect(await t.call(ada, 'propose', { kind: 'purchase', title: 'Telefon hattı', text: 'Müşteriler arıyor.', usd: 12 })).toMatch(/sahibine gitti/);
+    expect(await t.call(ada, 'propose', { kind: 'idea', title: 'Blog', text: 'Haftalık yazı.' })).toMatch(/Koordinatör/);
+    const open = await t.call(c, 'proposalsOpen');
+    expect(open).toContain('Blog');
+    expect(open).not.toContain('Telefon');
+    const id = t.proposals.list({ statuses: ['open'] })[0]!.id;
+    expect(await t.call(c, 'proposalDecide', { proposalId: id, decision: 'accept', note: 'Başla.' })).toMatch(/kabul/);
+    await expect(t.call(ada, 'propose', { kind: 'gift', title: 'x', text: 'y' })).rejects.toThrow(/Bilinmeyen öneri türü/);
+  });
+
+  it('lets a lead create tasks for their own team only; the coordinator appoints the lead', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r', team: 'İçerik' });
+    const can = t.company.hire(c.id, { name: 'Can', role: 'r', team: 'İçerik' });
+    const bob = t.company.hire(c.id, { name: 'Bob', role: 'r', team: 'Ürün' });
+    expect(await t.call(c, 'appointLead', { employee: 'Ada', team: 'İçerik' })).toMatch(/lider/);
+    expect(await t.call(ada, 'taskCreate', { assignee: 'Can', title: 'Slogan' })).toMatch(/Görev açıldı/);
+    await expect(t.call(ada, 'taskCreate', { assignee: bob.id, title: 'x' })).rejects.toThrow(/kendi ekibine/);
+    expect(t.tasks.list({ assignee: can.id }).map((x) => x.title)).toEqual(['Slogan']);
+  });
+
+  it('review focus: asks a colleague without interrupting them, and refuses yourself, strangers and the silent', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    await expect(t.call(ada, 'askColleague', { to: 'Can', question: 'NOTES.md nerede?' })).rejects.toThrow(/hiç konuşmadı/);
+    t.engine.send(can.id, 'merhaba');
+    await until(() => t.roster.get(can.id).sessionStarted && t.engine.ready(can.id), 8000);
+    await t.engine.sleep(can.id);
+    const answer = await t.call(ada, 'askColleague', { to: 'Can', question: 'NOTES.md nerede?' });
+    expect(answer).toMatch(/^Can: /);
+    expect(t.roster.get(can.id).lifecycle).toBe('sleeping');
+    await expect(t.call(ada, 'askColleague', { to: 'Ada', question: 'x' })).rejects.toThrow(/Kendine soramazsın/);
+    await expect(t.call(ada, 'askColleague', { to: 'kimse', question: 'x' })).rejects.toThrow(/bulunamadı/);
   });
 });

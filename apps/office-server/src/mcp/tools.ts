@@ -1,9 +1,9 @@
-import { MODEL_ALIASES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task } from '@cc/shared';
+import { MODEL_ALIASES, PROPOSAL_KINDS, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
-import { NotFoundError, ValidationError } from '../errors.ts';
+import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
 
@@ -70,7 +70,7 @@ export function officeTools(o: {
   characters: () => string[];
   memory: Memory;
   budget: Budget;
-  engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown };
+  engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown; sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }> };
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine } = o;
 
@@ -299,13 +299,74 @@ export function officeTools(o: {
       },
     },
     {
+      name: 'propose',
+      description:
+        'Carry something upwards: need (something the work requires), purchase (anything that costs money: a phone line, a subscription, a device), idea, or objection (we are on the wrong track). It goes to your lead or the coordinator; purchases go to the owner, who pays and buys.',
+      inputSchema: object({ kind: { type: 'string', enum: [...PROPOSAL_KINDS] }, title: s('Short title.'), text: s('What, why, and what you suggest.'), usd: number('For a purchase: the price, USD.'), planId: s('The plan it concerns.') }, ['kind', 'title', 'text']),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        const p = company.openProposal(employee.id, { kind: str(args, 'kind'), title: str(args, 'title'), text: str(args, 'text'), usd: num(args, 'usd') ?? null, planId: optStr(args, 'planId') ?? null });
+        return p.status === 'owner' ? `Talep açıldı (${p.id}) ve sahibine gitti; karar verince haber gelecek.` : `Öneri açıldı (${p.id}); ${company.nameOf(p.routedTo!)} karara bağlayacak.`;
+      },
+    },
+    {
+      name: 'proposalsOpen',
+      description: 'List the proposals waiting for your decision (lead or coordinator).',
+      inputSchema: object({}),
+      kinds: LEADS,
+      run: ({ employee }) => {
+        const open = company.proposalsFor(employee.id);
+        if (open.length === 0) return 'Kararını bekleyen öneri yok.';
+        return open.map((p) => `• ${p.id} [${p.kind}] “${p.title}” — ${company.nameOf(p.by)}: ${p.text}`).join('\n');
+      },
+    },
+    {
+      name: 'proposalDecide',
+      description: 'Decide a proposal that came to you (lead or coordinator): accept, decline, or escalate (a lead to the coordinator, the coordinator to the owner — do that for anything big). The decision goes to the decision log and the proposer hears.',
+      inputSchema: object({ proposalId: s('The proposal id.'), decision: { type: 'string', enum: ['accept', 'decline', 'escalate'] }, note: s('Why, in a sentence.') }, ['proposalId', 'decision']),
+      kinds: LEADS,
+      run: ({ employee }, args) => {
+        const p = company.decideProposal(employee.id, str(args, 'proposalId'), { decision: str(args, 'decision'), note: optStr(args, 'note') });
+        return p.status === 'accepted' ? `“${p.title}” kabul edildi.` : p.status === 'declined' ? `“${p.title}” reddedildi.` : p.status === 'owner' ? `“${p.title}” sahibine götürüldü.` : `“${p.title}” koordinatöre götürüldü.`;
+      },
+    },
+    {
+      name: 'askColleague',
+      description: 'Ask a colleague a quick question without interrupting them: a copy of their session answers from what they know and are doing. It cannot do work for you (use taskPass for that). Takes up to a couple of minutes.',
+      inputSchema: object({ to: s('Colleague id or name.'), question: s('The question.') }, ['to', 'question']),
+      kinds: EVERYONE,
+      run: async ({ employee }, args) => {
+        const question = str(args, 'question');
+        const to = findPerson(str(args, 'to'));
+        if (to.id === employee.id) throw new ValidationError('Kendine soramazsın.');
+        const out = await engine.sideQuestion(to.id, `${employee.name}${employee.title ? ` (${employee.title})` : ''} soruyor; kısaca, bildiğin kadarıyla cevap ver: ${question}`);
+        return out.ok ? `${to.name}: ${out.answer}` : `${to.name} şu an cevap veremedi: ${out.answer}`;
+      },
+    },
+    {
+      name: 'appointLead',
+      description: 'Make an employee the lead of a team (coordinator) — do it when a team grows past 4–5 people. The team reports to them; they hand out and order its work and settle its proposals, but cannot hire. lead: false ends it.',
+      inputSchema: object({ employee: s('Employee id or name.'), team: s('The team they lead.'), lead: { type: 'boolean', description: 'false ends the leadership (default true).' } }, ['employee']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const lead = bool(args, 'lead');
+        const team = optStr(args, 'team');
+        const who = findPerson(str(args, 'employee'));
+        const next = company.appointLead(employee.id, who.id, { team, lead });
+        return next.kind === 'lead' ? `${next.name} artık ${next.team} ekibinin lideri.` : `${next.name} artık ekip lideri değil.`;
+      },
+    },
+    {
       name: 'taskCreate',
       description: 'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done".',
       inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
-      kinds: COORDINATOR,
+      kinds: LEADS,
       run: ({ employee }, args) => {
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn') };
         const to = findPerson(str(args, 'assignee'));
+        if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
+          throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
+        }
         const task = company.createTask(employee.id, { assignee: to.id, ...input });
         return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}.`;
       },
@@ -314,7 +375,7 @@ export function officeTools(o: {
       name: 'taskAssign',
       description: 'Give a waiting or blocked task to someone else (coordinator).',
       inputSchema: object({ taskId: s('The task id.'), assignee: s('Employee id or name.') }, ['taskId', 'assignee']),
-      kinds: COORDINATOR,
+      kinds: LEADS,
       run: ({ employee }, args) => {
         const to = findPerson(str(args, 'assignee'));
         const task = company.assign(employee.id, str(args, 'taskId'), to.id);
@@ -325,7 +386,7 @@ export function officeTools(o: {
       name: 'taskReprioritize',
       description: 'Change a task’s priority (coordinator): 1 = most urgent … 5 = whenever.',
       inputSchema: object({ taskId: s('The task id.'), priority: integer('New priority.', 1, 5) }, ['taskId', 'priority']),
-      kinds: COORDINATOR,
+      kinds: LEADS,
       run: ({ employee }, args) => {
         const priority = num(args, 'priority');
         if (priority === undefined) throw new ValidationError('priority gerekli.');

@@ -267,6 +267,30 @@ export class PlanStore {
     return next;
   }
 
+  /** A revision of an approved plan starts: keep the approved version until the owner decides (rule B). */
+  saveApproved(id: string): void {
+    this.#db.prepare('UPDATE plans SET approved_snapshot = ? WHERE id = ?').run(JSON.stringify(this.get(id)), id);
+  }
+
+  approvedSnapshot(id: string): Plan | null {
+    const row = this.#db.prepare('SELECT approved_snapshot FROM plans WHERE id = ?').get(id) as unknown as { approved_snapshot: string | null } | undefined;
+    return row?.approved_snapshot ? (JSON.parse(row.approved_snapshot) as Plan) : null;
+  }
+
+  /** The owner declined the revision: the plan goes on as it was approved. */
+  restoreApproved(id: string): Plan {
+    const snap = this.approvedSnapshot(id);
+    if (!snap) throw new NotFoundError(`Bu planın saklanmış onaylı sürümü yok: ${id}`);
+    const { id: _id, createdAt: _c, proposedBy: _p, updatedAt: _u, ...fields } = snap;
+    const restored = this.update(id, fields);
+    this.clearApproved(id);
+    return restored;
+  }
+
+  clearApproved(id: string): void {
+    this.#db.prepare('UPDATE plans SET approved_snapshot = NULL WHERE id = ?').run(id);
+  }
+
   #write(p: Plan, insert: boolean): void {
     const values = [p.title, p.goal, p.approach, p.people, JSON.stringify(p.steps), p.quotaPct, p.usd, p.days, p.risks, p.status, p.version, p.updatedAt, p.approvedAt];
     if (insert) {

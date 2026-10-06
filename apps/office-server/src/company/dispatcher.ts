@@ -31,6 +31,7 @@ export interface DispatcherDeps {
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
 export const NOTICES_PREFIX = 'Ofisten notlar:';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Hands work to employees when they are free: the next task in their queue, the notices waiting for them (a plan
@@ -48,6 +49,8 @@ export class Dispatcher {
   readonly #now: () => number;
   /** When each employee last became idle (for idle sleep). */
   readonly #idleSince = new Map<string, number>();
+  /** When each coordinator was last reminded to report. */
+  readonly #reminded = new Map<string, number>();
   #sweepQueued = false;
 
   constructor(d: DispatcherDeps) {
@@ -67,6 +70,7 @@ export class Dispatcher {
     });
     const timer = setInterval(() => {
       this.#d.budget?.checkReserve();
+      this.#remindReport();
       this.#scheduleSweep();
     }, this.#d.tickMs ?? 60_000);
     timer.unref();
@@ -144,6 +148,21 @@ export class Dispatcher {
     this.#d.notices.markDelivered(pending.map((n) => n.id));
   }
 
+  /** Spec §4.5: a short report a day — remind the coordinator when something happened since the last one. */
+  #remindReport(): void {
+    const c = this.#d.company.coordinator();
+    if (!c) return;
+    const now = this.#now();
+    const last = Math.max(this.#d.events.latest(c.id, 'company.report')?.ts ?? 0, c.createdAt, this.#reminded.get(c.id) ?? 0);
+    if (now - last < DAY_MS) return;
+    const finished = this.#d.tasks.list({ statuses: ['done'], limit: 100_000 }).some((t) => (t.finishedAt ?? 0) > last);
+    const open = this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'], limit: 1 }).length > 0;
+    if (!finished && !open) return;
+    this.#reminded.set(c.id, now);
+    this.#d.notices.add(c.id, 'Günlük özet zamanı: bugün ne bitti, ne sürüyor, ne takıldı, ne harcandı — reportToOwner ile sahibine kısaca raporla.');
+    this.#schedule(c.id);
+  }
+
   #person(id: string): Employee | null {
     try {
       return this.#d.roster.get(id);
@@ -166,7 +185,8 @@ export class Dispatcher {
     if (this.#d.tasks.list({ assignee: e.id, statuses: ['waiting'] }).some((t) => t.kind === 'handover')) return true;
     const next = this.#d.tasks.nextFor(e.id);
     if (next && this.#mayStart(next)) return true;
-    return e.kind === 'coordinator' && this.#d.notices.pending(e.id).length > 0;
+    // Notices are the coordinator's and a lead's work (decisions waiting); a member's wait for their next task.
+    return (e.kind === 'coordinator' || e.kind === 'lead') && this.#d.notices.pending(e.id).length > 0;
   }
 
   #wake(id: string): void {
