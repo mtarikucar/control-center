@@ -7,6 +7,7 @@ export function TopBar() {
   const count = useOffice((s) => Object.keys(s.views).length);
   const setHireOpen = useOffice((s) => s.setHireOpen);
   const setCompanyOpen = useOffice((s) => s.setCompanyOpen);
+  const reserve = useOffice((s) => s.budget?.reserve.active ?? false);
   return (
     <header className="topbar">
       <div className="brand">
@@ -15,6 +16,11 @@ export function TopBar() {
         <span className="muted">{count} çalışan</span>
       </div>
       <QuotaHud quota={quota} now={Date.now()} />
+      {reserve && (
+        <span className="badge reserve" title="Kota kullanımı sahibinin payına dayandı: ofis yalnız acil işleri başlatıyor.">
+          Sahibinin payı korunuyor
+        </span>
+      )}
       <button type="button" onClick={() => setCompanyOpen(true)}>
         Şirket
       </button>

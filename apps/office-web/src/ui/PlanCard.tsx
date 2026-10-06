@@ -12,6 +12,7 @@ function estimates(p: Plan): string | null {
 /** A plan the coordinator proposed, as it stands now; the owner approves or declines the latest version here. */
 export function PlanCard({ plan }: { plan: Plan }) {
   const live = useOffice((s) => s.plans[plan.id]) ?? plan;
+  const spent = useOffice((s) => s.budget?.plans[plan.id]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (live.version > plan.version) {
@@ -66,6 +67,11 @@ export function PlanCard({ plan }: { plan: Plan }) {
         </ol>
       )}
       {guess && <p className="muted">{guess}</p>}
+      {(live.status === 'approved' || live.status === 'done') && spent && (
+        <p className={`muted${live.usd !== null && spent.spentUsd > live.usd ? ' over' : ''}`}>
+          {`Harcanan: $${spent.spentUsd}${live.usd !== null ? ` / $${live.usd}` : ''} · Claude ~$${spent.claudeUsd}`}
+        </p>
+      )}
       {live.status === 'draft' && (
         <div className="row end">
           <button type="button" disabled={busy} onClick={() => void act(() => api.declinePlan(live.id))}>
