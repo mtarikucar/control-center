@@ -16,7 +16,7 @@ export function OfficeScene() {
     <Canvas
       className="scene"
       orthographic
-      shadows
+      shadows="percentage"
       dpr={[1, 2]}
       gl={{ antialias: false, powerPreference: 'high-performance' }}
       camera={{ position: [...CAMERA_POSITION], zoom: CAMERA_ZOOM, near: -200, far: 400 }}

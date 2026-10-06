@@ -67,4 +67,18 @@ describe('CharacterModel', () => {
     expect(copies.length).toBeGreaterThan(0);
     expect(disposed).toEqual(copies);
   });
+
+  it('sits down once and holds the seated pose; standing up plays the same motion backwards', async () => {
+    const seat: CharacterAsset = { ...asset, clips: { sitDown: 'c/sitDown.glb' } };
+    const renderer = await ReactThreeTestRenderer.create(<CharacterModel asset={seat} role="sitDown" faded={false} />);
+    await renderer.advanceFrames(30, 0.1);
+    const seated = hipsY(renderer);
+    expect(seated).toBeGreaterThan(0.9);
+    await renderer.advanceFrames(10, 0.1);
+    expect(hipsY(renderer)).toBeCloseTo(seated, 3);
+    await renderer.update(<CharacterModel asset={seat} role="standUp" faded={false} />);
+    await renderer.advanceFrames(4, 0.1);
+    expect(hipsY(renderer)).toBeLessThan(seated - 0.1);
+    await renderer.unmount();
+  });
 });

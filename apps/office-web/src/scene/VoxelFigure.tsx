@@ -1,7 +1,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import type { Group } from 'three';
-import type { ClipRole } from '../assets/manifest.ts';
+import type { ModelRole } from './CharacterModel.tsx';
 
 const SHIRTS = ['#2f6fdf', '#5b7f45', '#e07a3a', '#283a6b', '#8a4fbf', '#c0392b', '#1f8a8a', '#7a5c3e'];
 
@@ -12,10 +12,10 @@ function hash(text: string): number {
 }
 
 /** Stand-in when no character model is available: a small voxel person that sits, walks and types. */
-export function VoxelFigure({ seed, role, faded }: { seed: string; role: ClipRole; faded: boolean }) {
+export function VoxelFigure({ seed, role, faded }: { seed: string; role: ModelRole; faded: boolean }) {
   const shirt = useMemo(() => SHIRTS[hash(seed) % SHIRTS.length]!, [seed]);
   const body = useRef<Group>(null);
-  const seated = role === 'sit' || role === 'typing' || role === 'talkSeated';
+  const seated = role === 'sit' || role === 'typing' || role === 'talkSeated' || role === 'sitDown';
   useFrame(({ clock }) => {
     const b = body.current;
     if (!b) return;

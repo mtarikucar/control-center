@@ -1,6 +1,5 @@
 import { AnimationClip, VectorKeyframeTrack } from 'three';
 import type { ClipRole } from '../assets/manifest.ts';
-import type { Activity } from '../office/behavior.ts';
 
 const FALLBACK: Record<ClipRole, ClipRole[]> = {
   typing: ['typing', 'sit', 'idle'],
@@ -35,4 +34,3 @@ export function inPlace(clip: AnimationClip): AnimationClip {
   return out;
 }
 
-export const roleFor = (activity: Activity, moving: boolean): ClipRole => (moving ? 'walk' : activity);

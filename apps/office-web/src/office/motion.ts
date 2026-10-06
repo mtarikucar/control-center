@@ -30,3 +30,11 @@ export function stepAlong(path: Pt[], pos: Pt, heading: number, speed: number, d
   }
   return { path: rest, pos: p, heading: h, arrived: rest.length === 0 };
 }
+
+/** Turns `current` towards `target` by at most `maxStep` radians, the short way round. */
+export function turnToward(current: number, target: number, maxStep: number): number {
+  let diff = (target - current) % (2 * Math.PI);
+  if (diff > Math.PI) diff -= 2 * Math.PI;
+  if (diff < -Math.PI) diff += 2 * Math.PI;
+  return Math.abs(diff) <= maxStep ? current + diff : current + Math.sign(diff) * maxStep;
+}

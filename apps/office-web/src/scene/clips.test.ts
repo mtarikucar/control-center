@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AnimationClip, QuaternionKeyframeTrack, VectorKeyframeTrack } from 'three';
-import { inPlace, pickClip, roleFor } from './clips.ts';
+import { inPlace, pickClip } from './clips.ts';
 
 describe('clips', () => {
   it('falls back to a close clip when a role is missing', () => {
@@ -19,10 +19,5 @@ describe('clips', () => {
     expect(clip.tracks[1]!.name).toBe('Spine.quaternion');
     expect(Array.from(clip.tracks[1]!.values)).toEqual(Array.from(spin.values));
     expect(Array.from(hips.values)).toEqual([1, 2, 3, 5, 2.5, 9]);
-  });
-
-  it('walks while moving, otherwise does the activity', () => {
-    expect(roleFor('typing', true)).toBe('walk');
-    expect(roleFor('drink', false)).toBe('drink');
   });
 });
