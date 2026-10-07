@@ -117,6 +117,8 @@ interface Runtime {
   switchedFrom: ModelAlias | null;
   /** Messages written since the switch, sent again on the old model if the switch fails. */
   sinceSwitch: Pending[];
+  /** A tool ran in the turn now open: the session did work on its model (a failure then is not the model's). */
+  toolsInTurn: boolean;
   /** The last thing the session said (why a failed turn failed). */
   lastText: string;
   /** The last model the session could not start on, and when. */
@@ -531,6 +533,7 @@ export class Engine {
     for (const event of normalize(raw)) {
       if (event.type === 'session.started' && !this.#roster.get(id).sessionStarted) this.#roster.update(id, { sessionStarted: true });
       if (event.type === 'message.assistant') rt.lastText = event.text;
+      if (event.type === 'tool.started') rt.toolsInTurn = true;
       if (event.type === 'quota.updated') {
         rt.quotaStatus = event.status;
         rt.limitAt = event.limitResetsAt ?? null;
@@ -577,11 +580,15 @@ export class Engine {
     rt.turnActive = false;
     rt.lastTurnAt = this.#now();
     const onTrial = rt.switchedFrom;
+    const worked = rt.toolsInTurn;
     rt.switchedFrom = null;
+    rt.toolsInTurn = false;
     rt.consumedInTurn = false;
     for (const resolve of rt.turnWaiters.splice(0)) resolve();
     if (rt.expectingExit) return;
-    if (onTrial && !ok && !rejected) {
+    // A model the account cannot use answers at once, before any tool: a turn that already worked and then failed
+    // (overloaded API, a tool error) ends as on main — idle, the office reminds — and is not re-run on the old model.
+    if (onTrial && !ok && !rejected && !worked) {
       this.#retryOn(id, onTrial);
       return;
     }
@@ -789,6 +796,7 @@ export class Engine {
         model: null,
         switchedFrom: null,
         sinceSwitch: [],
+        toolsInTurn: false,
         lastText: '',
         failedModel: null,
       };

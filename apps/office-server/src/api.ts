@@ -180,12 +180,18 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'POST' && action === 'messages') {
       const text = textOf(await readJson(req));
       // The owner talking to the coordinator: the constitution's owner model, but never below the coordinator's own (a
-      // coordinator who moved itself up for planning stays there); to anyone else, their own model (a task may have
-      // moved their session to another). The engine ignores hints while the model policy is off.
+      // coordinator who moved itself up for planning stays there). To anyone else in the middle of a task: no hint, the
+      // session stays on the model the task started it on (never mid-task); between tasks, their own model. The engine
+      // ignores hints while the model policy is off.
       const employee = d.roster.get(id);
       const owner = d.company?.budget.constitution().coordinatorModels.owner;
-      const model = owner && employee.kind === 'coordinator' && MODEL_RANK[owner] > MODEL_RANK[employee.model] ? owner : employee.model;
-      d.engine.send(id, text, 'owner', { model });
+      const hint =
+        employee.kind === 'coordinator'
+          ? { model: owner && MODEL_RANK[owner] > MODEL_RANK[employee.model] ? owner : employee.model }
+          : d.company?.tasks.inProgressOf(id)
+            ? {}
+            : { model: employee.model };
+      d.engine.send(id, text, 'owner', hint);
       return sendJson(res, 202, { ok: true });
     }
     if (method === 'POST' && action === 'side-questions') return sendJson(res, 200, await d.engine.sideQuestion(id, textOf(await readJson(req))));

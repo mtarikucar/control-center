@@ -12,13 +12,13 @@ afterEach(async () => {
 
 const MIN = 60_000;
 
-function make(o: { policy?: () => boolean; unavailable?: string } = {}) {
+function make(o: { policy?: () => boolean; unavailable?: string; env?: Record<string, string> } = {}) {
   let clock = new Date(2026, 9, 7, 10, 0).getTime();
   const now = () => clock;
   const s = setup(8, now);
   const failFlag = join(tempDir('fake-claude-fail-'), 'fail');
   // These tests are about the model policy: on unless a test switches it.
-  const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag, FAKE_CLAUDE_UNAVAILABLE_MODELS: o.unavailable ?? '' }, engine: { now, cacheTtlMinutes: () => 5, modelPolicyEnabled: o.policy ?? (() => true) } });
+  const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag, FAKE_CLAUDE_UNAVAILABLE_MODELS: o.unavailable ?? '', ...o.env }, engine: { now, cacheTtlMinutes: () => 5, modelPolicyEnabled: o.policy ?? (() => true) } });
   cleanups.push(f.cleanup, s.cleanup);
   const turns = (id: string) => s.events.list({ employeeId: id, limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
   const said = (id: string) =>
@@ -170,6 +170,34 @@ describe('Engine — model hints', () => {
     expect(t.events.list({ employeeId: e.id, limit: 5000 }).filter((x) => x.event.type === 'message.user' && (x.event as { text: string }).text === 'zor iş: rapor yaz')).toHaveLength(1);
     t.engine.send(e.id, 'yine zor', 'system', { model: 'opus', taskStart: true });
     await until(() => t.said(e.id).includes('echo: yine zor'), 8000);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+  });
+  it('important: a first turn on a new model that fails after it already worked is not a model failure — no retry, no pause on that model', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system');
+    await until(() => t.turns(e.id) === 1, 8000);
+    let lost = 0;
+    t.engine.send(e.id, 'zor iş TOOLFAIL', 'system', { model: 'opus', taskStart: true, onLost: () => (lost += 1) });
+    await until(() => t.turns(e.id) === 2, 8000);
+    await until(() => t.engine.ready(e.id), 8000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(lost).toBe(0);
+    expect(sessions(await readArgv(t.argvLog, 2))).toEqual(['sonnet', 'opus']);
+    expect(t.events.list({ employeeId: e.id, limit: 5000 }).some((x) => x.event.type === 'model.switch.failed')).toBe(false);
+    expect(t.turns(e.id)).toBe(2);
+  });
+
+  it('important: a model error that comes before claude replays the message is retried once and not also reported lost', async () => {
+    const t = make({ unavailable: 'opus', env: { FAKE_CLAUDE_ERROR_BEFORE_ACK: '1' } });
+    const e = t.engine.hire({ name: 'Ada', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system');
+    await until(() => t.turns(e.id) === 1, 8000);
+    let lost = 0;
+    t.engine.send(e.id, 'zor iş: rapor yaz', 'system', { model: 'opus', taskStart: true, onLost: () => (lost += 1) });
+    await until(() => t.said(e.id).includes('echo: zor iş: rapor yaz'), 8000);
+    await until(() => t.engine.ready(e.id), 8000);
+    expect(lost).toBe(0);
     expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
   });
 });

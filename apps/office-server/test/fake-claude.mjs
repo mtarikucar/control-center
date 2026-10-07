@@ -125,10 +125,17 @@ async function turn(text, uuid) {
     out({ type: 'system', subtype: 'init', model: opt('--model') ?? 'fake-model', cwd: process.cwd(), permissionMode: 'bypassPermissions', mcp_servers: [{ name: 'office', status: 'connected' }] });
     initSent = true;
   }
+  const unavailable = (process.env.FAKE_CLAUDE_UNAVAILABLE_MODELS ?? '').split(',').filter(Boolean);
+  if (process.env.FAKE_CLAUDE_ERROR_BEFORE_ACK && unavailable.includes(opt('--model') ?? '')) {
+    // A CLI that answers with the error before it replays the message: the message is never acknowledged.
+    const why = `There's an issue with the selected model (${opt('--model')}). It may not exist or you may not have access to it.`;
+    say(why);
+    result({ is_error: true, result: why });
+    return;
+  }
   ack(uuid, text);
   remember(text);
   // Like the real CLI on a model the account cannot use: it takes the message, answers with an error and stays up.
-  const unavailable = (process.env.FAKE_CLAUDE_UNAVAILABLE_MODELS ?? '').split(',').filter(Boolean);
   if (unavailable.includes(opt('--model') ?? '')) {
     const why = `There's an issue with the selected model (${opt('--model')}). It may not exist or you may not have access to it. Run --model to pick a different model.`;
     say(why);
@@ -142,6 +149,12 @@ async function turn(text, uuid) {
   if (text.includes('LIMIT')) {
     rateLimit('rejected', Number(process.env.FAKE_CLAUDE_LIMIT_RESET_SEC ?? '2'));
     result({ subtype: 'error_during_execution', is_error: true, result: 'usage limit reached' });
+    return;
+  }
+  if (text.includes('TOOLFAIL')) {
+    // Works (a tool runs), then the turn ends with an error for a reason that is not the model (e.g. overloaded).
+    out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_tf', name: 'Write', input: { file_path: '/d/half.txt', content: 'yarım' } }] } });
+    result({ subtype: 'error_during_execution', is_error: true, result: 'overloaded' });
     return;
   }
   if (text.includes('OOPS')) {

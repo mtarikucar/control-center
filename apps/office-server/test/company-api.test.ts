@@ -13,17 +13,17 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
-async function start() {
+async function start(o: { cacheTtlMinutes?: () => number } = {}) {
   const s = setup();
   // Wired like main.ts: the engine reads the model policy switch from the constitution.
-  const f = fakeEngine(s, { engine: { modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled } });
+  const f = fakeEngine(s, { engine: { modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled, ...(o.cacheTtlMinutes ? { cacheTtlMinutes: o.cacheTtlMinutes } : {}) } });
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
   const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, argvLog: f.argvLog, events: s.events };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, argvLog: f.argvLog, events: s.events, engine: f.engine };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -59,6 +59,27 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Şimdi derin düşün.' })).status).toBe(202);
     await until(() => turns() === 4, 8000);
     expect((await models(3)).sort()).toEqual(['A:haiku', 'K:fable', 'K:sonnet']);
+  });
+
+  it('important: the owner’s message never moves a member’s session in the middle of a task; between tasks it returns them to their own model', async () => {
+    // A cache that is always cold: any hint down would switch at once, so a kept model proves no hint was given.
+    const t = await start({ cacheTtlMinutes: () => 0 });
+    t.budget.setConstitution({ modelPolicyEnabled: true });
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', model: 'sonnet' });
+    const turns = () => t.events.list({ employeeId: ada.id, limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
+    const models = async (n: number) => (await readArgv(t.argvLog, n)).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Zor iş', difficulty: 'hard' });
+    t.company.start(task.id);
+    t.engine.send(ada.id, 'Zor iş', 'system', { model: 'opus', taskStart: true });
+    await until(() => turns() === 1, 8000);
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Nasıl gidiyor?' })).status).toBe(202);
+    await until(() => turns() === 2, 8000);
+    // Hired on sonnet, moved to opus by the task — and the owner's question kept it there.
+    expect(await models(2)).toEqual(['sonnet', 'opus']);
+    t.company.finish(ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Eline sağlık.' })).status).toBe(202);
+    await until(() => turns() === 3, 8000);
+    expect(await models(3)).toEqual(['sonnet', 'opus', 'sonnet']);
   });
 
   it('hires the coordinator once from the Company view, on Fable, with the manager look', async () => {
