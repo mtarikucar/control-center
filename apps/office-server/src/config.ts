@@ -12,6 +12,11 @@ export interface OfficeConfig {
   deskCount: number;
   /** Origins allowed besides the server's own http://127.0.0.1:<port> and http://localhost:<port>. */
   allowedOrigins: string[];
+  /**
+   * Host names allowed besides 127.0.0.1:<port> and localhost:<port>, e.g. the office's private Tailscale name
+   * (OFFICE_ALLOWED_HOSTS); each also allows its https:// origin. Only for a private network: the office has no login.
+   */
+  allowedHosts: string[];
   /** Built office-web (served at /). */
   webDir: string;
   /** Models and manifest (served at /assets3d/). */
@@ -46,7 +51,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfficeConfig {
   }
   // No extra origins by default: a dev server on a shared port (e.g. Vite's 5173) could otherwise drive employees.
   const allowedOrigins = (env.OFFICE_ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
+  const allowedHosts = (env.OFFICE_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
   const webDir = env.OFFICE_WEB_DIR ?? join(REPO_ROOT, 'apps', 'office-web', 'dist');
   const assetsDir = env.OFFICE_ASSETS_DIR ?? join(REPO_ROOT, 'assets', '3d');
-  return { dataDir, host: '127.0.0.1', port, claudeCommand, deskCount: 8, allowedOrigins, webDir, assetsDir };
+  return { dataDir, host: '127.0.0.1', port, claudeCommand, deskCount: 8, allowedOrigins, allowedHosts, webDir, assetsDir };
 }

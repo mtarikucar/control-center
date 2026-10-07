@@ -13,11 +13,11 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
-async function start() {
+async function start(o: { allowedHosts?: string[] } = {}) {
   const s = setup();
   const f = fakeEngine(s);
   const quota = new QuotaTracker(s.db, s.events);
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota }, { allowedOrigins: ['http://127.0.0.1:5173'] });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota }, { allowedOrigins: ['http://127.0.0.1:5173'], ...o });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
@@ -132,6 +132,14 @@ describe('API', () => {
     expect((await call(port, 'POST', '/api/employees', { ...hire, headers: { origin: 'http://127.0.0.1:5173' } })).status).toBe(201);
     expect((await call(port, 'POST', '/api/employees', { body: { name: 'Y', role: 'r' }, headers: { origin: `http://localhost:${port}` } })).status).toBe(201);
     await expect(openWs(port, '/ws', 'https://evil.example').opened).rejects.toThrow(/403|reddedildi/);
+  });
+
+  it('serves a host the owner allowed (e.g. the office’s private Tailscale name) and its https origin, and no other', async () => {
+    const { port } = await start({ allowedHosts: ['office.tail-x.ts.net'] });
+    expect((await call(port, 'GET', '/api/office', { headers: { host: 'office.tail-x.ts.net' } })).status).toBe(200);
+    expect((await call(port, 'POST', '/api/employees', { body: { name: 'T', role: 'r' }, headers: { host: 'office.tail-x.ts.net', origin: 'https://office.tail-x.ts.net' } })).status).toBe(201);
+    expect((await call(port, 'GET', '/api/office', { headers: { host: 'other.tail-x.ts.net' } })).status).toBe(403);
+    expect((await call(port, 'POST', '/api/employees', { body: { name: 'U', role: 'r' }, headers: { origin: 'http://office.tail-x.ts.net' } })).status).toBe(403);
   });
 
   it('survives a malformed WebSocket frame from a local client', async () => {

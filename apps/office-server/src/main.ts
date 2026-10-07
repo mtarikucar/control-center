@@ -65,7 +65,7 @@ const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, compa
 
 const api = createApi(
   { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list() }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
-  { allowedOrigins: config.allowedOrigins, webDir: config.webDir, assetsDir: config.assetsDir },
+  { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {
   console.error(

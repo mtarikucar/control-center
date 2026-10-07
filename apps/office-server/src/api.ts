@@ -30,6 +30,8 @@ export interface ApiDeps {
 
 export interface ApiOptions {
   allowedOrigins: string[];
+  /** Host names allowed besides the server's own (each also allows its https:// origin), e.g. a private Tailscale name. */
+  allowedHosts?: string[];
   /** Built office-web; omitted → only the API is served. */
   webDir?: string;
   /** Models + manifest served under /assets3d/. */
@@ -68,12 +70,12 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
 }
 
 /** Blocks DNS rebinding (Host) and cross-site requests from other pages in the owner's browser (Origin). */
-export function checkRequest(req: IncomingMessage, port: number, allowedOrigins: string[]): void {
-  const host = req.headers.host ?? '';
-  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) throw new ForbiddenError('Geçersiz Host başlığı.');
+export function checkRequest(req: IncomingMessage, port: number, allowedOrigins: string[], allowedHosts: string[] = []): void {
+  const host = (req.headers.host ?? '').toLowerCase();
+  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}` && !allowedHosts.includes(host)) throw new ForbiddenError('Geçersiz Host başlığı.');
   const origin = req.headers.origin;
   if (origin === undefined) return;
-  const allowed = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...allowedOrigins];
+  const allowed = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...allowedOrigins, ...allowedHosts.map((h) => `https://${h}`)];
   if (!allowed.includes(origin)) throw new ForbiddenError('Bu kaynaktan gelen isteklere izin yok.');
 }
 
@@ -116,7 +118,7 @@ function sendEmpty(res: ServerResponse, status: number): void {
 }
 
 async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  checkRequest(req, portOf(server), opts.allowedOrigins);
+  checkRequest(req, portOf(server), opts.allowedOrigins, opts.allowedHosts);
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (url.pathname === '/mcp' && d.mcp) {
@@ -283,7 +285,7 @@ export function createApi(d: ApiDeps, opts: ApiOptions): Api {
     const url = new URL(req.url ?? '/', 'http://localhost');
     try {
       if (url.pathname !== '/ws') throw new ForbiddenError('Bilinmeyen adres.');
-      checkRequest(req, portOf(server), opts.allowedOrigins);
+      checkRequest(req, portOf(server), opts.allowedOrigins, opts.allowedHosts);
     } catch {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
       return;

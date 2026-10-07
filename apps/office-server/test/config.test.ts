@@ -12,6 +12,7 @@ describe('loadConfig', () => {
     expect(c.claudeCommand).toEqual(['claude']);
     expect(c.deskCount).toBe(8);
     expect(c.allowedOrigins).toEqual([]);
+    expect(c.allowedHosts).toEqual([]);
     expect(c.webDir).toBe(join(REPO_ROOT, 'apps', 'office-web', 'dist'));
     expect(c.assetsDir).toBe(join(REPO_ROOT, 'assets', '3d'));
   });
@@ -22,6 +23,7 @@ describe('loadConfig', () => {
       OFFICE_PORT: '5000',
       OFFICE_CLAUDE_COMMAND: '["node","fake.mjs"]',
       OFFICE_ALLOWED_ORIGINS: 'http://a.test, http://b.test',
+      OFFICE_ALLOWED_HOSTS: 'office.tail-x.ts.net, ',
       OFFICE_WEB_DIR: '/tmp/web',
       OFFICE_ASSETS_DIR: '/tmp/assets',
     });
@@ -29,6 +31,7 @@ describe('loadConfig', () => {
     expect(c.port).toBe(5000);
     expect(c.claudeCommand).toEqual(['node', 'fake.mjs']);
     expect(c.allowedOrigins).toEqual(['http://a.test', 'http://b.test']);
+    expect(c.allowedHosts).toEqual(['office.tail-x.ts.net']);
     expect(c.webDir).toBe('/tmp/web');
     expect(c.assetsDir).toBe('/tmp/assets');
   });
