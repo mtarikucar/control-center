@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { WORK_TYPES } from '@cc/shared';
-import { CRAFT_VERSION, METHOD_HEADINGS, coordinationText, methodText, workingText } from '../src/company/craft.ts';
+import { CRAFT_VERSION, METHOD_HEADINGS, coordinationText, methodText, pmText, workingText } from '../src/company/craft.ts';
 import { officeGuide } from '../src/company/roles.ts';
 
 describe('the coordination craft (ships with the office)', () => {
@@ -50,5 +50,13 @@ describe('the coordination craft (ships with the office)', () => {
     expect(officeGuide('member')).toContain(workingText());
     expect(officeGuide('member')).not.toContain(`Koordinatörlük ${CRAFT_VERSION}`);
     expect(officeGuide('coordinator')).toContain('methodRead');
+  });
+
+  it('the coordinator’s guide says it is the project manager and how autonomy works; leads and members do not get it', () => {
+    expect(pmText()).toContain('goalSet');
+    expect(pmText()).toContain('restUntil');
+    expect(officeGuide('coordinator')).toContain(pmText());
+    expect(officeGuide('lead')).not.toContain(pmText());
+    expect(officeGuide('coordinator')).toMatch(/sahibi kartı onaylamadan/i);
   });
 });

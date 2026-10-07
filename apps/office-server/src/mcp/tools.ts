@@ -466,6 +466,7 @@ export function officeTools(o: {
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
         const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), method: args.method, goalId: optStr(args, 'goalId') ?? null, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
+        if (plan.status === 'approved') return `Plan başladı (${plan.id}): tam serbestsin, sahibini beklemiyorsun. Görevleri taskCreate ile aç ve dağıt; sahibi kartı görüyor ve isterse durdurabilir.`;
         return `Plan kartı açıldı (${plan.id}). Sahibinin onayını bekle; onay gelince sana haber verilecek.`;
       },
     },
@@ -476,7 +477,7 @@ export function officeTools(o: {
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
         const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), method: args.method, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
-        return `Plan güncellendi: sürüm ${plan.version}, sahibinin onayını bekliyor.`;
+        return plan.status === 'approved' ? `Plan güncellendi: sürüm ${plan.version}, sürüyor.` : `Plan güncellendi: sürüm ${plan.version}, sahibinin onayını bekliyor.`;
       },
     },
     {

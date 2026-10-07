@@ -42,3 +42,8 @@ export function methodText(type?: string, reader: (name: string) => string = rea
     }
   }
 }
+
+/** The coordinator's part of the core: the project manager in a living loop (spec §6). */
+export function pmText(): string {
+  return read('pm.md');
+}

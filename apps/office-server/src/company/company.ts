@@ -535,15 +535,21 @@ export class Company {
     this.#assertCoordinator(by);
     const fields = this.#draft(draft);
     const goalId = this.#goalOf(draft.goalId);
+    const free = this.#rules().autonomy === 'free';
     const plan = this.#d.plans.create({ ...fields, method: planMethod(draft.method), goalId, proposedBy: by });
     this.#emit(by, { type: 'plan.changed', change: 'proposed', plan });
-    return plan;
+    // Full autonomy (spec §6.2): the coordinator's plan starts now; the owner sees it and may stop it.
+    if (!free) return plan;
+    const started = this.#d.plans.update(plan.id, { status: 'approved', approvedAt: this.#now(), approvedBy: 'coordinator' });
+    this.#emit(by, { type: 'plan.changed', change: 'approved', plan: started });
+    return started;
   }
 
   revise(by: string, planId: string, draft: Partial<PlanDraft>): Plan {
     this.#assertCoordinator(by);
     const current = this.#d.plans.get(planId);
     if (current.status === 'declined') throw new ConflictError('Bu plandan vazgeçildi; yeni bir plan öner.');
+    if (current.status === 'stopped') throw new ConflictError('Bu plan durduruldu; yeni bir plan öner.');
     const merged = this.#draft({
       title: draft.title ?? current.title,
       goal: draft.goal ?? current.goal,
@@ -556,6 +562,14 @@ export class Company {
       risks: draft.risks ?? current.risks,
     });
     const method = draft.method === undefined ? (current.method ?? null) : planMethod(draft.method);
+    const free = this.#rules().autonomy === 'free';
+    if (free) {
+      // Full autonomy: the revision goes on at once, as the coordinator's.
+      const plan = this.#d.plans.update(planId, { ...merged, method, version: current.version + 1, status: 'approved', approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
+      this.#d.plans.clearApproved(planId);
+      this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
+      return plan;
+    }
     // A revision of an approved (or finished) plan is a new proposal: it waits for the owner again (rule B, big change).
     // Rule B: the approved version is kept until the owner decides on the revision (only the first revision saves it).
     if (current.status === 'approved' || current.status === 'done') this.#d.plans.saveApproved(planId);
@@ -567,7 +581,7 @@ export class Company {
   approve(planId: string): Plan {
     const current = this.#d.plans.get(planId);
     if (current.status !== 'draft') throw new ConflictError('Yalnız taslak bir plan onaylanabilir.');
-    const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now() });
+    const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now(), approvedBy: 'owner' });
     this.#d.plans.clearApproved(planId);
     const desk = this.#planDesk(plan);
     this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);

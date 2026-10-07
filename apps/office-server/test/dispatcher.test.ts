@@ -5,7 +5,7 @@ import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
-import { companyFor, METHOD } from './company-helpers.ts';
+import { companyFor, METHOD, PLANS_ONLY } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, tempDir, until, waitFor } from './helpers.ts';
 
@@ -20,7 +20,7 @@ function make() {
   const tasks = new TaskStore(s.db);
   const plans = new PlanStore(s.db);
   const notices = new NoticeStore(s.db);
-  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
+  const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
   const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks, notices, plans, company, engine: f.engine });
   const stop = dispatcher.start();
   cleanups.push(stop, f.cleanup, s.cleanup);

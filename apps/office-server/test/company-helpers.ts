@@ -1,4 +1,4 @@
-import type { QuotaState } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, type QuotaState } from '@cc/shared';
 import { Budget } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { Company } from '../src/company/company.ts';
@@ -23,8 +23,12 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     decisions: new DecisionStore(s.db, now), playbook: new PlaybookStore(s.db, now), notes: new NoteStore(s.db, now), employeeNotes: new EmployeeNoteStore(s.db, now),
   });
   let quotaState: QuotaState | null = null;
+  // The approval flow is what most tests are about (tests of full autonomy set it themselves); written to the store
+  // directly so no budget.changed event joins the log (the economy scenario compares the log with main's).
+  const constitutionStore = new ConstitutionStore(s.db);
+  constitutionStore.set({ autonomy: 'plans' });
   const budget = new Budget({
-    constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices,
+    constitution: constitutionStore, spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices,
     quota: { state: () => quotaState }, deskCount: 8, now,
   });
   const reloaded: string[] = [];
@@ -49,3 +53,6 @@ export const METHOD = {
   ],
   checks: ['Bitti tanımı karşılandı'],
 } as const satisfies import('@cc/shared').PlanMethod;
+
+/** The owner approves each plan (autonomy 'plans'): for tests about the approval flow, which the default 'free' skips. */
+export const PLANS_ONLY = (): import('@cc/shared').Constitution => ({ ...DEFAULT_CONSTITUTION, autonomy: 'plans' });

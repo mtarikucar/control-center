@@ -31,7 +31,10 @@ describe.skipIf(!enabled)('the coordination craft with the real claude CLI (coor
     const { Budget } = await import('../src/company/budget.ts');
     const { ConstitutionStore, SpendStore } = await import('../src/company/budget-store.ts');
     const quota = new QuotaTracker(s.db, s.events);
-    const budget = new Budget({ constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8 });
+    const constitutionStore = new ConstitutionStore(s.db);
+    // This scenario is about the owner's approval: each plan waits for it.
+    constitutionStore.set({ autonomy: 'plans' });
+    const budget = new Budget({ constitution: constitutionStore, spend: new SpendStore(s.db), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8 });
     const { ProposalStore } = await import('../src/company/proposal-store.ts');
     const proposals = new ProposalStore(s.db);
     const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id), constitution: () => budget.constitution(), proposals });
