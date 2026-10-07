@@ -76,3 +76,16 @@ tests before the merge. Deferred minors:
 - The digest still has a "Plan durumu" group for `plan.done`, which nothing emits any more.
 - A reviewer whose review the coordinator decides over their head is not told.
 - `taskAssign` on a review task ignores an explicit `reviewer` argument silently.
+
+## Coordinator craft, stage 2 (final review, 2026-10-07)
+The four Important findings were fixed with tests before the merge: a cancelled task could be revived through
+`taskUpdate`; an owner-stopped goal could be reopened and a finished plan of a closed goal reopened by a new task; the
+pulse left stale "no plan" notices while the coordinator was mid-turn; an approved plan with no task silenced the pulse.
+Deferred minors:
+- The owner cannot see that the coordinator is resting or why (`restReason` is not in the snapshot).
+- Under `plans`, a running plan with a pending revision is a draft: no Durdur until the revision is declined.
+- Pause / resume errors in the top bar are swallowed.
+- An owner's stop gives two coordinator turns (`plan.stopped`, then `pulse.goal_idle` for the same goal).
+- `goalsRead` lists only the newest 100 plans.
+- No test yet for a sleeping coordinator staying asleep through a pause and waking once on resume (the code path is right).
+- The `restUntil` reply says the owner's request ends the rest; only a new goal does.
