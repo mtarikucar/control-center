@@ -16,9 +16,10 @@ export function parseUntil(value: string, now: number, o: { maxDays: number; lab
   const text = (value ?? '').trim();
   const forms = `${o.label} gelecekte bir zaman olmalı: göreli (+30m, +6h, +1d) ya da yerel saat (2026-10-08T14:55 ya da 2026-10-08 14:55)`;
   let at: number;
-  const rel = /^\+(\d{1,4})\s*([mhdMHD])$/.exec(text);
+  const rel = /^\+(\d+)\s*([mhdMHD])$/.exec(text);
   const abs = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(text);
   if (rel) {
+    // No digit cap: a huge number becomes a huge (or Infinity) time, which the maxDays check below refuses.
     const n = Number(rel[1]);
     const unit = rel[2]!.toLowerCase();
     at = now + n * (unit === 'm' ? MINUTE : unit === 'h' ? HOUR : DAY);
@@ -157,7 +158,7 @@ export function cronLabel(spec: CronSpec): string {
   if (oneTime && allDays) return `her gün ${time}`;
   if (oneTime && spec.any.dom && month.length === 12 && dow.join(',') === '1,2,3,4,5') return `hafta içi ${time}`;
   if (oneTime && spec.any.dom && month.length === 12 && dow.length === 1) return `her ${DAYS[dow[0]!]} ${time}`;
-  if (oneTime && spec.any.dow && month.length === 12 && dom.length === 1) return `her ayın ${dom[0]}’i ${time}`;
+  if (oneTime && spec.any.dow && month.length === 12 && dom.length === 1) return `her ayın ${dom[0]}. günü ${time}`;
   if (minute.length === 1 && minute[0] === 0 && hour.length === 24 && allDays) return 'her saat';
   if (hour.length === 24 && allDays && minute.length > 1 && minute[0] === 0 && minute.every((m, i) => m === i * minute[1]!) && 60 % minute[1]! === 0) return `her ${minute[1]} dakikada`;
   return spec.expr;

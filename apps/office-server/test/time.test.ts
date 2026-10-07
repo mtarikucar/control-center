@@ -26,6 +26,14 @@ describe('parseUntil', () => {
     expect(parseUntil('+30d', T0, PARK)).toBe(T0 + 30 * 24 * 3_600_000);
     expect(() => parseUntil('+400d', T0, { maxDays: 365, label: 'Son tarih' })).toThrow(/Son tarih en fazla 365 gün/);
   });
+
+  it('review focus: takes a relative number of any length, and a too-large one is refused by the day bound, never accepted', () => {
+    expect(parseUntil('+43200m', T0, PARK)).toBe(T0 + 30 * 24 * 3_600_000);
+    expect(parseUntil('+10000m', T0, PARK)).toBe(T0 + 10_000 * 60_000);
+    expect(() => parseUntil('+43201m', T0, PARK)).toThrow(/Dönüş saati en fazla 30 gün/);
+    expect(() => parseUntil(`+${'9'.repeat(30)}m`, T0, PARK)).toThrow(/Dönüş saati en fazla 30 gün/);
+    expect(() => parseUntil(`+${'9'.repeat(400)}d`, T0, PARK)).toThrow(/Dönüş saati en fazla 30 gün/); // Number(…) is Infinity
+  });
 });
 
 describe('formatWhen', () => {
@@ -69,7 +77,8 @@ describe('cron', () => {
     expect(cronLabel(parseCron('0 10 * * 1'))).toBe('her Pazartesi 10:00');
     expect(cronLabel(parseCron('0 * * * *'))).toBe('her saat');
     expect(cronLabel(parseCron('*/15 * * * *'))).toBe('her 15 dakikada');
-    expect(cronLabel(parseCron('0 9 1 * *'))).toBe('her ayın 1’i 09:00');
+    expect(cronLabel(parseCron('0 9 1 * *'))).toBe('her ayın 1. günü 09:00');
+    expect(cronLabel(parseCron('0 9 10 * *'))).toBe('her ayın 10. günü 09:00');
     expect(cronLabel(parseCron('0 9,17 * * *'))).toBe('0 9,17 * * *');
   });
 
