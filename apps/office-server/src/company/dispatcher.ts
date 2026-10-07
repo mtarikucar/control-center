@@ -1,12 +1,14 @@
-import type { Constitution, Employee, Task } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, TASK_DIFFICULTY_LABELS, type Constitution, type Employee, type ModelAlias, type Task } from '@cc/shared';
+import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
+import { digestText, lastDigestSlot } from './notices.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 
 export interface DispatchEngine {
   ready(id: string): boolean;
-  send(id: string, text: string, source: 'system'): void;
+  send(id: string, text: string, source: 'system', opts?: SendOptions): void;
   fire(id: string): Promise<void>;
   sleep(id: string): Promise<unknown>;
   wake(id: string): unknown;
@@ -34,9 +36,11 @@ export const NOTICES_PREFIX = 'Ofisten notlar:';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Hands work to employees when they are free: the next task in their queue, the notices waiting for them (a plan
- * was approved, a colleague handed in), or one reminder about a task they left open. Never interrupts: it waits for
- * the employee to be idle (v1 rule: only the owner interrupts).
+ * Hands work to employees when they are free: the next task in their queue, the notices that need them (a plan was
+ * approved, someone is stuck), or one reminder about a task they left open. Notices for the record (a colleague
+ * handed in) ride along on those turns, or come together in one digest at the constitution's digest hours; the
+ * coordinator's daily report reminder comes with the day's last digest. Never interrupts: it waits for the employee
+ * to be idle (v1 rule: only the owner interrupts).
  */
 export class Dispatcher {
   readonly #d: DispatcherDeps;
@@ -49,7 +53,7 @@ export class Dispatcher {
   readonly #now: () => number;
   /** When each employee last became idle (for idle sleep). */
   readonly #idleSince = new Map<string, number>();
-  /** When each coordinator was last reminded to report. */
+  /** When each coordinator was last reminded to report (digest off: the reminder as before the economy plan). */
   readonly #reminded = new Map<string, number>();
   #sweepQueued = false;
 
@@ -70,7 +74,7 @@ export class Dispatcher {
     });
     const timer = setInterval(() => {
       this.#d.budget?.checkReserve();
-      this.#remindReport();
+      if (!this.#rules().digestEnabled) this.#remindReport();
       this.#scheduleSweep();
     }, this.#d.tickMs ?? 60_000);
     timer.unref();
@@ -116,6 +120,10 @@ export class Dispatcher {
       return;
     }
     const pending = this.#d.notices.pending(id);
+    // With the digest switched off every notice goes at once, as before the economy plan.
+    const digestOn = this.#rules().digestEnabled;
+    const decisions = digestOn ? pending.filter((n) => n.kind === 'decision') : pending;
+    const infos = digestOn ? pending.filter((n) => n.kind === 'info') : [];
     // Someone the owner is letting go gets nothing but their hand-over, even while it is blocked.
     const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
     const focus = handover && handover.status !== 'waiting' ? handover : this.#d.tasks.inProgressOf(id);
@@ -131,24 +139,40 @@ export class Dispatcher {
       const next = this.#d.tasks.nextFor(id);
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
-    if (started) body = this.#delivery(started);
-    if (!body && pending.length === 0) {
+    const hint = this.#hint(employee, started, Boolean(body) || started !== null || decisions.length > 0);
+    if (started) body = this.#delivery(started, hint.model);
+    const report = digestOn && employee.kind === 'coordinator' ? this.#reportDue(employee) : null;
+    // Information alone waits for a digest hour it has lived through (never during the owner's reserve); it rides on any turn that goes anyway.
+    const digestNow = !this.#reserve() && (report !== null || infos.some((n) => n.createdAt <= lastDigestSlot(this.#now(), this.#digestHours())));
+    if (!body && decisions.length === 0 && !digestNow) {
       this.#maybeSleep(employee, focus ?? null);
       return;
     }
-    const text = [pending.length ? `${NOTICES_PREFIX}\n${pending.map((n) => `- ${n.text}`).join('\n')}` : '', body].filter(Boolean).join('\n\n');
+    const alone = !body && decisions.length === 0;
+    const digest = infos.length > 0 || report !== null ? digestText(infos, { coordinator: employee.kind === 'coordinator', report: report !== null, alone }) : '';
+    const text = [decisions.length ? `${NOTICES_PREFIX}\n${decisions.map((n) => `- ${n.text}`).join('\n')}` : '', body, digest].filter(Boolean).join('\n\n');
+    // Lost on the way (no session could be started to read it): the task and the notices wait for the next idle moment.
+    const onLost = () => {
+      this.#d.notices.markUndelivered(pending.map((n) => n.id));
+      if (started) this.#putBack(id, started);
+      this.#scheduleSweep();
+    };
     try {
-      this.#d.engine.send(id, text, 'system');
+      this.#d.engine.send(id, text, 'system', { ...hint, onLost });
     } catch {
       // The session went away between ready() and send(): put the task back; the next idle moment delivers it.
-      if (started) this.#d.tasks.update(started.id, { status: 'waiting', startedAt: null });
+      if (started) this.#putBack(id, started);
       return;
     }
     if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
+    if (report !== null) this.#d.events.append(id, { type: 'report.reminded', slot: report });
   }
 
-  /** Spec §4.5: a short report a day — remind the coordinator when something happened since the last one. */
+  /**
+   * Spec §4.5, with the digest off (as before the economy plan): a day after the last report, reminder or hire, if
+   * something was done or is open, the coordinator gets a reminder notice.
+   */
   #remindReport(): void {
     const c = this.#d.company.coordinator();
     if (!c) return;
@@ -159,8 +183,49 @@ export class Dispatcher {
     const open = this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'], limit: 1 }).length > 0;
     if (!finished && !open) return;
     this.#reminded.set(c.id, now);
-    this.#d.notices.add(c.id, 'Günlük özet zamanı: bugün ne bitti, ne sürüyor, ne takıldı, ne harcandı — reportToOwner ile sahibine kısaca raporla.');
+    this.#d.notices.add(c.id, 'report.reminder', 'Günlük özet zamanı: bugün ne bitti, ne sürüyor, ne takıldı, ne harcandı — reportToOwner ile sahibine kısaca raporla.');
     this.#schedule(c.id);
+  }
+
+  /** A task started for a message that never reached its assignee waits in their queue again. */
+  #putBack(id: string, task: Task): void {
+    const current = this.#d.tasks.get(task.id);
+    if (current.assignee === id && current.status === 'in_progress') this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null });
+  }
+
+  #rules(): Constitution {
+    return this.#d.budget?.constitution() ?? DEFAULT_CONSTITUTION;
+  }
+
+  #digestHours(): number[] {
+    return this.#rules().digestHours;
+  }
+
+  /**
+   * The model a turn should run on (spec §6; the engine switches only as its model policy allows): the coordinator's by
+   * what the turn is for — a decision (notices, a task, a reminder) or only a digest; anyone else's by the task it starts:
+   * its difficulty's model, or their own (the roster's) without one. A model changes only at a task's start: a reminder
+   * in the middle of a task, or notices, keep the session's model.
+   */
+  #hint(e: Employee, started: Task | null, decision: boolean): ModelHint {
+    const rules = this.#rules();
+    if (e.kind === 'coordinator') return { model: decision ? rules.coordinatorModels.decision : rules.coordinatorModels.digest };
+    if (!started) return {};
+    return { model: started.difficulty && rules.difficultyModelsEnabled ? rules.difficultyModels[started.difficulty] : e.model, taskStart: true };
+  }
+
+  /**
+   * Spec §4.5: a short report a day. Due at the day's last digest hour (that hour, or null) when a task was opened,
+   * started or finished between the last report and it; once per digest hour (the log keeps it across restarts).
+   */
+  #reportDue(c: Employee): number | null {
+    const hours = this.#digestHours();
+    if (hours.length === 0) return null;
+    const slot = lastDigestSlot(this.#now(), [Math.max(...hours)]);
+    const reminded = this.#d.events.latest(c.id, 'report.reminded')?.event;
+    if (reminded?.type === 'report.reminded' && reminded.slot >= slot) return null;
+    const last = this.#d.events.latest(c.id, 'company.report')?.ts ?? 0;
+    return this.#d.tasks.changedBetween(last, slot) ? slot : null;
   }
 
   #person(id: string): Employee | null {
@@ -180,13 +245,19 @@ export class Dispatcher {
     return !this.#reserve() || task.priority === 1 || task.kind === 'handover';
   }
 
-  /** A sleeper wakes for a task that may start now; the coordinator also for its notices (they are its work). */
+  /**
+   * A sleeper wakes for a task that may start now; the coordinator and a lead also for their notices (they are their
+   * work); a member's notices wait for their next waking (spec §3.4, as before the economy plan). With the digest on,
+   * information wakes no one, and the coordinator wakes for the daily report.
+   */
   #hasWorkFor(e: Employee): boolean {
     if (this.#d.tasks.list({ assignee: e.id, statuses: ['waiting'] }).some((t) => t.kind === 'handover')) return true;
     const next = this.#d.tasks.nextFor(e.id);
     if (next && this.#mayStart(next)) return true;
-    // Notices are the coordinator's and a lead's work (decisions waiting); a member's wait for their next task.
-    return (e.kind === 'coordinator' || e.kind === 'lead') && this.#d.notices.pending(e.id).length > 0;
+    if (e.kind !== 'coordinator' && e.kind !== 'lead') return false;
+    const digestOn = this.#rules().digestEnabled;
+    if (this.#d.notices.pending(e.id).some((n) => !digestOn || n.kind === 'decision')) return true;
+    return digestOn && e.kind === 'coordinator' && !this.#reserve() && this.#reportDue(e) !== null;
   }
 
   #wake(id: string): void {
@@ -232,7 +303,7 @@ export class Dispatcher {
     return changed >= since;
   }
 
-  #delivery(task: Task): string {
+  #delivery(task: Task, model?: ModelAlias): string {
     let plan = '';
     if (task.planId) {
       try {
@@ -244,9 +315,10 @@ export class Dispatcher {
     const done = task.done.length ? `\n\nBitti tanımı:\n${task.done.map((d) => `- ${d}`).join('\n')}` : '';
     const deps = task.dependsOn.length ? `\nÖnce bitenler: ${task.dependsOn.join(', ')}` : '';
     const brief = this.#briefChanged(task) ? '\nŞirket özeti değişti; güncelini briefRead ile oku.' : '';
+    const level = task.difficulty && this.#rules().difficultyModelsEnabled ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
-İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${deps}${brief}
+İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${deps}${brief}
 
 ${task.description || '(açıklama yok)'}${done}
 
@@ -262,6 +334,7 @@ ${task.description || '(açıklama yok)'}${done}
     const name = this.#d.company.nameOf(id);
     this.#d.notices.add(
       coordinator.id,
+      'task.stalled',
       task.kind === 'handover'
         ? `${name} devir görevini hatırlatmaya rağmen teslim etmedi. Devir başkasına verilemez: ona sor, gerekirse reportToOwner ile sahibine bildir (sahibi Hemen çıkar ile devri atlayabilir).`
         : `${name} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,

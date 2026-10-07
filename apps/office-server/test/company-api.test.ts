@@ -5,24 +5,25 @@ import { OWNER } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor } from './company-helpers.ts';
-import { fakeEngine } from './engine-helpers.ts';
-import { setup } from './helpers.ts';
+import { fakeEngine, readArgv } from './engine-helpers.ts';
+import { setup, until } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
-async function start() {
+async function start(o: { cacheTtlMinutes?: () => number } = {}) {
   const s = setup();
-  const f = fakeEngine(s);
+  // Wired like main.ts: the engine reads the model policy switch from the constitution.
+  const f = fakeEngine(s, { engine: { modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled, ...(o.cacheTtlMinutes ? { cacheTtlMinutes: o.cacheTtlMinutes } : {}) } });
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
   const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, argvLog: f.argvLog, events: s.events, engine: f.engine };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -39,6 +40,48 @@ function call(port: number, method: string, path: string, body?: unknown): Promi
 }
 
 describe('company API', () => {
+  it('R11: the owner’s message does not move a sonnet coordinator to fable, model policy on or off; the owner can ask for fable', async () => {
+    const t = await start();
+    const coord = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', model: 'haiku' });
+    const turns = () => t.events.list({ limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
+    const models = async (n: number) => (await readArgv(t.argvLog, n)).map((a) => `${a.cwd.includes('koordinator') ? 'K' : 'A'}:${a.args[a.args.indexOf('--model') + 1]}`);
+    expect(t.budget.constitution()).toMatchObject({ modelPolicyEnabled: false, coordinatorModels: { owner: 'sonnet' } });
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Bir plan öner.' })).status).toBe(202);
+    await until(() => turns() === 1, 8000);
+    t.budget.setConstitution({ modelPolicyEnabled: true });
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Biraz daha düşün.' })).status).toBe(202);
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Merhaba.' })).status).toBe(202);
+    await until(() => turns() === 3, 8000);
+    expect((await models(2)).sort()).toEqual(['A:haiku', 'K:sonnet']);
+    // The owner may want fable for the coordinator: the constitution says so, and then it does.
+    t.budget.setConstitution({ coordinatorModels: { owner: 'fable' } });
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Şimdi derin düşün.' })).status).toBe(202);
+    await until(() => turns() === 4, 8000);
+    expect((await models(3)).sort()).toEqual(['A:haiku', 'K:fable', 'K:sonnet']);
+  });
+
+  it('important: the owner’s message never moves a member’s session in the middle of a task; between tasks it returns them to their own model', async () => {
+    // A cache that is always cold: any hint down would switch at once, so a kept model proves no hint was given.
+    const t = await start({ cacheTtlMinutes: () => 0 });
+    t.budget.setConstitution({ modelPolicyEnabled: true });
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', model: 'sonnet' });
+    const turns = () => t.events.list({ employeeId: ada.id, limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
+    const models = async (n: number) => (await readArgv(t.argvLog, n)).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Zor iş', difficulty: 'hard' });
+    t.company.start(task.id);
+    t.engine.send(ada.id, 'Zor iş', 'system', { model: 'opus', taskStart: true });
+    await until(() => turns() === 1, 8000);
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Nasıl gidiyor?' })).status).toBe(202);
+    await until(() => turns() === 2, 8000);
+    // Hired on sonnet, moved to opus by the task — and the owner's question kept it there.
+    expect(await models(2)).toEqual(['sonnet', 'opus']);
+    t.company.finish(ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Eline sağlık.' })).status).toBe(202);
+    await until(() => turns() === 3, 8000);
+    expect(await models(3)).toEqual(['sonnet', 'opus', 'sonnet']);
+  });
+
   it('hires the coordinator once from the Company view, on Fable, with the manager look', async () => {
     const t = await start();
     const hired = await call(t.port, 'POST', '/api/company/coordinator/hire');

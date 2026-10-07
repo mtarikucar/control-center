@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OWNER, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
+import { MODEL_RANK } from './model-policy.ts';
 import type { Company } from './company/company.ts';
 import type { Memory } from './company/memory.ts';
 import type { ProposalStore } from './company/proposal-store.ts';
@@ -177,7 +178,20 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     }
     if (method === 'GET' && action === 'file' && d.company) return sendJson(res, 200, d.company.memory.employeeFile(id));
     if (method === 'POST' && action === 'messages') {
-      d.engine.send(id, textOf(await readJson(req)));
+      const text = textOf(await readJson(req));
+      // The owner talking to the coordinator: the constitution's owner model, but never below the coordinator's own (a
+      // coordinator who moved itself up for planning stays there). To anyone else in the middle of a task: no hint, the
+      // session stays on the model the task started it on (never mid-task); between tasks, their own model. The engine
+      // ignores hints while the model policy is off.
+      const employee = d.roster.get(id);
+      const owner = d.company?.budget.constitution().coordinatorModels.owner;
+      const hint =
+        employee.kind === 'coordinator'
+          ? { model: owner && MODEL_RANK[owner] > MODEL_RANK[employee.model] ? owner : employee.model }
+          : d.company?.tasks.inProgressOf(id)
+            ? {}
+            : { model: employee.model };
+      d.engine.send(id, text, 'owner', hint);
       return sendJson(res, 202, { ok: true });
     }
     if (method === 'POST' && action === 'side-questions') return sendJson(res, 200, await d.engine.sideQuestion(id, textOf(await readJson(req))));

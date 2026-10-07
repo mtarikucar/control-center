@@ -17,6 +17,11 @@ export const OWNER = 'owner';
 export const TASK_KINDS = ['work', 'handover'] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
+/** How hard a task is: the constitution maps each to the model the task starts on (difficultyModels). */
+export const TASK_DIFFICULTIES = ['easy', 'medium', 'hard', 'critical'] as const;
+export type TaskDifficulty = (typeof TASK_DIFFICULTIES)[number];
+export const TASK_DIFFICULTY_LABELS: Record<TaskDifficulty, string> = { easy: 'kolay', medium: 'orta', hard: 'zor', critical: 'kritik' };
+
 export interface Task {
   id: string;
   planId: string | null;
@@ -30,6 +35,8 @@ export interface Task {
   assignee: string;
   /** 1 = most urgent … 5 = whenever. */
   priority: number;
+  /** Absent or null: none given; the assignee stays on their current model. */
+  difficulty?: TaskDifficulty | null;
   dependsOn: string[];
   status: TaskStatus;
   /** How many passes deep this task is (a task passed while working on a passed task is one deeper). */

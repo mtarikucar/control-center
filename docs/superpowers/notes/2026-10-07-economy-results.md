@@ -1,0 +1,109 @@
+# Ofis ekonomisi — sonuçlar (2026-10-07)
+
+Plan "Ofis ekonomisi"nin hedefi: aynı iş için ≥%50 daha az kota. Ölçüm: aynı senaryo testi
+(`apps/office-server/test/economy.scenario.test.ts`, son sürümü) üç kod üzerinde, her biri geçici bir worktree'de iki kez
+koşturuldu ve iki koşu birebir aynı çıktı. Senaryo ve sayım yöntemi: [economy-measure.md](economy-measure.md). Main'e commit
+yok.
+
+| Aşama | Kod | Ne değişti |
+|---|---|---|
+| Taban | main `e2889e8` | — |
+| Özet | `4866e7f` | not türleri: bilgi notları tur açmaz, özet saatlerinde tek tur; rapor hatırlatması son özette |
+| Son | office-economy `HEAD` | + koordinatör modeli turun türüne göre, görev modeli zorluğa göre (soğuk sınır kuralı) |
+
+Main ve özet aşamasında senaryonun yeni alanları (model ipucu, görev zorluğu) yok sayılır. Test kopyasında yalnız o
+kodlarda olmayan adlar uyarlandı: `DIGEST_HEADING`, `coordinatorModels` okuması ve main'in eski rapor hatırlatması metni. Eşikler beklendiği gibi main'de (koordinatör 15 tur) ve özet aşamasında
+(koordinatör maliyeti 75 > 67,5) kırmızı, dalda yeşil.
+
+## Önce / sonra
+
+| | Taban (main) | Özet | Son (dal) | Değişim (taban → son) |
+|---|---:|---:|---:|---:|
+| Koordinatör turu | 15 | 5 | 5 | −%67 |
+| Koordinatör modelleri | fable 15 | fable 5 | fable 1 · sonnet 3 · haiku 1 | |
+| Koordinatör modellenmiş maliyeti | 225 | 75 | **18,2** | **−%92** |
+| Üye turu (Ada + Can) | 6 + 5 | 6 + 5 | 6 + 5 | 0 |
+| Üye modelleri | sonnet 11 | sonnet 11 | opus 1 · sonnet 4 · haiku 6 | |
+| Üye modellenmiş maliyeti | 11 | 11 | 10,2 | −%7 |
+| **Toplam tur** | 26 | 16 | 16 | −%38 |
+| **Toplam modellenmiş maliyet** | 236 | 86 | **28,4** | **−%88** |
+| Açılan oturum (koord. + üyeler) | 8 + 2 | 4 + 2 | 5 + 11 | +%60 |
+
+Modellenmiş maliyet = Σ tur × ağırlık(model); ağırlıklar fable 15, opus 5, sonnet 1, haiku 0,2.
+
+Koordinatörün turları:
+
+| Saat | Neden | Taban | Son |
+|---|---|---|---|
+| 08:45 | sahibinin mesajı (plan iste) | fable | fable |
+| 09:00 | plan onayı (görevleri aç) | fable | sonnet |
+| 09:47 – 14:00 | 10 teslim (+ plan bitti) | 10 × fable | — (özete biner) |
+| 10:07 | takılma | fable | sonnet (+ 2 teslim özeti) |
+| 11:00 | öneri | fable | sonnet (+ 2 teslim özeti) |
+| 17:00 | özet + rapor hatırlatması | — | haiku |
+| ertesi gün 08:46 | rapor hatırlatması | fable | — |
+
+Kazancın kaynağı: tur sayısı not türleriyle (225 → 75), modelin turun işine göre seçilmesiyle (75 → 18,2). Üyelerde tur
+sayısı değişmez; kazanç kolay işlerin haiku'da koşmasından gelir, tek zor iş opus'a çıkar (önce sonnet'teydi).
+Hiçbir görev zorluğunun modelinden güçlü bir modelde koşmaz (test eşiği).
+
+## Yöntemin sınırları
+
+- **Bağlam boyutu ve önbellek yok sayıldı.** Her tur aynı ağırlıkta sayılır. Gerçekte bir turun maliyeti okunan bağlamla
+  büyür ve önbellekten okunan bağlam çok daha ucuzdur.
+- **Model değişimi soğuk başlangıçtır.** Bu tabloda görünmez ama dalda oturum sayısı arttı (10 → 16). Her model değişimi
+  oturumu yeniden açar; bağlam yeni modelde önbelleksiz bir kez yeniden okunur. Koordinatörde bu zaten uyku/uyanış
+  sınırlarına denk gelir: koordinatör 30 dk boşta uyur, uyanışta önbellek zaten soğuktur. Üyelerde her görev başı bir
+  soğuk başlangıç olabilir. Görev başında daha zayıf modele hemen geçmek (TTL beklemeden) bilinçli bir istisna: uzun bir
+  görevde bir soğuk okuma, işi gereğinden güçlü modelde koşturmaktan ucuzdur. Kaba hesap (giriş fiyatı ağırlıkla
+  orantılı, önbellek yazma 1,25×, okuma 0,1×): opus → haiku geçişi ilk çağrıda bile kazandırır; opus → sonnet birkaç
+  API çağrısında amorti olur.
+- Sahte claude anında ve sabit tokenla cevap verir; bir tur, gerçekte içindeki tüm API çağrılarıyla tek sayılır.
+- Senaryoda sahibiyle sohbet tek mesaj. Koordinatör fable'da işe alınmış; sahibinin mesajı kendi modelinin altına
+  inmediği için o tur fable. Sonnet'teki bir koordinatörde (canlı ofis) aynı tur sonnet olurdu. Sohbet
+  bitip 5 dk geçince sıradaki rutin not sonnet'te işlenir.
+- askColleague (yan cevaplar), teslim etmeyen üyeler (hatırlatma ve tırmandırma turları) ve sahibinin payı senaryoda
+  yok. Kota ortaktır; tabloda yalnız ofisin payı var.
+
+## İnceleme düzeltmelerinden sonra (aynı gün)
+
+Bağımsız incelemenin 8 bulgusu kapatıldı (sınır notları ve beklenen teslim karar notu; özetin kapanış satırı yalnız tek
+başına gelen özette; görev modeli yalnız oturumu taşır, kadrodaki model kalır; model geçişi başarısız olursa eski modelle
+sürer, mesaj kaybolmaz; rapor hatırlatması günlükte; çalışanın kritik
+pası zor sayılır). Senaryo yeniden çalıştırıldı: **sayılar değişmedi** (koordinatör 5 tur, 18,2; toplam 16 tur, 28,4;
+oturumlar 5 + 11). Beklenen: senaryodaki her görevin zorluğu var (kadro modeli devreye girmez), sınırlara ve payda
+uyandırmaya değmez, paslanan iş ve takılı isteyen yok. Düzeltmeler senaryonun dışındaki yolları kapatır; her biri kendi
+testinde.
+
+## İnceleme 2 (R9-R13)
+
+- **Anahtarlar varsayılan kapalı (R9).** Kapalıyken dal, senaryoda main'in gününü birebir yeniden üretiyor (R10):
+  koordinatör 14 tur / 210, toplam 25 tur / 221, 25 mesaj ve çalışan başına olay dizisi (237 olay) main'de bu testle
+  kaydedilenle aynı. Önceki tasarım iki noktada sapıyordu, ikisi düzeldi:
+  - rapor hatırlatması özet kapalıyken de yeni kuralla geliyordu;
+  - iki notun metni değişmişti.
+- **Uyandırma main'in kuralına döndü (R10b):** üyeyi not uyandırmaz; koordinatörü ve lideri uyandırır.
+- **Sahibinin mesajı Fable'a çıkarmaz (R11):** owner varsayılanı sonnet, koordinatörün kendi modelinden aşağı da değil.
+  Ekonomi açık koşusunun sayıları değişmedi (16 tur, 28,4), çünkü senaryodaki koordinatör fable'da işe alınıyor.
+- **Kullanılamayan model (R13):** gerçek CLI'de üretildi; görev kaybolmuyor, `model.switch.failed` yazılıyor.
+- Kabul belgesi R9-R13, matris: [economy-acceptance.md](economy-acceptance.md); değişen testler:
+  [economy-test-changes.md](economy-test-changes.md).
+
+## Doğrulama fazı (K3, K4 tabanı)
+
+- Kabul belgesi R1-R8, izlenebilirlik matrisi: [economy-acceptance.md](economy-acceptance.md).
+- Gerçek claude (K3): haiku → sonnet geçişinde konuşma korunuyor; model CLI'nin kendi init ve result satırında değişiyor.
+  Önbellek 6½ dk sonra hâlâ sıcak, 5 dk varsayımı çürüdü; düşürme yine de kazandırıyor. Ayrıntı:
+  [economy-cache-observation.md](economy-cache-observation.md).
+- Canlı taban (K4, n = 4 teslim): koordinatör (sahibi hariç) 1,25 tur/teslim, $1,83/teslim. Ayrıntı:
+  [economy-live-baseline.md](economy-live-baseline.md).
+- Göç 6-7 canlı DB kopyasında denendi; eski kod yeni şemada çalışıyor. Yayın: [economy-release-runbook.md](economy-release-runbook.md).
+- **Bu notun K2 rakamları modellenmiş maliyettir.** Gerçek kazanç yayın sonrası `economy-report` ile ölçülecek (R1, R2,
+  R6 = K4).
+
+## Gerçek kullanımda bakılacaklar
+
+- `budgetStatus` artık bugün kimin kaç tur kullandığını söylüyor; Bütçe sekmesi ekip başına tur gösteriyor. Birkaç gün
+  sonra koordinatör turu / gün ve haftalık kota %'si bu tabloyla karşılaştırılmalı.
+- Model haritaları ve `cacheTtlMinutes` Anayasa sekmesinden değişir. Özet turunun haiku'da yetersiz kaldığı görülürse
+  `coordinatorModels.digest` sonnet yapılabilir: koordinatör maliyeti 18,2'den 19'a çıkar, yine −%92.

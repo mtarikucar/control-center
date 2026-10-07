@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { Plan, PlanStatus, Task, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
+import type { Plan, PlanStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
+import { NOTICE_TOPICS, type Notice, type NoticeTopic } from './notices.ts';
 
 interface TaskRow {
   id: string;
@@ -22,6 +23,7 @@ interface TaskRow {
   started_at: number | null;
   finished_at: number | null;
   kind: string;
+  difficulty: string | null;
 }
 
 function taskFromRow(r: TaskRow): Task {
@@ -35,6 +37,7 @@ function taskFromRow(r: TaskRow): Task {
     requester: r.requester,
     assignee: r.assignee,
     priority: r.priority,
+    difficulty: (r.difficulty as TaskDifficulty | null) ?? null,
     dependsOn: JSON.parse(r.depends_on) as string[],
     status: r.status as TaskStatus,
     chainDepth: r.chain_depth,
@@ -57,11 +60,12 @@ export interface NewTask {
   requester: string;
   assignee: string;
   priority: number;
+  difficulty?: TaskDifficulty | null;
   dependsOn: string[];
   chainDepth: number;
 }
 
-export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt'>>;
+export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt'>>;
 
 const OPEN = "('waiting', 'in_progress', 'blocked')";
 
@@ -75,14 +79,14 @@ export class TaskStore {
   }
 
   create(t: NewTask): Task {
-    const task: Task = { ...t, kind: t.kind ?? 'work', id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null };
+    const task: Task = { ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null };
     this.#db
       .prepare(
         `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth,
-           note, result, nudged, created_at, started_at, finished_at, kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?)`,
+           note, result, nudged, created_at, started_at, finished_at, kind, difficulty)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?)`,
       )
-      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind);
+      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null);
     return task;
   }
 
@@ -115,8 +119,8 @@ export class TaskStore {
   update(id: string, patch: TaskPatch): Task {
     const next = { ...this.get(id), ...patch };
     this.#db
-      .prepare('UPDATE tasks SET assignee = ?, priority = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ? WHERE id = ?')
-      .run(next.assignee, next.priority, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt, id);
+      .prepare('UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ? WHERE id = ?')
+      .run(next.assignee, next.priority, next.difficulty ?? null, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt, id);
     return next;
   }
 
@@ -171,6 +175,15 @@ export class TaskStore {
   createdSince(requester: string, since: number): number {
     const row = this.#db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE requester = ? AND created_at >= ?').get(requester, since) as unknown as { n: number };
     return row.n;
+  }
+
+  /** A task was opened, started or finished in (after, until]: something to report. */
+  changedBetween(after: number, until: number): boolean {
+    return (
+      this.#db
+        .prepare('SELECT 1 FROM tasks WHERE (created_at > ? AND created_at <= ?) OR (started_at > ? AND started_at <= ?) OR (finished_at > ? AND finished_at <= ?) LIMIT 1')
+        .get(after, until, after, until, after, until) !== undefined
+    );
   }
 
   openInPlan(planId: string): number {
@@ -320,12 +333,22 @@ export class NoticeStore {
     this.#now = now;
   }
 
-  add(employeeId: string, text: string): void {
-    this.#db.prepare('INSERT INTO notices (employee_id, text, created_at, delivered_at) VALUES (?, ?, ?, NULL)').run(employeeId, text, this.#now());
+  /** The topic says whether the reader must act now (decision) or it is for the record (info): see NOTICE_TOPICS. */
+  add(employeeId: string, topic: NoticeTopic, text: string): void {
+    this.#db
+      .prepare('INSERT INTO notices (employee_id, kind, topic, text, created_at, delivered_at) VALUES (?, ?, ?, ?, ?, NULL)')
+      .run(employeeId, NOTICE_TOPICS[topic], topic, text, this.#now());
   }
 
-  pending(employeeId: string): Array<{ id: number; text: string }> {
-    return this.#db.prepare('SELECT id, text FROM notices WHERE employee_id = ? AND delivered_at IS NULL ORDER BY id').all(employeeId) as unknown as Array<{ id: number; text: string }>;
+  pending(employeeId: string): Notice[] {
+    return this.#db
+      .prepare('SELECT id, kind, topic, text, created_at AS createdAt FROM notices WHERE employee_id = ? AND delivered_at IS NULL ORDER BY id')
+      .all(employeeId) as unknown as Notice[];
+  }
+
+  /** The message that carried them was lost: they wait for the reader's next turn again. */
+  markUndelivered(ids: number[]): void {
+    for (const id of ids) this.#db.prepare('UPDATE notices SET delivered_at = NULL WHERE id = ?').run(id);
   }
 
   markDelivered(ids: number[]): void {

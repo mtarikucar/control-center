@@ -106,14 +106,17 @@ describe('Company — tasks', () => {
       [holder, other] = [other, holder];
     }
     expect(() => t.company.createTask(holder.id, { assignee: other.id, title: 'bir fazla' })).toThrow(/zincir/);
-    expect(t.notices.pending(c.id).some((n) => n.text.includes('zincir'))).toBe(true);
+    expect(t.notices.pending(c.id).find((n) => n.text.includes('zincir'))).toMatchObject({ kind: 'decision', topic: 'limit.chain' });
   });
 
   it('review focus: more than the daily limit from one employee is refused', () => {
     const t = make();
     const [a, b] = [t.company.hire(OWNER, { name: 'Ada', role: 'r' }), t.company.hire(OWNER, { name: 'Can', role: 'r' })];
+    const c = t.company.hireCoordinator();
     for (let i = 0; i < LIMITS.perDay; i += 1) t.company.createTask(a.id, { assignee: b.id, title: `iş ${i}` });
     expect(() => t.company.createTask(a.id, { assignee: b.id, title: 'bir fazla' })).toThrow(/günde/);
+    // The employee was told to leave it to the coordinator: the coordinator hears now, not at the next digest.
+    expect(t.notices.pending(c.id).at(-1)).toMatchObject({ kind: 'decision', topic: 'limit.tasks_per_day' });
   });
 
   it('starts, blocks and finishes; only the assignee or the coordinator hands it in; requester and coordinator hear', () => {
@@ -390,5 +393,71 @@ describe('Company — within the constitution', () => {
     expect(t.events.list({ limit: 500 }).some((e) => e.employeeId === ada.id && e.event.type === 'model.changed')).toBe(true);
     expect(() => t.company.setModel(c.id, ada.id, 'gpt' as never)).toThrow(/Bilinmeyen model/);
     expect(() => t.company.setModel(ada.id, c.id, 'haiku')).toThrow(/Yalnız koordinatör/);
+  });
+});
+
+describe('Company — notice kinds', () => {
+  it('important: what needs the reader now is a decision, what is only for the record is information', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, can] = [t.company.hire(c.id, { name: 'Ada', role: 'r', team: 'İçerik' }), t.company.hire(c.id, { name: 'Can', role: 'r', team: 'İçerik' })];
+    const last = (id: string) => {
+      const n = t.notices.pending(id).at(-1);
+      return n && `${n.kind} ${n.topic}`;
+    };
+    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    expect(last(c.id)).toBe('decision plan.approved');
+
+    const passed = t.company.createTask(ada.id, { assignee: can.id, title: 'çevir', planId: plan.id });
+    t.company.start(passed.id);
+    t.company.update(can.id, passed.id, { blocked: true, note: 'dosya yok' });
+    expect(last(c.id)).toBe('decision task.blocked');
+    t.company.update(can.id, passed.id, { blocked: false });
+    t.company.finish(can.id, passed.id, { summary: 'çevrildi', outputs: [], learned: '' });
+    expect(last(ada.id)).toBe('info task.finished');
+    expect(t.notices.pending(c.id).slice(-2).map((n) => `${n.kind} ${n.topic}`)).toEqual(['info task.finished', 'info plan.done']);
+
+    const waiting = t.company.createTask(c.id, { assignee: ada.id, title: 'bekleyen' });
+    t.company.assign(c.id, waiting.id, can.id);
+    expect(last(ada.id)).toBe('info task.moved');
+    const stuck = t.company.createTask(c.id, { assignee: ada.id, title: 'takılan' });
+    t.company.start(stuck.id);
+    t.company.update(ada.id, stuck.id, { blocked: true });
+    t.company.assign(c.id, stuck.id, can.id);
+    expect(last(ada.id)).toBe('decision task.taken');
+
+    t.company.appointLead(c.id, ada.id);
+    expect(last(ada.id)).toBe('info role.changed');
+    expect(last(can.id)).toBe('info role.changed');
+    t.company.appointCoordinator(can.id);
+    expect(last(can.id)).toBe('decision role.coordinator');
+    expect(last(c.id)).toBe('info role.changed');
+  });
+
+  it('review focus: a hand-in is a decision for a requester stuck on their own task, information otherwise; the coordinator’s copy stays information', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, can] = [t.company.hire(c.id, { name: 'Ada', role: 'r' }), t.company.hire(c.id, { name: 'Can', role: 'r' })];
+    const own = t.company.createTask(c.id, { assignee: ada.id, title: 'rapor' });
+    t.company.start(own.id);
+    const first = t.company.createTask(ada.id, { assignee: can.id, title: 'grafik' });
+    t.company.finish(can.id, first.id, { summary: 'çizildi', outputs: [], learned: '' });
+    expect(t.notices.pending(ada.id).at(-1)).toMatchObject({ kind: 'info', topic: 'task.finished' });
+    const second = t.company.createTask(ada.id, { assignee: can.id, title: 'tablo' });
+    t.company.update(ada.id, own.id, { blocked: true, note: 'tabloyu bekliyorum' });
+    t.company.finish(can.id, second.id, { summary: 'hazır', outputs: [], learned: '' });
+    expect(t.notices.pending(ada.id).at(-1)).toMatchObject({ kind: 'decision', topic: 'task.awaited' });
+    expect(t.notices.pending(c.id).filter((n) => n.text.startsWith('Görev bitti: “tablo”')).map((n) => `${n.kind} ${n.topic}`)).toEqual(['info task.finished']);
+  });
+
+  it('review focus: only the coordinator and leads open critical work; a member’s critical pass counts as hard', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, can] = [t.company.hire(c.id, { name: 'Ada', role: 'r', team: 'İçerik' }), t.company.hire(c.id, { name: 'Can', role: 'r', team: 'İçerik' })];
+    expect(t.company.createTask(ada.id, { assignee: can.id, title: 'acil', difficulty: 'critical' }).difficulty).toBe('hard');
+    expect(t.company.createTask(c.id, { assignee: can.id, title: 'mimari', difficulty: 'critical' }).difficulty).toBe('critical');
+    t.company.appointLead(c.id, ada.id);
+    expect(t.company.createTask(ada.id, { assignee: can.id, title: 'karar', difficulty: 'critical' }).difficulty).toBe('critical');
   });
 });

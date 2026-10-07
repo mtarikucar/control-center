@@ -213,3 +213,22 @@ describe('office tools', () => {
     await expect(t.call(ada, 'askColleague', { to: 'kimse', question: 'x' })).rejects.toThrow(/bulunamadı/);
   });
 });
+
+describe('office tools — task difficulty', () => {
+  it('taskCreate, taskPass and taskAssign take a difficulty; taskAssign can say it anew; the coordinator reads the mapping', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(c.id, { name: 'Can', role: 'r' });
+    await t.call(c, 'taskCreate', { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
+    await t.call(ada, 'taskPass', { to: can.id, title: 'Yazım', difficulty: 'easy' });
+    expect(await t.call(ada, 'taskPass', { to: can.id, title: 'Acil', difficulty: 'critical' })).toMatch(/“kritik” yerine “zor”/);
+    expect(t.tools.find((x) => x.name === 'taskPass')!.inputSchema).toMatchObject({ properties: { difficulty: { description: expect.stringMatching(/counts as hard/) } } });
+    const byTitle = (title: string) => t.tasks.list({ limit: 100 }).find((x) => x.title === title)!;
+    expect([byTitle('Mimari').difficulty, byTitle('Yazım').difficulty]).toEqual(['hard', 'easy']);
+    await t.call(c, 'taskAssign', { taskId: byTitle('Yazım').id, assignee: ada.id, difficulty: 'medium' });
+    expect(byTitle('Yazım')).toMatchObject({ assignee: ada.id, difficulty: 'medium' });
+    await expect(t.call(c, 'taskCreate', { assignee: ada.id, title: 'x', difficulty: 'trivial' })).rejects.toThrow(/Zorluk/);
+    expect(t.tools.find((x) => x.name === 'taskCreate')!.description).toMatch(/easy → haiku, medium → sonnet, hard → opus, critical → fable/);
+  });
+});

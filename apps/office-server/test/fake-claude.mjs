@@ -17,7 +17,10 @@ if (process.env.FAKE_CLAUDE_ARGV_LOG) appendFileSync(process.env.FAKE_CLAUDE_ARG
 
 const failFlag = process.env.FAKE_CLAUDE_FAIL_FLAG;
 if (failFlag && existsSync(failFlag)) {
-  unlinkSync(failFlag);
+  // The file may hold how many starts in a row fail (default one).
+  const left = Number(readFileSync(failFlag, 'utf8')) || 1;
+  if (left > 1) writeFileSync(failFlag, String(left - 1));
+  else unlinkSync(failFlag);
   process.stderr.write('startup failure\n');
   process.exit(1);
 }
@@ -117,12 +120,28 @@ let initSent = false;
 let busy = null;
 
 async function turn(text, uuid) {
+  // The real CLI announces itself (system init) at every turn; once per process is enough for the office.
   if (!initSent) {
-    out({ type: 'system', subtype: 'init', model: 'fake-model', cwd: process.cwd(), permissionMode: 'bypassPermissions', mcp_servers: [{ name: 'office', status: 'connected' }] });
+    out({ type: 'system', subtype: 'init', model: opt('--model') ?? 'fake-model', cwd: process.cwd(), permissionMode: 'bypassPermissions', mcp_servers: [{ name: 'office', status: 'connected' }] });
     initSent = true;
+  }
+  const unavailable = (process.env.FAKE_CLAUDE_UNAVAILABLE_MODELS ?? '').split(',').filter(Boolean);
+  if (process.env.FAKE_CLAUDE_ERROR_BEFORE_ACK && unavailable.includes(opt('--model') ?? '')) {
+    // A CLI that answers with the error before it replays the message: the message is never acknowledged.
+    const why = `There's an issue with the selected model (${opt('--model')}). It may not exist or you may not have access to it.`;
+    say(why);
+    result({ is_error: true, result: why });
+    return;
   }
   ack(uuid, text);
   remember(text);
+  // Like the real CLI on a model the account cannot use: it takes the message, answers with an error and stays up.
+  if (unavailable.includes(opt('--model') ?? '')) {
+    const why = `There's an issue with the selected model (${opt('--model')}). It may not exist or you may not have access to it. Run --model to pick a different model.`;
+    say(why);
+    result({ is_error: true, result: why });
+    return;
+  }
   if (text.includes('CRASH')) {
     process.stderr.write('boom: fake crash\n');
     process.exit(3);
@@ -130,6 +149,12 @@ async function turn(text, uuid) {
   if (text.includes('LIMIT')) {
     rateLimit('rejected', Number(process.env.FAKE_CLAUDE_LIMIT_RESET_SEC ?? '2'));
     result({ subtype: 'error_during_execution', is_error: true, result: 'usage limit reached' });
+    return;
+  }
+  if (text.includes('TOOLFAIL')) {
+    // Works (a tool runs), then the turn ends with an error for a reason that is not the model (e.g. overloaded).
+    out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_tf', name: 'Write', input: { file_path: '/d/half.txt', content: 'yarım' } }] } });
+    result({ subtype: 'error_during_execution', is_error: true, result: 'overloaded' });
     return;
   }
   if (text.includes('OOPS')) {
@@ -158,6 +183,15 @@ async function turn(text, uuid) {
     say(`slow-done${injected.length ? ` saw:${injected.join(',')}` : ''}`);
     rateLimit('allowed', 3600);
     result({ num_turns: 2, result: 'slow-done' });
+    return;
+  }
+  if (text.includes('HOLD') && process.env.FAKE_CLAUDE_HOLD_DIR) {
+    // A long piece of work: the turn lasts until the test releases it (a file named after the session).
+    const release = join(process.env.FAKE_CLAUDE_HOLD_DIR, sessionId);
+    while (!existsSync(release)) await sleep(10);
+    unlinkSync(release);
+    say('held-done');
+    result();
     return;
   }
   if (text.includes('WHAT DID I SAY')) {

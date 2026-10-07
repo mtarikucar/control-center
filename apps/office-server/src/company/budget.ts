@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -20,7 +20,11 @@ export interface BudgetDeps {
   now?: () => number;
 }
 
-const RULES: Record<keyof Constitution, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
+const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri' } as const;
+type SwitchKey = keyof typeof SWITCHES;
+type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | SwitchKey>;
+
+const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
   ownerReservePct: { label: 'Sahibinin kota payı (%)', min: 0, max: () => 90, integer: true },
   monthlyUsdCap: { label: 'Aylık para sınırı (USD)', min: 0, max: () => 1_000_000, integer: false, nullable: true },
@@ -28,7 +32,31 @@ const RULES: Record<keyof Constitution, { label: string; min: number; max: (desk
   tasksPerDay: { label: 'Günlük görev sınırı', min: 1, max: () => 500, integer: true },
   openTasksPerPlan: { label: 'Plan başına açık görev', min: 1, max: () => 500, integer: true },
   idleSleepMinutes: { label: 'Boşta uyuma süresi (dk)', min: 0, max: () => 1440, integer: true },
+  cacheTtlMinutes: { label: 'Önbellek süresi (dk)', min: 0, max: () => 60, integer: true },
 };
+
+const MODEL_MAPS = {
+  coordinatorModels: { label: 'Koordinatör modelleri', keys: ['owner', 'decision', 'digest'] },
+  difficultyModels: { label: 'Zorluk modelleri', keys: ['easy', 'medium', 'hard', 'critical'] },
+} as const;
+
+/** A change to one of the model maps: known keys, known models; the keys not given stay as they are. */
+function modelMap<T extends Record<string, string>>(key: keyof typeof MODEL_MAPS, value: unknown, current: T): T {
+  const { label, keys } = MODEL_MAPS[key];
+  const ok =
+    typeof value === 'object' && value !== null && !Array.isArray(value) &&
+    Object.entries(value).every(([k, v]) => (keys as readonly string[]).includes(k) && (MODEL_ALIASES as readonly unknown[]).includes(v));
+  if (!ok) throw new ValidationError(`Anayasa: ${label} ${keys.join(', ')} için ${MODEL_ALIASES.join(', ')} modellerinden biri olmalı.`);
+  return { ...current, ...(value as Partial<T>) };
+}
+
+/** One to six whole local hours, kept sorted and without repeats. */
+function digestHours(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 6 || value.some((h) => typeof h !== 'number' || !Number.isInteger(h) || h < 0 || h > 23)) {
+    throw new ValidationError('Anayasa: Özet saatleri 0 ile 23 arasında 1–6 tam saat olmalı (ör. 9, 17).');
+  }
+  return [...new Set(value as number[])].sort((a, b) => a - b);
+}
 
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toString()}`;
 
@@ -58,7 +86,20 @@ export class Budget {
     const checked: Partial<Constitution> = {};
     for (const [key, value] of Object.entries(patch)) {
       if (!Object.hasOwn(DEFAULT_CONSTITUTION, key)) throw new ValidationError(`Bilinmeyen anayasa maddesi: ${key}`);
-      const rule = RULES[key as keyof Constitution];
+      if (key === 'digestHours') {
+        checked.digestHours = digestHours(value);
+        continue;
+      }
+      if (Object.hasOwn(SWITCHES, key)) {
+        if (typeof value !== 'boolean') throw new ValidationError(`Anayasa: ${SWITCHES[key as SwitchKey]} anahtarı açık ya da kapalı (true/false) olmalı.`);
+        (checked as Record<string, unknown>)[key] = value;
+        continue;
+      }
+      if (key === 'coordinatorModels' || key === 'difficultyModels') {
+        (checked as Record<string, unknown>)[key] = modelMap(key, value, this.constitution()[key]);
+        continue;
+      }
+      const rule = RULES[key as NumberKey];
       if (value === null && rule.nullable) {
         (checked as Record<string, unknown>)[key] = null;
         continue;
@@ -100,6 +141,7 @@ export class Budget {
       const used = Math.max(r.fiveHourPct ?? 0, r.sevenDayPct ?? 0);
       this.#d.notices.add(
         coordinator.id,
+        'reserve.changed',
         r.active
           ? `Sahibinin kota payı devrede: kullanım %${used}, sınır %${r.limitPct}. Ofis yalnız öncelik 1 görevleri başlatıyor, boştakiler uyuyor; pencere açılınca kendiliğinden döner. Gerekirse öncelikleri yeniden sırala.`
           : 'Sahibinin kota payı serbest kaldı: ofis normal çalışmaya döndü.',
@@ -132,7 +174,7 @@ export class Budget {
       if (spent > plan.usd) warnings.push(`“${plan.title}” planının harcaması ${money(spent)} ile onaylanan ${money(plan.usd)} bütçeyi aştı: bu büyük bir değişiklik, planRevise ile sahibine getirilmeli.`);
     }
     const coordinator = this.#d.roster.list().find((e) => e.kind === 'coordinator');
-    if (warnings.length && coordinator && coordinator.id !== by) this.#d.notices.add(coordinator.id, warnings.join(' '));
+    if (warnings.length && coordinator && coordinator.id !== by) this.#d.notices.add(coordinator.id, 'spend.over', warnings.join(' '));
     this.#announce();
     return { spend, warnings };
   }
@@ -178,11 +220,12 @@ export class Budget {
     const people = this.#d.roster.list();
     const usage = this.#d.quota.usageAll?.(people.map((e) => e.id)) ?? {};
     const top = people
-      .map((e) => ({ name: e.name, usd: usage[e.id]?.today.costUsd ?? 0 }))
-      .filter((x) => x.usd > 0)
-      .sort((a, b) => b.usd - a.usd)
+      .map((e) => ({ name: e.name, usd: usage[e.id]?.today.costUsd ?? 0, turns: usage[e.id]?.today.turns ?? 0, side: usage[e.id]?.today.sideAnswers ?? 0 }))
+      .filter((x) => x.usd > 0 || x.turns > 0 || x.side > 0)
+      .sort((a, b) => b.usd - a.usd || b.turns - a.turns)
       .slice(0, 5);
-    if (top.length) lines.push(`Bugün en çok kullananlar: ${top.map((x) => `${x.name} ~${money(x.usd)}`).join(', ')}.`);
+    const used = (x: (typeof top)[number]) => `${x.name} ~${money(x.usd)}, ${x.turns} tur${x.side ? ` + ${x.side} yan cevap` : ''}`;
+    if (top.length) lines.push(`Bugün en çok kullananlar: ${top.map(used).join('; ')}.`);
     return lines.join('\n');
   }
 

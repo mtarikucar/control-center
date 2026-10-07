@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_CONSTITUTION, OWNER, type QuotaState } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, OWNER, type QuotaState, type Usage } from '@cc/shared';
+import { Budget } from '../src/company/budget.ts';
+import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
+import { QuotaTracker } from '../src/quota.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
@@ -29,6 +32,28 @@ describe('Budget — constitution', () => {
     expect(t.budget.constitution()).toEqual(DEFAULT_CONSTITUTION);
     expect(t.budget.setConstitution({ ownerReservePct: 40, monthlyUsdCap: 100, maxEmployees: 5 })).toMatchObject({ ownerReservePct: 40, monthlyUsdCap: 100, maxEmployees: 5 });
     expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'budget.changed')).toBe(true);
+    expect(t.budget.setConstitution({ digestHours: [18, 8, 18] }).digestHours).toEqual([8, 18]);
+    const models = t.budget.setConstitution({ coordinatorModels: { digest: 'sonnet' }, difficultyModels: { easy: 'sonnet' }, cacheTtlMinutes: 10 });
+    expect(models).toMatchObject({
+      coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'sonnet' },
+      difficultyModels: { easy: 'sonnet', medium: 'sonnet', hard: 'opus', critical: 'fable' },
+      cacheTtlMinutes: 10,
+    });
+    expect(t.budget.setConstitution({ digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false })).toMatchObject({
+      digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false,
+    });
+  });
+
+  it('R9: the economy switches are off by default, also in a database written before they existed; the owner turns them on and off', () => {
+    const t = make();
+    const off = { digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false };
+    expect(DEFAULT_CONSTITUTION).toMatchObject({ ...off, cacheTtlMinutes: 5, coordinatorModels: { owner: 'sonnet' } });
+    expect(t.budget.constitution()).toMatchObject(off);
+    // The live office's constitution today: one row, nothing about the switches.
+    t.db.prepare("INSERT INTO constitution (key, value) VALUES ('ownerReservePct', '80')").run();
+    expect(t.budget.constitution()).toMatchObject({ ...off, ownerReservePct: 80 });
+    expect(t.budget.setConstitution({ digestEnabled: true }).digestEnabled).toBe(true);
+    expect(t.budget.setConstitution({ digestEnabled: false })).toMatchObject(off);
   });
 
   it('review focus: refuses wrong types, out-of-range values and unknown keys, changing nothing', () => {
@@ -36,6 +61,8 @@ describe('Budget — constitution', () => {
     for (const bad of [
       { maxEmployees: 9 }, { maxEmployees: 0 }, { maxEmployees: 2.5 }, { ownerReservePct: -1 }, { ownerReservePct: 95 }, { ownerReservePct: '25' },
       { monthlyUsdCap: -5 }, { chainDepth: 0 }, { tasksPerDay: 501 }, { idleSleepMinutes: 1441 }, { salary: 10 },
+      { digestHours: [] }, { digestHours: [24] }, { digestHours: [9.5] }, { digestHours: '9, 17' }, { digestHours: [1, 2, 3, 4, 5, 6, 7] },
+      { cacheTtlMinutes: 61 }, { digestEnabled: 'false' }, { modelPolicyEnabled: 0 }, { difficultyModelsEnabled: null }, { coordinatorModels: { boss: 'fable' } }, { coordinatorModels: { owner: 'gpt' } }, { difficultyModels: 'haiku' }, { difficultyModels: [] },
     ]) {
       expect(() => t.budget.setConstitution(bad), JSON.stringify(bad)).toThrow(/Anayasa|anayasa/);
     }
@@ -141,5 +168,23 @@ describe('Budget — status for the coordinator', () => {
     expect(text).toContain('sınır %75');
     expect(text).toContain('Bu ay harcanan: $0');
     expect(text).toContain('“Video”');
+  });
+
+  it('names who used most today with their turns, side answers apart (the quota tracker wired like main.ts)', () => {
+    const t = make();
+    const budget = new Budget({
+      constitution: new ConstitutionStore(t.db), spend: new SpendStore(t.db), tasks: t.tasks, plans: t.plans, roster: t.roster, events: t.events, notices: t.notices,
+      quota: new QuotaTracker(t.db, t.events), deskCount: 8,
+    });
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    t.company.hire(c.id, { name: 'Can', role: 'r' });
+    const usage: Usage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    const turn = (id: string, costUsd: number) =>
+      t.events.append(id, { type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd, numTurns: 4, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 });
+    for (let i = 0; i < 12; i += 1) turn(c.id, 0.08);
+    for (let i = 0; i < 3; i += 1) turn(ada.id, 0.05);
+    t.events.append(ada.id, { type: 'side.answer', text: 'a', ok: true, usage, costUsd: 0.01 });
+    expect(budget.status()).toContain('Bugün en çok kullananlar: Koordinatör ~$0.96, 12 tur; Ada ~$0.16, 3 tur + 1 yan cevap.');
   });
 });

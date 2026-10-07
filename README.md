@@ -51,7 +51,8 @@ koordinatöre döner. Beklemek istemezseniz **Hemen çıkar**.
 ## Bütçe ve anayasa
 
 Şirket görünümünün **Anayasa** sekmesinde sınırları siz koyarsınız: en çok kaç çalışan, Claude kotasından size ayrılan
-pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, boştakilerin kaç dakika sonra uyuyacağı.
+pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, boştakilerin kaç dakika sonra uyuyacağı, özet
+saatleri ve hangi işin hangi modelde koşacağı.
 
 - **Sahibinin payı:** 5 saatlik ya da haftalık kullanım `100 − pay` sınırına gelince ofis yalnız öncelik 1 işleri
   başlatır, boştakileri uyutur ve koordinatöre haber verir; süren işler kesilmez, pencere açılınca kendiliğinden döner.
@@ -60,7 +61,28 @@ pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, bo
   çıkar ve koordinatör sahibine getirir. **Bütçe** sekmesi her planın harcadığını, Claude kullanımını ve onaylanan parayı
   yan yana gösterir.
 - **Uyku:** işi olmayan çalışan bir süre sonra uyur (oturumu korunur); görevi gelince ya da siz yazınca uyanır.
-- Koordinatör `budgetStatus` ile bütçeyi görür, `setModel` ile birinin modelini değiştirir, `sleep`/`wake` kullanır.
+- **Ofis ekonomisi (anahtarlı, varsayılan kapalı):** Anayasa sekmesinde üç anahtar var, üçü de varsayılan
+  kapalı. Kapalıyken ofis eskisi gibi çalışır (main ile birebir; senaryo testi main'de kaydedilmiş mesaj ve olaylarla
+  karşılaştırır).
+  - `digestEnabled` — **notlar ve özet:** karar gerektiren notlar (plan onayı, takılma, öneri…) hemen bir tur açar;
+    yalnız bilgi olanlar (teslimler, rol değişikliği…) bir sonraki tura biner ya da **özet saatlerinde**
+    (`digestHours`, varsayılan 9 ve 17) tek turda gelir. Günlük rapor hatırlatması son özetle gelir.
+  - `modelPolicyEnabled` — **model seçimi:** koordinatörün modeli turun ne için olduğuna göre seçilir
+    (`coordinatorModels`): sizin mesajınız sonnet (koordinatörün kendi modelinden aşağı değil; isterseniz fable
+    yapın), karar notu sonnet, yalnız özet haiku. Model değişiminde süreç kapanıp `--resume --model` ile yeniden açılır
+    (hafıza sürer). Daha güçlü modele hemen, daha zayıfa yalnız son turdan `cacheTtlMinutes` (5 dk) sonra geçilir.
+    Hesabın kullanamadığı bir modelde oturum eski modelle sürer ve mesaj yeniden gönderilir (`model.switch.failed`).
+  - `difficultyModelsEnabled` — **görev zorluğu:** görevlerin bir zorluğu olabilir (`taskCreate`/`taskPass`/
+    `taskAssign` → `difficulty`: kolay, orta, zor, kritik); görev başlarken çalışan o zorluğun modeline geçer
+    (`difficultyModels`: haiku, sonnet, opus, fable), görev ortasında asla. Görev modeli yalnız o görev içindir:
+    çalışanın kendi modeli (`setModel`) zorluksuz görevde, yan soruda ve sizin mesajınızda kullanılır. Kritik işi yalnız
+    koordinatör ve liderler açar.
+  - Uyandırma değişmedi: üyeyi not uyandırmaz, koordinatörü ve lideri uyandırır.
+- Koordinatör `budgetStatus` ile bütçeyi ve bugün kimin kaç tur kullandığını görür, `setModel` ile birinin modelini
+  değiştirir, `sleep`/`wake` kullanır. Ölçüm: `docs/superpowers/notes/2026-10-07-economy-results.md`.
+- **Ölçüm ve yayın:** `pnpm economy-report --since 2026-10-07` (salt okunur; `--db`, `--until`) kabul belgesinin
+  metriklerini canlı veriden yazar; `node apps/office-server/scripts/migration-rehearsal.ts --from <yedek>` göçleri bir
+  kopyada prova eder. Kabul ve yayın: `docs/superpowers/notes/economy-acceptance.md`, `economy-release-runbook.md`.
 
 ## Öneriler ve ekip liderleri
 

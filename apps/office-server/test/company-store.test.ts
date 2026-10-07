@@ -90,11 +90,13 @@ describe('PlanStore', () => {
 describe('NoticeStore', () => {
   it('keeps notices until they are delivered', () => {
     const { notices } = stores();
-    notices.add('e1', 'bir');
-    notices.add('e1', 'iki');
-    notices.add('e2', 'başka');
+    notices.add('e1', 'plan.approved', 'bir');
+    notices.add('e1', 'task.finished', 'iki');
+    notices.add('e2', 'task.blocked', 'başka');
     const pending = notices.pending('e1');
     expect(pending.map((n) => n.text)).toEqual(['bir', 'iki']);
+    expect(pending.map((n) => [n.kind, n.topic])).toEqual([['decision', 'plan.approved'], ['info', 'task.finished']]);
+    expect(pending[0]?.createdAt).toEqual(expect.any(Number));
     notices.markDelivered(pending.map((n) => n.id));
     expect(notices.pending('e1')).toEqual([]);
     expect(notices.pending('e2')).toHaveLength(1);

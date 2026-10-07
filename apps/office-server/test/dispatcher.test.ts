@@ -1,11 +1,13 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { companyFor } from './company-helpers.ts';
-import { fakeEngine } from './engine-helpers.ts';
-import { setup, until, waitFor } from './helpers.ts';
+import { fakeEngine, readArgv } from './engine-helpers.ts';
+import { setup, tempDir, until, waitFor } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -228,7 +230,8 @@ describe('Dispatcher — reserve and sleep', () => {
     await until(() => t.engine.ready(ada.id) && t.engine.ready(coord.id));
     await t.engine.sleep(coord.id);
     await t.engine.sleep(ada.id);
-    t.notices.add(ada.id, 'Bilgi: toplantı yok.');
+    // As on main (only the topic is new); a decision, so not even a decision wakes a member.
+    t.notices.add(ada.id, 'proposal.decided', 'Bilgi: toplantı yok.');
     const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Plan onaylandı')), 8000);
@@ -245,6 +248,7 @@ describe('Dispatcher — reserve and sleep', () => {
     expect(t.roster.get(ada.id).lifecycle).toBe('stopped');
     expect(t.tasks.get(task.id).status).toBe('waiting');
   });
+
   it('reminds the coordinator once a day to report when something happened', async () => {
     const t = makeBudgeted();
     const coord = t.company.hireCoordinator();
@@ -274,3 +278,324 @@ describe('Dispatcher — reserve and sleep', () => {
     await until(() => systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.includes('Altyazı')), 8000);
   });
 });
+
+describe('Dispatcher — notice kinds and the digest', () => {
+  const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).getTime();
+  /** Everything on one simulated clock: digest hours are local wall-clock hours. */
+  function makeDigest(o: { unavailable?: string } = {}) {
+    let clock = at(7, 10);
+    const now = () => clock;
+    const s = setup(8, now);
+    const failFlag = join(tempDir('fake-claude-fail-'), 'fail');
+    const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag, FAKE_CLAUDE_UNAVAILABLE_MODELS: o.unavailable ?? '' }, engine: { now, modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled } });
+    const c = companyFor(s, f, undefined, now);
+    // These tests are about the economy plan's features: all three switched on (they are off by default).
+    c.budget.setConstitution({ idleSleepMinutes: 0, digestEnabled: true, modelPolicyEnabled: true, difficultyModelsEnabled: true });
+    const run = () =>
+      new Dispatcher({
+        events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine,
+        budget: c.budget, now, tickMs: 50,
+      }).start();
+    let stop = run();
+    cleanups.push(() => stop(), f.cleanup, s.cleanup);
+    return {
+      ...s, ...c, engine: f.engine, argvLog: f.argvLog, setClock: (t: number) => (clock = t), turns: (id: string) => systemMessages(s.events.list({ limit: 5000 }), id),
+      failNextStarts: (n: number) => writeFileSync(failFlag, String(n)),
+      /** The office restarts: a new dispatcher over the same database. */
+      restart: () => {
+        stop();
+        stop = run();
+      },
+    };
+  }
+
+  it('important: information alone opens no turn; a decision does, and the information rides on it as the digest', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    await until(() => t.engine.ready(coord.id));
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.\nAyrıntı ikinci satırda.');
+    t.notices.add(coord.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    await sleep(400);
+    expect(t.turns(coord.id)).toEqual([]);
+    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    await sleep(300);
+    const turns = t.turns(coord.id);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatch(/^Ofisten notlar:\n- Plan onaylandı/);
+    expect(turns[0]).toContain('## Ofisten özet — 2 not, 10:00');
+    expect(turns[0]).toContain('Teslimler (1):\n- “Yaz” (Ada): Yazıldı. Ayrıntı ikinci satırda.');
+    expect(turns[0]).toContain('Rol/lider değişiklikleri (1):\n- Can artık İçerik ekibinin lideri.');
+    // Under "open the tasks" the digest does not say "open no work".
+    expect(turns[0]).not.toContain('Özet turunda beklenen yalnız kayıt');
+    expect(t.notices.pending(coord.id)).toEqual([]);
+  });
+
+  it('important: information comes alone only at a digest hour it lived through, in one turn; an empty digest is skipped', async () => {
+    const t = makeDigest();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id));
+    t.notices.add(ada.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    t.setClock(at(7, 12, 30));
+    t.notices.add(ada.id, 'task.moved', '“Çeviri” görevi (no x) Can adlı çalışana verildi.');
+    t.setClock(at(7, 16, 59));
+    await sleep(300);
+    expect(t.turns(ada.id)).toEqual([]);
+    t.setClock(at(7, 17));
+    await until(() => t.turns(ada.id).length === 1, 8000);
+    t.setClock(at(7, 17, 30));
+    t.notices.add(ada.id, 'role.changed', 'Ece işe alındı.');
+    t.setClock(at(7, 23));
+    await sleep(300);
+    expect(t.turns(ada.id)).toHaveLength(1);
+    expect(t.turns(ada.id)[0]).toMatch(/^## Ofisten özet — 2 not, 10:00–12:30\n/);
+    expect(t.turns(ada.id)[0]).toContain('Görevler (1):');
+    expect(t.turns(ada.id)[0]).toContain('Bu özet bilgi içindir');
+    t.setClock(at(8, 9));
+    await until(() => t.turns(ada.id).length === 2, 8000);
+    expect(t.turns(ada.id)[1]).toMatch(/^## Ofisten özet — 1 not, 17:30\n/);
+    t.setClock(at(8, 17));
+    await sleep(300);
+    t.setClock(at(9, 9));
+    await sleep(300);
+    expect(t.turns(ada.id)).toHaveLength(2);
+  });
+
+  it('review focus: the daily report reminder comes with the last digest hour, only when tasks moved since the last report', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.stop(ada.id);
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Yaz' });
+    t.company.start(task.id);
+    t.setClock(at(7, 11));
+    t.company.finish(ada.id, task.id, { summary: 'Yazıldı.', outputs: [], learned: '' });
+    t.setClock(at(7, 16, 59));
+    await sleep(300);
+    expect(t.turns(coord.id)).toEqual([]);
+    t.setClock(at(7, 17));
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toContain('Teslimler (1):\n- “Yaz” (Ada): Yazıldı.');
+    expect(t.turns(coord.id)[0]).toContain('Günlük rapor zamanı');
+    expect(t.turns(coord.id)[0]).toContain('Özet turunda beklenen yalnız kayıt');
+    t.company.report(coord.id, 'Yaz bitti.');
+    t.setClock(at(8, 9));
+    await sleep(300);
+    t.setClock(at(8, 17));
+    await sleep(300);
+    expect(t.turns(coord.id)).toHaveLength(1);
+    t.setClock(at(8, 18));
+    t.company.createTask(coord.id, { assignee: ada.id, title: 'Düzelt' });
+    t.setClock(at(9, 9));
+    await sleep(300);
+    expect(t.turns(coord.id)).toHaveLength(1);
+    t.setClock(at(9, 17));
+    await until(() => t.turns(coord.id).length === 2, 8000);
+    expect(t.turns(coord.id)[1]).toMatch(/^## Ofisten özet — yeni not yok\n/);
+    expect(t.turns(coord.id)[1]).toContain('Günlük rapor zamanı');
+    await sleep(300);
+    expect(t.turns(coord.id)).toHaveLength(2);
+  });
+
+  it('R10: notices never wake a member, a decision wakes the coordinator, and with the digest on information wakes no one', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.sleep(coord.id);
+    await t.engine.sleep(ada.id);
+    t.notices.add(coord.id, 'task.finished', 'Görev bitti: “Yaz” (Ada): Yazıldı.');
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    t.setClock(at(7, 17));
+    await sleep(400);
+    expect([t.roster.get(coord.id).lifecycle, t.roster.get(ada.id).lifecycle]).toEqual(['sleeping', 'sleeping']);
+    t.notices.add(coord.id, 'task.blocked', 'Ada “Çiz” görevinde takıldı.');
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toMatch(/^Ofisten notlar:\n- Ada “Çiz” görevinde takıldı\./);
+    expect(t.turns(coord.id)[0]).toContain('“Yaz” (Ada): Yazıldı.');
+    // The member's decision waits for their next waking (spec §3.4, as on main).
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Çeviri' });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    expect(t.turns(ada.id)[0]).toMatch(/^Ofisten notlar:\n- “Altyazı” önerin kabul edildi\./);
+  });
+
+  it('review focus: in the owner’s reserve information opens no turn, even at a digest hour; it waits for the next turn', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    await until(() => t.engine.ready(coord.id));
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.9, resetsAt: at(7, 20) }, sevenDay: null, updatedAt: at(7, 10) });
+    t.budget.checkReserve();
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toContain('kota payı devrede');
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
+    t.setClock(at(7, 17));
+    await sleep(400);
+    expect(t.turns(coord.id)).toHaveLength(1);
+    t.setQuota(null);
+    t.budget.checkReserve();
+    await until(() => t.turns(coord.id).length === 2, 8000);
+    expect(t.turns(coord.id)[1]).toContain('serbest kaldı');
+    expect(t.turns(coord.id)[1]).toContain('Teslimler (1)');
+  });
+
+  it('important: the coordinator’s decisions go on its decision model, a digest alone on its digest model; a task starts on its difficulty’s', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    await until(() => t.turns(coord.id).length === 1 && t.engine.ready(coord.id), 8000);
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
+    t.setClock(at(7, 17));
+    await until(() => t.turns(coord.id).length === 2 && t.engine.ready(coord.id), 8000);
+    t.company.createTask(coord.id, { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
+    await until(() => t.turns(ada.id).some((m) => m.includes('## Görev: Mimari')), 8000);
+    expect(t.turns(ada.id).find((m) => m.includes('## Görev: Mimari'))).toContain('Zorluk: zor · Model: opus');
+    const argv = await readArgv(t.argvLog, 5);
+    const models = (who: string) => argv.filter((a) => a.cwd.includes(who)).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models('koordinator')).toEqual(['fable', 'sonnet', 'haiku']);
+    expect(models('ada')).toEqual(['sonnet', 'opus']);
+    // In the middle of the task (the office's reminder about it) the model stays.
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    await until(() => t.turns(ada.id).some((m) => m.startsWith(NUDGE_PREFIX) || m.includes('Altyazı')), 8000);
+    await until(() => t.engine.ready(ada.id), 8000);
+    expect((await readArgv(t.argvLog, 5)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1])).toEqual(['sonnet', 'opus']);
+  });
+
+  it('review focus: the report reminder is not repeated for the same digest hour after a restart', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.stop(ada.id);
+    t.company.createTask(coord.id, { assignee: ada.id, title: 'Yaz' });
+    t.setClock(at(7, 17));
+    await until(() => t.turns(coord.id).some((m) => m.includes('Günlük rapor zamanı')), 8000);
+    t.restart();
+    t.setClock(at(7, 17, 30));
+    await sleep(400);
+    expect(t.turns(coord.id).filter((m) => m.includes('Günlük rapor zamanı'))).toHaveLength(1);
+    t.setClock(at(8, 17));
+    await until(() => t.turns(coord.id).filter((m) => m.includes('Günlük rapor zamanı')).length === 2, 8000);
+  });
+
+  it('review focus: a sleeping member waits for their notices, in the reserve too; urgent work still wakes them', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.sleep(coord.id);
+    await t.engine.sleep(ada.id);
+    t.notices.add(ada.id, 'task.taken', '“Çeviri” görevi (no x) Can adlı çalışana verildi; üzerinde çalışmayı bırak.');
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.9, resetsAt: at(7, 20) }, sevenDay: null, updatedAt: at(7, 10) });
+    t.budget.checkReserve();
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    await until(() => t.turns(coord.id).some((m) => m.includes('kota payı devrede')), 8000);
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+    const urgent = t.company.createTask(coord.id, { assignee: ada.id, title: 'Acil', priority: 1 });
+    await until(() => t.tasks.get(urgent.id).status === 'in_progress', 8000);
+    expect(t.turns(ada.id)[0]).toContain('önerin kabul edildi');
+  });
+
+  it('critical: a task’s model is for that task: one without a difficulty runs on the employee’s own model, which only setModel changes', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r', model: 'opus' });
+    await until(() => t.engine.ready(ada.id));
+    const run = async (title: string, difficulty?: 'easy') => {
+      const task = t.company.createTask(coord.id, { assignee: ada.id, title, difficulty });
+      await until(() => t.turns(ada.id).some((m) => m.includes(`## Görev: ${title}`)), 8000);
+      t.company.finish(ada.id, task.id, { summary: 'tamam', outputs: [], learned: '' });
+      await until(() => t.engine.ready(ada.id), 8000);
+    };
+    await run('Kolay iş', 'easy');
+    expect(t.roster.get(ada.id).model).toBe('opus');
+    await run('Zorluksuz iş');
+    t.company.setModel(coord.id, ada.id, 'sonnet');
+    await run('Yine zorluksuz');
+    const models = (await readArgv(t.argvLog, 5)).filter((a) => a.cwd.includes('ada') && !a.args.includes('json')).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models).toEqual(['opus', 'haiku', 'opus', 'sonnet']);
+  });
+
+  it('critical: a delivery lost because no session would start puts the task and its notices back; they come again on resume', async () => {
+    const t = makeDigest();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id));
+    // A whole turn first: the session's process has surely started before the next starts are made to fail.
+    t.engine.send(ada.id, 'merhaba', 'system');
+    await until(() => t.events.list({ employeeId: ada.id, limit: 500 }).some((e) => e.event.type === 'turn.finished') && t.engine.ready(ada.id), 8000);
+    t.failNextStarts(2);
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
+    await until(() => t.roster.get(ada.id).lifecycle === 'error', 8000);
+    await until(() => t.tasks.get(task.id).status === 'waiting', 8000);
+    expect(t.notices.pending(ada.id).map((n) => n.topic)).toEqual(['proposal.decided']);
+    t.engine.resume(ada.id);
+    await until(() => t.tasks.get(task.id).status === 'in_progress' && t.engine.ready(ada.id), 8000);
+    const deliveries = t.turns(ada.id).filter((m) => m.includes('## Görev: Mimari'));
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries[1]).toContain('önerin kabul edildi');
+    expect(t.notices.pending(ada.id)).toEqual([]);
+  });
+
+  it('R7: with the digest switched off, information goes at once like a decision (as before the economy plan)', async () => {
+    const t = makeDigest();
+    t.budget.setConstitution({ digestEnabled: false });
+    const coord = t.company.hireCoordinator();
+    await until(() => t.engine.ready(coord.id));
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toBe('Ofisten notlar:\n- “Yaz” (Ada): Yazıldı.');
+    await until(() => t.engine.ready(coord.id), 8000);
+    await t.engine.sleep(coord.id);
+    t.notices.add(coord.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    await until(() => t.turns(coord.id).length === 2, 8000);
+    t.budget.setConstitution({ digestEnabled: true });
+    await until(() => t.engine.ready(coord.id), 8000);
+    t.notices.add(coord.id, 'task.finished', '“Çiz” (Can): Çizildi.');
+    await sleep(400);
+    expect(t.turns(coord.id)).toHaveLength(2);
+  });
+
+  it('R7: with difficulty models switched off a task starts on its assignee’s own model; the difficulty is kept', async () => {
+    const t = makeDigest();
+    t.budget.setConstitution({ difficultyModelsEnabled: false });
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r', model: 'opus' });
+    await until(() => t.engine.ready(ada.id));
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Kolay iş', difficulty: 'easy' });
+    await until(() => t.turns(ada.id).some((m) => m.includes('## Görev: Kolay iş')), 8000);
+    // Off is as on main: no difficulty line in the task message; the difficulty is kept.
+    expect(t.turns(ada.id)[0]).not.toContain('Zorluk');
+    expect(t.tasks.get(task.id).difficulty).toBe('easy');
+    await until(() => t.engine.ready(ada.id), 8000);
+    const models = (await readArgv(t.argvLog, 2)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models).toEqual(['opus']);
+  });
+
+  it('R13: a task whose model the account cannot use is not lost: it runs on the old model with its notices, and the switch failure is in the log', async () => {
+    const t = makeDigest({ unavailable: 'opus' });
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id) && t.engine.ready(coord.id));
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
+    const said = () => t.events.list({ employeeId: ada.id, limit: 5000 }).flatMap((e) => (e.event.type === 'message.assistant' ? [e.event.text] : []));
+    await until(() => said().some((x) => x.startsWith('echo: ') && x.includes('## Görev: Mimari')), 8000);
+    expect(said().find((x) => x.startsWith('echo: '))).toContain('önerin kabul edildi');
+    expect(t.events.list({ employeeId: ada.id, limit: 5000 }).find((e) => e.event.type === 'model.switch.failed')?.event).toMatchObject({ from: 'sonnet', to: 'opus' });
+    expect(t.tasks.get(task.id).status).toBe('in_progress');
+    expect(t.notices.pending(ada.id)).toEqual([]);
+    const models = (await readArgv(t.argvLog, 4)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models).toEqual(['sonnet', 'opus', 'sonnet']);
+  });
+});
+

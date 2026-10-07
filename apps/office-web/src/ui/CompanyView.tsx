@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { Employee, Task, TaskStatus } from '@cc/shared';
+import { TASK_DIFFICULTY_LABELS, type Employee, type Task, type TaskStatus } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
@@ -210,6 +210,7 @@ export function CompanyView() {
                     {items.map((t) => (
                       <article key={t.id} className={`task-card ${t.status}`}>
                         <strong>{t.title}</strong>
+                        {t.difficulty && <span className={`badge difficulty ${t.difficulty}`}>{TASK_DIFFICULTY_LABELS[t.difficulty]}</span>}
                         <span className="muted">
                           {nameOf(t.assignee)} · P{t.priority}
                           {t.planId && plans[t.planId] ? ` · ${plans[t.planId]!.title}` : ''}

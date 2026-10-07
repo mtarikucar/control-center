@@ -61,11 +61,12 @@ export interface TestSetup {
   cleanup: () => void;
 }
 
-export function setup(deskCount = 8): TestSetup {
+/** `now` (optional) is the clock of the event log and the roster, for tests that run on a simulated clock. */
+export function setup(deskCount = 8, now?: () => number): TestSetup {
   const dataDir = tempDir();
   const db = openDb(':memory:');
   migrateUp(db);
-  const events = new EventStore(db);
-  const roster = new Roster(db, deskCount);
+  const events = new EventStore(db, now);
+  const roster = new Roster(db, deskCount, now);
   return { dataDir, db, events, roster, cleanup: () => rmSync(dataDir, { recursive: true, force: true }) };
 }

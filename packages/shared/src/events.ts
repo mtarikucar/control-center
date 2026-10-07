@@ -54,6 +54,8 @@ export type OfficeEvent =
   | { type: 'task.changed'; change: TaskChange; task: Task }
   | { type: 'plan.changed'; change: PlanChange; plan: Plan }
   | { type: 'company.report'; text: string }
+  /** The coordinator was reminded to report, for the digest hour `slot` (so a restart does not remind again). */
+  | { type: 'report.reminded'; slot: number }
   | { type: 'brief.updated' }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
   | { type: 'decision.recorded'; decision: Decision }
@@ -62,6 +64,8 @@ export type OfficeEvent =
   | { type: 'spend.recorded'; spend: Spend }
   | { type: 'budget.changed'; budget: BudgetSummary }
   | { type: 'model.changed'; model: ModelAlias }
+  /** A session could not run on the model a hint asked for; it goes on on `from` and the turn's messages are sent again. */
+  | { type: 'model.switch.failed'; from: string; to: string; reason: string }
   | { type: 'proposal.changed'; change: ProposalChange; proposal: Proposal }
   | { type: 'error'; message: string };
 
@@ -74,7 +78,8 @@ export interface StoredEvent {
   event: OfficeEvent;
 }
 
-export type UsageTotals = Usage & { costUsd: number };
+/** Claude use summed over finished turns and side answers; `turns` counts turns, `sideAnswers` answers given aside (askColleague). */
+export type UsageTotals = Usage & { costUsd: number; turns: number; sideAnswers: number };
 
 export interface EmployeeUsage {
   today: UsageTotals;

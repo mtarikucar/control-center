@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Employee, OfficeEvent, OfficeSnapshot, Plan, Proposal, StoredEvent, Task } from '@cc/shared';
+import type { BudgetSummary, Employee, OfficeEvent, OfficeSnapshot, Plan, Proposal, StoredEvent, Task } from '@cc/shared';
 import { EMPTY_DATA, MAX_EVENTS, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
 
 const employee = (over: Partial<Employee> = {}): Employee => ({
@@ -44,6 +44,7 @@ describe('applyEvent', () => {
     expect(d.usage.e1?.today).toMatchObject({ inputTokens: 10, outputTokens: 20, costUsd: 0.01 });
     d = applyEvent(d, stored({ type: 'side.answer', text: 'a', ok: true, usage, costUsd: 0.002 }));
     expect(d.usage.e1?.total.costUsd).toBeCloseTo(0.012);
+    expect(d.usage.e1?.total).toMatchObject({ turns: 1, sideAnswers: 1 });
   });
 
   it('keeps the turn open while claude has queued turns', () => {
@@ -105,7 +106,7 @@ describe('usage watermark', () => {
     seq, employeeId: 'e1', ts: seq,
     event: { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: input, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 },
   });
-  const counted = { today: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 }, total: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 } };
+  const counted = { today: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 1, sideAnswers: 0 }, total: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 1, sideAnswers: 0 } };
 
   it('review focus: counts usage once across a reconnect (snapshot, then replay of events it already covers)', () => {
     let d = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 10, usage: { e1: counted } }));
@@ -231,8 +232,8 @@ describe('company memory', () => {
 });
 
 describe('budget', () => {
-  const summary = (pct: number) => ({
-    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30 },
+  const summary = (pct: number): BudgetSummary => ({
+    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false },
     reserve: { active: false, limitPct: 100 - pct, fiveHourPct: null, sevenDayPct: null },
     month: { key: '2026-10', usd: 0 },
     plans: {},

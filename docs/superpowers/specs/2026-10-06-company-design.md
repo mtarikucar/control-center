@@ -110,8 +110,23 @@ plan, bağımlılıklar (başka görevler: "şu parça gelince başla"), durum (
 - Her çalışanın öncelik sıralı kuyruğu vardır (öncelik, sonra açılış zamanı; bağımlılığı bitmemiş görev atlanır).
 - Çalışan boşa çıkınca (`idle`) ofis sıradaki görevi **sistem mesajı** olarak verir (başlık, açıklama, bitti tanımı,
   bağlam: plan, isteyen, ilgili kararlar) ve görevi `sürüyor` yapar. Uyuyorsa önce uyandırır.
-- Çalışan `taskFinish` ile teslim eder; isteyen ve koordinatör bilgilenir (görev panosu, isteyene sistem mesajı
-  sıradaki boşluğunda). Takılırsa `taskUpdate(takıldı, neden)`; koordinatör görür.
+- Çalışan `taskFinish` ile teslim eder; isteyen ve koordinatör bilgilenir (görev panosu ve bir **bilgi notu**). Takılırsa
+  `taskUpdate(takıldı, neden)`; koordinatöre **karar notu** gider.
+- **Uyandırma (değişmedi):** uyuyan biri yapabileceği bir görev için uyanır. Koordinatör ve lider notları için de uyanır
+  (notlar onların işi). Üyeyi not uyandırmaz; üye notunu bir sonraki uyanışında alır. Sahibinin payındaki kurallar aynı.
+- **Not türleri** (`notices.kind`, `notices.topic`; tablo: `company/notices.ts`). Her not kaydedilir. Türün etkisi yalnız
+  **özet anahtarı** (`digestEnabled`, anayasa, varsayılan **kapalı**) açıkken vardır. Kapalıyken her not eskisi gibi hemen
+  gider ve günlük rapor hatırlatması eskisi gibi ayrı bir nottur: davranış ve mesajlar main ile birebir (golden testi).
+  *Karar* (`decision`): alıcı şimdi karar vermeli ya da bir şey yapmalı (plan onayı/reddi, takılma, duran iş, öneri
+  açıldı/yükseltildi/karara bağlandı, sahibinin payı, harcama sınırı aşımı, zincir/gün sınırı, işten çıkarma/devir,
+  görevin elinden alınması, koordinatörlük, geri alınan karar, kendi görevi takılıyken paslayanın beklediği teslim).
+  *Bilgi* (`info`): yalnız kayıt (görev bitti, planın açık görevi kalmadı, rol/lider değişikliği, başlamamış görevin
+  başkasına verilmesi, sahibine giden satın alma). Özet açıkken bilgi notu tek başına tur açmaz ve koordinatörü ya da
+  lideri uyandırmaz. O an giden her tura (karar notu, görev, hatırlatma) "## Ofisten özet" olarak biner, ya da anayasadaki
+  **özet saatlerinde** (`digestHours`, varsayılan 9 ve 17, yerel saat) tek turda gelir. Bekleyen bilgi yoksa özet atlanır;
+  sahibinin payı devredeyken bekler. Özet metnini sunucu yazar (model yok): konuya göre gruplu, başlıkta not sayısı ve
+  kapsadığı süre, grup başına en çok 8 satır. "Yalnız kayıt tut" kapanışı yalnız tek başına gelen özette. Rapor
+  hatırlatması günün son özetine biner ve `report.reminded` olayıyla günlüğe yazılır (yeniden başlatmada tekrarlanmaz).
 - v1 kuralı sürer: işin ortasına yalnız sahibi girer; görevler ve paslar kuyruğa düşer.
 
 ### 4.4 Paslama ve öneriler
@@ -127,7 +142,8 @@ plan, bağımlılıklar (başka görevler: "şu parça gelince başla"), durum (
 - Büyük değişiklik: `planRevise` + "onay bekliyor"; sahibi onaylayana dek planın yeni kapsamına geçilmez (eski
   görevler sürebilir).
 - Rapor: plan bitince, büyük değişiklikte ve günde bir kısa özet (sahibi açıksa panelde, değilse koordinatörün
-  etiketinde bildirim).
+  etiketinde bildirim). Günlük rapor hatırlatması ayrı tur açmaz: günün son özet saatindeki özete bir satır olarak biner,
+  yalnız son rapordan o saate dek bir görev açıldı, başladı ya da bittiyse (gerekirse uyuyan koordinatörü uyandırır).
 
 ### 4.6 Sonsuz döngüye karşı (anayasa)
 
@@ -170,6 +186,25 @@ görev sayısı ≤ 60. Aşınca araç reddeder ve koordinatöre not düşer.
   koordinatör sahibine getirir. (Ofis harcamayı **engelleyemez** — çalışanlar serbest; sınır görünürlük ve
   koordinatörün görevi içindir.)
 - **Görünürlük:** karakter başına token/maliyet (v1) + plan ve ekip başına toplam kota, para, kalan bütçe.
+- **Model seçimi (anayasa):** iki anahtar, ikisi de varsayılan **kapalı**. `modelPolicyEnabled` kapalıyken ipuçları
+  yok sayılır ve herkes kendi (kadro) modelinde çalışır. `difficultyModelsEnabled` kapalıyken zorluk saklanır ama modeli
+  değiştirmez ve görev metninde zorluk satırı olmaz. Açıkken her gönderim bir model ipucu taşır:
+  - Koordinatöre sahibinin mesajı `coordinatorModels.owner` (varsayılan **sonnet**), ama koordinatörün kendi modelinden
+    asla aşağı değil: plan için kendini `setModel` ile fable'a alan koordinatör orada kalır. Sahibi isterse owner'ı
+    fable yapar.
+  - Karar notu, görev ve hatırlatma `decision` (sonnet); yalnız özetten oluşan tur `digest` (haiku).
+  - Görev başında çalışana `difficultyModels[zorluk]` (kolay haiku, orta sonnet, zor opus, kritik fable). Zorluk yoksa
+    çalışanın kendi modeli. Kritik işi yalnız sahibi, koordinatör ve liderler açar; başkasınınki zor sayılır.
+
+  İpucu yalnız oturumu taşır: çalışanın kendi (rol) modeli kadroda kalır ve yalnız `setModel` ile değişir. Yan soru,
+  sahibinin üyeye mesajı ve uyku/durdurma sonrası ilk oturum kendi modelinde. **Model değişimi açık oturumu
+  değiştirmez:** süreç kapanır, `--resume --model <yeni>` ile yeniden açılır (hafıza sürer, konuşma yeni modelde yeniden
+  önbelleğe yazılır). Daha güçlü modele hemen, daha zayıfa yalnız son turdan `cacheTtlMinutes` (5 dk; bekleme süresi,
+  önbellek ömrü değil) sonra geçilir. Görev başı her iki yöne geçer; görev ya da tur ortasında asla. Yeni modeldeki ilk
+  tur hatayla biterse ya da süreç ondan önce kapanırsa (gerçek CLI kullanılamayan modelde mesajı alır, hata cevabı
+  verir, açık kalır) geçiş başarısızdır: `model.switch.failed` olayı yazılır, oturum eski modelle yeniden açılır,
+  geçişten beri yazılan mesajlar yeniden gönderilir, o model 10 dk istenmez. Hiç oturum açılamazsa görev kuyruğa, notlar
+  teslim edilmemişe döner.
 - Plan başına Claude kullanımı: her bitmiş turun maliyeti çalışanın o an sürdüğü göreve, görevler de planlarına yazılır; plan başına kota payı tahmin olarak kalır (kota ortak).
 
 ## 7. Ofis araç seti (MCP)
@@ -218,7 +253,10 @@ Yeni göç sürümleri (her biri `up` + `down`, `down` yalnız kendi eklediğini
 - `tasks.kind` (`work` | `handover`).
 - `decisions` (id, zaman, veren, başlık, seçilen, gerekçe, alternatifler, plan, `reverts`).
 - `playbook` (konu, sürüm, metin, yazan, gerekçe, zaman). `notes` (+ FTS5 dizini). `spend`. `proposals`.
-  `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, `chainDepth`, `tasksPerDay`, `openTasksPerPlan`, `idleSleepMinutes`); `tasks.cost_usd`, `tasks.tokens`.
+  `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, `chainDepth`, `tasksPerDay`, `openTasksPerPlan`, `idleSleepMinutes`, `digestHours`); `tasks.cost_usd`, `tasks.tokens`.
+- `notices.kind` (`decision` \| `info`), `notices.topic` (göç 6; eski notlar `decision`). `tasks.difficulty` (göç 7;
+  `easy` \| `medium` \| `hard` \| `critical`, boş olabilir). Anayasaya `digestHours`, `coordinatorModels`,
+  `cacheTtlMinutes`, `difficultyModels`.
 - Olaylar (`OfficeEvent`): `plan.*`, `task.*`, `proposal.changed`, `decision.recorded`, `spend.recorded`, `brief.updated`,
   `lifecycle.changed` (`sleeping`), `role.changed` — v1 olay kaydına ve canlı akışa girer (ekran bunlardan beslenir).
 

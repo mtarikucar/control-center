@@ -23,7 +23,8 @@ small. Grouped by area, roughly most useful first.
 ## Budget
 - "Kota payı devrede" repeats after every office restart (`#wasActive` starts false).
 - `wake` tool says "uyandı" for someone not asleep; `setModel` reply says "yeniden açılıyor" even when deferred.
-- Notices still cost an awake member a turn during the reserve.
+- ~~Notices still cost an awake member a turn during the reserve.~~ **Closed (office-economy):** information notices
+  wait during the reserve and open no turn; only a decision notice does, by design.
 - A sleeper whose hand-over is done is not let go (practically unreachable).
 - `chargeTurn` ignores blocked tasks.
 - "1,000" parses as 1 in the Anayasa form; no colour for `.badge.sleeping`.
@@ -36,9 +37,26 @@ small. Grouped by area, roughly most useful first.
 - Old proposal cards outside the snapshot window may show Onayla/Reddet (the server answers 409).
 - Lead rights key on `team`, routing on `reportsTo`; two leads per team are allowed.
 - Daily reminder edges: a fresh coordinator with an old `createdAt`, a stopped coordinator accumulating reminders, the
-  in-memory map across restarts.
+  in-memory map across restarts. *(office-economy: the reminder is no longer a notice but a line of the last digest hour's
+  digest, so nothing accumulates and `createdAt` is not used; the in-memory map remains: after a restart an unanswered
+  reminder can come once more.)*
 - `askColleague` has no per-day cap and can hold an MCP call up to 120 s.
 - `taskCreate`/`taskAssign`/`taskReprioritize` descriptions still say "(coordinator)"; the proposer is not told on a
   lead → coordinator escalation.
 - Misc: `officeStatus` prints lifecycles in English; `hire` tool's character enum is computed at startup; `reportsTo`
   is not checked against the roster; the bearer token is visible in `/proc` via `--mcp-config` (accepted in spec §7).
+
+## Office economy (fresh review before merge, 2026-10-07)
+Important #1 (owner's message moved a member mid-task) and #2 (a turn that worked then failed was re-run as a model
+failure) were fixed with tests before the merge. #3 (un-acked messages handled twice on a failed switch) does not
+happen: `#onExit` empties `unread` before `close()` resolves, so `#halt` finds nothing; a test pins it.
+- `engine.ts:60`, `budget.ts:35`, `BudgetTabs.tsx:124` still call `cacheTtlMinutes` the cache's warm time ("bekleme süresi").
+- `economy-results.md` keeps an unmeasured "cold after a 30-min sleep" claim.
+- Waking a sleeper and then hinting a task's model spawns `claude` twice (wake on own model, then switch).
+- A member's digest-only turn runs on their own model and costs a turn with nothing to do.
+- Failed-trial exits count toward the crash window (two in 120 s → `error`).
+- `report.reminded` is logged before delivery is proven; a lost reminder is not retried for that slot.
+- `#putBack` updates the task without a `task.changed` event (board stale until refresh).
+- `budgetStatus` text changed format even with the switches off (not listed among the deliberate differences).
+- `economy-live-baseline.md` holds real office data (names, per-employee USD): fine while the repo is private.
+- The coordinator's own tasks use `coordinatorModels.decision`, never the task's difficulty.

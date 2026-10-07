@@ -81,6 +81,7 @@ describe('API', () => {
     const after = await call(port, 'GET', '/api/office');
     expect(after.body.quota.status).toBe('allowed');
     expect(after.body.usage[hired.body.id].total.inputTokens).toBe(10);
+    expect(after.body.usage[hired.body.id].today).toMatchObject({ turns: 1, sideAnswers: 0 });
   });
 
   it('runs side questions, stop, resume and the terminal hand-off', async () => {

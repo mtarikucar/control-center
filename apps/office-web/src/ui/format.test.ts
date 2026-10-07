@@ -14,7 +14,7 @@ describe('format', () => {
     expect(formatPercent(0.04)).toBe('%4');
     expect(formatPercent(1)).toBe('%100');
     expect(tokensOf(undefined)).toBe(0);
-    expect(tokensOf({ inputTokens: 10, outputTokens: 20, cacheReadTokens: 99, cacheCreationTokens: 99, costUsd: 0 })).toBe(30);
+    expect(tokensOf({ inputTokens: 10, outputTokens: 20, cacheReadTokens: 99, cacheCreationTokens: 99, costUsd: 0, turns: 0, sideAnswers: 0 })).toBe(30);
   });
 
   it('formats reset times relative to now', () => {

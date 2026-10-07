@@ -29,11 +29,13 @@ export function BudgetTab() {
   const shown = Object.values(plans)
     .filter((p) => p.status === 'approved' || p.status === 'done')
     .sort((x, y) => y.updatedAt - x.updatedAt);
-  const teams = new Map<string, number>();
+  const teams = new Map<string, { usd: number; turns: number }>();
   for (const v of Object.values(views)) {
     if (v.employee.lifecycle === 'archived') continue;
     const team = v.employee.team || 'Ekipsiz';
-    teams.set(team, (teams.get(team) ?? 0) + (usage[v.employee.id]?.today.costUsd ?? 0));
+    const today = usage[v.employee.id]?.today;
+    const sum = teams.get(team) ?? { usd: 0, turns: 0 };
+    teams.set(team, { usd: sum.usd + (today?.costUsd ?? 0), turns: sum.turns + (today?.turns ?? 0) });
   }
   const cap = b.constitution.monthlyUsdCap;
   return (
@@ -94,10 +96,11 @@ export function BudgetTab() {
         <h3>Ekipler (bugün, Claude kullanımı)</h3>
         <table>
           <tbody>
-            {[...teams.entries()].map(([team, usd]) => (
+            {[...teams.entries()].map(([team, sum]) => (
               <tr key={team} aria-label={team}>
                 <td>{team}</td>
-                <td>{money(usd)}</td>
+                <td>{money(sum.usd)}</td>
+                <td>{`${sum.turns} tur`}</td>
               </tr>
             ))}
           </tbody>
@@ -107,7 +110,7 @@ export function BudgetTab() {
   );
 }
 
-const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean }> = [
+const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean; models?: readonly string[]; toggle?: boolean }> = [
   { key: 'maxEmployees', label: 'Çalışan sınırı', hint: 'Koordinatör dahil; masa sayısını aşamaz.' },
   { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
   { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
@@ -115,7 +118,17 @@ const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; null
   { key: 'tasksPerDay', label: 'Günlük görev sınırı', hint: 'Bir çalışanın günde açabileceği görev (koordinatör hariç).' },
   { key: 'openTasksPerPlan', label: 'Plan başına açık görev', hint: 'Bir planda aynı anda açık en çok görev.' },
   { key: 'idleSleepMinutes', label: 'Boşta uyuma (dk)', hint: 'İşi olmayan çalışan bu kadar sonra uyur; 0 = hiç.' },
+  { key: 'digestHours', label: 'Özet saatleri', hint: 'Karar gerektirmeyen notlar bu saatlerde tek turda gelir; sonuncusu günlük raporu getirir (ör. 9, 17).', hours: true },
+  { key: 'coordinatorModels', label: 'Koordinatör modelleri', hint: 'Sahibinin mesajı / karar / özet turu (ör. fable / sonnet / haiku).', models: ['owner', 'decision', 'digest'] },
+  { key: 'difficultyModels', label: 'Zorluk modelleri', hint: 'Kolay / orta / zor / kritik görev (ör. haiku / sonnet / opus / fable).', models: ['easy', 'medium', 'hard', 'critical'] },
+  { key: 'cacheTtlMinutes', label: 'Önbellek süresi (dk)', hint: 'Bir oturum son turundan bu kadar sonra daha ucuz modele geçebilir; daha önce geçmez.' },
+  { key: 'digestEnabled', label: 'Özet açık', hint: 'Kapalıyken bilgi notları da karar notu gibi hemen gelir.', toggle: true },
+  { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır (koordinatör de).', toggle: true },
+  { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },
 ];
+
+const shown = (v: Constitution[keyof Constitution]): string =>
+  v === null ? '' : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? Object.values(v).join(' / ') : String(v);
 
 /** The owner's fixed limits; the server checks every value and says what is wrong. */
 export function ConstitutionTab() {
@@ -127,7 +140,7 @@ export function ConstitutionTab() {
   // While the owner is typing, a budget update (someone's spending) must not reset the form.
   const dirty = useRef(false);
   useEffect(() => {
-    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, current[f.key] === null ? '' : String(current[f.key])])));
+    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, shown(current[f.key])])));
   }, [current]);
   if (!current) return <p className="muted">Yükleniyor…</p>;
   const save = async (e: FormEvent) => {
@@ -135,8 +148,32 @@ export function ConstitutionTab() {
     setBusy(true);
     setSaved(false);
     setError(null);
-    const patch: Record<string, number | null> = {};
+    const patch: Record<string, unknown> = {};
     for (const f of FIELDS) {
+      if (f.toggle) {
+        patch[f.key] = draft[f.key] === 'true';
+        continue;
+      }
+      if (f.models) {
+        const names = (draft[f.key] ?? '').split('/').map((x) => x.trim()).filter(Boolean);
+        if (names.length !== f.models.length) {
+          setError(`${f.label}: “/” ile ayrılmış ${f.models.length} model girin.`);
+          setBusy(false);
+          return;
+        }
+        patch[f.key] = Object.fromEntries(f.models.map((k, i) => [k, names[i]]));
+        continue;
+      }
+      if (f.hours) {
+        const hours = (draft[f.key] ?? '').split(/[\s,;]+/).filter(Boolean).map(Number);
+        if (hours.length === 0 || hours.some((h) => !Number.isInteger(h))) {
+          setError(`${f.label}: virgülle ayrılmış tam saatler girin (ör. 9, 17).`);
+          setBusy(false);
+          return;
+        }
+        patch[f.key] = hours;
+        continue;
+      }
       const raw = (draft[f.key] ?? '').trim().replace(',', '.');
       if (raw === '' && f.nullable) {
         patch[f.key] = null;
@@ -166,10 +203,17 @@ export function ConstitutionTab() {
       {FIELDS.map((f) => (
         <label key={f.key}>
           <span>{f.label}</span>
-          <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => {
-              dirty.current = true;
-              setDraft({ ...draft, [f.key]: e.target.value });
-            }} />
+          {f.toggle ? (
+            <input type="checkbox" aria-label={f.label} checked={draft[f.key] === 'true'} onChange={(e) => {
+                dirty.current = true;
+                setDraft({ ...draft, [f.key]: String(e.target.checked) });
+              }} />
+          ) : (
+            <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => {
+                dirty.current = true;
+                setDraft({ ...draft, [f.key]: e.target.value });
+              }} />
+          )}
           <small className="muted">{f.hint}</small>
         </label>
       ))}

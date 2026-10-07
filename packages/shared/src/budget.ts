@@ -1,3 +1,6 @@
+import type { TaskDifficulty } from './company.ts';
+import type { ModelAlias } from './employee.ts';
+
 /** The owner's fixed limits (spec §4.6, §6). */
 export interface Constitution {
   /** Employees at most, the coordinator included (never more than the desks). */
@@ -11,6 +14,29 @@ export interface Constitution {
   openTasksPerPlan: number;
   /** Someone with nothing to do sleeps after this many idle minutes (0 = never). */
   idleSleepMinutes: number;
+  /** Local hours when notices that need no decision come together in one digest turn; the last one brings the daily report. */
+  digestHours: number[];
+  /**
+   * The coordinator's model by what a turn is for: the owner's messages (never below the coordinator's own model, so
+   * a coordinator who moved itself up for planning stays there), decisions (notices, tasks, reminders), digests.
+   */
+  coordinatorModels: { owner: ModelAlias; decision: ModelAlias; digest: ModelAlias };
+  /**
+   * A session moves to a weaker model only after this long without a turn, so a conversation does not flap between
+   * models. (Named for the prompt cache; the real CLI keeps it warm longer — over 6½ minutes, measured 2026-10-07.)
+   */
+  cacheTtlMinutes: number;
+  /** The model a task starts on, by its difficulty. */
+  difficultyModels: Record<TaskDifficulty, ModelAlias>;
+  /**
+   * Switches for the economy plan's three features, all OFF by default (and in a database that has no such key): off
+   * is the behaviour before the plan — every notice goes at once as before and the daily report reminder comes as
+   * before; model hints are ignored (everyone on their own model); a task's difficulty moves no one to another model
+   * (it is still kept).
+   */
+  digestEnabled: boolean;
+  modelPolicyEnabled: boolean;
+  difficultyModelsEnabled: boolean;
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
@@ -21,6 +47,13 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   tasksPerDay: 30,
   openTasksPerPlan: 60,
   idleSleepMinutes: 30,
+  digestHours: [9, 17],
+  coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' },
+  cacheTtlMinutes: 5,
+  difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
+  digestEnabled: false,
+  modelPolicyEnabled: false,
+  difficultyModelsEnabled: false,
 };
 
 /** Money an employee spent on an outside service (the office cannot see it; they record it). */

@@ -60,17 +60,21 @@ export class QuotaTracker {
            COALESCE(SUM(json_extract(payload, '$.usage.outputTokens')), 0) AS output,
            COALESCE(SUM(json_extract(payload, '$.usage.cacheReadTokens')), 0) AS cacheRead,
            COALESCE(SUM(json_extract(payload, '$.usage.cacheCreationTokens')), 0) AS cacheCreation,
-           COALESCE(SUM(json_extract(payload, '$.costUsd')), 0) AS cost
+           COALESCE(SUM(json_extract(payload, '$.costUsd')), 0) AS cost,
+           COALESCE(SUM(type = 'turn.finished'), 0) AS turns,
+           COALESCE(SUM(type = 'side.answer'), 0) AS side
          FROM events
          WHERE employee_id = ? AND ts >= ? AND type IN ('turn.finished', 'side.answer')`,
       )
-      .get(employeeId, since) as unknown as { input: number; output: number; cacheRead: number; cacheCreation: number; cost: number };
+      .get(employeeId, since) as unknown as { input: number; output: number; cacheRead: number; cacheCreation: number; cost: number; turns: number; side: number };
     return {
       inputTokens: row.input,
       outputTokens: row.output,
       cacheReadTokens: row.cacheRead,
       cacheCreationTokens: row.cacheCreation,
       costUsd: row.cost,
+      turns: row.turns,
+      sideAnswers: row.side,
     };
   }
 }
