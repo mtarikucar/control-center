@@ -1,4 +1,4 @@
-export const TASK_STATUSES = ['waiting', 'in_progress', 'review', 'blocked', 'done', 'cancelled'] as const;
+export const TASK_STATUSES = ['waiting', 'in_progress', 'review', 'blocked', 'parked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const REVIEW_SEVERITIES = ['critical', 'important', 'minor'] as const;
@@ -71,6 +71,16 @@ export interface Task {
   reviewOf?: string | null;
   /** How many times the task was handed in for review (0: never). */
   round?: number;
+  /** Not handed out before this time (epoch ms): a start time, or a parked task's return time. */
+  notBefore?: number | null;
+  /** Should be done by this time (epoch ms); past it the coordinator is told once. */
+  dueAt?: number | null;
+  /** Why it was parked (spec §4.2); null when not parked. */
+  parkedReason?: string | null;
+  /** How many times it was parked (the third tells the coordinator). */
+  parkCount?: number;
+  /** The routine that opened it, if any. */
+  scheduleId?: string | null;
   dependsOn: string[];
   status: TaskStatus;
   /** How many passes deep this task is (a task passed while working on a passed task is one deeper). */
@@ -130,6 +140,77 @@ export interface Goal {
 /** `set`: opened; `updated`: changed or reopened; `closed`: done or dropped by the coordinator; `stopped`: by the owner. */
 export type GoalChange = 'set' | 'updated' | 'closed' | 'stopped';
 
+export const SCHEDULE_STATUSES = ['active', 'paused', 'stopped'] as const;
+export type ScheduleStatus = (typeof SCHEDULE_STATUSES)[number];
+/** Recurring work (spec §4.4): each firing opens an ordinary task. */
+export interface Schedule {
+  id: string;
+  title: string;
+  description: string;
+  done: string[];
+  assignee: string;
+  reviewer: string | null;
+  planId: string | null;
+  priority: number;
+  difficulty: TaskDifficulty | null;
+  /** 5-field cron, local time. */
+  cron: string;
+  /** Stops after this time (epoch ms), if given. */
+  until: number | null;
+  status: ScheduleStatus;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastTaskId: string | null;
+  /** Firings skipped because the previous instance was still open. */
+  skipCount: number;
+  /** Consecutive firings that could not open a task. */
+  failCount: number;
+  createdBy: string;
+  createdAt: number;
+  note: string | null;
+}
+export type ScheduleChange = 'created' | 'updated' | 'fired' | 'skipped' | 'paused' | 'resumed' | 'stopped';
+
+/** One line of an employee's agenda (spec §6.1). */
+export interface AgendaEntry {
+  kind: 'now' | 'queued' | 'review_wait' | 'parked' | 'not_before' | 'scheduled';
+  taskId: string | null;
+  scheduleId: string | null;
+  title: string;
+  /** When it starts or returns (epoch ms); null when it depends on another task's end that cannot be estimated. */
+  at: number | null;
+  /** Estimated end (epoch ms), for now/queued. */
+  until: number | null;
+  /** Estimate basis: "son 10 iş" / "zorluk: zor, 4 iş" / "ofis geneli" / "varsayılan" / "inceleme". */
+  basis: string | null;
+  /** "X bitince" (the dependency's title), "Can'da, tur 2", a park reason, a cron label. */
+  note: string | null;
+  priority: number | null;
+  dueAt: number | null;
+  overdue: boolean;
+  lowConfidence: boolean;
+}
+export interface EmployeeAgenda {
+  id: string;
+  name: string;
+  /** Turkish state line: "uyuyor", "kota payı devrede (yalnız öncelik 1)", "şirket duraklatıldı", "limit doldu, açılış 20:10", or null. */
+  state: string | null;
+  entries: AgendaEntry[];
+}
+export interface ClockStatus {
+  nextDueAt: number | null;
+  /** What is due then, in Turkish ("Adım 1 penceresi · Koordinatör"), or null. */
+  nextDueLabel: string | null;
+  lastRunAt: number | null;
+  lastJumpAt: number | null;
+}
+export interface AgendaReport {
+  generatedAt: number;
+  horizonMs: number;
+  clock: ClockStatus;
+  employees: EmployeeAgenda[];
+}
+
 export const PLAN_STATUSES = ['draft', 'approved', 'done', 'declined', 'stopped'] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];
 
@@ -161,7 +242,7 @@ export interface Plan {
   approvedAt: number | null;
 }
 
-/** `in_review`: handed in, waiting for its reviewer. `reviewed`: a review task was decided. */
-export type TaskChange = 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized' | 'in_review' | 'reviewed';
+/** `in_review`: handed in, waiting for its reviewer. `reviewed`: a review task was decided. `parked`: set aside until a time. `returned`: its time came. */
+export type TaskChange = 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized' | 'in_review' | 'reviewed' | 'parked' | 'returned';
 /** `reopened`: a done plan got a new task. `kept`: the owner declined a revision; the plan goes on as approved. `stopped`: by the owner. */
 export type PlanChange = 'proposed' | 'revised' | 'approved' | 'declined' | 'done' | 'reopened' | 'kept' | 'stopped';

@@ -309,4 +309,52 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS goals_status;
       DROP TABLE IF EXISTS goals;`,
   },
+  {
+    version: 10,
+    name: 'office scheduler: task times, parked status, schedules',
+    // Tasks from before: no time, never parked, not from a routine.
+    up: `
+      ALTER TABLE tasks ADD COLUMN not_before INTEGER;
+      ALTER TABLE tasks ADD COLUMN due_at INTEGER;
+      ALTER TABLE tasks ADD COLUMN parked_reason TEXT;
+      ALTER TABLE tasks ADD COLUMN park_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE tasks ADD COLUMN schedule_id TEXT;
+      ALTER TABLE tasks ADD COLUMN overdue_notified INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS tasks_not_before ON tasks (status, not_before);
+      CREATE INDEX IF NOT EXISTS tasks_schedule ON tasks (schedule_id, status);
+      CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        done TEXT NOT NULL,
+        assignee TEXT NOT NULL,
+        reviewer TEXT,
+        plan_id TEXT,
+        priority INTEGER NOT NULL,
+        difficulty TEXT,
+        cron TEXT NOT NULL,
+        until_at INTEGER,
+        status TEXT NOT NULL,
+        next_run_at INTEGER,
+        last_run_at INTEGER,
+        last_task_id TEXT,
+        skip_count INTEGER NOT NULL DEFAULT 0,
+        fail_count INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS schedules_due ON schedules (status, next_run_at);`,
+    down: `
+      DROP INDEX IF EXISTS schedules_due;
+      DROP TABLE IF EXISTS schedules;
+      DROP INDEX IF EXISTS tasks_schedule;
+      DROP INDEX IF EXISTS tasks_not_before;
+      ALTER TABLE tasks DROP COLUMN overdue_notified;
+      ALTER TABLE tasks DROP COLUMN schedule_id;
+      ALTER TABLE tasks DROP COLUMN park_count;
+      ALTER TABLE tasks DROP COLUMN parked_reason;
+      ALTER TABLE tasks DROP COLUMN due_at;
+      ALTER TABLE tasks DROP COLUMN not_before;`,
+  },
 ];

@@ -51,7 +51,7 @@ function bool(args: Args, key: string): boolean | undefined {
   return v;
 }
 
-const STATUS_TR: Record<Task['status'], string> = { waiting: 'bekliyor', in_progress: 'sürüyor', review: 'incelemede', blocked: 'takıldı', done: 'bitti', cancelled: 'iptal' };
+const STATUS_TR: Record<Task['status'], string> = { waiting: 'bekliyor', in_progress: 'sürüyor', review: 'incelemede', blocked: 'takıldı', parked: 'ertelendi', done: 'bitti', cancelled: 'iptal' };
 
 function taskLine(t: Task, company: Company): string {
   const done = t.done.length ? ` — bitti tanımı: ${t.done.join('; ')}` : '';

@@ -1,5 +1,5 @@
 import type { BudgetSummary, Spend } from './budget.ts';
-import type { Goal, GoalChange, Plan, PlanChange, Task, TaskChange } from './company.ts';
+import type { ClockStatus, Goal, GoalChange, Plan, PlanChange, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Decision } from './memory.ts';
 import type { Proposal, ProposalChange } from './proposal.ts';
@@ -55,6 +55,11 @@ export type OfficeEvent =
   | { type: 'plan.changed'; change: PlanChange; plan: Plan }
   | { type: 'goal.changed'; change: GoalChange; goal: Goal }
   | { type: 'company.paused'; paused: boolean }
+  | { type: 'schedule.changed'; change: ScheduleChange; schedule: Schedule }
+  /** The clock woke more than two minutes after the time it was armed for (sleep, a clock change). */
+  | { type: 'clock.jumped'; expectedAt: number; actualAt: number }
+  /** One due item failed; the clock went on. */
+  | { type: 'clock.error'; job: string; message: string }
   | { type: 'company.report'; text: string }
   /** The coordinator was reminded to report, for the digest hour `slot` (so a restart does not remind again). */
   | { type: 'report.reminded'; slot: number }
@@ -110,6 +115,9 @@ export interface OfficeSnapshot {
   goals?: Goal[];
   /** The owner paused the company: nothing is handed out. */
   paused?: boolean;
+  /** Routines (all but stopped, plus the last 10 stopped). */
+  schedules?: Schedule[];
+  clock?: ClockStatus;
 }
 
 export type ServerMessage =

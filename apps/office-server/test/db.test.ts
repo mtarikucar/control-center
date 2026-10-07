@@ -18,14 +18,15 @@ function tables(db: Db): string[] {
 const V4_TABLES = [...V3_TABLES, 'constitution', 'spend'].sort();
 const V5_TABLES = [...V4_TABLES, 'proposals'].sort();
 const V9_TABLES = [...V5_TABLES, 'company_state', 'goals'].sort();
+const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(9);
-    expect(tables(db)).toEqual(V9_TABLES);
+    expect(migrateUp(db)).toBe(10);
+    expect(tables(db)).toEqual(V10_TABLES);
   });
 
   it('round-trips up → down → up', () => {
@@ -34,14 +35,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(9);
-    expect(tables(db)).toEqual(V9_TABLES);
+    expect(migrateUp(db)).toBe(10);
+    expect(tables(db)).toEqual(V10_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(9);
+    expect(migrateUp(db)).toBe(10);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -203,6 +204,26 @@ describe('migrations', () => {
     expect(columns(db, 'plans')).not.toContain('approved_by');
     expect(db.prepare('SELECT COUNT(*) AS n FROM plans').get()).toMatchObject({ n: 1 });
     expect(migrateDown(db, 8)).toBe(8);
-    expect(migrateUp(db)).toBe(9);
+    expect(migrateUp(db, upTo(9))).toBe(9);
+  });
+
+  it('v10 gives tasks their time fields and adds schedules; v10 down restores v9 and keeps tasks', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(9));
+    db.prepare(
+      `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
+       VALUES ('t1', NULL, 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'waiting', 0, 1)`,
+    ).run();
+    migrateUp(db);
+    expect(tables(db)).toContain('schedules');
+    expect({ ...(db.prepare('SELECT not_before, due_at, parked_reason, park_count, schedule_id, overdue_notified FROM tasks').get() as object) }).toEqual({
+      not_before: null, due_at: null, parked_reason: null, park_count: 0, schedule_id: null, overdue_notified: 0,
+    });
+    expect(migrateDown(db, 9)).toBe(9);
+    expect(tables(db)).not.toContain('schedules');
+    for (const col of ['not_before', 'due_at', 'parked_reason', 'park_count', 'schedule_id', 'overdue_notified']) expect(columns(db, 'tasks')).not.toContain(col);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
+    expect(migrateDown(db, 9)).toBe(9);
+    expect(migrateUp(db)).toBe(10);
   });
 });

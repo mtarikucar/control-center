@@ -43,6 +43,12 @@ export interface Constitution {
   activeGoals: number;
   /** With neither goals nor work, the coordinator is told at most this often, hours; 0 = never (spec §6.3). */
   pulseHours: number;
+  /** The agenda's estimate for a task with no history, minutes (spec §6.1). */
+  defaultTaskMinutes: number;
+  /** A routine may not fire more often than this, minutes (spec §4.4). */
+  minScheduleMinutes: number;
+  /** Routines at once, at most (stopped ones do not count). */
+  maxSchedules: number;
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
@@ -63,6 +69,9 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   autonomy: 'free',
   activeGoals: 3,
   pulseHours: 6,
+  defaultTaskMinutes: 45,
+  minScheduleMinutes: 60,
+  maxSchedules: 20,
 };
 
 /** Money an employee spent on an outside service (the office cannot see it; they record it). */

@@ -38,6 +38,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: 'Sürüyor',
   review: 'İncelemede',
   blocked: 'Takıldı',
+  parked: 'Ertelendi',
   done: 'Bitti',
   cancelled: 'İptal',
 };

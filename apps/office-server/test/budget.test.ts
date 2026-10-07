@@ -87,6 +87,15 @@ describe('Budget — constitution', () => {
     expect(() => t.budget.setConstitution({ activeGoals: 0 })).toThrow(/aktif hedef/);
     expect(() => t.budget.setConstitution({ pulseHours: 200 })).toThrow(/Nabız/);
   });
+
+  it('the scheduler keys: default task minutes, the routine minimum interval and the routine cap, validated in Turkish', () => {
+    const t = make();
+    expect(DEFAULT_CONSTITUTION).toMatchObject({ defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 });
+    expect(t.budget.setConstitution({ defaultTaskMinutes: 30, minScheduleMinutes: 15, maxSchedules: 5 })).toMatchObject({ defaultTaskMinutes: 30, minScheduleMinutes: 15, maxSchedules: 5 });
+    expect(() => t.budget.setConstitution({ defaultTaskMinutes: 1 })).toThrow(/Varsayılan görev süresi/);
+    expect(() => t.budget.setConstitution({ minScheduleMinutes: 0 })).toThrow(/Rutin aralığı/);
+    expect(() => t.budget.setConstitution({ maxSchedules: 101 })).toThrow(/En fazla rutin/);
+  });
 });
 
 describe('Budget — the owner’s reserve', () => {

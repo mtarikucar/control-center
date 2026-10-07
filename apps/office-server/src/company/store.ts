@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Plan, PlanMethod, PlanStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
+import type { Plan, PlanMethod, PlanStatus, Schedule, ScheduleStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 import { NOTICE_TOPICS, type Notice, type NoticeTopic } from './notices.ts';
@@ -27,6 +27,11 @@ interface TaskRow {
   reviewer: string | null;
   review_of: string | null;
   round: number | null;
+  not_before: number | null;
+  due_at: number | null;
+  parked_reason: string | null;
+  park_count: number | null;
+  schedule_id: string | null;
 }
 
 function taskFromRow(r: TaskRow): Task {
@@ -44,6 +49,11 @@ function taskFromRow(r: TaskRow): Task {
     reviewer: r.reviewer ?? null,
     reviewOf: r.review_of ?? null,
     round: r.round ?? 0,
+    notBefore: r.not_before ?? null,
+    dueAt: r.due_at ?? null,
+    parkedReason: r.parked_reason ?? null,
+    parkCount: r.park_count ?? 0,
+    scheduleId: r.schedule_id ?? null,
     dependsOn: JSON.parse(r.depends_on) as string[],
     status: r.status as TaskStatus,
     chainDepth: r.chain_depth,
@@ -71,13 +81,20 @@ export interface NewTask {
   reviewer?: string | null;
   /** A review task: the task it reviews. */
   reviewOf?: string | null;
+  /** Not handed out before this time. */
+  notBefore?: number | null;
+  dueAt?: number | null;
+  /** The routine that opens it. */
+  scheduleId?: string | null;
   dependsOn: string[];
   chainDepth: number;
 }
 
-export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'reviewer' | 'round' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt'>>;
+export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'reviewer' | 'round' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt' | 'notBefore' | 'dueAt' | 'parkedReason' | 'parkCount'>>;
 
-const OPEN = "('waiting', 'in_progress', 'review', 'blocked')";
+const OPEN = "('waiting', 'in_progress', 'review', 'blocked', 'parked')";
+/** Statuses the clock watches for a due date. */
+export const OPEN_STATUSES: TaskStatus[] = ['waiting', 'in_progress', 'review', 'blocked', 'parked'];
 
 export class TaskStore {
   readonly #db: Db;
@@ -91,15 +108,16 @@ export class TaskStore {
   create(t: NewTask): Task {
     const task: Task = {
       ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, reviewer: t.reviewer ?? null, reviewOf: t.reviewOf ?? null, round: 0,
+      notBefore: t.notBefore ?? null, dueAt: t.dueAt ?? null, parkedReason: null, parkCount: 0, scheduleId: t.scheduleId ?? null,
       id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null,
     };
     this.#db
       .prepare(
         `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth,
-           note, result, nudged, created_at, started_at, finished_at, kind, difficulty, reviewer, review_of, round)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?, ?, ?, 0)`,
+           note, result, nudged, created_at, started_at, finished_at, kind, difficulty, reviewer, review_of, round, not_before, due_at, schedule_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?)`,
       )
-      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null, task.reviewer ?? null, task.reviewOf ?? null);
+      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null, task.reviewer ?? null, task.reviewOf ?? null, task.notBefore ?? null, task.dueAt ?? null, task.scheduleId ?? null);
     return task;
   }
 
@@ -132,16 +150,28 @@ export class TaskStore {
   update(id: string, patch: TaskPatch): Task {
     const next = { ...this.get(id), ...patch };
     this.#db
-      .prepare('UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, reviewer = ?, round = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ? WHERE id = ?')
-      .run(next.assignee, next.priority, next.difficulty ?? null, next.reviewer ?? null, next.round ?? 0, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt, id);
+      .prepare(
+        `UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, reviewer = ?, round = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ?,
+           not_before = ?, due_at = ?, parked_reason = ?, park_count = ? WHERE id = ?`,
+      )
+      .run(
+        next.assignee, next.priority, next.difficulty ?? null, next.reviewer ?? null, next.round ?? 0, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt,
+        next.notBefore ?? null, next.dueAt ?? null, next.parkedReason ?? null, next.parkCount ?? 0, id,
+      );
     return next;
   }
 
-  /** The assignee's next task: waiting, every dependency done; most urgent first (1 = most urgent), then oldest. */
-  nextFor(assignee: string): Task | null {
+  /**
+   * The assignee's next task: waiting, its start time come, every dependency done; most urgent first (1 = most urgent),
+   * then the nearer due date, then oldest.
+   */
+  nextFor(assignee: string, now: number = this.#now()): Task | null {
     const rows = this.#db
-      .prepare("SELECT * FROM tasks WHERE assignee = ? AND status = 'waiting' ORDER BY priority, created_at")
-      .all(assignee) as unknown as TaskRow[];
+      .prepare(
+        `SELECT * FROM tasks WHERE assignee = ? AND status = 'waiting' AND (not_before IS NULL OR not_before <= ?)
+         ORDER BY priority, (due_at IS NULL), due_at, created_at`,
+      )
+      .all(assignee, now) as unknown as TaskRow[];
     for (const row of rows) {
       const task = taskFromRow(row);
       const ready = task.dependsOn.every((dep) => {
@@ -210,6 +240,70 @@ export class TaskStore {
       .prepare("SELECT * FROM tasks WHERE review_of = ? AND kind = 'review' AND status = 'done' ORDER BY finished_at DESC, rowid DESC LIMIT 1")
       .get(taskId) as unknown as TaskRow | undefined;
     return row ? taskFromRow(row) : null;
+  }
+
+  /** Parked tasks whose return time has come. */
+  dueParked(now: number): Task[] {
+    const rows = this.#db.prepare("SELECT * FROM tasks WHERE status = 'parked' AND not_before IS NOT NULL AND not_before <= ? ORDER BY not_before").all(now) as unknown as TaskRow[];
+    return rows.map(taskFromRow);
+  }
+
+  /** A parked task comes back to the queue — once, and only when its time has come (atomic; a second call changes nothing). */
+  returnParked(id: string, now: number): boolean {
+    const r = this.#db
+      .prepare("UPDATE tasks SET status = 'waiting', not_before = NULL, started_at = NULL, nudged = 0 WHERE id = ? AND status = 'parked' AND not_before IS NOT NULL AND not_before <= ?")
+      .run(id, now);
+    return Number(r.changes) > 0;
+  }
+
+  /** Open tasks past their due date that the coordinator has not been told about. */
+  overdueUnnotified(now: number): Task[] {
+    const rows = this.#db
+      .prepare(`SELECT * FROM tasks WHERE status IN ${OPEN} AND due_at IS NOT NULL AND due_at <= ? AND overdue_notified = 0 ORDER BY due_at`)
+      .all(now) as unknown as TaskRow[];
+    return rows.map(taskFromRow);
+  }
+
+  markOverdueNotified(id: string): void {
+    this.#db.prepare('UPDATE tasks SET overdue_notified = 1 WHERE id = ?').run(id);
+  }
+
+  /** The nearest future time a task needs the clock: a park return, a start time, or an unannounced due date. */
+  nextDueAt(now: number): number | null {
+    const row = this.#db
+      .prepare(
+        `SELECT MIN(t) AS t FROM (
+           SELECT not_before AS t FROM tasks WHERE status IN ('parked', 'waiting') AND not_before IS NOT NULL AND not_before > ?
+           UNION ALL
+           SELECT due_at AS t FROM tasks WHERE status IN ${OPEN} AND due_at IS NOT NULL AND due_at > ? AND overdue_notified = 0
+         )`,
+      )
+      .get(now, now) as unknown as { t: number | null };
+    return row.t ?? null;
+  }
+
+  /** The still-open task a routine opened last, if any (the pile-up brake, spec §4.4). */
+  openInstance(scheduleId: string): Task | null {
+    const row = this.#db.prepare(`SELECT * FROM tasks WHERE schedule_id = ? AND status IN ${OPEN} ORDER BY created_at DESC LIMIT 1`).get(scheduleId) as unknown as TaskRow | undefined;
+    return row ? taskFromRow(row) : null;
+  }
+
+  /** How long finished tasks took (ms), newest first — the agenda's estimates (spec §6.1). */
+  durations(o: { assignee?: string; kind: TaskKind; difficulty?: TaskDifficulty | null; limit: number }): number[] {
+    const where = ["status = 'done'", 'started_at IS NOT NULL', 'finished_at IS NOT NULL', 'kind = ?'];
+    const params: Array<string | number> = [o.kind];
+    if (o.assignee !== undefined) {
+      where.push('assignee = ?');
+      params.push(o.assignee);
+    }
+    if (o.difficulty) {
+      where.push('difficulty = ?');
+      params.push(o.difficulty);
+    }
+    const rows = this.#db
+      .prepare(`SELECT finished_at - started_at AS d FROM tasks WHERE ${where.join(' AND ')} ORDER BY finished_at DESC LIMIT ?`)
+      .all(...params, o.limit) as unknown as Array<{ d: number }>;
+    return rows.map((r) => r.d);
   }
 }
 
@@ -351,6 +445,127 @@ export class PlanStore {
         )
         .run(...values, p.id);
     }
+  }
+}
+
+interface ScheduleRow {
+  id: string;
+  title: string;
+  description: string;
+  done: string;
+  assignee: string;
+  reviewer: string | null;
+  plan_id: string | null;
+  priority: number;
+  difficulty: string | null;
+  cron: string;
+  until_at: number | null;
+  status: string;
+  next_run_at: number | null;
+  last_run_at: number | null;
+  last_task_id: string | null;
+  skip_count: number;
+  fail_count: number;
+  created_by: string;
+  created_at: number;
+  note: string | null;
+}
+
+const scheduleFromRow = (r: ScheduleRow): Schedule => ({
+  id: r.id, title: r.title, description: r.description, done: JSON.parse(r.done) as string[], assignee: r.assignee, reviewer: r.reviewer, planId: r.plan_id,
+  priority: r.priority, difficulty: (r.difficulty as TaskDifficulty | null) ?? null, cron: r.cron, until: r.until_at, status: r.status as ScheduleStatus,
+  nextRunAt: r.next_run_at, lastRunAt: r.last_run_at, lastTaskId: r.last_task_id, skipCount: r.skip_count, failCount: r.fail_count, createdBy: r.created_by,
+  createdAt: r.created_at, note: r.note,
+});
+
+export interface NewSchedule {
+  title: string;
+  description: string;
+  done: string[];
+  assignee: string;
+  reviewer: string | null;
+  planId: string | null;
+  priority: number;
+  difficulty: TaskDifficulty | null;
+  cron: string;
+  until: number | null;
+  createdBy: string;
+  nextRunAt: number | null;
+}
+
+export type SchedulePatch = Partial<Pick<Schedule, 'title' | 'description' | 'done' | 'assignee' | 'reviewer' | 'priority' | 'difficulty' | 'cron' | 'until' | 'status' | 'nextRunAt' | 'lastRunAt' | 'lastTaskId' | 'skipCount' | 'failCount' | 'note'>>;
+
+/** Routines (spec §4.4): templates the clock turns into ordinary tasks. */
+export class ScheduleStore {
+  readonly #db: Db;
+  readonly #now: () => number;
+
+  constructor(db: Db, now: () => number = Date.now) {
+    this.#db = db;
+    this.#now = now;
+  }
+
+  create(s: NewSchedule): Schedule {
+    const schedule: Schedule = { ...s, id: randomUUID(), status: 'active', lastRunAt: null, lastTaskId: null, skipCount: 0, failCount: 0, createdAt: this.#now(), note: null };
+    this.#db
+      .prepare(
+        `INSERT INTO schedules (id, title, description, done, assignee, reviewer, plan_id, priority, difficulty, cron, until_at, status, next_run_at, last_run_at, last_task_id, skip_count, fail_count, created_by, created_at, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL, NULL, 0, 0, ?, ?, NULL)`,
+      )
+      .run(schedule.id, schedule.title, schedule.description, JSON.stringify(schedule.done), schedule.assignee, schedule.reviewer, schedule.planId, schedule.priority, schedule.difficulty, schedule.cron, schedule.until, schedule.nextRunAt, schedule.createdBy, schedule.createdAt);
+    return schedule;
+  }
+
+  get(id: string): Schedule {
+    const row = this.#db.prepare('SELECT * FROM schedules WHERE id = ?').get(id) as unknown as ScheduleRow | undefined;
+    if (!row) throw new NotFoundError(`Rutin bulunamadı: ${id}`);
+    return scheduleFromRow(row);
+  }
+
+  list(o: { statuses?: ScheduleStatus[]; assignee?: string; planId?: string; limit?: number } = {}): Schedule[] {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (o.statuses?.length) {
+      where.push(`status IN (${o.statuses.map(() => '?').join(', ')})`);
+      params.push(...o.statuses);
+    }
+    if (o.assignee !== undefined) {
+      where.push('assignee = ?');
+      params.push(o.assignee);
+    }
+    if (o.planId !== undefined) {
+      where.push('plan_id = ?');
+      params.push(o.planId);
+    }
+    const rows = this.#db.prepare(`SELECT * FROM schedules ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at LIMIT ?`).all(...params, o.limit ?? 1000) as unknown as ScheduleRow[];
+    return rows.map(scheduleFromRow);
+  }
+
+  update(id: string, patch: SchedulePatch): Schedule {
+    const next: Schedule = { ...this.get(id), ...patch };
+    this.#db
+      .prepare(
+        `UPDATE schedules SET title = ?, description = ?, done = ?, assignee = ?, reviewer = ?, priority = ?, difficulty = ?, cron = ?, until_at = ?, status = ?,
+           next_run_at = ?, last_run_at = ?, last_task_id = ?, skip_count = ?, fail_count = ?, note = ? WHERE id = ?`,
+      )
+      .run(next.title, next.description, JSON.stringify(next.done), next.assignee, next.reviewer, next.priority, next.difficulty, next.cron, next.until, next.status, next.nextRunAt, next.lastRunAt, next.lastTaskId, next.skipCount, next.failCount, next.note, id);
+    return next;
+  }
+
+  /** Active routines whose next run has come, soonest first. */
+  due(now: number): Schedule[] {
+    const rows = this.#db.prepare("SELECT * FROM schedules WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at, created_at").all(now) as unknown as ScheduleRow[];
+    return rows.map(scheduleFromRow);
+  }
+
+  nextRunAt(): number | null {
+    const row = this.#db.prepare("SELECT MIN(next_run_at) AS t FROM schedules WHERE status = 'active' AND next_run_at IS NOT NULL").get() as unknown as { t: number | null };
+    return row.t ?? null;
+  }
+
+  /** Routines that count against the constitution's cap (stopped ones do not). */
+  activeCount(): number {
+    return (this.#db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE status IN ('active', 'paused')").get() as unknown as { n: number }).n;
   }
 }
 
