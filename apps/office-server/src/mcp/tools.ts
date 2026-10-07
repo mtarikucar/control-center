@@ -1,8 +1,9 @@
-import { KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText } from '../company/craft.ts';
 import type { Memory } from '../company/memory.ts';
+import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
 import type { TaskStore } from '../company/store.ts';
 import { formatPerformance, type PerformanceReport } from '../performance.ts';
 import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
@@ -301,6 +302,20 @@ export function officeTools(o: {
       inputSchema: object({}),
       kinds: EVERYONE,
       run: () => company.brief(),
+    },
+    {
+      name: 'profileRead',
+      description: `Read the company profile: what the company is, section by section (${PROFILE_SECTIONS.join(', ')}); empty sections show as empty, assumed ones are marked. With section only that one; with section and history: true its versions, newest first.`,
+      inputSchema: object({ section: { type: 'string', enum: [...PROFILE_SECTIONS], description: 'One section only.' }, history: { type: 'boolean', description: 'The section’s versions, newest first (needs section).' } }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        const section = optStr(args, 'section');
+        if (bool(args, 'history')) {
+          if (section === undefined) throw new ValidationError('Geçmiş için bir bölüm (section) ver.');
+          return profileHistoryText(profileSection(section), company.profileHistory(section), (id) => company.nameOf(id));
+        }
+        return profileText(company.profile(), section === undefined ? undefined : profileSection(section));
+      },
     },
     {
       name: 'memorySearch',
@@ -696,6 +711,28 @@ export function officeTools(o: {
       run: ({ employee }, args) => {
         company.updateBrief(employee.id, str(args, 'text'));
         return 'Şirket özeti güncellendi ve bütün masalara dağıtıldı.';
+      },
+    },
+    {
+      name: 'profileUpdate',
+      description: `Write one section of the company profile (coordinator): the fields given replace theirs, null or an empty value removes one, the others stay; every change is a new version. assumed (required) is about the fields given in this call only: true when you filled them in without the owner saying so, false when they are the owner's word — give an assumed field again with assumed: false once the owner confirms it; the other fields keep their mark. The brief is not changed. Sections and fields (name[] = a list of texts): ${profileFieldsHelp()}.`,
+      inputSchema: object(
+        {
+          section: { type: 'string', enum: [...PROFILE_SECTIONS], description: 'The section.' },
+          fields: { type: 'object', description: 'Field → text, list of texts, or null to remove.' },
+          assumed: { type: 'boolean', description: 'The fields given here: true = your assumption, false = the owner said so.' },
+        },
+        ['section', 'fields', 'assumed'],
+      ),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const before = company.profile().version;
+        const entry = company.profileUpdate(employee.id, { section: args.section, fields: args.fields, assumed: args.assumed });
+        const label = PROFILE_SPEC[entry.section].label;
+        if (entry.version <= before) return `Değişiklik yok: ${label} (sürüm ${entry.version}) zaten böyle.`;
+        return entry.assumed
+          ? `Profil güncellendi: ${label} (sürüm ${entry.version}; varsayım: ${entry.assumedFields.join(', ')}). Sahibi doğrulayınca bu alanları assumed: false ile yeniden yaz.`
+          : `Profil güncellendi: ${label} (sürüm ${entry.version}).`;
       },
     },
     {

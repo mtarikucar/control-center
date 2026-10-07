@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
+import type { CompanyProfile, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -11,6 +11,8 @@ import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
 import type { CompanyStateStore, GoalStore } from './goal-store.ts';
 import { checkKpis } from './kpi.ts';
+import { mergeProfile, profileSection } from './profile.ts';
+import type { ProfileStore } from './profile-store.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
@@ -64,6 +66,8 @@ export interface CompanyDeps {
   /** Goals and the company's own state (stage 2; absent in tests that do not care). */
   goals?: GoalStore;
   state?: CompanyStateStore;
+  /** The company profile (B2; absent in tests that do not care). */
+  profile?: ProfileStore;
   /** Routines (stage: scheduler; absent in tests that do not care). */
   schedules?: ScheduleStore;
   /** The office clock: told when a time changed, so it re-arms (absent in tests that do not care). */
@@ -135,6 +139,12 @@ export interface GoalInput {
   kpis?: unknown;
   status?: string;
   note?: string;
+}
+
+export interface ProfileInput {
+  section: unknown;
+  fields: unknown;
+  assumed?: unknown;
 }
 
 export interface StatusLine {
@@ -1238,6 +1248,42 @@ export class Company {
   report(by: string, text: string): void {
     this.#assertCoordinator(by);
     this.#emit(by, { type: 'company.report', text: clean(text, 'Rapor', 6000, true) });
+  }
+
+  // ── profile ───────────────────────────────────────────────────────────────
+
+  /** Each section's current state (spec 2026-10-08-company-profile-design). */
+  profile(): CompanyProfile {
+    return this.#d.profile?.current() ?? { version: 0, sections: {} };
+  }
+
+  profileHistory(section: unknown): ProfileEntry[] {
+    return this.#profile().history(profileSection(section));
+  }
+
+  /**
+   * The coordinator writes one section: the given fields merged into it, under the next version, each marked an
+   * assumption or the owner's word as `assumed` says (required: no silent default). Returns the section as it stands;
+   * when nothing changes no version is opened and the current entry comes back. The brief is not touched.
+   */
+  profileUpdate(by: string, input: ProfileInput): ProfileEntry {
+    this.#assertCoordinator(by);
+    const store = this.#profile();
+    const section = profileSection(input.section);
+    if (input.assumed === undefined) throw new ValidationError('assumed gerekli: bu alanlar sahibinden mi (false), varsayım mı (true)?');
+    if (typeof input.assumed !== 'boolean') throw new ValidationError('assumed true ya da false olmalı.');
+    const current = store.current().sections[section];
+    const next = mergeProfile(section, current ?? { fields: {}, assumedFields: [] }, input.fields, input.assumed);
+    if (current && JSON.stringify([current.fields, current.assumedFields]) === JSON.stringify([next.fields, next.assumedFields])) return current;
+    if (!current && Object.keys(next.fields).length === 0) throw new ValidationError(`${PROFILE_SPEC[section].label} bölümü boş; yazacak bir alan ver.`);
+    const entry = store.write(section, next.fields, next.assumedFields, by);
+    this.#emit(by, { type: 'profile.updated', entry });
+    return entry;
+  }
+
+  #profile(): ProfileStore {
+    if (!this.#d.profile) throw new ConflictError('Bu ofiste şirket profili açık değil.');
+    return this.#d.profile;
   }
 
   // ── brief ─────────────────────────────────────────────────────────────────

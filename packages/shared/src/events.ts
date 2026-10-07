@@ -2,6 +2,7 @@ import type { BudgetSummary, Spend } from './budget.ts';
 import type { ClockStatus, Goal, GoalChange, Plan, PlanChange, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Decision } from './memory.ts';
+import type { ProfileEntry } from './profile.ts';
 import type { Proposal, ProposalChange } from './proposal.ts';
 
 export interface Usage {
@@ -64,6 +65,8 @@ export type OfficeEvent =
   /** The coordinator was reminded to report, for the digest hour `slot` (so a restart does not remind again). */
   | { type: 'report.reminded'; slot: number }
   | { type: 'brief.updated' }
+  /** A section of the company profile changed; `entry` is the section as it now stands. */
+  | { type: 'profile.updated'; entry: ProfileEntry }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
   | { type: 'decision.recorded'; decision: Decision }
   | { type: 'playbook.updated'; topic: string; version: number; reason: string }

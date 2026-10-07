@@ -12,6 +12,7 @@ import { Memory } from './company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
 import { Dispatcher } from './company/dispatcher.ts';
 import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
+import { ProfileStore } from './company/profile-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
@@ -64,7 +65,7 @@ const budget = new Budget({
   constitution: new ConstitutionStore(db), spend: new SpendStore(db), tasks, plans, roster, events, notices, quota, deskCount: config.deskCount,
 });
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db) });
 const pulse = new Pulse({ company, goals, state, plans, tasks, notices, budget });
 // The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
 const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });

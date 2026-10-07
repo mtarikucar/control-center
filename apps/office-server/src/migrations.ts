@@ -365,11 +365,33 @@ export const MIGRATIONS: Migration[] = [
     down: `ALTER TABLE tasks DROP COLUMN nudged_at;`,
   },
   {
-    // feat/company-profile also takes 12: whichever merges second becomes 13 (spec 2026-10-08-goal-kpis-design §5).
+    // integration/core-1: B16 entered the merge order before B2, so the goal KPIs keep 12 and the profile takes 13.
     version: 12,
     name: 'goal KPIs',
     // Goals from before: no KPIs.
     up: `ALTER TABLE goals ADD COLUMN kpis TEXT NOT NULL DEFAULT '[]';`,
     down: `ALTER TABLE goals DROP COLUMN kpis;`,
+  },
+  {
+    // feat/company-profile wrote this as 12; it is 13 here (after the goal KPIs, see above).
+    version: 13,
+    name: 'company profile: sections, one row per version',
+    // Append-only: a section's current state is its row with the highest version; the version is company-wide.
+    // assumed_fields: which fields are assumptions; assumed: any of them is.
+    up: `
+      CREATE TABLE IF NOT EXISTS company_profile (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL UNIQUE,
+        section TEXT NOT NULL,
+        json TEXT NOT NULL,
+        assumed INTEGER NOT NULL,
+        assumed_fields TEXT NOT NULL DEFAULT '[]',
+        by TEXT NOT NULL,
+        ts INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS company_profile_section ON company_profile (section, version);`,
+    down: `
+      DROP INDEX IF EXISTS company_profile_section;
+      DROP TABLE IF EXISTS company_profile;`,
   },
 ];

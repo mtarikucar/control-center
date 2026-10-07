@@ -66,6 +66,8 @@ goalsRead()                                                          kim: koordi
 
 ## 5. Göç numarası ve birleştirme sırası
 
+- **Çözüldü (`integration/core-1`, görev 80732cd0):** sıra fix/task-turn-cost → feat/performance-metrics → bu dal →
+  feat/company-profile; KPI göçü v12, profil göçü v13. Ayrıntı: `docs/superpowers/notes/2026-10-08-core-1-merge.md`.
 - Bu dal v12 kullanıyor. **`feat/company-profile` (B2) da v12 kullanıyor.** İkisi `MIGRATIONS` dizisinin aynı yerine
   eklediği için birleştirmede git çakışma verir; ikinci birleştirilen göç **v13** olmalı (sürüm, `db.test.ts`
   beklentileri).

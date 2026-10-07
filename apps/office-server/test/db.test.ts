@@ -19,14 +19,15 @@ const V4_TABLES = [...V3_TABLES, 'constitution', 'spend'].sort();
 const V5_TABLES = [...V4_TABLES, 'proposals'].sort();
 const V9_TABLES = [...V5_TABLES, 'company_state', 'goals'].sort();
 const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
+const V13_TABLES = [...V10_TABLES, 'company_profile'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(12);
-    expect(tables(db)).toEqual(V10_TABLES);
+    expect(migrateUp(db)).toBe(13);
+    expect(tables(db)).toEqual(V13_TABLES);
   });
 
   it('numbers the migrations 1, 2, 3 … with no gap and no repeat (a merge that numbers two alike or skips one fails here)', () => {
@@ -39,14 +40,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(12);
-    expect(tables(db)).toEqual(V10_TABLES);
+    expect(migrateUp(db)).toBe(13);
+    expect(tables(db)).toEqual(V13_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(12);
+    expect(migrateUp(db)).toBe(13);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -255,12 +256,30 @@ describe('migrations', () => {
     migrateUp(db, upTo(11));
     const before = columns(db, 'goals');
     db.prepare("INSERT INTO goals (id, title, why, done, status, created_by, created_at) VALUES ('g1', 'eski', 'neden', '[\"d\"]', 'active', 'c', 1)").run();
-    migrateUp(db);
+    migrateUp(db, upTo(12));
     expect(appliedVersion(db)).toBe(12);
     expect({ ...(db.prepare('SELECT title, done, kpis FROM goals').get() as object) }).toEqual({ title: 'eski', done: '["d"]', kpis: '[]' });
     expect(migrateDown(db, 11)).toBe(11);
     expect(columns(db, 'goals')).toEqual(before);
     expect({ ...(db.prepare('SELECT id, title FROM goals').get() as object) }).toEqual({ id: 'g1', title: 'eski' });
-    expect(migrateUp(db)).toBe(12);
+    expect(migrateUp(db, upTo(12))).toBe(12);
+  });
+
+  it('v13 adds the company profile, empty on a database from before; v13 down restores v12 exactly and keeps the rest', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(12));
+    db.prepare("INSERT INTO goals (id, title, why, done, status, created_by, created_at) VALUES ('g1', 'eski', 'neden', '[]', 'active', 'c', 1)").run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(13);
+    expect(tables(db)).toEqual(V13_TABLES);
+    expect(columns(db, 'company_profile')).toEqual(['id', 'version', 'section', 'json', 'assumed', 'assumed_fields', 'by', 'ts']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM company_profile').get()).toMatchObject({ n: 0 });
+    db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p1', 1, 'identity', '{}', 0, 'c', 1)").run();
+    expect(() => db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p2', 1, 'offer', '{}', 0, 'c', 1)").run()).toThrow(/UNIQUE/);
+    expect(migrateDown(db, 12)).toBe(12);
+    expect(tables(db)).toEqual(V10_TABLES);
+    expect(columns(db, 'goals')).toContain('kpis');
+    expect(db.prepare('SELECT title FROM goals').get()).toMatchObject({ title: 'eski' });
+    expect(migrateUp(db)).toBe(13);
   });
 });
