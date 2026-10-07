@@ -12,12 +12,12 @@ afterEach(async () => {
 
 const MIN = 60_000;
 
-function make() {
+function make(o: { policy?: () => boolean } = {}) {
   let clock = new Date(2026, 9, 7, 10, 0).getTime();
   const now = () => clock;
   const s = setup(8, now);
   const failFlag = join(tempDir('fake-claude-fail-'), 'fail');
-  const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag }, engine: { now, cacheTtlMinutes: () => 5 } });
+  const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag }, engine: { now, cacheTtlMinutes: () => 5, modelPolicyEnabled: o.policy } });
   cleanups.push(f.cleanup, s.cleanup);
   const turns = (id: string) => s.events.list({ employeeId: id, limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
   const said = (id: string) =>
@@ -135,5 +135,19 @@ describe('Engine — model hints', () => {
     t.engine.send(e.id, 'yine kolay', 'system', { model: 'haiku', taskStart: true });
     await until(() => t.turns(e.id) === 3, 8000);
     expect(sessions(await readArgv(t.argvLog, 4))).toEqual(['opus', 'haiku', 'opus', 'haiku']);
+  });
+
+  it('R7: with the model policy switched off hints are ignored, and a session on another model goes back to the employee’s own', async () => {
+    let policy = true;
+    const t = make({ policy: () => policy });
+    const e = t.engine.hire({ name: 'Ada', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'bir', 'system', { model: 'opus' });
+    await until(() => t.turns(e.id) === 1, 8000);
+    policy = false;
+    t.engine.send(e.id, 'iki', 'system', { model: 'fable' });
+    await until(() => t.turns(e.id) === 2, 8000);
+    t.engine.send(e.id, 'üç', 'owner', { model: 'fable' });
+    await until(() => t.turns(e.id) === 3, 8000);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
   });
 });

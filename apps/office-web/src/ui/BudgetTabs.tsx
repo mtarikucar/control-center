@@ -110,7 +110,7 @@ export function BudgetTab() {
   );
 }
 
-const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean; models?: readonly string[] }> = [
+const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean; models?: readonly string[]; toggle?: boolean }> = [
   { key: 'maxEmployees', label: 'Çalışan sınırı', hint: 'Koordinatör dahil; masa sayısını aşamaz.' },
   { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
   { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
@@ -122,6 +122,9 @@ const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; null
   { key: 'coordinatorModels', label: 'Koordinatör modelleri', hint: 'Sahibinin mesajı / karar / özet turu (ör. fable / sonnet / haiku).', models: ['owner', 'decision', 'digest'] },
   { key: 'difficultyModels', label: 'Zorluk modelleri', hint: 'Kolay / orta / zor / kritik görev (ör. haiku / sonnet / opus / fable).', models: ['easy', 'medium', 'hard', 'critical'] },
   { key: 'cacheTtlMinutes', label: 'Önbellek süresi (dk)', hint: 'Bir oturum son turundan bu kadar sonra daha ucuz modele geçebilir; daha önce geçmez.' },
+  { key: 'digestEnabled', label: 'Özet açık', hint: 'Kapalıyken bilgi notları da karar notu gibi hemen gelir.', toggle: true },
+  { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır (koordinatör de).', toggle: true },
+  { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },
 ];
 
 const shown = (v: Constitution[keyof Constitution]): string =>
@@ -147,6 +150,10 @@ export function ConstitutionTab() {
     setError(null);
     const patch: Record<string, unknown> = {};
     for (const f of FIELDS) {
+      if (f.toggle) {
+        patch[f.key] = draft[f.key] === 'true';
+        continue;
+      }
       if (f.models) {
         const names = (draft[f.key] ?? '').split('/').map((x) => x.trim()).filter(Boolean);
         if (names.length !== f.models.length) {
@@ -196,10 +203,17 @@ export function ConstitutionTab() {
       {FIELDS.map((f) => (
         <label key={f.key}>
           <span>{f.label}</span>
-          <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => {
-              dirty.current = true;
-              setDraft({ ...draft, [f.key]: e.target.value });
-            }} />
+          {f.toggle ? (
+            <input type="checkbox" aria-label={f.label} checked={draft[f.key] === 'true'} onChange={(e) => {
+                dirty.current = true;
+                setDraft({ ...draft, [f.key]: String(e.target.checked) });
+              }} />
+          ) : (
+            <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => {
+                dirty.current = true;
+                setDraft({ ...draft, [f.key]: e.target.value });
+              }} />
+          )}
           <small className="muted">{f.hint}</small>
         </label>
       ))}

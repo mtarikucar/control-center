@@ -22,6 +22,14 @@ export interface Constitution {
   cacheTtlMinutes: number;
   /** The model a task starts on, by its difficulty. */
   difficultyModels: Record<TaskDifficulty, ModelAlias>;
+  /**
+   * Switches for the economy plan's three features (all on by default); off brings back the earlier behaviour:
+   * notices for the record go at once like decisions; model hints are ignored (everyone on their own model); a task's
+   * difficulty no longer moves its assignee to another model (the difficulty is still kept).
+   */
+  digestEnabled: boolean;
+  modelPolicyEnabled: boolean;
+  difficultyModelsEnabled: boolean;
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
@@ -36,6 +44,9 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   coordinatorModels: { owner: 'fable', decision: 'sonnet', digest: 'haiku' },
   cacheTtlMinutes: 5,
   difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
+  digestEnabled: true,
+  modelPolicyEnabled: true,
+  difficultyModelsEnabled: true,
 };
 
 /** Money an employee spent on an outside service (the office cannot see it; they record it). */

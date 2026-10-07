@@ -116,8 +116,10 @@ export class Dispatcher {
       return;
     }
     const pending = this.#d.notices.pending(id);
-    const decisions = pending.filter((n) => n.kind === 'decision');
-    const infos = pending.filter((n) => n.kind === 'info');
+    // With the digest switched off every notice goes at once, as before the economy plan.
+    const digestOn = this.#rules().digestEnabled;
+    const decisions = digestOn ? pending.filter((n) => n.kind === 'decision') : pending;
+    const infos = digestOn ? pending.filter((n) => n.kind === 'info') : [];
     // Someone the owner is letting go gets nothing but their hand-over, even while it is blocked.
     const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
     const focus = handover && handover.status !== 'waiting' ? handover : this.#d.tasks.inProgressOf(id);
@@ -186,7 +188,8 @@ export class Dispatcher {
   #hint(e: Employee, started: Task | null, decision: boolean): ModelHint {
     const rules = this.#rules();
     if (e.kind === 'coordinator') return { model: decision ? rules.coordinatorModels.decision : rules.coordinatorModels.digest };
-    return started ? { model: started.difficulty ? rules.difficultyModels[started.difficulty] : e.model, taskStart: true } : {};
+    if (!started) return {};
+    return { model: started.difficulty && rules.difficultyModelsEnabled ? rules.difficultyModels[started.difficulty] : e.model, taskStart: true };
   }
 
   /**
@@ -227,7 +230,8 @@ export class Dispatcher {
     if (next && this.#mayStart(next)) return true;
     // Information never wakes anyone: it waits for their next turn or a digest they are awake for. During the owner's
     // reserve only the coordinator wakes for a decision; one that asks nothing of a sleeper wakes no one.
-    const wakes = this.#d.notices.pending(e.id).some((n) => n.kind === 'decision' && !NOTHING_FOR_A_SLEEPER.has(n.topic));
+    const digestOn = this.#rules().digestEnabled;
+    const wakes = this.#d.notices.pending(e.id).some((n) => (n.kind === 'decision' || !digestOn) && !NOTHING_FOR_A_SLEEPER.has(n.topic));
     if (wakes && (e.kind === 'coordinator' || !this.#reserve())) return true;
     return e.kind === 'coordinator' && !this.#reserve() && this.#reportDue(e) !== null;
   }

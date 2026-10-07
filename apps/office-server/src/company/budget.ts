@@ -20,7 +20,9 @@ export interface BudgetDeps {
   now?: () => number;
 }
 
-type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels'>;
+const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri' } as const;
+type SwitchKey = keyof typeof SWITCHES;
+type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | SwitchKey>;
 
 const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
@@ -86,6 +88,11 @@ export class Budget {
       if (!Object.hasOwn(DEFAULT_CONSTITUTION, key)) throw new ValidationError(`Bilinmeyen anayasa maddesi: ${key}`);
       if (key === 'digestHours') {
         checked.digestHours = digestHours(value);
+        continue;
+      }
+      if (Object.hasOwn(SWITCHES, key)) {
+        if (typeof value !== 'boolean') throw new ValidationError(`Anayasa: ${SWITCHES[key as SwitchKey]} anahtarı açık ya da kapalı (true/false) olmalı.`);
+        (checked as Record<string, unknown>)[key] = value;
         continue;
       }
       if (key === 'coordinatorModels' || key === 'difficultyModels') {

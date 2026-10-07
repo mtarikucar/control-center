@@ -41,6 +41,7 @@ let mcpUrl = '';
 const engine = new Engine({
   roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens },
   cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
+  modelPolicyEnabled: () => budget.constitution().modelPolicyEnabled,
 });
 const tasks = new TaskStore(db);
 const plans = new PlanStore(db);

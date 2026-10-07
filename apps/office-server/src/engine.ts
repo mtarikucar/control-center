@@ -59,6 +59,8 @@ export interface EngineOptions {
   mcp?: { url: () => string; tokens: TokenRegistry };
   /** How long a session's prompt cache stays warm (the constitution's cacheTtlMinutes; default 5). */
   cacheTtlMinutes?: () => number;
+  /** The constitution's modelPolicyEnabled (default on): off, hints are ignored and sessions run on the employee's own model. */
+  modelPolicyEnabled?: () => boolean;
 }
 
 /** What a message would best run on; the session moves there only as modelPolicy allows, never in the middle of a turn. */
@@ -130,6 +132,7 @@ export class Engine {
   readonly #sideQuestionTimeoutMs: number;
   readonly #mcp: EngineOptions['mcp'];
   readonly #cacheTtlMinutes: () => number;
+  readonly #modelPolicyEnabled: () => boolean;
   readonly #runtimes = new Map<string, Runtime>();
   readonly #sideRuns = new Set<AbortController>();
 
@@ -147,6 +150,7 @@ export class Engine {
     this.#sideQuestionTimeoutMs = o.sideQuestionTimeoutMs ?? 120_000;
     this.#mcp = o.mcp;
     this.#cacheTtlMinutes = o.cacheTtlMinutes ?? (() => 5);
+    this.#modelPolicyEnabled = o.modelPolicyEnabled ?? (() => true);
   }
 
   hire(input: HireInput): Employee {
@@ -186,8 +190,9 @@ export class Engine {
     return rt.model ?? employee.model;
   }
 
-  /** The model a hint moves the session to now, or null to keep it. */
-  #switchTo(employee: Employee, rt: Runtime, hint: ModelHint): ModelAlias | null {
+  /** The model a hint moves the session to now, or null to keep it. With the policy off: back to their own model. */
+  #switchTo(employee: Employee, rt: Runtime, requested: ModelHint): ModelAlias | null {
+    const hint: ModelHint = this.#modelPolicyEnabled() ? requested : { model: employee.model, taskStart: true };
     if (!hint.model || rt.turnActive) return null;
     if (rt.failedModel?.model === hint.model && this.#now() - rt.failedModel.at < FAILED_MODEL_PAUSE_MS) return null;
     const lastTurnFinishedAt = rt.lastTurnAt ?? this.#events.latest(employee.id, 'turn.finished')?.ts ?? null;

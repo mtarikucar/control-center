@@ -522,4 +522,38 @@ describe('Dispatcher — notice kinds and the digest', () => {
     expect(deliveries[1]).toContain('önerin kabul edildi');
     expect(t.notices.pending(ada.id)).toEqual([]);
   });
+
+  it('R7: with the digest switched off, information goes at once like a decision (as before the economy plan)', async () => {
+    const t = makeDigest();
+    t.budget.setConstitution({ digestEnabled: false });
+    const coord = t.company.hireCoordinator();
+    await until(() => t.engine.ready(coord.id));
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toBe('Ofisten notlar:\n- “Yaz” (Ada): Yazıldı.');
+    await until(() => t.engine.ready(coord.id), 8000);
+    await t.engine.sleep(coord.id);
+    t.notices.add(coord.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    await until(() => t.turns(coord.id).length === 2, 8000);
+    t.budget.setConstitution({ digestEnabled: true });
+    await until(() => t.engine.ready(coord.id), 8000);
+    t.notices.add(coord.id, 'task.finished', '“Çiz” (Can): Çizildi.');
+    await sleep(400);
+    expect(t.turns(coord.id)).toHaveLength(2);
+  });
+
+  it('R7: with difficulty models switched off a task starts on its assignee’s own model; the difficulty is kept', async () => {
+    const t = makeDigest();
+    t.budget.setConstitution({ difficultyModelsEnabled: false });
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r', model: 'opus' });
+    await until(() => t.engine.ready(ada.id));
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Kolay iş', difficulty: 'easy' });
+    await until(() => t.turns(ada.id).some((m) => m.includes('## Görev: Kolay iş')), 8000);
+    expect(t.turns(ada.id)[0]).toContain('Zorluk: kolay · Model: opus');
+    expect(t.tasks.get(task.id).difficulty).toBe('easy');
+    await until(() => t.engine.ready(ada.id), 8000);
+    const models = (await readArgv(t.argvLog, 2)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models).toEqual(['opus']);
+  });
 });
