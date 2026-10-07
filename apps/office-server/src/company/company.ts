@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, REVIEW_DECISIONS, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
+import type { Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -15,9 +15,9 @@ import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
-import type { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './store.ts';
+import type { NoticeStore, PlanStore, SchedulePatch, ScheduleStore, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
-import { formatWhen, parseUntil } from './time.ts';
+import { formatWhen, minIntervalMinutes, nextCron, parseCron, parseUntil, type CronSpec } from './time.ts';
 
 /** The constitution's loop guards by default (spec §4.6); the owner changes them in the constitution. */
 export const LIMITS = {
@@ -38,6 +38,8 @@ const HANDOVER_DONE = [
 ];
 const SELF_REVIEW = 'Bir işi yapan kendi işinin inceleyicisi olamaz; başka birini seç.';
 const PROPOSAL_TR: Record<ProposalKind, string> = { need: 'ihtiyaç', purchase: 'satın alma', idea: 'fikir', objection: 'itiraz' };
+/** What a routine's new status is called in its event. */
+const SCHEDULE_CHANGE: Record<ScheduleStatus, ScheduleChange> = { active: 'resumed', paused: 'paused', stopped: 'stopped' };
 
 export interface CompanyDeps {
   roster: Roster;
@@ -84,7 +86,28 @@ export interface TaskInput {
   startAfter?: string | null;
   /** Should be done by this time (spec §4.3); same forms. */
   dueAt?: string | null;
+  /** The routine this task is an instance of (spec §4.4; set by the due-processor only). */
+  scheduleId?: string | null;
 }
+
+/** Recurring work (spec §4.4): each firing opens an ordinary task with these fields. */
+export interface ScheduleInput {
+  title: string;
+  description?: string;
+  done?: string[];
+  assignee: string;
+  /** 5 fields, local time. */
+  cron: string;
+  reviewer?: string | null;
+  planId?: string | null;
+  priority?: number;
+  difficulty?: TaskDifficulty | null;
+  /** Stop after this time: `+30d` or a local time. */
+  until?: string | null;
+}
+
+/** What scheduleUpdate may change: anything but the plan, and the status. */
+export type ScheduleUpdate = Partial<Omit<ScheduleInput, 'planId'>> & { status?: string };
 
 export interface PlanDraft {
   title: string;
@@ -124,6 +147,11 @@ export interface StatusLine {
 function amount(value: number | null | undefined, label: string): number | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new ValidationError(`${label} sıfır ya da pozitif bir sayı olmalı.`);
+  return value;
+}
+
+function priorityOf(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 5) throw new ValidationError('Öncelik 1 (en acil) ile 5 arasında bir tam sayı olmalı.');
   return value;
 }
 
@@ -287,7 +315,7 @@ export class Company {
     const reviewer = this.#reviewerOf(input.reviewer, assignee.id);
     const task = this.#d.tasks.create({
       planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), reviewer, dependsOn, chainDepth: Math.max(0, chainDepth),
-      notBefore, dueAt,
+      notBefore, dueAt, scheduleId: input.scheduleId ?? null,
     });
     this.#taskEvent('created', task);
     if (notBefore !== null || dueAt !== null) this.#touchClock();
@@ -336,6 +364,11 @@ export class Company {
   /** Someone was fired: their open work waits again and the coordinator hands it out (spec §10); a hand-over is cancelled. */
   releaseTasksOf(id: string): void {
     this.#rerouteProposals(id);
+    // Their routines wait for a new assignee (spec §4.4).
+    for (const sch of this.#d.schedules?.list({ assignee: id, statuses: ['active', 'paused'] }) ?? []) {
+      if (sch.status === 'active') this.#applyScheduleStatus(sch, 'paused', id);
+      this.#tellCoordinator(id, 'schedule.unassigned', `“${sch.title}” rutininin atananı (${this.nameOf(id)}) işten çıkarıldı; rutin duraklatıldı. scheduleUpdate ile yeni bir atanan ver ve sürdür.`);
+    }
     for (const m of this.#d.roster.list()) if (m.reportsTo === id) this.#d.roster.update(m.id, { reportsTo: null });
     const work: Task[] = [];
     for (const task of this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked', 'parked'] })) {
@@ -477,6 +510,136 @@ export class Company {
   #tellOwnerChanged(text: string): void {
     const c = this.coordinator();
     if (c) this.#d.notices.add(c.id, 'agenda.owner_changed', text);
+  }
+
+  // ── routines (spec §4.4) ──────────────────────────────────────────────────
+
+  /** The coordinator, or a lead for their own team, opens recurring work; each firing opens an ordinary task. */
+  createSchedule(by: string, input: ScheduleInput): Schedule {
+    const store = this.#schedules();
+    const assignee = this.#d.roster.get(input.assignee);
+    this.#assertManages(by, assignee.id);
+    if (assignee.lifecycle === 'archived') throw new ConflictError(`${assignee.name} işten çıkarıldı; ona rutin verilemez.`);
+    const max = this.#rules().maxSchedules;
+    if (store.activeCount() >= max) throw new ConflictError(`En fazla ${max} rutin olabilir; önce birini durdur (scheduleUpdate: status stopped).`);
+    const now = this.#now();
+    const spec = this.#cronSpec(input.cron, now);
+    const planId = input.planId ?? null;
+    if (planId !== null) {
+      const plan = this.#d.plans.get(planId);
+      if (plan.status !== 'approved' && plan.status !== 'done') throw new ConflictError(`“${plan.title}” planı sürmüyor; rutin yalnız süren bir plana bağlanabilir.`);
+    }
+    const schedule = store.create({
+      title: clean(input.title, 'Başlık', 120, true),
+      description: clean(input.description, 'Açıklama', 4000, false),
+      done: lines(input.done, 'Bitti tanımı', 12, 300),
+      assignee: assignee.id,
+      reviewer: this.#reviewerOf(input.reviewer, assignee.id),
+      planId,
+      priority: priorityOf(input.priority ?? 3),
+      difficulty: this.#difficultyBy(by, input.difficulty),
+      cron: spec.expr,
+      until: input.until ? parseUntil(input.until, now, { maxDays: DUE_MAX_DAYS, label: 'Bitiş' }) : null,
+      createdBy: by,
+      nextRunAt: nextCron(spec, now),
+    });
+    this.#emit(by, { type: 'schedule.changed', change: 'created', schedule });
+    this.#touchClock();
+    return schedule;
+  }
+
+  /** The coordinator, or a lead for their own team, changes a routine; a stopped one stays stopped. */
+  updateSchedule(by: string, id: string, patch: ScheduleUpdate): Schedule {
+    const store = this.#schedules();
+    const current = store.get(id);
+    this.#assertManages(by, current.assignee);
+    if (current.status === 'stopped') throw new ConflictError('Bu rutin durduruldu; yenisini aç.');
+    const now = this.#now();
+    const next: SchedulePatch = {};
+    if (patch.title !== undefined) next.title = clean(patch.title, 'Başlık', 120, true);
+    if (patch.description !== undefined) next.description = clean(patch.description, 'Açıklama', 4000, false);
+    if (patch.done !== undefined) next.done = lines(patch.done, 'Bitti tanımı', 12, 300);
+    if (patch.priority !== undefined) next.priority = priorityOf(patch.priority);
+    if (patch.difficulty !== undefined) next.difficulty = this.#difficultyBy(by, patch.difficulty);
+    if (patch.until !== undefined) next.until = patch.until ? parseUntil(patch.until, now, { maxDays: DUE_MAX_DAYS, label: 'Bitiş' }) : null;
+    if (patch.assignee !== undefined) {
+      const assignee = this.#d.roster.get(patch.assignee);
+      this.#assertManages(by, assignee.id);
+      if (assignee.lifecycle === 'archived') throw new ConflictError(`${assignee.name} işten çıkarıldı.`);
+      next.assignee = assignee.id;
+    }
+    const doer = next.assignee ?? current.assignee;
+    if (patch.reviewer !== undefined) next.reviewer = this.#reviewerOf(patch.reviewer, doer);
+    else if (current.reviewer === doer) throw new ConflictError(SELF_REVIEW);
+    if (patch.cron !== undefined) {
+      const spec = this.#cronSpec(patch.cron, now);
+      next.cron = spec.expr;
+      next.nextRunAt = nextCron(spec, now);
+    }
+    let change: ScheduleChange = 'updated';
+    if (patch.status !== undefined) {
+      if (!(SCHEDULE_STATUSES as readonly string[]).includes(patch.status)) throw new ValidationError('Rutin durumu active, paused ya da stopped olmalı.');
+      const status = patch.status as ScheduleStatus;
+      if (status !== current.status) {
+        next.status = status;
+        change = SCHEDULE_CHANGE[status];
+        if (status === 'active') Object.assign(next, this.#resumed(next.cron ?? current.cron, doer));
+      }
+    }
+    const schedule = store.update(id, next);
+    this.#emit(by, { type: 'schedule.changed', change, schedule });
+    this.#touchClock();
+    return schedule;
+  }
+
+  /** The owner's routine buttons (spec §6.3); the coordinator hears, for the record. */
+  ownerSchedule(id: string, action: 'pause' | 'resume' | 'stop'): Schedule {
+    const current = this.#schedules().get(id);
+    if (current.status === 'stopped') throw new ConflictError('Bu rutin durduruldu; yeniden açılamaz.');
+    const status = action === 'pause' ? 'paused' : action === 'resume' ? 'active' : 'stopped';
+    const next = this.#applyScheduleStatus(current, status, OWNER);
+    const verb = action === 'pause' ? 'duraklattı' : action === 'resume' ? 'sürdürdü' : 'durdurdu';
+    if (next.status !== current.status) this.#tellOwnerChanged(`Sahibi “${current.title}” rutinini ${verb}.`);
+    return next;
+  }
+
+  /** Active and paused routines, then the last 10 stopped. */
+  schedules(): Schedule[] {
+    if (!this.#d.schedules) return [];
+    return [...this.#d.schedules.list({ statuses: ['active', 'paused'] }), ...this.#d.schedules.list({ statuses: ['stopped'] }).slice(-10)];
+  }
+
+  #applyScheduleStatus(current: Schedule, status: ScheduleStatus, by: string): Schedule {
+    if (current.status === status) return current;
+    const patch: SchedulePatch = status === 'active' ? { status, ...this.#resumed(current.cron, current.assignee) } : { status };
+    const schedule = this.#schedules().update(current.id, patch);
+    this.#emit(by === OWNER ? null : by, { type: 'schedule.changed', change: SCHEDULE_CHANGE[status], schedule });
+    this.#touchClock();
+    return schedule;
+  }
+
+  /**
+   * A routine comes back: only with an assignee still in the office; its next run is from now, so the missed ones become
+   * one catch-up at most, and its failures count afresh.
+   */
+  #resumed(cron: string, assignee: string): SchedulePatch {
+    const who = this.#person(assignee);
+    if (!who || who.lifecycle === 'archived') throw new ConflictError(`${this.nameOf(assignee)} işten çıkarıldı; rutin yeni bir atanan verilene kadar duraklatılmış kalır.`);
+    return { nextRunAt: nextCron(parseCron(cron), this.#now()), failCount: 0 };
+  }
+
+  /** A valid cron no more frequent than the constitution allows (the smallest gap among its next five runs). */
+  #cronSpec(expr: string, now: number): CronSpec {
+    const spec = parseCron(expr);
+    const min = this.#rules().minScheduleMinutes;
+    const gap = minIntervalMinutes(spec, now);
+    if (gap < min) throw new ValidationError(`Rutin aralığı en az ${min} dk olmalı; bu zamanlama ${Math.round(gap)} dk'da bir tetikleniyor.`);
+    return spec;
+  }
+
+  #schedules(): ScheduleStore {
+    if (!this.#d.schedules) throw new ConflictError('Bu ofiste rutinler açık değil.');
+    return this.#d.schedules;
   }
 
   /** The office hands the task to its assignee (Dispatcher). */
@@ -813,6 +976,8 @@ export class Company {
       }
       this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'cancelled', finishedAt: at }));
     }
+    // Its routines stop with it (spec §4.4).
+    for (const sch of this.#d.schedules?.list({ planId, statuses: ['active', 'paused'] }) ?? []) this.#applyScheduleStatus(sch, 'stopped', OWNER);
     this.#d.plans.clearApproved(planId);
     const stopped = this.#d.plans.update(planId, { status: 'stopped' });
     const desk = this.#planDesk(stopped);

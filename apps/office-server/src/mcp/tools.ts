@@ -1,10 +1,10 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type Task, type TaskDifficulty } from '@cc/shared';
+import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText } from '../company/craft.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
-import { formatWhen } from '../company/time.ts';
+import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
@@ -52,6 +52,7 @@ function bool(args: Args, key: string): boolean | undefined {
   return v;
 }
 
+const SCHEDULE_TR: Record<ScheduleStatus, string> = { active: 'sürüyor', paused: 'duraklatıldı', stopped: 'durduruldu' };
 const STATUS_TR: Record<Task['status'], string> = { waiting: 'bekliyor', in_progress: 'sürüyor', review: 'incelemede', blocked: 'takıldı', parked: 'ertelendi', done: 'bitti', cancelled: 'iptal' };
 
 function taskLine(t: Task, company: Company): string {
@@ -169,6 +170,54 @@ export function officeTools(o: {
       run: ({ employee }, args) => {
         const task = company.unparkTask(employee.id, str(args, 'taskId'));
         return `“${task.title}” sıraya döndü (öncelik ${task.priority}).`;
+      },
+    },
+    {
+      name: 'scheduleCreate',
+      description:
+        'Open a routine (coordinator; lead for their team): recurring work that opens an ordinary task each time — with a reviewer, evidence and all the office rules. cron has 5 fields in local time ("0 9 * * 1-5" = weekdays 09:00). Routines cost quota: keep few, no more often than the constitution allows. A new instance is skipped while the previous one is still open.',
+      inputSchema: object(
+        { title: s('Routine title.'), description: s('What to do each time.'), done: strings('Definition of done of each instance.'), assignee: s('Employee id or name.'), cron: s('5-field cron, local time.'), reviewer, planId: s('The plan it serves.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty, until: { ...until, description: 'Stop after this time (optional): relative (+30d) or a local time (2026-12-31T18:00).' } },
+        ['title', 'assignee', 'cron'],
+      ),
+      kinds: LEADS,
+      run: ({ employee }, args) => {
+        const to = findPerson(str(args, 'assignee'));
+        const created = company.createSchedule(employee.id, {
+          title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), assignee: to.id, cron: str(args, 'cron'), reviewer: reviewerArg(args) ?? null,
+          planId: optStr(args, 'planId') ?? null, priority: num(args, 'priority'), difficulty: difficultyArg(args), until: optStr(args, 'until'),
+        });
+        return `Rutin açıldı (${created.id}): “${created.title}” → ${to.name}, ${cronLabel(parseCron(created.cron))}; ilk çalışma ${formatWhen(created.nextRunAt ?? Date.now(), Date.now())}.`;
+      },
+    },
+    {
+      name: 'scheduleList',
+      description: 'List the routines (coordinator, lead): who, when (in Turkish and as cron), the next run, the last instance, skips and failures.',
+      inputSchema: object({}),
+      kinds: LEADS,
+      run: () => {
+        const all = company.schedules();
+        if (all.length === 0) return 'Rutin yok.';
+        return all
+          .map((x) => `• ${x.id} “${x.title}” → ${company.nameOf(x.assignee)} · ${cronLabel(parseCron(x.cron))} (${x.cron}) · ${SCHEDULE_TR[x.status]}${x.nextRunAt && x.status === 'active' ? ` · sıradaki ${formatWhen(x.nextRunAt, Date.now())}` : ''}${x.lastTaskId ? ` · son örnek ${x.lastTaskId}` : ''}${x.skipCount ? ` · ${x.skipCount} atlama` : ''}${x.failCount ? ` · ${x.failCount} hata` : ''}${x.note ? ` · ${x.note}` : ''}`)
+          .join('\n');
+      },
+    },
+    {
+      name: 'scheduleUpdate',
+      description: 'Change a routine (coordinator; lead for their team): status (active resumes, paused, stopped), cron, assignee, reviewer, priority, difficulty, until, title, description, done.',
+      inputSchema: object(
+        { scheduleId: s('The routine id.'), status: { type: 'string', enum: ['active', 'paused', 'stopped'], description: 'active resumes (next run from now), paused waits, stopped is final.' }, cron: s('New 5-field cron.'), assignee: s('New assignee (id or name).'), reviewer, priority: integer('1–5.', 1, 5), difficulty, until: { ...until, description: 'New stop time: relative (+30d) or a local time (2026-12-31T18:00); empty removes it.' }, title: s('New title.'), description: s('New description.'), done: strings('New definition of done.') },
+        ['scheduleId'],
+      ),
+      kinds: LEADS,
+      run: ({ employee }, args) => {
+        const assignee = optStr(args, 'assignee');
+        const changed = company.updateSchedule(employee.id, str(args, 'scheduleId'), {
+          status: optStr(args, 'status'), cron: optStr(args, 'cron'), assignee: assignee ? findPerson(assignee).id : undefined, reviewer: args.reviewer === undefined ? undefined : (reviewerArg(args) ?? null),
+          priority: num(args, 'priority'), difficulty: args.difficulty === undefined ? undefined : difficultyArg(args), until: optStr(args, 'until'), title: optStr(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'),
+        });
+        return `“${changed.title}” rutini güncellendi: ${SCHEDULE_TR[changed.status]}, ${cronLabel(parseCron(changed.cron))}${changed.nextRunAt && changed.status === 'active' ? `, sıradaki ${formatWhen(changed.nextRunAt, Date.now())}` : ''}.`;
       },
     },
     {

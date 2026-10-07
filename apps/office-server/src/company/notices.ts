@@ -66,6 +66,12 @@ export const NOTICE_TOPICS = {
   'task.reparked': 'decision',
   /** A task passed its due date (the coordinator hears once). */
   'task.overdue': 'info',
+  /** A routine skipped its third firing in a row: its previous instance is still open. */
+  'schedule.skipped': 'decision',
+  /** A routine could not open a task three times running; it is paused. */
+  'schedule.failed': 'decision',
+  /** A routine's assignee left; it is paused until it has one. */
+  'schedule.unassigned': 'decision',
   /** The owner changed the agenda from the sheet (released, parked, prioritized, a routine paused…). */
   'agenda.owner_changed': 'info',
   /** Digest off: the daily report reminder as a notice of its own (with the digest on it is a line of the digest). */

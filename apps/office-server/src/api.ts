@@ -50,6 +50,7 @@ const PROPOSAL_ROUTE = /^\/api\/proposals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline|stop)$/;
 const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/;
 const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
+const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
 const EMPLOYEE_ROUTE =
   /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file))?$/;
 
@@ -66,7 +67,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
   return {
     ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
-    goals: d.company.service.goals(), paused: d.company.service.paused(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),
+    goals: d.company.service.goals(), paused: d.company.service.paused(), schedules: d.company.service.schedules(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),
   };
 }
 
@@ -160,6 +161,9 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       // "Öne al" always means priority 1: a `priority` in the body is accepted and ignored.
       return sendJson(res, 200, company.ownerPrioritize(id));
     }
+    // The owner's routine buttons (spec §6.3): Duraklat / Sürdür / Durdur.
+    const scheduleAction = SCHEDULE_ROUTE.exec(url.pathname);
+    if (method === 'POST' && scheduleAction) return sendJson(res, 200, company.ownerSchedule(scheduleAction[1] ?? '', scheduleAction[2] as 'pause' | 'resume' | 'stop'));
     if (method === 'POST' && url.pathname === '/api/company/pause') {
       company.pause();
       return sendJson(res, 200, { paused: true });

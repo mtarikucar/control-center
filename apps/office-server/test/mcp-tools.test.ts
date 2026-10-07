@@ -36,7 +36,9 @@ describe('office tools', () => {
       'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend', 'reviewDecide',
       'taskFinish', 'taskPark', 'taskPass', 'taskUpdate',
     ]);
-    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark']);
+    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual([
+      'decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
+    ]);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
       'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
     ]);
@@ -353,5 +355,18 @@ describe('office tools — task difficulty', () => {
     await t.call(ada, 'taskPass', { to: 'Can', title: 'Takip', startAfter: '+2h' });
     expect(t.tasks.list({ assignee: can.id })[0]!.notBefore).toBeGreaterThan(Date.now());
     await expect(Promise.resolve().then(() => t.call(c, 'taskCreate', { assignee: 'Ada', title: 'X', dueAt: '+400d' }))).rejects.toThrow(/Son tarih/);
+  });
+
+  it('scheduleCreate, scheduleList and scheduleUpdate run routines; the list says the cron in Turkish', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const reply = await t.call(c, 'scheduleCreate', { title: 'Günlük ölçüm', assignee: 'Ada', cron: '0 9 * * *', done: ['rapor'] });
+    expect(reply).toMatch(/her gün 09:00/);
+    const id = t.schedules.list()[0]!.id;
+    expect(await t.call(c, 'scheduleList')).toContain('her gün 09:00');
+    expect(await t.call(c, 'scheduleUpdate', { scheduleId: id, status: 'paused' })).toMatch(/duraklatıldı/);
+    expect(t.schedules.get(id).status).toBe('paused');
+    await expect(Promise.resolve().then(() => t.call(ada, 'scheduleCreate', { title: 'X', assignee: 'Ada', cron: '0 9 * * *' }))).rejects.toThrow(/kapalı/);
   });
 });

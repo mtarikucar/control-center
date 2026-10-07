@@ -250,4 +250,18 @@ describe('company API', () => {
     const heard = t.notices.pending(c.id).filter((n) => n.topic === 'agenda.owner_changed');
     expect(heard.length).toBe(3);
   });
+
+  it('lets the owner pause, resume and stop a routine, and shows routines in the snapshot', async () => {
+    const t = await start({ clock: { status: () => ({ nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null }) } });
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const s = t.company.createSchedule(c.id, { title: 'Günlük', assignee: ada.id, cron: '0 9 * * *' });
+    expect((await call(t.port, 'POST', `/api/schedules/${s.id}/pause`)).body.status).toBe('paused');
+    expect((await call(t.port, 'POST', `/api/schedules/${s.id}/resume`)).body.status).toBe('active');
+    expect((await call(t.port, 'POST', `/api/schedules/${s.id}/stop`)).body.status).toBe('stopped');
+    expect((await call(t.port, 'POST', `/api/schedules/${s.id}/resume`)).status).toBe(409);
+    const office = await call(t.port, 'GET', '/api/office');
+    expect(office.body.schedules.map((x: { title: string }) => x.title)).toEqual(['Günlük']);
+    expect(office.body.clock).toMatchObject({ nextDueAt: null });
+  });
 });
