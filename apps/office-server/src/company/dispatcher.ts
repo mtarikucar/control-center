@@ -3,7 +3,7 @@ import type { ModelHint } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
-import { digestText, lastDigestSlot } from './notices.ts';
+import { NOTHING_FOR_A_SLEEPER, digestText, lastDigestSlot } from './notices.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 
 export interface DispatchEngine {
@@ -52,8 +52,6 @@ export class Dispatcher {
   readonly #now: () => number;
   /** When each employee last became idle (for idle sleep). */
   readonly #idleSince = new Map<string, number>();
-  /** The digest hour at which each coordinator was last reminded to report. */
-  readonly #reminded = new Map<string, number>();
   #sweepQueued = false;
 
   constructor(d: DispatcherDeps) {
@@ -156,7 +154,7 @@ export class Dispatcher {
     }
     if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
-    if (report !== null) this.#reminded.set(id, report);
+    if (report !== null) this.#d.events.append(id, { type: 'report.reminded', slot: report });
   }
 
   #rules(): Constitution {
@@ -180,13 +178,14 @@ export class Dispatcher {
 
   /**
    * Spec §4.5: a short report a day. Due at the day's last digest hour (that hour, or null) when a task was opened,
-   * started or finished between the last report and it; once per digest hour.
+   * started or finished between the last report and it; once per digest hour (the log keeps it across restarts).
    */
   #reportDue(c: Employee): number | null {
     const hours = this.#digestHours();
     if (hours.length === 0) return null;
     const slot = lastDigestSlot(this.#now(), [Math.max(...hours)]);
-    if ((this.#reminded.get(c.id) ?? 0) >= slot) return null;
+    const reminded = this.#d.events.latest(c.id, 'report.reminded')?.event;
+    if (reminded?.type === 'report.reminded' && reminded.slot >= slot) return null;
     const last = this.#d.events.latest(c.id, 'company.report')?.ts ?? 0;
     return this.#d.tasks.changedBetween(last, slot) ? slot : null;
   }
@@ -213,8 +212,10 @@ export class Dispatcher {
     if (this.#d.tasks.list({ assignee: e.id, statuses: ['waiting'] }).some((t) => t.kind === 'handover')) return true;
     const next = this.#d.tasks.nextFor(e.id);
     if (next && this.#mayStart(next)) return true;
-    // Information never wakes anyone: it waits for their next turn or a digest they are awake for.
-    if (this.#d.notices.pending(e.id).some((n) => n.kind === 'decision')) return true;
+    // Information never wakes anyone: it waits for their next turn or a digest they are awake for. During the owner's
+    // reserve only the coordinator wakes for a decision; one that asks nothing of a sleeper wakes no one.
+    const wakes = this.#d.notices.pending(e.id).some((n) => n.kind === 'decision' && !NOTHING_FOR_A_SLEEPER.has(n.topic));
+    if (wakes && (e.kind === 'coordinator' || !this.#reserve())) return true;
     return e.kind === 'coordinator' && !this.#reserve() && this.#reportDue(e) !== null;
   }
 

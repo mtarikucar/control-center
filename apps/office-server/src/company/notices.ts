@@ -45,6 +45,9 @@ export const NOTICE_TOPICS = {
 } as const satisfies Record<string, NoticeKind>;
 
 export type NoticeKind = 'decision' | 'info';
+
+/** Decisions that ask nothing of someone asleep: they wait for the reader's next turn instead of waking them. */
+export const NOTHING_FOR_A_SLEEPER: ReadonlySet<string> = new Set(['task.taken'] satisfies Array<keyof typeof NOTICE_TOPICS>);
 export type NoticeTopic = keyof typeof NOTICE_TOPICS;
 
 export interface Notice {

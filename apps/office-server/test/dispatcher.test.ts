@@ -269,12 +269,21 @@ describe('Dispatcher — notice kinds and the digest', () => {
     const f = fakeEngine(s, { engine: { now } });
     const c = companyFor(s, f, undefined, now);
     c.budget.setConstitution({ idleSleepMinutes: 0 });
-    const stop = new Dispatcher({
-      events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine,
-      budget: c.budget, now, tickMs: 50,
-    }).start();
-    cleanups.push(stop, f.cleanup, s.cleanup);
-    return { ...s, ...c, engine: f.engine, argvLog: f.argvLog, setClock: (t: number) => (clock = t), turns: (id: string) => systemMessages(s.events.list({ limit: 5000 }), id) };
+    const run = () =>
+      new Dispatcher({
+        events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine,
+        budget: c.budget, now, tickMs: 50,
+      }).start();
+    let stop = run();
+    cleanups.push(() => stop(), f.cleanup, s.cleanup);
+    return {
+      ...s, ...c, engine: f.engine, argvLog: f.argvLog, setClock: (t: number) => (clock = t), turns: (id: string) => systemMessages(s.events.list({ limit: 5000 }), id),
+      /** The office restarts: a new dispatcher over the same database. */
+      restart: () => {
+        stop();
+        stop = run();
+      },
+    };
   }
 
   it('important: information alone opens no turn; a decision does, and the information rides on it as the digest', async () => {
@@ -429,5 +438,43 @@ describe('Dispatcher — notice kinds and the digest', () => {
     await until(() => t.turns(ada.id).some((m) => m.startsWith(NUDGE_PREFIX) || m.includes('Altyazı')), 8000);
     await until(() => t.engine.ready(ada.id), 8000);
     expect((await readArgv(t.argvLog, 5)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1])).toEqual(['sonnet', 'opus']);
+  });
+
+  it('review focus: the report reminder is not repeated for the same digest hour after a restart', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.stop(ada.id);
+    t.company.createTask(coord.id, { assignee: ada.id, title: 'Yaz' });
+    t.setClock(at(7, 17));
+    await until(() => t.turns(coord.id).some((m) => m.includes('Günlük rapor zamanı')), 8000);
+    t.restart();
+    t.setClock(at(7, 17, 30));
+    await sleep(400);
+    expect(t.turns(coord.id).filter((m) => m.includes('Günlük rapor zamanı'))).toHaveLength(1);
+    t.setClock(at(8, 17));
+    await until(() => t.turns(coord.id).filter((m) => m.includes('Günlük rapor zamanı')).length === 2, 8000);
+  });
+
+  it('review focus: in the reserve a decision wakes only the coordinator (urgent work still wakes a member); a taken task wakes no one', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.sleep(coord.id);
+    await t.engine.sleep(ada.id);
+    t.notices.add(ada.id, 'task.taken', '“Çeviri” görevi (no x) Can adlı çalışana verildi; üzerinde çalışmayı bırak.');
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.9, resetsAt: at(7, 20) }, sevenDay: null, updatedAt: at(7, 10) });
+    t.budget.checkReserve();
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    await until(() => t.turns(coord.id).some((m) => m.includes('kota payı devrede')), 8000);
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+    const urgent = t.company.createTask(coord.id, { assignee: ada.id, title: 'Acil', priority: 1 });
+    await until(() => t.tasks.get(urgent.id).status === 'in_progress', 8000);
+    expect(t.turns(ada.id)[0]).toContain('önerin kabul edildi');
   });
 });
