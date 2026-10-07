@@ -124,6 +124,8 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note">{`Harcama: ${e.spend.service} $${e.spend.usd} — ${e.spend.purpose}`}</div>;
     case 'model.changed':
       return <div className="note">{`Model: ${e.model}`}</div>;
+    case 'model.switch.failed':
+      return <div className="note">{`Model geçişi olmadı (${e.to}): ${e.from} ile sürüyor. ${e.reason}`}</div>;
     case 'proposal.changed':
       return e.change === 'opened' || e.change === 'escalated' ? <ProposalCard proposal={e.proposal} /> : <div className="note">{`Öneri “${e.proposal.title}”: ${e.change === 'accepted' ? 'kabul edildi' : 'reddedildi'}`}</div>;
     default:

@@ -127,6 +127,14 @@ async function turn(text, uuid) {
   }
   ack(uuid, text);
   remember(text);
+  // Like the real CLI on a model the account cannot use: it takes the message, answers with an error and stays up.
+  const unavailable = (process.env.FAKE_CLAUDE_UNAVAILABLE_MODELS ?? '').split(',').filter(Boolean);
+  if (unavailable.includes(opt('--model') ?? '')) {
+    const why = `There's an issue with the selected model (${opt('--model')}). It may not exist or you may not have access to it. Run --model to pick a different model.`;
+    say(why);
+    result({ is_error: true, result: why });
+    return;
+  }
   if (text.includes('CRASH')) {
     process.stderr.write('boom: fake crash\n');
     process.exit(3);

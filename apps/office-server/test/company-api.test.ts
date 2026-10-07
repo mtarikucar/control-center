@@ -15,7 +15,8 @@ afterEach(async () => {
 
 async function start() {
   const s = setup();
-  const f = fakeEngine(s);
+  // Wired like main.ts: the engine reads the model policy switch from the constitution.
+  const f = fakeEngine(s, { engine: { modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled } });
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
   const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals } }, { allowedOrigins: [] });
@@ -39,14 +40,24 @@ function call(port: number, method: string, path: string, body?: unknown): Promi
 }
 
 describe('company API', () => {
-  it('important: the owner’s message to the coordinator goes on the constitution’s owner model; to a member, on theirs', async () => {
+  it('R11: the owner’s message does not move a sonnet coordinator to fable, model policy on or off; the owner can ask for fable', async () => {
     const t = await start();
     const coord = t.company.hireCoordinator('sonnet');
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', model: 'haiku' });
-    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Bir plan öner.' })).status).toBe(202);
-    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Merhaba.' })).status).toBe(202);
+    const turns = () => t.events.list({ limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
     const models = async (n: number) => (await readArgv(t.argvLog, n)).map((a) => `${a.cwd.includes('koordinator') ? 'K' : 'A'}:${a.args[a.args.indexOf('--model') + 1]}`);
-    await until(() => t.events.list({ limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length === 2, 8000);
+    expect(t.budget.constitution()).toMatchObject({ modelPolicyEnabled: false, coordinatorModels: { owner: 'sonnet' } });
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Bir plan öner.' })).status).toBe(202);
+    await until(() => turns() === 1, 8000);
+    t.budget.setConstitution({ modelPolicyEnabled: true });
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Biraz daha düşün.' })).status).toBe(202);
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Merhaba.' })).status).toBe(202);
+    await until(() => turns() === 3, 8000);
+    expect((await models(2)).sort()).toEqual(['A:haiku', 'K:sonnet']);
+    // The owner may want fable for the coordinator: the constitution says so, and then it does.
+    t.budget.setConstitution({ coordinatorModels: { owner: 'fable' } });
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Şimdi derin düşün.' })).status).toBe(202);
+    await until(() => turns() === 4, 8000);
     expect((await models(3)).sort()).toEqual(['A:haiku', 'K:fable', 'K:sonnet']);
   });
 

@@ -42,12 +42,11 @@ export const NOTICE_TOPICS = {
   'limit.tasks_per_day': 'decision',
   /** The owner reverted a decision: do what follows from it. */
   'decision.reverted': 'decision',
+  /** Digest off: the daily report reminder as a notice of its own (with the digest on it is a line of the digest). */
+  'report.reminder': 'decision',
 } as const satisfies Record<string, NoticeKind>;
 
 export type NoticeKind = 'decision' | 'info';
-
-/** Decisions that ask nothing of someone asleep: they wait for the reader's next turn instead of waking them. */
-export const NOTHING_FOR_A_SLEEPER: ReadonlySet<string> = new Set(['task.taken'] satisfies Array<keyof typeof NOTICE_TOPICS>);
 export type NoticeTopic = keyof typeof NOTICE_TOPICS;
 
 export interface Notice {
@@ -101,7 +100,8 @@ function span(from: number, to: number): string {
 }
 
 function oneLine(text: string): string {
-  const line = text.replace(/\s+/g, ' ').trim();
+  // Under "Teslimler" the notice's own "Görev bitti:" says nothing new.
+  const line = text.replace(/\s+/g, ' ').trim().replace(/^Görev bitti: /, '');
   return line.length > LINE_CHARS ? `${line.slice(0, LINE_CHARS - 1)}…` : line;
 }
 

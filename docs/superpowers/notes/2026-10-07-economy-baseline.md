@@ -13,6 +13,10 @@ Can ikinci işinin 20. dakikasında takılır, koordinatör işi Ada'ya verir. A
 koordinatör kabul eder. Ertesi sabah günlük rapor hatırlatması gelir, koordinatör raporlar. Herkes işini teslim eder (hatırlatma
 ya da tırmandırma yok); kimse askColleague kullanmaz.
 
+Bu tablolar ve aynı günün main'de kaydedilmiş mesaj/olay günlüğü (`2026-10-07-economy-baseline.log.json`) senaryo
+testinin **golden**'ıdır. Dal, anahtarlar kapalıyken bunları birebir üretmek zorunda (R10, `economy.scenario.test.ts`).
+Tabloyu değiştirmeden önce main'de yeniden ölç.
+
 ## Taban (main, 2026-10-07)
 
 | Çalışan | Rol | Model | Tur | Oturum | Ağırlık | Modellenmiş maliyet |

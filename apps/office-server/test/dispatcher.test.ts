@@ -230,7 +230,8 @@ describe('Dispatcher — reserve and sleep', () => {
     await until(() => t.engine.ready(ada.id) && t.engine.ready(coord.id));
     await t.engine.sleep(coord.id);
     await t.engine.sleep(ada.id);
-    t.notices.add(ada.id, 'role.changed', 'Bilgi: Can artık ekip lideri.');
+    // As on main (only the topic is new); a decision, so not even a decision wakes a member.
+    t.notices.add(ada.id, 'proposal.decided', 'Bilgi: toplantı yok.');
     const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Plan onaylandı')), 8000);
@@ -246,6 +247,23 @@ describe('Dispatcher — reserve and sleep', () => {
     await sleep(300);
     expect(t.roster.get(ada.id).lifecycle).toBe('stopped');
     expect(t.tasks.get(task.id).status).toBe('waiting');
+  });
+
+  it('reminds the coordinator once a day to report when something happened', async () => {
+    const t = makeBudgeted();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    const reminders = () => systemMessages(t.events.list({ limit: 5000 }), coord.id).filter((m) => m.includes('Günlük özet zamanı'));
+    t.advance(25 * 3_600_000);
+    await sleep(300);
+    expect(reminders()).toHaveLength(0);
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'iş' });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    await until(() => reminders().length === 1, 8000);
+    await sleep(300);
+    expect(reminders()).toHaveLength(1);
+    t.advance(25 * 3_600_000);
+    await until(() => reminders().length === 2, 8000);
   });
 
   it('important: a sleeping lead wakes for a proposal to decide', async () => {
@@ -264,14 +282,15 @@ describe('Dispatcher — reserve and sleep', () => {
 describe('Dispatcher — notice kinds and the digest', () => {
   const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).getTime();
   /** Everything on one simulated clock: digest hours are local wall-clock hours. */
-  function makeDigest() {
+  function makeDigest(o: { unavailable?: string } = {}) {
     let clock = at(7, 10);
     const now = () => clock;
     const s = setup(8, now);
     const failFlag = join(tempDir('fake-claude-fail-'), 'fail');
-    const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag }, engine: { now } });
+    const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag, FAKE_CLAUDE_UNAVAILABLE_MODELS: o.unavailable ?? '' }, engine: { now, modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled } });
     const c = companyFor(s, f, undefined, now);
-    c.budget.setConstitution({ idleSleepMinutes: 0 });
+    // These tests are about the economy plan's features: all three switched on (they are off by default).
+    c.budget.setConstitution({ idleSleepMinutes: 0, digestEnabled: true, modelPolicyEnabled: true, difficultyModelsEnabled: true });
     const run = () =>
       new Dispatcher({
         events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine,
@@ -380,24 +399,28 @@ describe('Dispatcher — notice kinds and the digest', () => {
     expect(t.turns(coord.id)).toHaveLength(2);
   });
 
-  it('important: information never wakes a sleeper, even at a digest hour; a decision wakes anyone, a member too', async () => {
+  it('R10: notices never wake a member, a decision wakes the coordinator, and with the digest on information wakes no one', async () => {
     const t = makeDigest();
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
     await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
     await t.engine.sleep(coord.id);
     await t.engine.sleep(ada.id);
-    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
-    t.notices.add(ada.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    t.notices.add(coord.id, 'task.finished', 'Görev bitti: “Yaz” (Ada): Yazıldı.');
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
     t.setClock(at(7, 17));
     await sleep(400);
     expect([t.roster.get(coord.id).lifecycle, t.roster.get(ada.id).lifecycle]).toEqual(['sleeping', 'sleeping']);
-    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
-    await until(() => t.turns(ada.id).length === 1, 8000);
+    t.notices.add(coord.id, 'task.blocked', 'Ada “Çiz” görevinde takıldı.');
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toMatch(/^Ofisten notlar:\n- Ada “Çiz” görevinde takıldı\./);
+    expect(t.turns(coord.id)[0]).toContain('“Yaz” (Ada): Yazıldı.');
+    // The member's decision waits for their next waking (spec §3.4, as on main).
+    await sleep(300);
+    expect(t.roster.get(ada.id).lifecycle).toBe('sleeping');
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Çeviri' });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
     expect(t.turns(ada.id)[0]).toMatch(/^Ofisten notlar:\n- “Altyazı” önerin kabul edildi\./);
-    expect(t.turns(ada.id)[0]).toContain('Can artık İçerik ekibinin lideri.');
-    expect(t.turns(ada.id)[0]).not.toContain('Bu özet bilgi içindir');
-    expect(t.roster.get(coord.id).lifecycle).toBe('sleeping');
   });
 
   it('review focus: in the owner’s reserve information opens no turn, even at a digest hour; it waits for the next turn', async () => {
@@ -461,7 +484,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     await until(() => t.turns(coord.id).filter((m) => m.includes('Günlük rapor zamanı')).length === 2, 8000);
   });
 
-  it('review focus: in the reserve a decision wakes only the coordinator (urgent work still wakes a member); a taken task wakes no one', async () => {
+  it('review focus: a sleeping member waits for their notices, in the reserve too; urgent work still wakes them', async () => {
     const t = makeDigest();
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
@@ -550,10 +573,29 @@ describe('Dispatcher — notice kinds and the digest', () => {
     await until(() => t.engine.ready(ada.id));
     const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Kolay iş', difficulty: 'easy' });
     await until(() => t.turns(ada.id).some((m) => m.includes('## Görev: Kolay iş')), 8000);
-    expect(t.turns(ada.id)[0]).toContain('Zorluk: kolay · Model: opus');
+    // Off is as on main: no difficulty line in the task message; the difficulty is kept.
+    expect(t.turns(ada.id)[0]).not.toContain('Zorluk');
     expect(t.tasks.get(task.id).difficulty).toBe('easy');
     await until(() => t.engine.ready(ada.id), 8000);
     const models = (await readArgv(t.argvLog, 2)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1]);
     expect(models).toEqual(['opus']);
   });
+
+  it('R13: a task whose model the account cannot use is not lost: it runs on the old model with its notices, and the switch failure is in the log', async () => {
+    const t = makeDigest({ unavailable: 'opus' });
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id) && t.engine.ready(coord.id));
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
+    const said = () => t.events.list({ employeeId: ada.id, limit: 5000 }).flatMap((e) => (e.event.type === 'message.assistant' ? [e.event.text] : []));
+    await until(() => said().some((x) => x.startsWith('echo: ') && x.includes('## Görev: Mimari')), 8000);
+    expect(said().find((x) => x.startsWith('echo: '))).toContain('önerin kabul edildi');
+    expect(t.events.list({ employeeId: ada.id, limit: 5000 }).find((e) => e.event.type === 'model.switch.failed')?.event).toMatchObject({ from: 'sonnet', to: 'opus' });
+    expect(t.tasks.get(task.id).status).toBe('in_progress');
+    expect(t.notices.pending(ada.id)).toEqual([]);
+    const models = (await readArgv(t.argvLog, 4)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models).toEqual(['sonnet', 'opus', 'sonnet']);
+  });
 });
+

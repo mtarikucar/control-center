@@ -3,7 +3,7 @@ import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
-import { NOTHING_FOR_A_SLEEPER, digestText, lastDigestSlot } from './notices.ts';
+import { digestText, lastDigestSlot } from './notices.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 
 export interface DispatchEngine {
@@ -33,6 +33,7 @@ export interface DispatcherDeps {
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
 export const NOTICES_PREFIX = 'Ofisten notlar:';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Hands work to employees when they are free: the next task in their queue, the notices that need them (a plan was
@@ -52,6 +53,8 @@ export class Dispatcher {
   readonly #now: () => number;
   /** When each employee last became idle (for idle sleep). */
   readonly #idleSince = new Map<string, number>();
+  /** When each coordinator was last reminded to report (digest off: the reminder as before the economy plan). */
+  readonly #reminded = new Map<string, number>();
   #sweepQueued = false;
 
   constructor(d: DispatcherDeps) {
@@ -71,6 +74,7 @@ export class Dispatcher {
     });
     const timer = setInterval(() => {
       this.#d.budget?.checkReserve();
+      if (!this.#rules().digestEnabled) this.#remindReport();
       this.#scheduleSweep();
     }, this.#d.tickMs ?? 60_000);
     timer.unref();
@@ -137,7 +141,7 @@ export class Dispatcher {
     }
     const hint = this.#hint(employee, started, Boolean(body) || started !== null || decisions.length > 0);
     if (started) body = this.#delivery(started, hint.model);
-    const report = employee.kind === 'coordinator' ? this.#reportDue(employee) : null;
+    const report = digestOn && employee.kind === 'coordinator' ? this.#reportDue(employee) : null;
     // Information alone waits for a digest hour it has lived through (never during the owner's reserve); it rides on any turn that goes anyway.
     const digestNow = !this.#reserve() && (report !== null || infos.some((n) => n.createdAt <= lastDigestSlot(this.#now(), this.#digestHours())));
     if (!body && decisions.length === 0 && !digestNow) {
@@ -163,6 +167,24 @@ export class Dispatcher {
     if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
     if (report !== null) this.#d.events.append(id, { type: 'report.reminded', slot: report });
+  }
+
+  /**
+   * Spec §4.5, with the digest off (as before the economy plan): a day after the last report, reminder or hire, if
+   * something was done or is open, the coordinator gets a reminder notice.
+   */
+  #remindReport(): void {
+    const c = this.#d.company.coordinator();
+    if (!c) return;
+    const now = this.#now();
+    const last = Math.max(this.#d.events.latest(c.id, 'company.report')?.ts ?? 0, c.createdAt, this.#reminded.get(c.id) ?? 0);
+    if (now - last < DAY_MS) return;
+    const finished = this.#d.tasks.list({ statuses: ['done'], limit: 100_000 }).some((t) => (t.finishedAt ?? 0) > last);
+    const open = this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'], limit: 1 }).length > 0;
+    if (!finished && !open) return;
+    this.#reminded.set(c.id, now);
+    this.#d.notices.add(c.id, 'report.reminder', 'Günlük özet zamanı: bugün ne bitti, ne sürüyor, ne takıldı, ne harcandı — reportToOwner ile sahibine kısaca raporla.');
+    this.#schedule(c.id);
   }
 
   /** A task started for a message that never reached its assignee waits in their queue again. */
@@ -223,17 +245,19 @@ export class Dispatcher {
     return !this.#reserve() || task.priority === 1 || task.kind === 'handover';
   }
 
-  /** A sleeper wakes for a task that may start now, a notice that needs them, or (the coordinator) the daily report. */
+  /**
+   * A sleeper wakes for a task that may start now; the coordinator and a lead also for their notices (they are their
+   * work); a member's notices wait for their next waking (spec §3.4, as before the economy plan). With the digest on,
+   * information wakes no one, and the coordinator wakes for the daily report.
+   */
   #hasWorkFor(e: Employee): boolean {
     if (this.#d.tasks.list({ assignee: e.id, statuses: ['waiting'] }).some((t) => t.kind === 'handover')) return true;
     const next = this.#d.tasks.nextFor(e.id);
     if (next && this.#mayStart(next)) return true;
-    // Information never wakes anyone: it waits for their next turn or a digest they are awake for. During the owner's
-    // reserve only the coordinator wakes for a decision; one that asks nothing of a sleeper wakes no one.
+    if (e.kind !== 'coordinator' && e.kind !== 'lead') return false;
     const digestOn = this.#rules().digestEnabled;
-    const wakes = this.#d.notices.pending(e.id).some((n) => (n.kind === 'decision' || !digestOn) && !NOTHING_FOR_A_SLEEPER.has(n.topic));
-    if (wakes && (e.kind === 'coordinator' || !this.#reserve())) return true;
-    return e.kind === 'coordinator' && !this.#reserve() && this.#reportDue(e) !== null;
+    if (this.#d.notices.pending(e.id).some((n) => !digestOn || n.kind === 'decision')) return true;
+    return digestOn && e.kind === 'coordinator' && !this.#reserve() && this.#reportDue(e) !== null;
   }
 
   #wake(id: string): void {
@@ -291,7 +315,7 @@ export class Dispatcher {
     const done = task.done.length ? `\n\nBitti tanımı:\n${task.done.map((d) => `- ${d}`).join('\n')}` : '';
     const deps = task.dependsOn.length ? `\nÖnce bitenler: ${task.dependsOn.join(', ')}` : '';
     const brief = this.#briefChanged(task) ? '\nŞirket özeti değişti; güncelini briefRead ile oku.' : '';
-    const level = task.difficulty ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
+    const level = task.difficulty && this.#rules().difficultyModelsEnabled ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
 İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${deps}${brief}

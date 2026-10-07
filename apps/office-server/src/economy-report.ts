@@ -161,7 +161,8 @@ export function economyReport(db: DatabaseSync, w: Window): EconomyReport {
     } else if (ev.type === 'error' && inWindow(row.ts)) {
       const message = String(ev.message ?? '');
       if (/teslim edilemedi|iptal edildi|yeniden gönderilemedi/.test(message)) incidents.lostMessages += 1;
-      if (/modelinde açılamadı/.test(message)) incidents.failedSwitches += 1;
+    } else if (ev.type === 'model.switch.failed' && inWindow(row.ts)) {
+      incidents.failedSwitches += 1;
     } else if (ev.type === 'plan.changed' && inWindow(row.ts)) {
       const plan = ev.plan as { approvedAt: number | null };
       if (ev.change === 'reopened') plansReopened += 1;

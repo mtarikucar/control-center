@@ -12,12 +12,13 @@ afterEach(async () => {
 
 const MIN = 60_000;
 
-function make(o: { policy?: () => boolean } = {}) {
+function make(o: { policy?: () => boolean; unavailable?: string } = {}) {
   let clock = new Date(2026, 9, 7, 10, 0).getTime();
   const now = () => clock;
   const s = setup(8, now);
   const failFlag = join(tempDir('fake-claude-fail-'), 'fail');
-  const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag }, engine: { now, cacheTtlMinutes: () => 5, modelPolicyEnabled: o.policy } });
+  // These tests are about the model policy: on unless a test switches it.
+  const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag, FAKE_CLAUDE_UNAVAILABLE_MODELS: o.unavailable ?? '' }, engine: { now, cacheTtlMinutes: () => 5, modelPolicyEnabled: o.policy ?? (() => true) } });
   cleanups.push(f.cleanup, s.cleanup);
   const turns = (id: string) => s.events.list({ employeeId: id, limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
   const said = (id: string) =>
@@ -82,7 +83,7 @@ describe('Engine — model hints', () => {
     expect(t.said(e.id).at(-1)).toBe('echo: zor iş');
     expect(lost).toBe(0);
     expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
-    expect(t.errors(e.id).some((m) => m.includes('opus modelinde açılamadı; sonnet ile sürüyor'))).toBe(true);
+    expect(t.events.list({ employeeId: e.id, limit: 5000 }).find((x) => x.event.type === 'model.switch.failed')?.event).toMatchObject({ type: 'model.switch.failed', from: 'sonnet', to: 'opus' });
     expect(t.roster.get(e.id).lifecycle).toBe('idle');
     t.engine.send(e.id, 'yine zor', 'system', { model: 'opus', taskStart: true });
     await until(() => t.turns(e.id) === 3, 8000);
@@ -150,4 +151,26 @@ describe('Engine — model hints', () => {
     await until(() => t.turns(e.id) === 3, 8000);
     expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
   });
+
+  it('R13: a model the account cannot use (the CLI answers its first turn with an error and stays up): back to the old model, the message sent again, model.switch.failed', async () => {
+    const t = make({ unavailable: 'opus' });
+    const e = t.engine.hire({ name: 'Ada', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system');
+    await until(() => t.turns(e.id) === 1, 8000);
+    let lost = 0;
+    t.engine.send(e.id, 'zor iş: rapor yaz', 'system', { model: 'opus', taskStart: true, onLost: () => (lost += 1) });
+    await until(() => t.said(e.id).includes('echo: zor iş: rapor yaz'), 8000);
+    await until(() => t.engine.ready(e.id), 8000);
+    expect(lost).toBe(0);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+    const failed = t.events.list({ employeeId: e.id, limit: 5000 }).find((x) => x.event.type === 'model.switch.failed')?.event;
+    expect(failed).toMatchObject({ type: 'model.switch.failed', from: 'sonnet', to: 'opus' });
+    expect((failed as { reason: string }).reason).toMatch(/issue with the selected model/);
+    // Logged once: the owner sees the message once, though claude got it twice.
+    expect(t.events.list({ employeeId: e.id, limit: 5000 }).filter((x) => x.event.type === 'message.user' && (x.event as { text: string }).text === 'zor iş: rapor yaz')).toHaveLength(1);
+    t.engine.send(e.id, 'yine zor', 'system', { model: 'opus', taskStart: true });
+    await until(() => t.said(e.id).includes('echo: yine zor'), 8000);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+  });
 });
+

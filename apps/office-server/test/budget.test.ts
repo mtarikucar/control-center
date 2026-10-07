@@ -35,13 +35,25 @@ describe('Budget — constitution', () => {
     expect(t.budget.setConstitution({ digestHours: [18, 8, 18] }).digestHours).toEqual([8, 18]);
     const models = t.budget.setConstitution({ coordinatorModels: { digest: 'sonnet' }, difficultyModels: { easy: 'sonnet' }, cacheTtlMinutes: 10 });
     expect(models).toMatchObject({
-      coordinatorModels: { owner: 'fable', decision: 'sonnet', digest: 'sonnet' },
+      coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'sonnet' },
       difficultyModels: { easy: 'sonnet', medium: 'sonnet', hard: 'opus', critical: 'fable' },
       cacheTtlMinutes: 10,
     });
     expect(t.budget.setConstitution({ digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false })).toMatchObject({
       digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false,
     });
+  });
+
+  it('R9: the economy switches are off by default, also in a database written before they existed; the owner turns them on and off', () => {
+    const t = make();
+    const off = { digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false };
+    expect(DEFAULT_CONSTITUTION).toMatchObject({ ...off, cacheTtlMinutes: 5, coordinatorModels: { owner: 'sonnet' } });
+    expect(t.budget.constitution()).toMatchObject(off);
+    // The live office's constitution today: one row, nothing about the switches.
+    t.db.prepare("INSERT INTO constitution (key, value) VALUES ('ownerReservePct', '80')").run();
+    expect(t.budget.constitution()).toMatchObject({ ...off, ownerReservePct: 80 });
+    expect(t.budget.setConstitution({ digestEnabled: true }).digestEnabled).toBe(true);
+    expect(t.budget.setConstitution({ digestEnabled: false })).toMatchObject(off);
   });
 
   it('review focus: refuses wrong types, out-of-range values and unknown keys, changing nothing', () => {

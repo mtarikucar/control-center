@@ -271,7 +271,7 @@ export class Company {
       this.#d.notices.add(
         holder.id,
         started ? 'task.taken' : 'task.moved',
-        `“${task.title}” görevi (no ${task.id}) ${target.name} adlı çalışana verildi${started ? '; üzerinde çalışmayı bırak.' : '.'}`,
+        `“${task.title}” görevi (no ${task.id}) ${target.name} adlı çalışana verildi; üzerinde çalışmayı bırak.`,
       );
     }
     this.#taskEvent('assigned', next);
@@ -381,7 +381,7 @@ export class Company {
       // The archive never blocks a hand-in: the result is kept in the database either way.
     }
     const next = this.#d.tasks.update(taskId, { status: 'done', result: archived, finishedAt });
-    const line = `“${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
+    const line = `Görev bitti: “${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
     if (task.requester !== OWNER && task.requester !== by) {
       // A requester stuck on their own task is likely waiting for this one: they can go on now.
       const waiting = this.#d.tasks.list({ assignee: task.requester, statuses: ['blocked'], limit: 1 }).length > 0;

@@ -366,7 +366,7 @@ export function officeTools(o: {
     {
       name: 'taskCreate',
       description:
-        'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done". Give a difficulty: the task starts on its model (constitution, by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
+        'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done". Give a difficulty: when difficulty models are on in the constitution, the task starts on its model (by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
       inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
       kinds: LEADS,
       run: ({ employee }, args) => {

@@ -59,7 +59,7 @@ function office(file: string, version = Math.max(...MIGRATIONS.map((m) => m.vers
   events.append(ada.id, { type: 'task.changed', change: 'updated', task: { ...ciz, status: 'blocked' } });
   events.append(ada.id, { type: 'task.changed', change: 'assigned', task: { ...ciz, status: 'waiting' } });
   events.append(ada.id, { type: 'side.answer', text: 'x', ok: true, usage: usage(1), costUsd: 0.01 });
-  events.append(ada.id, { type: 'error', message: 'Oturum opus modelinde açılamadı; sonnet ile sürüyor.' });
+  events.append(ada.id, { type: 'model.switch.failed', from: 'sonnet', to: 'opus', reason: 'There’s an issue with the selected model' });
   events.append(ada.id, { type: 'error', message: 'Okunmamış 1 mesaj teslim edilemedi.' });
   return { db, coord, ada, clock: () => clock, setClock: (t: number) => (clock = t), notices: new NoticeStore(db, now), now };
 }

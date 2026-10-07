@@ -448,7 +448,7 @@ describe('Company — notice kinds', () => {
     t.company.update(ada.id, own.id, { blocked: true, note: 'tabloyu bekliyorum' });
     t.company.finish(can.id, second.id, { summary: 'hazır', outputs: [], learned: '' });
     expect(t.notices.pending(ada.id).at(-1)).toMatchObject({ kind: 'decision', topic: 'task.awaited' });
-    expect(t.notices.pending(c.id).filter((n) => n.text.startsWith('“tablo”')).map((n) => `${n.kind} ${n.topic}`)).toEqual(['info task.finished']);
+    expect(t.notices.pending(c.id).filter((n) => n.text.startsWith('Görev bitti: “tablo”')).map((n) => `${n.kind} ${n.topic}`)).toEqual(['info task.finished']);
   });
 
   it('review focus: only the coordinator and leads open critical work; a member’s critical pass counts as hard', () => {

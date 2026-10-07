@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Employee, StoredEvent } from '@cc/shared';
 import { Dispatcher, NOTICES_PREFIX } from '../src/company/dispatcher.ts';
@@ -10,7 +11,10 @@ import { setup, tempDir, until, type TestSetup } from './helpers.ts';
 
 /*
  * Economy scenario (plan "Ofis ekonomisi"): one simulated working day of a small office on the fake claude, counted
- * per employee — turns, the model each turn ran on and a modelled cost. It only reports; later tasks add thresholds.
+ * per employee — turns, the model each turn ran on and a modelled cost. Two runs:
+ * - every switch off (the default): the day must be main's, turn for turn and message for message — compared with the
+ *   baseline note's tables and with the messages and events recorded by this same test on main (the golden file);
+ * - the economy on (all three switches): the plan's thresholds.
  *
  * Deterministic by construction: the dispatcher's clock and its deferred work belong to the test. Time jumps from one
  * event to the next (a discrete-event simulation) and after each event the office runs until it rests. A member's
@@ -27,6 +31,12 @@ const DAY = 24 * 60 * MIN;
 const MODEL_WEIGHTS = { fable: 15, opus: 5, sonnet: 1, haiku: 0.2 } as const;
 type Family = keyof typeof MODEL_WEIGHTS;
 const familyOf = (model: string): Family | null => (Object.keys(MODEL_WEIGHTS) as Family[]).find((f) => model.toLowerCase().includes(f)) ?? null;
+const RANK: Record<Family, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
+
+const NOTES = fileURLToPath(new URL('../../../docs/superpowers/notes/', import.meta.url));
+/** The baseline measured on main (e2889e8): its tables, and the messages and events of the same day recorded on main. */
+const BASELINE_NOTE = join(NOTES, '2026-10-07-economy-baseline.md');
+const BASELINE_LOG = join(NOTES, '2026-10-07-economy-baseline.log.json');
 
 /** The plan "Ofis ekonomisi" targets: the coordinator's turns for this day, and its modelled cost at most 30 % of main's (measured on e2889e8). */
 const MAX_COORDINATOR_TURNS = 5;
@@ -56,14 +66,19 @@ function allEvents(s: TestSetup): StoredEvent[] {
   return out;
 }
 
-async function simulateDay() {
-  const start = new Date(2026, 9, 7, 8, 45).getTime();
+/**
+ * `economy`: the three switches on, the owner asks for the plan at 08:45 (on the owner model, as the API sends it) and
+ * the tasks have a difficulty. Off: the day as the baseline on main — 09:00, the plan proposed and approved.
+ */
+async function simulateDay(cfg: { economy: boolean }) {
+  const start = new Date(2026, 9, 7, cfg.economy ? 8 : 9, cfg.economy ? 45 : 0).getTime();
   let clock = start;
   const now = () => clock;
   const s = setup(8, now);
   const holdDir = tempDir('fake-claude-hold-');
-  const f = fakeEngine(s, { env: { FAKE_CLAUDE_HOLD_DIR: holdDir }, engine: { now } });
+  const f = fakeEngine(s, { env: { FAKE_CLAUDE_HOLD_DIR: holdDir }, engine: { now, modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled } });
   const c = companyFor(s, f, undefined, now);
+  if (cfg.economy) c.budget.setConstitution({ digestEnabled: true, modelPolicyEnabled: true, difficultyModelsEnabled: true });
   const deferred: Array<() => void> = [];
   const dispatcher = new Dispatcher({
     events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget,
@@ -74,7 +89,8 @@ async function simulateDay() {
   const coord = c.company.hireCoordinator();
   const ada = c.company.hire(coord.id, { name: 'Ada', role: 'Geliştirici' });
   const can = c.company.hire(coord.id, { name: 'Can', role: 'Geliştirici' });
-  let planId = '';
+  const propose = () => c.company.propose(coord.id, { title: 'Sürüm 1', goal: 'On işlik bir sürüm', approach: 'İki geliştirici, beşer iş' }).id;
+  let planId = cfg.economy ? '' : propose();
 
   let order = 0;
   const agenda: Array<{ at: number; order: number; run: () => void }> = [];
@@ -92,20 +108,21 @@ async function simulateDay() {
   const coordinatorTurn = (text: string, source: 'owner' | 'system') => {
     coordinatorTurns.push({ at: clock, text, source });
     if (source === 'owner') {
-      planId = c.company.propose(coord.id, { title: 'Sürüm 1', goal: 'On işlik bir sürüm', approach: 'İki geliştirici, beşer iş' }).id;
+      planId = propose();
       at(start + 15 * MIN, () => c.company.approve(planId));
     }
     if (text.includes('Plan onaylandı')) {
       for (let i = 1; i <= TASKS; i += 1) {
         const assignee = i <= TASKS / 2 ? ada.id : can.id;
         c.company.createTask(coord.id, {
-          assignee, title: `İş ${i}`, description: `Sürümün ${i}. parçası. HOLD`, done: ['Testler yeşil'], planId, difficulty: DIFFICULTIES[i - 1],
+          assignee, title: `İş ${i}`, description: `Sürümün ${i}. parçası. HOLD`, done: ['Testler yeşil'], planId, difficulty: cfg.economy ? DIFFICULTIES[i - 1] : undefined,
         });
       }
     }
     if (text.includes('görevinde takıldı')) for (const t of c.tasks.list({ statuses: ['blocked'] })) c.company.assign(coord.id, t.id, ada.id);
     if (text.includes('proposalDecide') && proposalId) c.company.decideProposal(coord.id, proposalId, { decision: 'accept', note: 'Olur.' });
-    if (text.includes('Günlük rapor zamanı')) c.company.report(coord.id, 'On iş bitti; biri takıldı ve Ada’ya geçti; bir fikir kabul edildi.');
+    // The reminder's wording: with the digest it is a line of the digest, without it the notice it was on main.
+    if (/Günlük (rapor|özet) zamanı/.test(text)) c.company.report(coord.id, 'On iş bitti; biri takıldı ve Ada’ya geçti; bir fikir kabul edildi.');
   };
   const memberTurn = (e: Employee, text: string) => {
     const taskId = /Görev no: (\S+)/.exec(text)?.[1];
@@ -163,10 +180,12 @@ async function simulateDay() {
     await settle();
   };
 
-  // 08:45: everyone is in; the owner asks the coordinator for a plan (the API sends it on the constitution's owner model)
-  // and approves it at 09:00.
   await until(() => [coord, ada, can].every((e) => f.engine.ready(e.id)), 10_000);
-  f.engine.send(coord.id, 'Sürüm 1 için on işlik bir plan öner.', 'owner', { model: c.budget.constitution().coordinatorModels.owner });
+  if (cfg.economy) {
+    // 08:45: the owner asks the coordinator for a plan; the API's hint: the owner model, never below the coordinator's own.
+    const owner = c.budget.constitution().coordinatorModels.owner as Family;
+    f.engine.send(coord.id, 'Sürüm 1 için on işlik bir plan öner.', 'owner', { model: RANK[owner] > RANK[coord.model as Family] ? owner : coord.model });
+  } else c.company.approve(planId);
   await sweepAt(start);
   for (let m = SWEEP_EVERY; m <= WORKDAY_MINUTES; m += SWEEP_EVERY) at(start + m * MIN, () => undefined);
   while (agenda.length) {
@@ -182,6 +201,35 @@ async function simulateDay() {
   await sweepAt(clock);
 
   return { s, c, start, coordinatorTurns, people: [coord, ada, can] };
+}
+
+const uuids = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+
+/**
+ * What the day said and did, comparable across runs: every message (ids masked), and each one's events in order.
+ * (Events of different people interleave as their processes answer; each one's own sequence is fixed.)
+ */
+function logOf(s: TestSetup, people: Employee[]) {
+  const who = (id: string | null) => people.find((p) => p.id === id)?.name ?? '-';
+  const all = allEvents(s);
+  const events: Record<string, string[]> = {};
+  for (const e of all) (events[who(e.employeeId)] ??= []).push(e.event.type);
+  return {
+    messages: all.flatMap((e) => (e.event.type === 'message.user' ? [`${who(e.employeeId)} · ${e.event.source} · ${e.event.text.replace(uuids, '<id>')}`] : [])),
+    events,
+  };
+}
+
+/** The data rows of the first Markdown table after `heading` in `text`. */
+function tableAfter(text: string, heading: string): string[] {
+  const lines = text.split('\n');
+  const from = lines.findIndex((l) => l.startsWith(heading));
+  const rows: string[] = [];
+  for (const line of lines.slice(from + 1)) {
+    if (line.startsWith('|')) rows.push(line.trim());
+    else if (rows.length) break;
+  }
+  return rows.slice(2);
 }
 
 interface Turn {
@@ -284,28 +332,54 @@ modelinden güçlü bir modelde koşmaz. Yeniden üretmek için (repo kökünden
 `;
 
 /** The table per employee and model, and why each coordinator turn came, on which model (`coordinatorModels`, in order). */
-function report(rows: Row[], coordinatorModels: string[], coordinatorTurns: Array<{ at: number; text: string; source: 'owner' | 'system' }>, start: number): string {
+type CoordinatorTurn = { at: number; text: string; source: 'owner' | 'system' };
+
+/** Turns, sessions and modelled cost per employee and model, with the total (the baseline note's table). */
+function employeeTable(rows: Row[]): string[] {
   const cost = (r: Row) => r.turns * MODEL_WEIGHTS[r.model as Family];
   const kind: Record<string, string> = { coordinator: 'koordinatör', lead: 'lider', member: 'üye' };
   const n = (x: number) => String(Math.round(x * 10) / 10);
-  const lines = [
+  return [
     '| Çalışan | Rol | Model | Tur | Oturum | Ağırlık | Modellenmiş maliyet |',
     '|---|---|---|---:|---:|---:|---:|',
     ...rows.map((r) => `| ${r.name} | ${kind[r.kind] ?? r.kind} | ${r.model} | ${r.turns} | ${r.sessions} | ${n(MODEL_WEIGHTS[r.model as Family])} | ${n(cost(r))} |`),
     `| **Toplam** | | | **${rows.reduce((a, r) => a + r.turns, 0)}** | | | **${n(rows.reduce((a, r) => a + cost(r), 0))}** |`,
-    '',
-    'Koordinatöre tur açan olaylar (simüle saat):',
-    '',
-    '| # | Saat | Neden | Model |',
-    '|---:|---|---|---|',
-    ...coordinatorTurns.map((t, i) => `| ${i + 1} | ${clockText(t.at, start)} | ${causesOf(t.text, t.source)} | ${coordinatorModels[i] ?? '?'} |`),
   ];
-  return lines.join('\n');
+}
+
+/** Why each coordinator turn came, when; with `models`, on which model too. */
+function timelineTable(coordinatorTurns: CoordinatorTurn[], start: number, models?: string[]): string[] {
+  return [
+    models ? '| # | Saat | Neden | Model |' : '| # | Saat | Neden |',
+    models ? '|---:|---|---|---|' : '|---:|---|---|',
+    ...coordinatorTurns.map((t, i) => `| ${i + 1} | ${clockText(t.at, start)} | ${causesOf(t.text, t.source)} |${models ? ` ${models[i] ?? '?'} |` : ''}`),
+  ];
+}
+
+function report(rows: Row[], coordinatorModels: string[], coordinatorTurns: CoordinatorTurn[], start: number): string {
+  return [...employeeTable(rows), '', 'Koordinatöre tur açan olaylar (simüle saat):', '', ...timelineTable(coordinatorTurns, start, coordinatorModels)].join('\n');
 }
 
 describe('economy scenario', () => {
-  it('a simulated day: turns, models and modelled cost per employee (reports only)', async () => {
-    const { s, c, start, coordinatorTurns, people } = await simulateDay();
+  it('R10: with every switch off the day is main’s — the baseline note’s tables, and main’s messages and events one by one', async () => {
+    const { s, start, coordinatorTurns, people } = await simulateDay({ economy: false });
+    const log = logOf(s, people);
+    // ECONOMY_GOLDEN_OUT=<file>: write the log (how the golden was recorded on main).
+    if (process.env.ECONOMY_GOLDEN_OUT) writeFileSync(process.env.ECONOMY_GOLDEN_OUT, `${JSON.stringify(log, null, 1)}\n`);
+    const { turns, sessions } = turnsOf(s, people);
+    const table = employeeTable(rowsOf(turns, sessions, people));
+    const timeline = timelineTable(coordinatorTurns, start);
+    console.log(`\nEkonomi senaryosu — anahtarlar kapalı\n\n${[...table, '', ...timeline].join('\n')}\n`);
+    const baseline = readFileSync(BASELINE_NOTE, 'utf8');
+    expect(table.slice(2)).toEqual(tableAfter(baseline, '## Taban (main, 2026-10-07)'));
+    expect(timeline.slice(2)).toEqual(tableAfter(baseline, 'Zaman çizelgesi'));
+    const golden = JSON.parse(readFileSync(BASELINE_LOG, 'utf8')) as ReturnType<typeof logOf>;
+    expect(log.messages).toEqual(golden.messages);
+    expect(log.events).toEqual(golden.events);
+  }, 60_000);
+
+  it('the economy on: turns, models and modelled cost per employee, within the plan’s thresholds', async () => {
+    const { s, c, start, coordinatorTurns, people } = await simulateDay({ economy: true });
 
     const tasks = c.tasks.list({ limit: 100 });
     expect(tasks).toHaveLength(TASKS);

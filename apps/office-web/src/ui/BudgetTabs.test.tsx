@@ -6,8 +6,8 @@ import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 
 const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
   constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17],
-    coordinatorModels: { owner: 'fable', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
-    digestEnabled: true, modelPolicyEnabled: true, difficultyModelsEnabled: true },
+    coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
+    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false },
   reserve: { active: true, limitPct: 75, fiveHourPct: 82, sevenDayPct: 40 },
   month: { key: '2026-10', usd: 31.5 },
   plans: { p1: { spentUsd: 25, claudeUsd: 3.2 } },
@@ -61,16 +61,17 @@ describe('ConstitutionTab', () => {
     fireEvent.change(screen.getByLabelText('Aylık para sınırı (USD)'), { target: { value: '' } });
     expect((screen.getByLabelText('Özet saatleri') as HTMLInputElement).value).toBe('9, 17');
     fireEvent.change(screen.getByLabelText('Özet saatleri'), { target: { value: '8, 13 18' } });
-    expect((screen.getByLabelText('Koordinatör modelleri') as HTMLInputElement).value).toBe('fable / sonnet / haiku');
+    expect((screen.getByLabelText('Koordinatör modelleri') as HTMLInputElement).value).toBe('sonnet / sonnet / haiku');
     fireEvent.change(screen.getByLabelText('Koordinatör modelleri'), { target: { value: 'opus / sonnet/haiku' } });
-    expect((screen.getByLabelText('Model politikası açık') as HTMLInputElement).checked).toBe(true);
+    // R9: the switches come off; the owner turns one on.
+    expect((screen.getByLabelText('Model politikası açık') as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByLabelText('Model politikası açık'));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
     expect(api.setConstitution).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerReservePct: 40, monthlyUsdCap: null, maxEmployees: 8, digestHours: [8, 13, 18], cacheTtlMinutes: 5,
         coordinatorModels: { owner: 'opus', decision: 'sonnet', digest: 'haiku' }, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
-        digestEnabled: true, modelPolicyEnabled: false, difficultyModelsEnabled: true,
+        digestEnabled: false, modelPolicyEnabled: true, difficultyModelsEnabled: false,
       }),
     );
     expect(screen.getByText('Kaydedildi.')).toBeTruthy();

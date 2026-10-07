@@ -64,6 +64,8 @@ export type OfficeEvent =
   | { type: 'spend.recorded'; spend: Spend }
   | { type: 'budget.changed'; budget: BudgetSummary }
   | { type: 'model.changed'; model: ModelAlias }
+  /** A session could not run on the model a hint asked for; it goes on on `from` and the turn's messages are sent again. */
+  | { type: 'model.switch.failed'; from: string; to: string; reason: string }
   | { type: 'proposal.changed'; change: ProposalChange; proposal: Proposal }
   | { type: 'error'; message: string };
 

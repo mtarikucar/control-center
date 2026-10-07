@@ -28,7 +28,7 @@ describe.skipIf(!enabled)('real claude: a model switch keeps the conversation (h
     const raw = join(tempDir('claude-raw-'), 'raw.jsonl');
     // The CLI's stdout is teed to a file so the test can read its own words (model names, cache tokens).
     const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE'))), RAW_LOG: raw };
-    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['sh', '-c', 'claude "$@" | tee -a "$RAW_LOG"', 'sh'], env });
+    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['sh', '-c', 'claude "$@" | tee -a "$RAW_LOG"', 'sh'], env, modelPolicyEnabled: () => true });
     const word = `zebra-${Math.floor(1000 + Math.random() * 9000)}`;
     const turns: Array<{ prompt: string; seq: number }> = [];
     const turn = async (prompt: string, hint = {}) => {
@@ -74,6 +74,47 @@ describe.skipIf(!enabled)('real claude: a model switch keeps the conversation (h
       ].join('\n');
       console.log(`\n${table}\n`);
       if (process.env.SMOKE_OUT) writeFileSync(process.env.SMOKE_OUT, `${table}\n`);
+    } finally {
+      await engine.shutdown();
+      s.cleanup();
+    }
+  }, 600_000);
+});
+
+/**
+ * Acceptance R13 at K3: a switch to a model the account cannot use. The real CLI starts on it, takes the message,
+ * answers "There's an issue with the selected model …" (result is_error) and stays up. The office must notice
+ * (model.switch.failed), go back to the old model and send the message again: the code word still comes back.
+ */
+describe.skipIf(!enabled)('real claude: a switch to a model the account cannot use loses nothing', () => {
+  it('falls back to haiku, sends the message again, and says so (model.switch.failed)', async () => {
+    const s = setup();
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE')));
+    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['claude'], env, modelPolicyEnabled: () => true });
+    const e = engine.hire({ name: 'Smoke', role: 'Kısa cevap veren bir test çalışanısın; araç kullanma.', model: 'haiku' });
+    const word = `kiwi-${Math.floor(1000 + Math.random() * 9000)}`;
+    const said = () => s.events.list({ employeeId: e.id, limit: 5000 }).flatMap((x) => (x.event.type === 'message.assistant' ? [x.event.text] : []));
+    try {
+      engine.send(e.id, `Remember this code word for later: ${word}. Reply with exactly: OK`, 'system');
+      await waitFor(s.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { timeoutMs: 180_000 });
+      // A name no account has: what the CLI does on a model it cannot use.
+      engine.send(e.id, 'What was the code word I gave you? Reply with the code word only.', 'system', { model: 'claude-nonexistent-model-9' as never, taskStart: true });
+      const answer = await waitFor(s.events, (x) => x.employeeId === e.id && x.event.type === 'message.assistant' && x.event.text.includes(word), { timeoutMs: 180_000 });
+      await waitFor(s.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: answer.seq, timeoutMs: 180_000 });
+      const failed = s.events.list({ employeeId: e.id, limit: 5000 }).find((x) => x.event.type === 'model.switch.failed')?.event as { from: string; to: string; reason: string } | undefined;
+      expect(failed).toMatchObject({ from: 'haiku', to: 'claude-nonexistent-model-9' });
+      expect(failed!.reason).toMatch(/issue with the selected model/);
+      const inits = s.events.list({ employeeId: e.id, limit: 5000 }).filter((x) => x.event.type === 'session.started').map((x) => (x.event as { model: string }).model);
+      const finished = s.events.list({ employeeId: e.id, limit: 5000 }).filter((x) => x.event.type === 'turn.finished').map((x) => (x.event as { ok: boolean }).ok);
+      const out = [
+        `Kod kelimesi: ${word}`,
+        `Turların CLI init modeli: ${inits.join(' → ')}`,
+        `Turlar (ok): ${finished.join(', ')}`,
+        `model.switch.failed: ${failed!.from} → ${failed!.to}: ${failed!.reason}`,
+        `Son cevap: ${said().at(-1)}`,
+      ].join('\n');
+      console.log(`\n${out}\n`);
+      if (process.env.SMOKE_R13_OUT) writeFileSync(process.env.SMOKE_R13_OUT, `${out}\n`);
     } finally {
       await engine.shutdown();
       s.cleanup();
