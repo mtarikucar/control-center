@@ -100,6 +100,14 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
           {time}
         </div>
       );
+    case 'goal.changed':
+      return (
+        <div className="note">
+          {e.change === 'set' ? `Hedef: ${e.goal.title}` : e.change === 'stopped' ? `Hedef durduruldu: ${e.goal.title}` : e.change === 'closed' ? `Hedef kapandı: ${e.goal.title}` : `Hedef güncellendi: ${e.goal.title}`}
+        </div>
+      );
+    case 'company.paused':
+      return <div className="note">{e.paused ? 'Şirket duraklatıldı' : 'Şirket sürdürüldü'}</div>;
     case 'task.changed': {
       if (e.change === 'in_review') return <div className="note">Görev incelemede: {e.task.title}</div>;
       if (e.change === 'reviewed') {

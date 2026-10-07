@@ -4,7 +4,7 @@ import type { Plan } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { PlanCard } from './PlanCard.tsx';
 
-vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})) } }));
+vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})) } }));
 const { api } = await import('../net/api.ts');
 
 const plan = (over: Partial<Plan> = {}): Plan => ({
@@ -68,5 +68,14 @@ describe('PlanCard', () => {
   it('a plan without a method shows no method section', () => {
     render(<PlanCard plan={plan({ method: null })} />);
     expect(screen.queryByRole('region', { name: 'Nasıl yapılacak' })).toBeNull();
+  });
+
+  it('marks a plan the coordinator started and lets the owner stop a running plan', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    useOffice.setState({ plans: { p1: plan({ status: 'approved', approvedBy: 'coordinator' }) } });
+    render(<PlanCard plan={plan({ status: 'approved', approvedBy: 'coordinator' })} />);
+    expect(screen.getByText('Koordinatör başlattı')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Durdur' }));
+    await waitFor(() => expect(api.stopPlan).toHaveBeenCalledWith('p1'));
   });
 });

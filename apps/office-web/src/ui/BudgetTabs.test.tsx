@@ -112,4 +112,15 @@ describe('ConstitutionTab', () => {
     act(() => useOffice.setState({ budget: summary({ month: { key: '2026-10', usd: 99 } }) }));
     expect((screen.getByLabelText('Sahibinin kota payı (%)') as HTMLInputElement).value).toBe('40');
   });
+
+  it('edits autonomy, the active-goal limit and the pulse interval', async () => {
+    render(<ConstitutionTab />);
+    const free = screen.getByLabelText('Tam serbest') as HTMLInputElement;
+    expect(free.checked).toBe(true);
+    fireEvent.click(free);
+    fireEvent.change(screen.getByLabelText('En fazla aktif hedef'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Nabız aralığı (saat)'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Kaydet' }));
+    await waitFor(() => expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ autonomy: 'plans', activeGoals: 4, pulseHours: 0 })));
+  });
 });

@@ -1,4 +1,4 @@
-import type { Employee, EmployeeKind, Lifecycle, ModelAlias, PlanStatus, ProposalKind, ProposalStatus, TaskStatus } from '@cc/shared';
+import type { Employee, EmployeeKind, GoalStatus, Lifecycle, ModelAlias, PlanStatus, ProposalKind, ProposalStatus, TaskStatus } from '@cc/shared';
 import { formatReset } from './format.ts';
 
 const LABELS: Record<Lifecycle, string> = {
@@ -46,3 +46,5 @@ export const PLAN_STATUS_LABELS: Record<PlanStatus, string> = { draft: 'Onay bek
 
 export const PROPOSAL_KIND_LABELS: Record<ProposalKind, string> = { need: 'İhtiyaç', purchase: 'Satın alma', idea: 'Fikir', objection: 'İtiraz' };
 export const PROPOSAL_STATUS_LABELS: Record<ProposalStatus, string> = { open: 'Karar bekliyor', owner: 'Senin onayını bekliyor', accepted: 'Kabul edildi', declined: 'Reddedildi' };
+
+export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = { active: 'Aktif', done: 'Ulaşıldı', dropped: 'Bırakıldı' };

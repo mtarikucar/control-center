@@ -39,6 +39,7 @@ export function PlanCard({ plan }: { plan: Plan }) {
       <header className="row">
         <strong>{live.title}</strong>
         <span className={`badge plan-${live.status}`}>{PLAN_STATUS_LABELS[live.status]}</span>
+        {live.approvedBy === 'coordinator' && <span className="badge started-by">Koordinatör başlattı</span>}
       </header>
       <span className="muted">sürüm {live.version}</span>
       <dl>
@@ -102,6 +103,19 @@ export function PlanCard({ plan }: { plan: Plan }) {
           </button>
           <button type="button" className="primary" disabled={busy} onClick={() => void act(() => api.approvePlan(live.id))}>
             Onayla
+          </button>
+        </div>
+      )}
+      {live.status === 'approved' && (
+        <div className="row end">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (window.confirm(`“${live.title}” planı durdurulsun mu? Açık görevleri iptal edilir.`)) void act(() => api.stopPlan(live.id));
+            }}
+          >
+            Durdur
           </button>
         </div>
       )}
