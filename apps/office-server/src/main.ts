@@ -86,13 +86,16 @@ api.server.on('error', (err: NodeJS.ErrnoException) => {
   releaseLock();
   process.exit(1);
 });
+// Stopped first on shutdown, so no tick or due run reaches a closing engine or a closed database.
+let stopDispatcher: (() => void) | null = null;
+let stopClock: (() => void) | null = null;
 // Recover only once the port is ours, so a failed start never touches the employees.
 api.server.listen(config.port, config.host, () => {
   const { port } = api.server.address() as AddressInfo;
   mcpUrl = `http://${config.host}:${port}/mcp`;
   engine.recover();
-  dispatcher.start();
-  clock.start();
+  stopDispatcher = dispatcher.start();
+  stopClock = clock.start();
   budget.watch();
   console.log(`office-server hazır: http://${config.host}:${port}  (veri: ${config.dataDir})`);
 });
@@ -102,6 +105,8 @@ async function shutdown(): Promise<void> {
   if (closing) return;
   closing = true;
   console.log('office-server kapanıyor…');
+  stopClock?.();
+  stopDispatcher?.();
   await api.close();
   await engine.shutdown();
   db.close();

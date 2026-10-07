@@ -12,7 +12,7 @@ const BY_DIFFICULTY_MIN_SAMPLES = 3;
 const REVIEW_DEFAULT_MS = 15 * MIN;
 const SCHEDULE_OCCURRENCES = 3;
 const NO_CLOCK: ClockStatus = { nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null };
-const LABEL: Record<AgendaEntry['kind'], string> = { now: 'Şimdi', queued: 'Sırada', review_wait: 'İnceleme bekliyor', parked: 'Park', not_before: 'Başlangıç', scheduled: 'Rutin' };
+const LABEL: Record<AgendaEntry['kind'], string> = { now: 'Şimdi', queued: 'Sırada', review_wait: 'İnceleme bekliyor', parked: 'Ertelendi', not_before: 'Başlangıç', scheduled: 'Rutin' };
 
 export interface AgendaDeps {
   roster: Roster;
@@ -169,7 +169,7 @@ export class Agenda {
     for (const t of open.filter((x) => x.status === 'review')) {
       const reviewer = t.reviewer ? this.#d.company.nameOf(t.reviewer) : 'inceleyici';
       // `round` counts the hand-ins: the first is round 1.
-      entries.push(this.#entry('review_wait', t, null, null, null, `${reviewer}’da, tur ${Math.max(1, t.round ?? 0)}`, false, now));
+      entries.push(this.#entry('review_wait', t, null, null, null, `inceleyici: ${reviewer}, tur ${Math.max(1, t.round ?? 0)}`, false, now));
     }
     // A parked task past its return that the clock has not brought back yet shows at its return time: due now.
     for (const t of open.filter((x) => x.status === 'parked')) entries.push(this.#entry('parked', t, t.notBefore ?? now, null, null, t.parkedReason ?? null, false, now));
@@ -188,7 +188,9 @@ export class Agenda {
         // A routine with no run ahead shows what it has: the agenda never fails on one.
       }
     }
-    const within = entries.filter((x) => x.at === null || x.at <= now + this.#horizon);
+    // The horizon trims what is worked out (queued chains, routine runs); a park or a start time is a date someone set,
+    // shown however far ahead it is (up to 30 or 365 days).
+    const within = entries.filter((x) => x.at === null || x.kind === 'parked' || x.kind === 'not_before' || x.at <= now + this.#horizon);
     within.sort((a, b) => (a.at ?? Number.POSITIVE_INFINITY) - (b.at ?? Number.POSITIVE_INFINITY));
     return { id: e.id, name: e.name, state: this.#state(e, now), entries: within };
   }

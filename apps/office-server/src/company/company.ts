@@ -15,7 +15,7 @@ import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
-import type { NoticeStore, PlanStore, SchedulePatch, ScheduleStore, TaskStore } from './store.ts';
+import type { NoticeStore, PlanStore, SchedulePatch, ScheduleStore, TaskPatch, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
 import { formatWhen, minIntervalMinutes, nextCron, parseCron, parseUntil, type CronSpec } from './time.ts';
 
@@ -346,7 +346,7 @@ export class Company {
       if (reviewer === target.id) throw new ConflictError('Bu görevin inceleyicisi ona verilemez: yapan kendi işini onaylayamaz. Önce başka bir inceleyici seç (reviewer).');
     }
     const difficulty = o.difficulty === undefined ? task.difficulty : difficultyOf(o.difficulty);
-    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false, difficulty, reviewer });
+    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false, difficulty, reviewer, ...this.#leaveParked(task) });
     // Whoever takes over a review also reviews the later rounds.
     if (task.kind === 'review' && task.reviewOf) this.#d.tasks.update(task.reviewOf, { reviewer: target.id });
     if (holder && holder.id !== target.id && holder.lifecycle !== 'archived') {
@@ -462,6 +462,14 @@ export class Company {
     }
     this.#touchClock();
     return next;
+  }
+
+  /**
+   * A task leaving `parked` by any path but the clock's return or unparkTask forgets its park: a stale return time
+   * would otherwise hold it as a start time. (Letting its holder go keeps it on purpose: releaseTasksOf, spec §4.5.)
+   */
+  #leaveParked(task: Task): TaskPatch {
+    return task.status === 'parked' ? { notBefore: null, parkedReason: null } : {};
   }
 
   /** The time came (the clock): the parked task waits in its queue again — once, and only if still parked and due. */
@@ -679,6 +687,8 @@ export class Company {
     // A closed task stays closed: a stopped plan's cancelled work must not come back through a status note.
     if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev kapandı; durumu değiştirilemez.');
     if (task.status === 'review') throw new ConflictError('Bu görev incelemede; inceleyicinin kararını bekle.');
+    // A parked task's status is the clock's: blocked here would leave it neither parked nor held by anyone.
+    if (task.status === 'parked' && u.blocked !== undefined) throw new ConflictError('Bu görev ertelendi; saatinde geri gelecek. Not düşebilirsin, durumunu saat değiştirir.');
     const note = u.note === undefined ? task.note : clean(u.note, 'Not', 2000, false) || null;
     let status = task.status;
     if (u.blocked === true) status = 'blocked';
@@ -715,7 +725,7 @@ export class Company {
     const reviewer = task.kind === 'work' && task.reviewer ? this.#reviewerFor(task) : null;
     if (reviewer) {
       const round = (task.round ?? 0) + 1;
-      const next = this.#d.tasks.update(taskId, { status: 'review', result: archived, round });
+      const next = this.#d.tasks.update(taskId, { status: 'review', result: archived, round, ...this.#leaveParked(task) });
       this.#taskEvent('in_review', next);
       const review = this.#d.tasks.create({
         kind: 'review', planId: task.planId, title: `İnceleme: ${task.title} (tur ${round})`, description: reviewBrief(next, this.nameOf(task.assignee), round),
@@ -724,7 +734,7 @@ export class Company {
       this.#taskEvent('created', review);
       return next;
     }
-    return this.#complete(task, archived, by, at);
+    return this.#complete(task, archived, by, at, undefined, this.#leaveParked(task));
   }
 
   /**
@@ -791,8 +801,8 @@ export class Company {
   }
 
   /** The task closes: the requester and the coordinator hear, the lesson becomes a note, the plan may finish. */
-  #complete(task: Task, result: TaskResult, by: string, at: number, approvedBy?: string): Task {
-    const next = this.#d.tasks.update(task.id, { status: 'done', result, finishedAt: at });
+  #complete(task: Task, result: TaskResult, by: string, at: number, approvedBy?: string, extra: TaskPatch = {}): Task {
+    const next = this.#d.tasks.update(task.id, { status: 'done', result, finishedAt: at, ...extra });
     const coordinator = this.coordinator();
     const line = `Görev bitti: “${task.title}” (${this.nameOf(task.assignee)}${approvedBy ? `; ${approvedBy} onayladı` : ''}): ${result.summary}`;
     if (task.requester !== OWNER && task.requester !== by) {
@@ -998,7 +1008,7 @@ export class Company {
       if (holder && holder.lifecycle !== 'archived' && (task.status === 'in_progress' || task.status === 'blocked')) {
         this.#d.notices.add(holder.id, 'task.cancelled', `“${task.title}” görevi (no ${task.id}) iptal edildi: sahibi “${plan.title}” planını durdurdu. Üzerinde çalışmayı bırak.`);
       }
-      this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'cancelled', finishedAt: at }));
+      this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'cancelled', finishedAt: at, ...this.#leaveParked(task) }));
     }
     // Its routines stop with it (spec §4.4) — without #planMayFinish: a stopped plan is stopped, never done.
     for (const sch of this.#d.schedules?.list({ planId, statuses: ['active', 'paused'] }) ?? []) this.#applyScheduleStatus(sch, 'stopped', OWNER);
@@ -1048,6 +1058,9 @@ export class Company {
   resume(): void {
     this.#state().setPaused(false);
     this.#emit(this.coordinator()?.id ?? null, { type: 'company.paused', paused: false });
+    // The clock re-arms for the nearest time. A routine that fell due while paused is already past, which nextDueAt does
+    // not count: it runs at the clock's next run, within the safety tick.
+    this.#touchClock();
   }
 
   paused(): boolean {

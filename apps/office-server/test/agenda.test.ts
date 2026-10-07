@@ -209,12 +209,41 @@ describe('Agenda (spec §6.1)', () => {
     const by = (title: string) => entries.find((e) => e.title.startsWith(title))!;
     expect(by('Geç')).toMatchObject({ kind: 'queued', overdue: true, dueAt: late.dueAt });
     expect(by('Takip')).toMatchObject({ kind: 'queued' }); // its time came while we advanced
-    expect(by('İncelenen')).toMatchObject({ kind: 'review_wait', note: 'Can’da, tur 1' });
+    expect(by('İncelenen')).toMatchObject({ kind: 'review_wait', note: 'inceleyici: Can, tur 1' });
     expect(by('Pencere')).toMatchObject({ kind: 'parked', at: T0 + 24 * 60 * MIN, note: 'ölçüm penceresi dolsun' });
     expect(by('Günlük')).toMatchObject({ kind: 'scheduled', note: 'her gün 09:00', at: new Date(2026, 9, 8, 9, 0).getTime() });
     // A parked task past its return but not yet returned by the clock still shows, as due now.
     t.advance(24 * 60 * MIN);
     expect(t.agenda.forEmployee(t.ada.id).entries.find((e) => e.title === 'Pencere')).toMatchObject({ kind: 'parked', at: T0 + 24 * 60 * MIN });
+  });
+
+  it('final review F2: a park or start time past the horizon still shows, in the list and the text; a routine run past it does not', () => {
+    const t = make();
+    const parked = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Uzak park' });
+    t.company.parkTask(t.ada.id, parked.id, '+10d', 'ay sonu verisi');
+    t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Uzak başlangıç', startAfter: '+20d' });
+    t.company.createSchedule(t.coordinator.id, { title: 'Ayın 15i', assignee: t.ada.id, cron: '0 9 15 * *' });
+    const entries = t.agenda.forEmployee(t.ada.id).entries;
+    expect(entries.find((e) => e.title === 'Uzak park')).toMatchObject({ kind: 'parked', at: T0 + 10 * 24 * 60 * MIN });
+    expect(entries.find((e) => e.title === 'Uzak başlangıç')).toMatchObject({ kind: 'not_before', at: T0 + 20 * 24 * 60 * MIN });
+    // 15 October 09:00 is eight days out: past the seven-day horizon.
+    expect(entries.some((e) => e.title === 'Ayın 15i')).toBe(false);
+    const text = t.agenda.text(t.ada.id);
+    expect(text).toContain('Uzak park');
+    expect(text).toContain('Uzak başlangıç');
+    expect(text).not.toContain('Ayın 15i');
+  });
+
+  it('final review F4/F7: the text says Ertelendi for a park and names the reviewer without a suffix', () => {
+    const t = make();
+    const parked = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Pencere' });
+    t.company.parkTask(t.ada.id, parked.id, '+1d', 'ölçüm penceresi dolsun');
+    const reviewed = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'İncelenen', reviewer: t.can.id });
+    t.company.finish(t.ada.id, reviewed.id, { summary: 'bitti', outputs: [], learned: '' });
+    const text = t.agenda.text(t.ada.id);
+    expect(text).toContain('Ertelendi: Pencere (yarın 14:10) — ölçüm penceresi dolsun');
+    expect(text).not.toContain('Park:');
+    expect(text).toContain('İnceleme bekliyor: İncelenen — inceleyici: Can, tur 1');
   });
 
   it('shows at most three runs of a routine within the horizon, none after its end', () => {

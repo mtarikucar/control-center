@@ -183,7 +183,7 @@ export interface AgendaEntry {
   until: number | null;
   /** Estimate basis: "son 10 iş" / "zorluk: zor, 4 iş" / "ofis geneli" / "varsayılan" / "inceleme". */
   basis: string | null;
-  /** "X bitince" (the dependency's title), "Can'da, tur 2", a park reason, a cron label. */
+  /** "X bitince" (the dependency's title), "inceleyici: Can, tur 2", a park reason, a cron label. */
   note: string | null;
   priority: number | null;
   dueAt: number | null;

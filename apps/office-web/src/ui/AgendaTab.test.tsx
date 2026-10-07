@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgendaReport, Employee, Schedule } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { AgendaTab } from './AgendaTab.tsx';
+import { AgendaTimeline } from './AgendaTimeline.tsx';
 
 const NOW = new Date(2026, 9, 7, 14, 10).getTime();
 const H = 3_600_000;
@@ -99,6 +100,24 @@ describe('AgendaTab', () => {
     await waitFor(() => expect(screen.getByRole('region', { name: 'Koordinatör' })).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: 'Zaman çizelgesi' }));
     expect(screen.getByRole('img', { name: /Koordinatör zaman çizelgesi/ })).toBeTruthy();
+  });
+
+  it('final review F2: the timeline keeps to its own window — a park ten days out and a start twenty days out draw nothing', () => {
+    const far = (kind: 'parked' | 'not_before', taskId: string, title: string, at: number) =>
+      ({ kind, taskId, scheduleId: null, title, at, until: null, basis: null, note: null, priority: 3, dueAt: null, overdue: false, lowConfidence: false }) as const;
+    const agenda = { id: 'ada', name: 'Ada', state: null, entries: [
+      { kind: 'queued' as const, taskId: 'q', scheduleId: null, title: 'Yakın iş', at: NOW, until: NOW + H, basis: 'varsayılan', note: null, priority: 3, dueAt: null, overdue: false, lowConfidence: false },
+      far('parked', 'p', 'Uzak park', NOW + 10 * 24 * H),
+      far('not_before', 'n', 'Uzak başlangıç', NOW + 20 * 24 * H),
+    ] };
+    for (const spanMs of [24 * H, 7 * 24 * H]) {
+      const { container, unmount } = render(<AgendaTimeline agenda={agenda} now={NOW} spanMs={spanMs} />);
+      expect(container.querySelectorAll('.tl-mark')).toHaveLength(0);
+      expect(container.querySelectorAll('.tl-bar')).toHaveLength(1);
+      expect(container.querySelector('svg')?.getAttribute('viewBox')).toMatch(/^0 0 720 /);
+      for (const rect of container.querySelectorAll('.tl-bar rect')) expect(Number(rect.getAttribute('x')) + Number(rect.getAttribute('width'))).toBeLessThanOrEqual(720);
+      unmount();
+    }
   });
 
   it('lists the routines, a paused one too, so the owner can resume it; a stopped one has no buttons', async () => {

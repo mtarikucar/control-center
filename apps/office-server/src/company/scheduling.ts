@@ -168,7 +168,8 @@ export class Scheduling {
         assignee: schedule.assignee, title: `${schedule.title} — ${at}`, description: schedule.description, done: schedule.done,
         priority: schedule.priority, planId: schedule.planId, difficulty: schedule.difficulty, reviewer: schedule.reviewer, scheduleId: schedule.id,
       });
-      const fired = d.schedules.update(schedule.id, { nextRunAt, lastRunAt: now, lastTaskId: task.id, failCount: 0, note: null });
+      // A firing ends both runs: the skip notice counts skips in a row, as the failure brake counts failures.
+      const fired = d.schedules.update(schedule.id, { nextRunAt, lastRunAt: now, lastTaskId: task.id, failCount: 0, skipCount: 0, note: null });
       d.db.exec('COMMIT');
       d.events.append(null, { type: 'schedule.changed', change: 'fired', schedule: fired });
       report.fired.push(schedule.id);

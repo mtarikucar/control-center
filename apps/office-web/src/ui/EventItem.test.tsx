@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventItem } from './EventItem.tsx';
 
 afterEach(cleanup);
@@ -87,5 +87,19 @@ describe('EventItem', () => {
     expect(screen.getByText(/Saat atladı/)).toBeTruthy();
     rerender(<EventItem stored={{ seq: 5, employeeId: null, ts: 0, event: { type: 'clock.error', job: 'rutin s1', message: 'veritabanı kilitli' } }} />);
     expect(screen.getByText('Saat: rutin s1 başarısız — veritabanı kilitli')).toBeTruthy();
+  });
+
+  it('final review F8: a park reads as it was said — “yarın” relative to the event, not to when the feed is read', () => {
+    const parkedAt = new Date(2026, 9, 7, 14, 10).getTime();
+    const back = new Date(2026, 9, 8, 14, 55).getTime();
+    const task = { id: 't1', kind: 'work' as const, planId: null, title: 'Pencere', description: '', done: [], requester: 'owner', assignee: 'ada', priority: 3, dependsOn: [], status: 'parked' as const, chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null, notBefore: back, parkedReason: 'ölçüm' };
+    // The feed is read the next morning.
+    vi.useFakeTimers({ now: new Date(2026, 9, 8, 9, 0) });
+    try {
+      render(<EventItem stored={{ seq: 1, employeeId: 'ada', ts: parkedAt, event: { type: 'task.changed', change: 'parked', task } }} />);
+      expect(screen.getByText('Görev ertelendi: Pencere (yarın 14:55 — ölçüm)')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

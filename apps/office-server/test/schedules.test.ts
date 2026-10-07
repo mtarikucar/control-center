@@ -76,6 +76,31 @@ describe('routines (spec §4.4)', () => {
     expect(t.schedules.get(s.id).note).toBe('11 Eki 2026 09:00: önceki örnek (“Günlük ölçüm — 8 Eki 2026 09:00”) hâlâ açık, atlandı');
   });
 
+  it('final review F5: a firing ends the run of skips — skip, skip, fire, skip, skip tells no one; the third skip in a row does', () => {
+    const t = make();
+    const s = t.company.createSchedule(t.coordinator.id, { title: 'Ölçüm', assignee: t.ada.id, cron: '0 9 * * *' });
+    const skipped = () => t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'schedule.skipped');
+    const run = (day: number) => {
+      t.set(new Date(2026, 9, day, 9, 0).getTime());
+      return t.scheduling.runDue();
+    };
+    run(8);
+    const first = t.tasks.list({ assignee: t.ada.id })[0]!;
+    expect(run(9).skipped).toEqual([s.id]);
+    expect(run(10).skipped).toEqual([s.id]);
+    t.company.start(first.id);
+    t.company.finish(t.ada.id, first.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect(run(11).fired).toEqual([s.id]);
+    expect(t.schedules.get(s.id).skipCount).toBe(0);
+    expect(run(12).skipped).toEqual([s.id]);
+    expect(run(13).skipped).toEqual([s.id]);
+    expect(t.schedules.get(s.id).skipCount).toBe(2);
+    expect(skipped()).toHaveLength(0);
+    expect(run(14).skipped).toEqual([s.id]);
+    expect(skipped()).toHaveLength(1);
+    expect(skipped()[0]!.text).toContain('3 kez atlandı');
+  });
+
   it('review focus: each instance carries its own date and time, so a daily routine’s tasks are told apart', () => {
     const t = make();
     t.company.createSchedule(t.coordinator.id, { title: 'Ölçüm', assignee: t.ada.id, cron: '0 9 * * *' });
@@ -108,6 +133,15 @@ describe('routines (spec §4.4)', () => {
     t.company.resume();
     expect(t.scheduling.runDue().fired).toEqual([s.id]);
     expect(t.tasks.list({ assignee: t.ada.id })).toHaveLength(1);
+  });
+
+  it('final review F6: resuming the company touches the clock, so it re-arms for the nearest time', () => {
+    const t = make();
+    t.daily();
+    t.company.pause();
+    const before = t.clockTouches();
+    t.company.resume();
+    expect(t.clockTouches()).toBe(before + 1);
   });
 
   it('review focus: a let-go assignee pauses the routine with a notice; a stopped plan stops it; neither fires again even if due', () => {

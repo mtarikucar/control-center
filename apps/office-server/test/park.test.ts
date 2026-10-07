@@ -140,4 +140,42 @@ describe('park (spec §4.2)', () => {
     t.company.stopPlan(t.plan.id);
     expect(t.tasks.get(b.id).status).toBe('cancelled');
   });
+
+  it('final review F1: a parked task’s status is the clock’s — blocked is refused, a note is still written and the park stays', () => {
+    const t = make();
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'ertelenmiş' });
+    t.company.start(task.id);
+    t.company.parkTask(t.coordinator.id, task.id, '+1d', 'yarına');
+    expect(() => t.company.update(t.ada.id, task.id, { blocked: true })).toThrow(/ertelendi; saatinde geri gelecek/);
+    expect(() => t.company.update(t.ada.id, task.id, { blocked: false })).toThrow(/ertelendi/);
+    const noted = t.company.update(t.ada.id, task.id, { note: 'bıraktım' });
+    expect(noted).toMatchObject({ status: 'parked', note: 'bıraktım', notBefore: T0 + 24 * 3_600_000, parkedReason: 'yarına' });
+    expect(t.tasks.get(task.id)).toMatchObject({ status: 'parked', notBefore: T0 + 24 * 3_600_000 });
+  });
+
+  it('final review F3: a parked task finished anyway forgets its park — sent back with changes it waits with no start time', () => {
+    const t = make();
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'yine de bitti', reviewer: t.can.id });
+    t.company.parkTask(t.ada.id, task.id, '+1d', 'bekle');
+    const inReview = t.company.finish(t.ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect(inReview).toMatchObject({ status: 'review', notBefore: null, parkedReason: null });
+    const review = t.tasks.list({ assignee: t.can.id }).find((x) => x.kind === 'review')!;
+    t.company.reviewDecide(t.can.id, review.id, { decision: 'changes', findings: [{ severity: 'important', text: 'eksik' }] });
+    expect(t.tasks.get(task.id)).toMatchObject({ status: 'waiting', notBefore: null, parkedReason: null });
+    const solo = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'incelemesiz' });
+    t.company.parkTask(t.ada.id, solo.id, '+1d', 'bekle');
+    expect(t.company.finish(t.ada.id, solo.id, { summary: 'bitti', outputs: [], learned: '' })).toMatchObject({ status: 'done', notBefore: null, parkedReason: null });
+  });
+
+  it('final review F3: a parked task given to someone else waits for them now, and one cancelled with its plan keeps no park', () => {
+    const t = make();
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'devredilen' });
+    t.company.parkTask(t.ada.id, task.id, '+1d', 'bekle');
+    expect(t.company.assign(t.coordinator.id, task.id, t.can.id)).toMatchObject({ status: 'waiting', assignee: t.can.id, notBefore: null, parkedReason: null });
+    expect(t.tasks.nextFor(t.can.id)?.id).toBe(task.id);
+    const planned = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'planlı', planId: t.plan.id });
+    t.company.parkTask(t.ada.id, planned.id, '+1d', 'bekle');
+    t.company.stopPlan(t.plan.id);
+    expect(t.tasks.get(planned.id)).toMatchObject({ status: 'cancelled', notBefore: null, parkedReason: null });
+  });
 });

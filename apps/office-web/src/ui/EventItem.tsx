@@ -130,7 +130,8 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
         );
       }
       if (e.change === 'parked') {
-        const back = e.task.notBefore ? formatWhenTR(e.task.notBefore, Date.now()) : null;
+        // As it was said when parked: read a day later, “yarın” must not turn into “bugün”.
+        const back = e.task.notBefore ? formatWhenTR(e.task.notBefore, stored.ts) : null;
         const why = [back, e.task.parkedReason].filter(Boolean).join(' — ');
         return <div className="note">{`Görev ertelendi: ${e.task.title}${why ? ` (${why})` : ''}`}</div>;
       }
