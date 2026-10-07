@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cronLabel, formatWhen, minIntervalMinutes, nextCron, parseCron, parseUntil } from '../src/company/time.ts';
+import { cronLabel, formatStamp, formatWhen, minIntervalMinutes, nextCron, parseCron, parseUntil } from '../src/company/time.ts';
 
 const T0 = new Date(2026, 9, 7, 14, 10).getTime(); // 7 Eki 2026 14:10 local
 const PARK = { maxDays: 30, label: 'Dönüş saati' };
@@ -43,6 +43,15 @@ describe('formatWhen', () => {
     expect(formatWhen(new Date(2026, 9, 12, 14, 55).getTime(), T0)).toBe('12 Eki 14:55');
     expect(formatWhen(new Date(2027, 0, 3, 8, 30).getTime(), T0)).toBe('3 Oca 2027 08:30');
     expect(formatWhen(new Date(2026, 9, 6, 18, 0).getTime(), T0)).toBe('6 Eki 18:00');
+  });
+});
+
+describe('formatStamp', () => {
+  it('review focus: names the moment itself — day, month, year and time, never “bugün” or “yarın” — so it reads the same any day later', () => {
+    expect(formatStamp(new Date(2026, 9, 8, 9, 0).getTime())).toBe('8 Eki 2026 09:00');
+    expect(formatStamp(new Date(2026, 9, 7, 14, 10).getTime())).toBe('7 Eki 2026 14:10');
+    expect(formatStamp(new Date(2027, 0, 3, 8, 5).getTime())).toBe('3 Oca 2027 08:05');
+    expect(formatStamp(new Date(2028, 1, 29, 23, 59).getTime())).toBe('29 Şub 2028 23:59');
   });
 });
 

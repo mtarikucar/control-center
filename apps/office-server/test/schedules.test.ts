@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER } from '@cc/shared';
+import { ConflictError } from '../src/errors.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
@@ -50,7 +51,7 @@ describe('routines (spec §4.4)', () => {
     const report = t.scheduling.runDue();
     expect(report.fired).toEqual([s.id]);
     const task = t.tasks.list({ assignee: t.ada.id })[0]!;
-    expect(task).toMatchObject({ title: 'Günlük ölçüm — bugün 09:00', description: 'economy-report çalıştır', done: ['rapor notlarda'], reviewer: t.can.id, planId: t.plan.id, priority: 2, difficulty: 'easy', scheduleId: s.id, requester: t.coordinator.id, status: 'waiting' });
+    expect(task).toMatchObject({ title: 'Günlük ölçüm — 8 Eki 2026 09:00', description: 'economy-report çalıştır', done: ['rapor notlarda'], reviewer: t.can.id, planId: t.plan.id, priority: 2, difficulty: 'easy', scheduleId: s.id, requester: t.coordinator.id, status: 'waiting' });
     const after = t.schedules.get(s.id);
     expect(after.nextRunAt).toBe(new Date(2026, 9, 9, 9, 0).getTime());
     expect(after).toMatchObject({ lastRunAt: new Date(2026, 9, 8, 9, 0).getTime(), lastTaskId: task.id });
@@ -71,6 +72,21 @@ describe('routines (spec §4.4)', () => {
     expect(t.tasks.list({ assignee: t.ada.id })).toHaveLength(1);
     expect(t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'schedule.skipped')).toHaveLength(1);
     expect(t.schedules.get(s.id).nextRunAt).toBe(new Date(2026, 9, 12, 9, 0).getTime());
+    // The note names the firing itself, not “bugün”: it is read days later.
+    expect(t.schedules.get(s.id).note).toBe('11 Eki 2026 09:00: önceki örnek (“Günlük ölçüm — 8 Eki 2026 09:00”) hâlâ açık, atlandı');
+  });
+
+  it('review focus: each instance carries its own date and time, so a daily routine’s tasks are told apart', () => {
+    const t = make();
+    t.company.createSchedule(t.coordinator.id, { title: 'Ölçüm', assignee: t.ada.id, cron: '0 9 * * *' });
+    t.set(new Date(2026, 9, 8, 9, 0).getTime());
+    t.scheduling.runDue();
+    const first = t.tasks.list({ assignee: t.ada.id })[0]!;
+    t.company.start(first.id);
+    t.company.finish(t.ada.id, first.id, { summary: 'bitti', outputs: [], learned: '' });
+    t.set(new Date(2026, 9, 9, 9, 0).getTime());
+    t.scheduling.runDue();
+    expect(t.tasks.list({ assignee: t.ada.id }).map((x) => x.title)).toEqual(['Ölçüm — 8 Eki 2026 09:00', 'Ölçüm — 9 Eki 2026 09:00']);
   });
 
   it('single catch-up: after a week closed, one task opens and the next run is after now', () => {
@@ -178,5 +194,87 @@ describe('routines (spec §4.4)', () => {
     expect(t.schedules.get(s.id).status).toBe('paused');
     const ece = t.company.hire(t.coordinator.id, { name: 'Ece', role: 'r', team: 'Ops' });
     expect(t.company.updateSchedule(t.coordinator.id, s.id, { assignee: ece.id, status: 'active' })).toMatchObject({ assignee: ece.id, status: 'active' });
+  });
+
+  it('review focus: a routine with no run in the next 366 days fires this one, then stops with a notice — no error on every clock run', () => {
+    const t = make();
+    t.set(new Date(2028, 1, 1, 12, 0).getTime());
+    const s = t.company.createSchedule(t.coordinator.id, { title: 'Artık gün', assignee: t.ada.id, cron: '0 9 29 2 *' });
+    expect(s.nextRunAt).toBe(new Date(2028, 1, 29, 9, 0).getTime());
+    t.set(new Date(2028, 1, 29, 9, 0).getTime());
+    const report = t.scheduling.runDue();
+    expect(report).toMatchObject({ fired: [s.id], errors: [] });
+    expect(t.tasks.list({ assignee: t.ada.id })).toHaveLength(1);
+    expect(t.schedules.get(s.id)).toMatchObject({ status: 'stopped', note: 'Sonraki çalışma 366 gün içinde yok' });
+    expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'schedule.changed' && e.event.change === 'stopped' && e.event.schedule.id === s.id)).toBe(true);
+    t.advance(3_600_000);
+    expect(t.scheduling.runDue()).toMatchObject({ fired: [], skipped: [], errors: [] });
+    expect(t.tasks.list({ assignee: t.ada.id })).toHaveLength(1);
+    expect(t.events.list({ limit: 500 }).filter((e) => e.event.type === 'clock.error')).toHaveLength(0);
+    const failed = t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'schedule.failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.text).toContain('366 gün');
+  });
+
+  it('review focus: a routine is open work on its plan — the plan stays running while it lives, and finishes once (one retro) when it stops', () => {
+    const t = make();
+    const retros = () => t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'plan.retro');
+    const s = t.company.createSchedule(t.coordinator.id, { title: 'Ölçüm', assignee: t.ada.id, cron: '0 9 * * *', planId: t.plan.id });
+    for (const day of [8, 9]) {
+      t.set(new Date(2026, 9, day, 9, 0).getTime());
+      expect(t.scheduling.runDue().fired).toEqual([s.id]);
+      const instance = t.tasks.list({ assignee: t.ada.id, statuses: ['waiting'] })[0]!;
+      t.company.start(instance.id);
+      t.company.finish(t.ada.id, instance.id, { summary: 'bitti', outputs: [], learned: '' });
+      expect(t.plans.get(t.plan.id).status).toBe('approved');
+    }
+    expect(retros()).toHaveLength(0);
+    expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'plan.changed' && (e.event.change === 'done' || e.event.change === 'reopened'))).toBe(false);
+    t.company.ownerSchedule(s.id, 'stop');
+    expect(t.plans.get(t.plan.id).status).toBe('done');
+    expect(retros()).toHaveLength(1);
+  });
+
+  it('review focus: a routine that ends by itself or by the coordinator lets its plan finish; a finished plan takes no routine; stopping a plan stops its routines and never finishes it', () => {
+    const t = make();
+    const retros = () => t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'plan.retro');
+    const second = t.company.propose(t.coordinator.id, { title: 'Q', goal: 'g', approach: 'a', method: METHOD });
+    t.company.approve(second.id);
+    const third = t.company.propose(t.coordinator.id, { title: 'R', goal: 'g', approach: 'a', method: METHOD });
+    t.company.approve(third.id);
+    // until passed (the clock ends it) → its plan finishes, once.
+    t.company.createSchedule(t.coordinator.id, { title: 'Kısa', assignee: t.ada.id, cron: '0 9 * * *', until: '+1d', planId: t.plan.id });
+    // stopped by the coordinator → its plan finishes, once.
+    const weekly = t.company.createSchedule(t.coordinator.id, { title: 'Haftalık', assignee: t.ada.id, cron: '0 10 * * 1', planId: second.id });
+    t.company.updateSchedule(t.coordinator.id, weekly.id, { status: 'stopped' });
+    expect(t.plans.get(second.id).status).toBe('done');
+    t.set(new Date(2026, 9, 9, 9, 0).getTime());
+    t.scheduling.runDue();
+    expect(t.plans.get(t.plan.id).status).toBe('done');
+    expect(retros()).toHaveLength(2);
+    expect(() => t.company.createSchedule(t.coordinator.id, { title: 'Geç', assignee: t.ada.id, cron: '0 9 * * *', planId: t.plan.id })).toThrow(ConflictError);
+    expect(() => t.company.createSchedule(t.coordinator.id, { title: 'Geç', assignee: t.ada.id, cron: '0 9 * * *', planId: t.plan.id })).toThrow(/“P” planı bitti; rutin yalnız süren bir plana bağlanabilir/);
+    // The owner stops a plan whose only work is a routine: stopped, not done, and no retro.
+    const daily = t.company.createSchedule(t.coordinator.id, { title: 'Günlük', assignee: t.ada.id, cron: '0 9 * * *', planId: third.id });
+    t.company.stopPlan(third.id);
+    expect(t.plans.get(third.id).status).toBe('stopped');
+    expect(t.schedules.get(daily.id).status).toBe('stopped');
+    expect(retros()).toHaveLength(2);
+    expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'plan.changed' && e.event.change === 'done' && e.event.plan.id === third.id)).toBe(false);
+  });
+
+  it('review focus: a let-go reviewer pauses the routine with a notice, and it cannot resume until it has a new reviewer', () => {
+    const t = make();
+    const s = t.daily();
+    t.roster.update(t.can.id, { lifecycle: 'archived' });
+    t.company.releaseTasksOf(t.can.id);
+    expect(t.schedules.get(s.id).status).toBe('paused');
+    const notice = t.notices.pending(t.coordinator.id).find((n) => n.topic === 'schedule.unassigned');
+    expect(notice?.text).toBe('“Günlük ölçüm” rutininin inceleyicisi (Can) işten çıkarıldı; rutin duraklatıldı. scheduleUpdate ile yeni bir inceleyici ver ve sürdür.');
+    expect(() => t.company.ownerSchedule(s.id, 'resume')).toThrow(ConflictError);
+    expect(() => t.company.ownerSchedule(s.id, 'resume')).toThrow(/Can işten çıkarıldı; rutin yeni bir inceleyici verilene kadar/);
+    expect(() => t.company.updateSchedule(t.coordinator.id, s.id, { status: 'active' })).toThrow(/Can işten çıkarıldı/);
+    expect(t.schedules.get(s.id).status).toBe('paused');
+    expect(t.company.updateSchedule(t.coordinator.id, s.id, { reviewer: t.coordinator.id, status: 'active' })).toMatchObject({ reviewer: t.coordinator.id, status: 'active' });
   });
 });

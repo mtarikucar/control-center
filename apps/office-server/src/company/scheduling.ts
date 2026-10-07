@@ -1,11 +1,11 @@
-import type { Constitution } from '@cc/shared';
+import type { Constitution, Schedule } from '@cc/shared';
 import { DEFAULT_CONSTITUTION } from '@cc/shared';
 import type { Db } from '../db.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Company } from './company.ts';
 import type { CompanyStateStore } from './goal-store.ts';
 import type { NoticeStore, ScheduleStore, TaskStore } from './store.ts';
-import { formatWhen, nextCron, parseCron } from './time.ts';
+import { formatStamp, formatWhen, nextCron, parseCron } from './time.ts';
 
 /** A park may reach this far ahead (spec §4.2). */
 export const PARK_MAX_DAYS = 30;
@@ -37,6 +37,19 @@ export function dueLabel(tasks: TaskStore, schedules: ScheduleStore, company: Co
   if (task) return `${task.title} · ${company.nameOf(task.assignee)}`;
   const schedule = schedules.list({ statuses: ['active'] }).find((s) => s.nextRunAt === when);
   return schedule ? `${schedule.title} · ${company.nameOf(schedule.assignee)} (rutin)` : null;
+}
+
+/** Why the clock stopped a routine that has no run left in the window nextCron searches. */
+const NO_NEXT_RUN = 'Sonraki çalışma 366 gün içinde yok';
+
+/** The next run strictly after `now`, or null when there is none within 366 days (a 29 February routine, say). */
+function nextRun(cron: string, now: number): number | null {
+  const spec = parseCron(cron);
+  try {
+    return nextCron(spec, now);
+  } catch {
+    return null;
+  }
 }
 
 /** What one run of the due-processor did. */
@@ -112,51 +125,67 @@ export class Scheduling {
     for (const schedule of d.schedules.due(now)) {
       guard(`schedule ${schedule.id}`, () => {
         if (schedule.until !== null && schedule.until <= now) {
-          const stopped = d.schedules.update(schedule.id, { status: 'stopped', note: 'Bitiş tarihi geçti' });
-          d.events.append(null, { type: 'schedule.changed', change: 'stopped', schedule: stopped });
+          d.company.endSchedule(schedule.id, 'Bitiş tarihi geçti');
           return;
         }
-        const nextRunAt = nextCron(parseCron(schedule.cron), now);
-        const open = d.tasks.openInstance(schedule.id);
-        if (open) {
-          // The pile-up brake: no second instance while the first is open.
-          const skipCount = schedule.skipCount + 1;
-          const skipped = d.schedules.update(schedule.id, { nextRunAt, skipCount, note: `${formatWhen(now, now)}: önceki örnek (“${open.title}”) hâlâ açık, atlandı` });
-          d.events.append(null, { type: 'schedule.changed', change: 'skipped', schedule: skipped });
-          report.skipped.push(schedule.id);
-          if (skipCount % REPARK_LIMIT === 0) {
-            const c = d.company.coordinator();
-            if (c) d.notices.add(c.id, 'schedule.skipped', `“${schedule.title}” rutini ${skipCount} kez atlandı: önceki örneği (“${open.title}”, no ${open.id}) hâlâ açık. Örneği kapat ya da rutini seyrelt/durdur (scheduleUpdate).`);
-          }
-          return;
-        }
-        // Opening the task and moving the next run is one transaction: never half done, never twice.
-        d.db.exec('BEGIN IMMEDIATE');
+        const nextRunAt = nextRun(schedule.cron, now);
         try {
-          const task = d.company.createTask(schedule.createdBy, {
-            assignee: schedule.assignee, title: `${schedule.title} — ${formatWhen(now, now)}`, description: schedule.description, done: schedule.done,
-            priority: schedule.priority, planId: schedule.planId, difficulty: schedule.difficulty, reviewer: schedule.reviewer, scheduleId: schedule.id,
-          });
-          const fired = d.schedules.update(schedule.id, { nextRunAt, lastRunAt: now, lastTaskId: task.id, failCount: 0, note: null });
-          d.db.exec('COMMIT');
-          d.events.append(null, { type: 'schedule.changed', change: 'fired', schedule: fired });
-          report.fired.push(schedule.id);
-        } catch (err) {
-          if (d.db.isTransaction) d.db.exec('ROLLBACK');
-          const failCount = schedule.failCount + 1;
-          const message = err instanceof Error ? err.message : String(err);
-          const paused = failCount >= REPARK_LIMIT;
-          const failed = d.schedules.update(schedule.id, { nextRunAt, failCount, status: paused ? 'paused' : schedule.status, note: `${formatWhen(now, now)}: görev açılamadı — ${message}` });
-          if (paused) {
-            // The sheet follows routines by their events.
-            d.events.append(null, { type: 'schedule.changed', change: 'paused', schedule: failed });
+          this.#runSchedule(schedule, now, nextRunAt, report);
+        } finally {
+          // No run left within 366 days: this one was the last. Stopped (with a word to the coordinator) rather than due —
+          // and failing — on every clock run from now on.
+          if (nextRunAt === null) {
+            d.company.endSchedule(schedule.id, NO_NEXT_RUN);
             const c = d.company.coordinator();
-            if (c) d.notices.add(c.id, 'schedule.failed', `“${schedule.title}” rutini üst üste ${failCount} kez görev açamadı (${message}); duraklatıldı. Nedenini gider ve scheduleUpdate ile sürdür.`);
+            if (c) d.notices.add(c.id, 'schedule.failed', `“${schedule.title}” rutininin sonraki çalışması 366 gün içinde yok; rutin durduruldu. Gerekiyorsa yeni bir zamanlamayla yeniden aç (scheduleCreate).`);
           }
-          // Counted on the routine and logged by the guard (clock.error).
-          throw err;
         }
       });
+    }
+  }
+
+  /** One due routine: skipped while its previous instance is open, else one task — opened and recorded in one transaction. */
+  #runSchedule(schedule: Schedule, now: number, nextRunAt: number | null, report: DueReport): void {
+    const d = this.deps;
+    const at = formatStamp(now);
+    const open = d.tasks.openInstance(schedule.id);
+    if (open) {
+      // The pile-up brake: no second instance while the first is open.
+      const skipCount = schedule.skipCount + 1;
+      const skipped = d.schedules.update(schedule.id, { nextRunAt, skipCount, note: `${at}: önceki örnek (“${open.title}”) hâlâ açık, atlandı` });
+      d.events.append(null, { type: 'schedule.changed', change: 'skipped', schedule: skipped });
+      report.skipped.push(schedule.id);
+      if (skipCount % REPARK_LIMIT === 0) {
+        const c = d.company.coordinator();
+        if (c) d.notices.add(c.id, 'schedule.skipped', `“${schedule.title}” rutini ${skipCount} kez atlandı: önceki örneği (“${open.title}”, no ${open.id}) hâlâ açık. Örneği kapat ya da rutini seyrelt/durdur (scheduleUpdate).`);
+      }
+      return;
+    }
+    // Opening the task and moving the next run is one transaction: never half done, never twice.
+    d.db.exec('BEGIN IMMEDIATE');
+    try {
+      const task = d.company.createTask(schedule.createdBy, {
+        assignee: schedule.assignee, title: `${schedule.title} — ${at}`, description: schedule.description, done: schedule.done,
+        priority: schedule.priority, planId: schedule.planId, difficulty: schedule.difficulty, reviewer: schedule.reviewer, scheduleId: schedule.id,
+      });
+      const fired = d.schedules.update(schedule.id, { nextRunAt, lastRunAt: now, lastTaskId: task.id, failCount: 0, note: null });
+      d.db.exec('COMMIT');
+      d.events.append(null, { type: 'schedule.changed', change: 'fired', schedule: fired });
+      report.fired.push(schedule.id);
+    } catch (err) {
+      if (d.db.isTransaction) d.db.exec('ROLLBACK');
+      const failCount = schedule.failCount + 1;
+      const message = err instanceof Error ? err.message : String(err);
+      const paused = failCount >= REPARK_LIMIT;
+      const failed = d.schedules.update(schedule.id, { nextRunAt, failCount, status: paused ? 'paused' : schedule.status, note: `${at}: görev açılamadı — ${message}` });
+      if (paused) {
+        // The sheet follows routines by their events.
+        d.events.append(null, { type: 'schedule.changed', change: 'paused', schedule: failed });
+        const c = d.company.coordinator();
+        if (c) d.notices.add(c.id, 'schedule.failed', `“${schedule.title}” rutini üst üste ${failCount} kez görev açamadı (${message}); duraklatıldı. Nedenini gider ve scheduleUpdate ile sürdür.`);
+      }
+      // Counted on the routine and logged by the guard (clock.error).
+      throw err;
     }
   }
 

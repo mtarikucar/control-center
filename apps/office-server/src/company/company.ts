@@ -364,10 +364,12 @@ export class Company {
   /** Someone was fired: their open work waits again and the coordinator hands it out (spec §10); a hand-over is cancelled. */
   releaseTasksOf(id: string): void {
     this.#rerouteProposals(id);
-    // Their routines wait for a new assignee (spec §4.4).
-    for (const sch of this.#d.schedules?.list({ assignee: id, statuses: ['active', 'paused'] }) ?? []) {
+    // Routines they do or review wait for someone new (spec §4.4): the coordinator gives one.
+    for (const sch of this.#d.schedules?.list({ statuses: ['active', 'paused'] }) ?? []) {
+      const role = sch.assignee === id ? { who: 'atananı', next: 'atanan' } : sch.reviewer === id ? { who: 'inceleyicisi', next: 'inceleyici' } : null;
+      if (!role) continue;
       if (sch.status === 'active') this.#applyScheduleStatus(sch, 'paused', id);
-      this.#tellCoordinator(id, 'schedule.unassigned', `“${sch.title}” rutininin atananı (${this.nameOf(id)}) işten çıkarıldı; rutin duraklatıldı. scheduleUpdate ile yeni bir atanan ver ve sürdür.`);
+      this.#tellCoordinator(id, 'schedule.unassigned', `“${sch.title}” rutininin ${role.who} (${this.nameOf(id)}) işten çıkarıldı; rutin duraklatıldı. scheduleUpdate ile yeni bir ${role.next} ver ve sürdür.`);
     }
     for (const m of this.#d.roster.list()) if (m.reportsTo === id) this.#d.roster.update(m.id, { reportsTo: null });
     const work: Task[] = [];
@@ -527,7 +529,8 @@ export class Company {
     const planId = input.planId ?? null;
     if (planId !== null) {
       const plan = this.#d.plans.get(planId);
-      if (plan.status !== 'approved' && plan.status !== 'done') throw new ConflictError(`“${plan.title}” planı sürmüyor; rutin yalnız süren bir plana bağlanabilir.`);
+      if (plan.status === 'done') throw new ConflictError(`“${plan.title}” planı bitti; rutin yalnız süren bir plana bağlanabilir.`);
+      if (plan.status !== 'approved') throw new ConflictError(`“${plan.title}” planı sürmüyor; rutin yalnız süren bir plana bağlanabilir.`);
     }
     const schedule = store.create({
       title: clean(input.title, 'Başlık', 120, true),
@@ -583,12 +586,13 @@ export class Company {
       if (status !== current.status) {
         next.status = status;
         change = SCHEDULE_CHANGE[status];
-        if (status === 'active') Object.assign(next, this.#resumed(next.cron ?? current.cron, doer));
+        if (status === 'active') Object.assign(next, this.#resumed(next.cron ?? current.cron, doer, next.reviewer !== undefined ? next.reviewer : current.reviewer));
       }
     }
     const schedule = store.update(id, next);
     this.#emit(by, { type: 'schedule.changed', change, schedule });
     this.#touchClock();
+    this.#planMayFinish(schedule);
     return schedule;
   }
 
@@ -600,7 +604,17 @@ export class Company {
     const next = this.#applyScheduleStatus(current, status, OWNER);
     const verb = action === 'pause' ? 'duraklattı' : action === 'resume' ? 'sürdürdü' : 'durdurdu';
     if (next.status !== current.status) this.#tellOwnerChanged(`Sahibi “${current.title}” rutinini ${verb}.`);
+    this.#planMayFinish(next);
     return next;
+  }
+
+  /** The clock ends a routine (its until passed, or no run is left within 366 days): stopped, with why; its plan may finish. */
+  endSchedule(id: string, note: string): Schedule {
+    const current = this.#schedules().get(id);
+    if (current.status === 'stopped') return current;
+    const schedule = this.#applyScheduleStatus(current, 'stopped', null, { note });
+    this.#planMayFinish(schedule);
+    return schedule;
   }
 
   /** Active and paused routines, then the last 10 stopped. */
@@ -609,9 +623,10 @@ export class Company {
     return [...this.#d.schedules.list({ statuses: ['active', 'paused'] }), ...this.#d.schedules.list({ statuses: ['stopped'] }).slice(-10)];
   }
 
-  #applyScheduleStatus(current: Schedule, status: ScheduleStatus, by: string): Schedule {
+  /** One status change of a routine, with its event; `by` null: the office's own (the clock). */
+  #applyScheduleStatus(current: Schedule, status: ScheduleStatus, by: string | null, extra: SchedulePatch = {}): Schedule {
     if (current.status === status) return current;
-    const patch: SchedulePatch = status === 'active' ? { status, ...this.#resumed(current.cron, current.assignee) } : { status };
+    const patch: SchedulePatch = status === 'active' ? { ...extra, status, ...this.#resumed(current.cron, current.assignee, current.reviewer) } : { ...extra, status };
     const schedule = this.#schedules().update(current.id, patch);
     this.#emit(by === OWNER ? null : by, { type: 'schedule.changed', change: SCHEDULE_CHANGE[status], schedule });
     this.#touchClock();
@@ -619,13 +634,22 @@ export class Company {
   }
 
   /**
-   * A routine comes back: only with an assignee still in the office; its next run is from now, so the missed ones become
-   * one catch-up at most, and its failures count afresh.
+   * A routine comes back: only with its assignee and reviewer still in the office; its next run is from now, so the
+   * missed ones become one catch-up at most, and its failures count afresh.
    */
-  #resumed(cron: string, assignee: string): SchedulePatch {
-    const who = this.#person(assignee);
-    if (!who || who.lifecycle === 'archived') throw new ConflictError(`${this.nameOf(assignee)} işten çıkarıldı; rutin yeni bir atanan verilene kadar duraklatılmış kalır.`);
+  #resumed(cron: string, assignee: string, reviewer: string | null): SchedulePatch {
+    const gone = (id: string) => {
+      const who = this.#person(id);
+      return !who || who.lifecycle === 'archived';
+    };
+    if (gone(assignee)) throw new ConflictError(`${this.nameOf(assignee)} işten çıkarıldı; rutin yeni bir atanan verilene kadar duraklatılmış kalır.`);
+    if (reviewer !== null && gone(reviewer)) throw new ConflictError(`${this.nameOf(reviewer)} işten çıkarıldı; rutin yeni bir inceleyici verilene kadar duraklatılmış kalır.`);
     return { nextRunAt: nextCron(parseCron(cron), this.#now()), failCount: 0 };
+  }
+
+  /** A routine stopped (not by its plan's own stop): it was open work, so its plan may be finished now — once. */
+  #planMayFinish(schedule: Schedule): void {
+    if (schedule.status === 'stopped' && schedule.planId) this.#maybeFinishPlan(schedule.planId);
   }
 
   /** A valid cron no more frequent than the constitution allows (the smallest gap among its next five runs). */
@@ -976,7 +1000,7 @@ export class Company {
       }
       this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'cancelled', finishedAt: at }));
     }
-    // Its routines stop with it (spec §4.4).
+    // Its routines stop with it (spec §4.4) — without #planMayFinish: a stopped plan is stopped, never done.
     for (const sch of this.#d.schedules?.list({ planId, statuses: ['active', 'paused'] }) ?? []) this.#applyScheduleStatus(sch, 'stopped', OWNER);
     this.#d.plans.clearApproved(planId);
     const stopped = this.#d.plans.update(planId, { status: 'stopped' });
@@ -1229,6 +1253,8 @@ export class Company {
   #maybeFinishPlan(planId: string): void {
     const plan = this.#d.plans.get(planId);
     if (plan.status !== 'approved' || this.#d.tasks.openInPlan(planId) > 0) return;
+    // A live routine is open work too: its plan runs while the routine does (spec §4.4).
+    if (this.#d.schedules?.list({ planId, statuses: ['active', 'paused'], limit: 1 }).length) return;
     const done = this.#d.plans.update(planId, { status: 'done' });
     const desk = this.#planDesk(done);
     this.#d.notices.add(

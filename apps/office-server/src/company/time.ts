@@ -50,6 +50,12 @@ export function formatWhen(ms: number, now: number): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${year} ${time}`;
 }
 
+/** "8 Eki 2026 09:00" — the moment itself, local time, never relative: for titles and notes read on any later day. */
+export function formatStamp(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export interface CronSpec {
   expr: string;
   fields: { minute: number[]; hour: number[]; dom: number[]; month: number[]; dow: number[] };
