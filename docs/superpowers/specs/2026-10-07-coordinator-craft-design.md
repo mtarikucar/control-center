@@ -119,6 +119,8 @@ Eski planların yöntemi boştur ve sorunsuz görünür.
   - `approve`: asıl görev biter (isteyene ve koordinatöre haber, planın bitişi kontrol edilir).
   - `changes`: bulgular önem dereceleriyle yazılır; asıl görev yapana geri döner (bekliyor, tur +1), teslim mesajında
     bulgular yer alır. Üçüncü "değişiklik iste"de koordinatöre karar notu gider.
+- İnceleme görevi `reviewDecide` ile kapanır; inceleme görevine `taskFinish` denirse ofis "kararını reviewDecide ile ver"
+  der. İnceleme görevi asıl görevin planına bağlıdır; plan, inceleme görevleri dahil her görevi bitince biter.
 - Koordinatör inceleyicili bir görevi yapanın yerine teslim ederse yine incelemeye gider.
 - İnceleyici işten çıkar ya da uzun süre karar vermezse inceleme görevi diğer görevler gibi koordinatöre döner
   (mevcut kurallar).
@@ -149,12 +151,13 @@ yöntem önerisi. Değerlendirme plana bağlı bir not olarak kalır; genel öne
 
 ## 7. Veri modeli
 
-`office-economy` birleştikten sonraki ilk göç (v8), geri alınabilir ve gidiş-dönüş testli:
+Bir göç, geri alınabilir ve gidiş-dönüş testli. Numarası birleştirme sırasına bağlı: `office-economy` (v6, v7) önce
+birleşirse v8; birleşmezse bu iş v6 alır ve ekonominin göçleri birleşirken yeniden numaralanır.
 
 - `plans.method` (JSON, boş olabilir)
 - `tasks.reviewer`, `tasks.review_of` (inceleme görevinin asıl görevi), `tasks.round` (varsayılan 0)
 - Görev durumuna `review`, görev türüne `review` eklenir (sütun metin; şema değişmez).
-- Teslimin `evidence` alanı mevcut teslim JSON'unda durur (göç gerekmez).
+- Kanıt, teslim JSON'una (`TaskResult`) `evidence: string[]` olarak eklenir (göç gerekmez; bitti tanımı zaten `string[]`).
 
 ## 8. Ekran
 
