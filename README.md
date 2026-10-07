@@ -74,6 +74,11 @@ saatleri ve hangi işin hangi modelde koşacağı.
   koordinatör ve liderler açar.
 - Koordinatör `budgetStatus` ile bütçeyi ve bugün kimin kaç tur kullandığını görür, `setModel` ile birinin modelini
   değiştirir, `sleep`/`wake` kullanır. Ölçüm: `docs/superpowers/notes/2026-10-07-economy-results.md`.
+- **Kapatma anahtarları:** `digestEnabled`, `modelPolicyEnabled`, `difficultyModelsEnabled` (Anayasa sekmesi) her
+  özelliği tek tek eski davranışa döndürür.
+- **Ölçüm ve yayın:** `pnpm economy-report --since 2026-10-07` (salt okunur; `--db`, `--until`) kabul belgesinin
+  metriklerini canlı veriden yazar; `node apps/office-server/scripts/migration-rehearsal.ts --from <yedek>` göçleri bir
+  kopyada prova eder. Kabul ve yayın: `docs/superpowers/notes/economy-acceptance.md`, `economy-release-runbook.md`.
 
 ## Öneriler ve ekip liderleri
 

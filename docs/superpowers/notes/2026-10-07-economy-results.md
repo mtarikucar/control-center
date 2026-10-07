@@ -74,6 +74,18 @@ oturumlar 5 + 11). Beklenen: senaryodaki her görevin zorluğu var (kadro modeli
 uyandırmaya değmez, paslanan iş ve takılı isteyen yok. Düzeltmeler senaryonun dışındaki yolları kapatır; her biri kendi
 testinde.
 
+## Doğrulama fazı (K3, K4 tabanı)
+
+- Kabul belgesi R1-R8, izlenebilirlik matrisi: [economy-acceptance.md](economy-acceptance.md).
+- Gerçek claude (K3): haiku → sonnet geçişinde konuşma korunuyor; model CLI'nin kendi init ve result satırında değişiyor.
+  Önbellek 6½ dk sonra hâlâ sıcak, 5 dk varsayımı çürüdü; düşürme yine de kazandırıyor. Ayrıntı:
+  [economy-cache-observation.md](economy-cache-observation.md).
+- Canlı taban (K4, n = 4 teslim): koordinatör (sahibi hariç) 1,25 tur/teslim, $1,83/teslim. Ayrıntı:
+  [economy-live-baseline.md](economy-live-baseline.md).
+- Göç 6-7 canlı DB kopyasında denendi; eski kod yeni şemada çalışıyor. Yayın: [economy-release-runbook.md](economy-release-runbook.md).
+- **Bu notun K2 rakamları modellenmiş maliyettir.** Gerçek kazanç yayın sonrası `economy-report` ile ölçülecek (R1, R2,
+  R6 = K4).
+
 ## Gerçek kullanımda bakılacaklar
 
 - `budgetStatus` artık bugün kimin kaç tur kullandığını söylüyor; Bütçe sekmesi ekip başına tur gösteriyor. Birkaç gün
