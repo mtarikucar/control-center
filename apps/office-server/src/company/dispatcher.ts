@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, TASK_DIFFICULTY_LABELS, type Constitution, type Employee, type ModelAlias, type Task } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, REVIEW_SEVERITY_LABELS, TASK_DIFFICULTY_LABELS, type Constitution, type Employee, type ModelAlias, type Task } from '@cc/shared';
 import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -35,6 +35,8 @@ export const NUDGE_PREFIX = 'Hatırlatma:';
 export const NOTICES_PREFIX = 'Ofisten notlar:';
 export const WORK_CLOSING =
   'İş bitince `taskFinish` ile teslim et: görev no, kısa özet, bitti tanımının her maddesi için bir kanıt (evidence, aynı sırayla), ürettiğin dosyalar, öğrendiklerin. Takılırsan `taskUpdate` ile "blocked" yap ve nedenini yaz; başka birinin yapması gereken bir parça çıkarsa `taskPass` kullan.';
+export const REVIEW_CLOSING =
+  'Kararını `reviewDecide` ile ver: bu inceleme görevinin no’su, approve ya da changes, bulgular (her biri için severity — critical, important ya da minor — ve somut bir senaryo). Her iddiayı kendin doğrula; düzeltmeyi kendin yapma, yapana bırak. `taskFinish` kullanma.';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -317,14 +319,25 @@ export class Dispatcher {
     const done = task.done.length ? `\n\nBitti tanımı:\n${task.done.map((d) => `- ${d}`).join('\n')}` : '';
     const deps = task.dependsOn.length ? `\nÖnce bitenler: ${task.dependsOn.join(', ')}` : '';
     const brief = this.#briefChanged(task) ? '\nŞirket özeti değişti; güncelini briefRead ile oku.' : '';
+    const reviewer = task.kind === 'work' && task.reviewer ? `\nİnceleyen: ${this.#d.company.nameOf(task.reviewer)} — teslimin onun onayıyla kapanır.` : '';
+    const returned = task.kind === 'work' && (task.round ?? 0) > 0 ? this.#returned(task) : '';
     const level = task.difficulty && this.#rules().difficultyModelsEnabled ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
-İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${deps}${brief}
+İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${reviewer}${deps}${brief}
 
-${task.description || '(açıklama yok)'}${done}
+${task.description || '(açıklama yok)'}${done}${returned}
 
-${WORK_CLOSING}`;
+${task.kind === 'review' ? REVIEW_CLOSING : WORK_CLOSING}`;
+  }
+
+  /** A task sent back by its reviewer: the findings of the last review go with it. */
+  #returned(task: Task): string {
+    const last = this.#d.tasks.latestReview(task.id);
+    const outcome = last?.result?.review;
+    if (!last || !outcome || outcome.decision !== 'changes') return '';
+    const findings = outcome.findings.map((f) => `- [${REVIEW_SEVERITY_LABELS[f.severity]}] ${f.text}`).join('\n');
+    return `\n\n### İnceleme: değişiklik istendi (tur ${task.round}, ${this.#d.company.nameOf(last.assignee)})\n${last.result?.summary ?? ''}\n${findings}\nÖnce kritik ve önemli bulguları kapat; her biri için ne yaptığını teslim özetine yaz.`;
   }
 
   /** Still open after the reminder: the queue behind it is stuck, so the coordinator decides (ask, or taskAssign). */
@@ -339,12 +352,13 @@ ${WORK_CLOSING}`;
       'task.stalled',
       task.kind === 'handover'
         ? `${name} devir görevini hatırlatmaya rağmen teslim etmedi. Devir başkasına verilemez: ona sor, gerekirse reportToOwner ile sahibine bildir (sahibi Hemen çıkar ile devri atlayabilir).`
-        : `${name} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
+        : `${name} “${task.title}” ${task.kind === 'review' ? 'incelemesini' : 'görevini'} (no ${task.id}) hatırlatmaya rağmen ${task.kind === 'review' ? 'karara bağlamadı' : 'teslim etmedi'}; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
     );
     this.#schedule(coordinator.id);
   }
 
   #nudge(task: Task): string {
+    if (task.kind === 'review') return `${NUDGE_PREFIX} “${task.title}” (no ${task.id}) hâlâ açık. Kararını \`reviewDecide\` ile ver.`;
     return `${NUDGE_PREFIX} “${task.title}” görevi (no ${task.id}) hâlâ açık görünüyor. Bitirdiysen \`taskFinish\` ile teslim et; takıldıysan \`taskUpdate\` ile durumunu yaz.`;
   }
 }

@@ -42,6 +42,12 @@ export const NOTICE_TOPICS = {
   'limit.tasks_per_day': 'decision',
   /** The owner reverted a decision: do what follows from it. */
   'decision.reverted': 'decision',
+  /** Your hand-in passed its review. */
+  'review.approved': 'info',
+  /** A reviewer sent a task back with findings (the coordinator hears). */
+  'review.changes': 'info',
+  /** A task was sent back for the third time or more: the coordinator changes the approach or brings it to the owner. */
+  'review.stuck': 'decision',
   /** Digest off: the daily report reminder as a notice of its own (with the digest on it is a line of the digest). */
   'report.reminder': 'decision',
 } as const satisfies Record<string, NoticeKind>;
@@ -81,6 +87,7 @@ const LINE_CHARS = 160;
 
 const GROUPS: Array<{ title: string; topics: readonly string[] }> = [
   { title: 'Teslimler', topics: ['task.finished', 'task.awaited'] },
+  { title: 'İncelemeler', topics: ['review.approved', 'review.changes'] },
   { title: 'Plan durumu', topics: ['plan.done'] },
   { title: 'Görevler', topics: ['task.moved'] },
   { title: 'Öneriler', topics: ['proposal.to_owner'] },

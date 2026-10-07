@@ -1,4 +1,4 @@
-import { WORK_TYPES, type PlanMethod } from '@cc/shared';
+import { REVIEW_SEVERITIES, WORK_TYPES, type PlanMethod, type ReviewFinding, type ReviewSeverity, type Task } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import { isWorkType } from './craft.ts';
 import { clean, lines } from './text.ts';
@@ -31,4 +31,50 @@ export function planMethod(value: unknown): PlanMethod {
   const checks = lines(v.checks as string[] | undefined, 'Kalite kontrolleri', 12, 300);
   if (checks.length === 0) throw new ValidationError('Yöntemde en az bir kalite kontrolü (checks) olmalı: işin iyi olduğunu neyle anlayacaksın?');
   return { workType: v.workType, stages, checks };
+}
+
+/** From this many review rounds sent back on, the coordinator decides how to go on (spec §5.2). */
+export const REVIEW_ROUNDS = 3;
+
+/** A reviewer's findings, checked and sorted most severe first. */
+export function reviewFindings(value: unknown): ReviewFinding[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new ValidationError('Bulgular (findings) bir liste olmalı: her biri için severity ve text.');
+  if (value.length > 30) throw new ValidationError('En fazla 30 bulgu yazılabilir.');
+  return value
+    .map((raw, i) => {
+      const f = record(raw);
+      if (!f || !(REVIEW_SEVERITIES as readonly unknown[]).includes(f.severity)) {
+        throw new ValidationError(`${i + 1}. bulgunun önem derecesi (severity) critical, important ya da minor olmalı; metni text alanına yaz.`);
+      }
+      return { severity: f.severity as ReviewSeverity, text: clean(text(f.text), `${i + 1}. bulgu`, 2000, true) };
+    })
+    .sort((a, b) => REVIEW_SEVERITIES.indexOf(a.severity) - REVIEW_SEVERITIES.indexOf(b.severity));
+}
+
+/** What the reviewer reads: the work, each done item with its evidence, the summary and the outputs. */
+export function reviewBrief(task: Task, doer: string, round: number): string {
+  const r = task.result;
+  const ev = r?.evidence ?? [];
+  const items = task.done.length
+    ? task.done.map((d, i) => `${i + 1}. ${d}\n   Kanıt: ${ev[i] ?? '—'}`).join('\n')
+    : ev.length
+      ? ev.map((e) => `- ${e}`).join('\n')
+      : '(bitti tanımı yok)';
+  return [
+    `${doer} “${task.title}” görevini teslim etti (inceleme turu ${round}); görev senin kararınla kapanır.`,
+    '',
+    '### İş',
+    task.description || '(açıklama yok)',
+    '',
+    '### Bitti tanımı ve kanıt',
+    items,
+    '',
+    '### Teslim özeti',
+    r?.summary ?? '',
+    ...(r?.outputs.length ? ['', '### Çıktılar', ...r.outputs.map((o) => `- ${o}`)] : []),
+    ...(r?.archive ? ['', `Arşiv: ${r.archive}`] : []),
+  ]
+    .join('\n')
+    .slice(0, 12000);
 }

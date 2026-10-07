@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
 import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, TASK_DIFFICULTIES, type TaskDifficulty } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, REVIEW_DECISIONS, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -11,7 +11,7 @@ import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
-import { planMethod } from './review.ts';
+import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
@@ -33,6 +33,7 @@ const HANDOVER_DONE = [
   'Elindeki işlerin durumu teslim özetinde (açık görevlerin koordinatöre dönecek)',
   'İşe yarayacak dosyalar teslimin outputs listesinde',
 ];
+const SELF_REVIEW = 'Bir işi yapan kendi işinin inceleyicisi olamaz; başka birini seç.';
 const PROPOSAL_TR: Record<ProposalKind, string> = { need: 'ihtiyaç', purchase: 'satın alma', idea: 'fikir', objection: 'itiraz' };
 
 export interface CompanyDeps {
@@ -67,6 +68,8 @@ export interface TaskInput {
   dependsOn?: string[];
   /** Sets the model the task starts on (the constitution's difficultyModels); none: the assignee's current model. */
   difficulty?: TaskDifficulty | null;
+  /** Who approves the hand-in before the task closes (spec §5.2): an employee id; never the assignee. */
+  reviewer?: string | null;
 }
 
 export interface PlanDraft {
@@ -245,16 +248,17 @@ export class Company {
       this.#tellCoordinator(by, 'limit.tasks_per_day', `${this.nameOf(by)} bugün ${rules.tasksPerDay} görev açtı ve sınıra geldi.`);
       throw new ConflictError(`Bir çalışan günde en fazla ${rules.tasksPerDay} görev açabilir.`);
     }
+    const reviewer = this.#reviewerOf(input.reviewer, assignee.id);
     const task = this.#d.tasks.create({
-      planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), dependsOn, chainDepth: Math.max(0, chainDepth),
+      planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), reviewer, dependsOn, chainDepth: Math.max(0, chainDepth),
     });
     this.#taskEvent('created', task);
     if (planId !== null) this.#reopenPlan(planId);
     return task;
   }
 
-  /** Gives a task to someone (and, with `difficulty`, says anew how hard it is). */
-  assign(by: string, taskId: string, assignee: string, o: { difficulty?: TaskDifficulty | null } = {}): Task {
+  /** Gives a task to someone (and, with `difficulty`, says anew how hard it is; with `reviewer`, who checks it). */
+  assign(by: string, taskId: string, assignee: string, o: { difficulty?: TaskDifficulty | null; reviewer?: string | null } = {}): Task {
     this.#assertManages(by, this.#d.tasks.get(taskId).assignee, assignee);
     const task = this.#d.tasks.get(taskId);
     // Finishing a hand-over lets its holder go: moving it would fire someone the owner never chose.
@@ -265,10 +269,20 @@ export class Company {
       throw new ConflictError('Bu görev şu an sürüyor; bitmeden başkasına verilemez.');
     }
     if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev kapandı.');
+    if (task.status === 'review') throw new ConflictError('Bu görev incelemede; inceleme kararı gelmeden başkasına verilemez.');
     const target = this.#d.roster.get(assignee);
     if (target.lifecycle === 'archived') throw new ConflictError(`${target.name} işten çıkarıldı.`);
+    let reviewer = task.reviewer ?? null;
+    if (task.kind === 'review') {
+      if (task.reviewOf && this.#d.tasks.get(task.reviewOf).assignee === target.id) throw new ConflictError(SELF_REVIEW);
+    } else {
+      if (o.reviewer !== undefined) reviewer = this.#reviewerOf(o.reviewer, target.id);
+      if (reviewer === target.id) throw new ConflictError('Bu görevin inceleyicisi ona verilemez: yapan kendi işini onaylayamaz. Önce başka bir inceleyici seç (reviewer).');
+    }
     const difficulty = o.difficulty === undefined ? task.difficulty : difficultyOf(o.difficulty);
-    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false, difficulty });
+    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false, difficulty, reviewer });
+    // Whoever takes over a review also reviews the later rounds.
+    if (task.kind === 'review' && task.reviewOf) this.#d.tasks.update(task.reviewOf, { reviewer: target.id });
     if (holder && holder.id !== target.id && holder.lifecycle !== 'archived') {
       const started = task.status === 'in_progress' || task.status === 'blocked';
       this.#d.notices.add(
@@ -367,6 +381,8 @@ export class Company {
     const coordinator = this.coordinator();
     if (task.assignee !== by && coordinator?.id !== by) throw new ForbiddenError('Yalnız görevi üstlenen ya da koordinatör teslim edebilir.');
     if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev zaten kapandı.');
+    if (task.kind === 'review') throw new ConflictError('Bu bir inceleme görevi: kararını reviewDecide ile ver (approve ya da changes, bulgular önem dereceleriyle).');
+    if (task.status === 'review') throw new ConflictError('Bu görev incelemede; inceleyicinin kararını bekle.');
     const evidence = lines(result.evidence, 'Kanıt', 20, 1000);
     const handed: TaskResult = {
       summary: (result.summary ?? '').trim().slice(0, 4000),
@@ -379,18 +395,87 @@ export class Company {
     if (task.kind === 'work' && evidence.length < task.done.length) {
       throw new ValidationError(`Bitti tanımında ${task.done.length} madde var; her biri için bir kanıt yaz (evidence, aynı sırayla): ne yaptın ve nasıl doğruladın.`);
     }
-    const finishedAt = this.#now();
-    let archived: TaskResult = handed;
+    const at = this.#now();
+    const archived = this.#archive(task, handed, at);
+    const reviewer = task.kind === 'work' && task.reviewer ? this.#reviewerFor(task) : null;
+    if (reviewer) {
+      const round = (task.round ?? 0) + 1;
+      const next = this.#d.tasks.update(taskId, { status: 'review', result: archived, round });
+      this.#taskEvent('in_review', next);
+      const review = this.#d.tasks.create({
+        kind: 'review', planId: task.planId, title: `İnceleme: ${task.title} (tur ${round})`, description: reviewBrief(next, this.nameOf(task.assignee), round),
+        done: [], requester: task.requester, assignee: reviewer.id, priority: task.priority, difficulty: task.difficulty ?? null, dependsOn: [], chainDepth: 0, reviewOf: task.id,
+      });
+      this.#taskEvent('created', review);
+      return next;
+    }
+    return this.#complete(task, archived, by, at);
+  }
+
+  /**
+   * The reviewer decides (spec §5.2): approve closes the reviewed task; changes sends it back to the one who did it,
+   * with the findings. Returns the reviewed task.
+   */
+  reviewDecide(by: string, reviewTaskId: string, d: { decision: unknown; findings?: unknown; note?: string }): Task {
+    const review = this.#d.tasks.get(reviewTaskId);
+    if (review.kind !== 'review' || !review.reviewOf) throw new ValidationError('Bu bir inceleme görevi değil; reviewDecide yalnız “İnceleme:” görevleri içindir.');
+    if (review.status === 'done' || review.status === 'cancelled') throw new ConflictError('Bu inceleme zaten karara bağlandı.');
+    const coordinator = this.coordinator();
+    const task = this.#d.tasks.get(review.reviewOf);
+    if (task.assignee === by) throw new ForbiddenError('Kendi işini inceleyemezsin; inceleme başka birinde olmalı.');
+    if (review.assignee !== by && coordinator?.id !== by) throw new ForbiddenError('Bu inceleme sana verilmedi.');
+    if (task.status !== 'review') throw new ConflictError('Bu görev artık incelemede değil.');
+    if (!(REVIEW_DECISIONS as readonly unknown[]).includes(d.decision)) throw new ValidationError('Karar (decision) approve ya da changes olmalı.');
+    const decision = d.decision as ReviewDecision;
+    const findings = reviewFindings(d.findings);
+    const serious = findings.some((f) => f.severity !== 'minor');
+    if (decision === 'approve' && serious) throw new ValidationError('Kritik ya da önemli bir bulgu varken onaylanamaz: changes ile geri gönder (bulgu küçükse minor yaz).');
+    if (decision === 'changes' && !serious) {
+      throw new ValidationError('Değişiklik istiyorsan en az bir kritik ya da önemli bulgu yaz (somut bir senaryoyla); yalnız küçük bulgular varsa approve et, küçükler kayda geçer.');
+    }
+    const note = clean(d.note, 'Not', 2000, false);
+    const me = this.#d.roster.get(by);
+    const at = this.#now();
+    const tally = reviewTally(findings);
+    const closed = this.#d.tasks.update(review.id, {
+      status: 'done',
+      finishedAt: at,
+      result: { summary: `${decision === 'approve' ? 'Onaylandı' : 'Değişiklik istendi'}${tally ? ` (${tally})` : ''}${note ? `: ${note}` : ''}`, outputs: [], learned: '', review: { decision, findings } },
+    });
+    this.#taskEvent('reviewed', closed);
+    if (decision === 'approve') {
+      const minor = findings.length ? `; küçük notlar: ${findings.map((f) => f.text).join(' · ')}` : '.';
+      this.#d.notices.add(task.assignee, 'review.approved', `“${task.title}” incelemeden geçti (${me.name} onayladı)${minor}`);
+      return this.#complete(task, task.result ?? { summary: '', outputs: [], learned: '' }, by, at, me.name);
+    }
+    const back = this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null, nudged: false });
+    this.#taskEvent('updated', back);
+    const round = task.round ?? 1;
+    const line = `İnceleme: “${task.title}” için değişiklik istendi (tur ${round}, ${me.name}): ${tally}.`;
+    const doer = this.#person(task.assignee);
+    if (!doer || doer.lifecycle === 'archived') this.#tellCoordinator(by, 'task.orphaned', `${line} ${this.nameOf(task.assignee)} işten çıkarıldı; görevi taskAssign ile başkasına ver.`);
+    else if (round >= REVIEW_ROUNDS) this.#tellCoordinator(by, 'review.stuck', `${line} Bu iş ${round} turdur geçemiyor: yaklaşımı değiştir (başka kişi, başka model, işi böl) ya da sahibine götür.`);
+    else this.#tellCoordinator(by, 'review.changes', line);
+    return back;
+  }
+
+  /** The hand-in is kept in the archive; the archive never blocks it (the result is in the database either way). */
+  #archive(task: Task, handed: TaskResult, at: number): TaskResult {
     try {
       const assignee = this.#d.roster.get(task.assignee);
       const planTitle = task.planId ? this.#d.plans.get(task.planId).title : null;
-      const dir = archiveTask({ dataDir: this.#d.dataDir, desk: deskDir(this.#d.dataDir, assignee.slug), task, result: handed, planTitle, by: assignee.name, now: finishedAt });
-      archived = { ...handed, archive: relative(this.#d.dataDir, dir) };
+      const dir = archiveTask({ dataDir: this.#d.dataDir, desk: deskDir(this.#d.dataDir, assignee.slug), task, result: handed, planTitle, by: assignee.name, now: at });
+      return { ...handed, archive: relative(this.#d.dataDir, dir) };
     } catch {
-      // The archive never blocks a hand-in: the result is kept in the database either way.
+      return handed;
     }
-    const next = this.#d.tasks.update(taskId, { status: 'done', result: archived, finishedAt });
-    const line = `Görev bitti: “${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
+  }
+
+  /** The task closes: the requester and the coordinator hear, the lesson becomes a note, the plan may finish. */
+  #complete(task: Task, result: TaskResult, by: string, at: number, approvedBy?: string): Task {
+    const next = this.#d.tasks.update(task.id, { status: 'done', result, finishedAt: at });
+    const coordinator = this.coordinator();
+    const line = `Görev bitti: “${task.title}” (${this.nameOf(task.assignee)}${approvedBy ? `; ${approvedBy} onayladı` : ''}): ${result.summary}`;
     if (task.requester !== OWNER && task.requester !== by) {
       // A requester stuck on their own task is likely waiting for this one: they can go on now.
       const waiting = this.#d.tasks.list({ assignee: task.requester, statuses: ['blocked'], limit: 1 }).length > 0;
@@ -398,9 +483,26 @@ export class Company {
     }
     if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, 'task.finished', line);
     this.#taskEvent('finished', next);
-    this.#d.memory?.learnedFrom(next, handed);
+    this.#d.memory?.learnedFrom(next, result);
     if (task.planId) this.#maybeFinishPlan(task.planId);
     return next;
+  }
+
+  /** A reviewer named for a task: someone in the office, not let go, and never the one who does it. */
+  #reviewerOf(value: string | null | undefined, assignee: string): string | null {
+    if (value === undefined || value === null || value === '') return null;
+    const r = this.#d.roster.get(value);
+    if (r.lifecycle === 'archived') throw new ConflictError(`${r.name} işten çıkarıldı; inceleyici olamaz.`);
+    if (r.id === assignee) throw new ConflictError(SELF_REVIEW);
+    return r.id;
+  }
+
+  /** Who reviews a hand-in now: its reviewer, or — if they were let go — the coordinator; never the one who did it. */
+  #reviewerFor(task: Task): Employee | null {
+    const named = task.reviewer ? this.#person(task.reviewer) : null;
+    if (named && named.lifecycle !== 'archived' && named.id !== task.assignee) return named;
+    const c = this.coordinator();
+    return c && c.id !== task.assignee ? c : null;
   }
 
   // ── plans ─────────────────────────────────────────────────────────────────
@@ -729,7 +831,7 @@ export class Company {
     if (c && c.id !== about) this.#d.notices.add(c.id, topic, text);
   }
 
-  #taskEvent(change: 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized', task: Task): void {
+  #taskEvent(change: TaskChange, task: Task): void {
     this.#emit(task.assignee, { type: 'task.changed', change, task });
   }
 

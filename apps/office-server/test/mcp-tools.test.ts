@@ -32,7 +32,7 @@ describe('office tools', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
     expect(names('member')).toEqual([
-      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend',
+      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend', 'reviewDecide',
       'taskFinish', 'taskPass', 'taskUpdate',
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
@@ -257,5 +257,19 @@ describe('office tools — task difficulty', () => {
     await expect(Promise.resolve().then(() => t.call(ada, 'taskFinish', { taskId: task.id, summary: 'bitti' }))).rejects.toThrow(/2 madde var/);
     await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'bitti', evidence: ['rapor.md yazıldı', 'her sayının yanında kaynak'] });
     expect(t.tasks.get(task.id).result?.evidence).toHaveLength(2);
+  });
+
+  it('names a reviewer by name, and the reviewer decides with reviewDecide', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    await t.call(ada, 'taskPass', { to: 'Can', title: 'Çeviri', done: ['tr metin'], reviewer: 'Ada' });
+    const task = t.tasks.list({ assignee: can.id })[0]!;
+    expect(task.reviewer).toBe(ada.id);
+    expect(await t.call(can, 'taskFinish', { taskId: task.id, summary: 'çevirdim', evidence: ['ceviri.md'] })).toMatch(/incelemeye gitti/);
+    const review = t.tasks.list({ assignee: ada.id }).find((x) => x.kind === 'review')!;
+    expect(await t.call(ada, 'myTasks')).toContain('İnceleme: Çeviri');
+    expect(await t.call(ada, 'reviewDecide', { taskId: review.id, decision: 'changes', findings: [{ severity: 'important', text: 'bir paragraf eksik' }] })).toMatch(/Değişiklik istendi/);
+    expect(t.tasks.get(task.id).status).toBe('waiting');
   });
 });

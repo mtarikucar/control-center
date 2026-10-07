@@ -600,3 +600,32 @@ describe('Dispatcher — notice kinds and the digest', () => {
   });
 });
 
+describe('Dispatcher — reviews', () => {
+  it('delivers a review task with reviewDecide instructions; a sent-back task comes back with the findings', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Metin', done: ['iki cümle'], reviewer: can.id });
+    await waitFor(t.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('İnceleyen: Can'));
+    t.company.finish(ada.id, task.id, { summary: 'yazdım', outputs: [], learned: '', evidence: ['metin.md'] });
+    const reviewMsg = await waitFor(t.events, (e) => e.employeeId === can.id && e.event.type === 'message.user' && e.event.text.includes('İnceleme: Metin'));
+    const text = (reviewMsg.event as { text: string }).text;
+    expect(text).toContain('reviewDecide');
+    expect(text).not.toContain('`taskFinish` ile teslim et');
+    const review = t.tasks.list({ assignee: can.id }).find((x) => x.kind === 'review')!;
+    t.company.reviewDecide(can.id, review.id, { decision: 'changes', findings: [{ severity: 'important', text: 'üç cümle olmuş' }] });
+    const back = await waitFor(t.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('değişiklik istendi'));
+    expect((back.event as { text: string }).text).toContain('[önemli] üç cümle olmuş');
+  });
+
+  it('reminds a reviewer to decide with reviewDecide', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Metin', reviewer: can.id });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    t.company.finish(ada.id, task.id, { summary: 'yazdım', outputs: [], learned: '' });
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), can.id).some((m) => m.startsWith(NUDGE_PREFIX)), 8000);
+    expect(systemMessages(t.events.list({ limit: 5000 }), can.id).find((m) => m.startsWith(NUDGE_PREFIX))).toContain('reviewDecide');
+  });
+});

@@ -1,4 +1,4 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
+import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText } from '../company/craft.ts';
@@ -55,7 +55,8 @@ const STATUS_TR: Record<Task['status'], string> = { waiting: 'bekliyor', in_prog
 
 function taskLine(t: Task, company: Company): string {
   const done = t.done.length ? ` — bitti tanımı: ${t.done.join('; ')}` : '';
-  return `• [${STATUS_TR[t.status]}] ${t.id} “${t.title}” (öncelik ${t.priority}, isteyen ${company.nameOf(t.requester)})${done}`;
+  const review = t.reviewer ? `, inceleyen ${company.nameOf(t.reviewer)}${t.round ? `, tur ${t.round}` : ''}` : '';
+  return `• [${STATUS_TR[t.status]}] ${t.id} “${t.title}” (öncelik ${t.priority}, isteyen ${company.nameOf(t.requester)}${review})${done}`;
 }
 
 const s = (description: string) => ({ type: 'string', description });
@@ -69,6 +70,7 @@ const difficulty = {
   description: 'How hard the task is; it starts on the model the constitution gives that difficulty. None: the assignee stays on their model.',
 };
 const difficultyArg = (args: Args) => optStr(args, 'difficulty') as TaskDifficulty | undefined;
+const reviewer = s('Who checks the hand-in before it closes (id or name); never the one who does the task. Give one for any task with a quality risk.');
 const method = {
   type: 'object',
   description: 'How the work is done (read methodRead first): the work type, at least two stages with who does each and whether someone else checks it, and at least one quality check.',
@@ -106,6 +108,11 @@ export function officeTools(o: {
     throw new NotFoundError(`Çalışan bulunamadı: ${who}. officeStatus ile ofistekileri görebilirsin.`);
   };
 
+  const reviewerArg = (args: Args): string | undefined => {
+    const who = optStr(args, 'reviewer');
+    return who === undefined || who === '' ? undefined : findPerson(who).id;
+  };
+
   const characterList = () => [...o.characters(), 'voxel'];
 
   return [
@@ -130,7 +137,29 @@ export function officeTools(o: {
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         const task = company.finish(employee.id, str(args, 'taskId'), { summary: str(args, 'summary'), evidence: list(args, 'evidence'), outputs: list(args, 'outputs') ?? [], learned: optStr(args, 'learned') ?? '' });
+        if (task.status === 'review') return `“${task.title}” teslim edildi ve incelemeye gitti; karar gelince ya kapanacak ya da bulgularla sana dönecek.`;
         return `“${task.title}” teslim edildi${task.result?.archive ? ` (arşiv: ${task.result.archive})` : ''}. İsteyen ve koordinatör haberdar edildi.`;
+      },
+    },
+    {
+      name: 'reviewDecide',
+      description:
+        'Decide a review task (its title starts with "İnceleme:"): approve closes the reviewed task; changes sends it back to whoever did it with your findings. Check every claim yourself first. Give each finding a severity (critical: wrong or harmful; important: misses the definition of done; minor: an improvement) and a concrete failure scenario. Approve only without critical or important findings. Never review your own work.',
+      inputSchema: object(
+        {
+          taskId: s('The review task id.'),
+          decision: { type: 'string', enum: ['approve', 'changes'] },
+          findings: { type: 'array', items: object({ severity: { type: 'string', enum: [...REVIEW_SEVERITIES] }, text: s('What is wrong, with a concrete scenario.') }, ['severity', 'text']), description: 'Findings, most severe first.' },
+          note: s('A short overall note.'),
+        },
+        ['taskId', 'decision'],
+      ),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        const task = company.reviewDecide(employee.id, str(args, 'taskId'), { decision: str(args, 'decision'), findings: args.findings, note: optStr(args, 'note') });
+        return task.status === 'done'
+          ? `Onaylandı: “${task.title}” kapandı; yapan ve isteyen haberdar edildi.`
+          : `Değişiklik istendi: “${task.title}” bulgularınla ${company.nameOf(task.assignee)} adlı çalışana döndü (tur ${task.round ?? 1}).`;
       },
     },
     {
@@ -146,13 +175,13 @@ export function officeTools(o: {
     {
       name: 'taskPass',
       description: 'Pass a piece of work to a colleague (by id or name). It goes to the end of their queue; they are not interrupted. Say what, why and when it counts as done.',
-      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` } }, ['to', 'title']),
+      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer }, ['to', 'title']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         // Arguments first: a malformed call should say what is malformed, not that a person was not found.
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args) };
         const to = findPerson(str(args, 'to'));
-        const task = company.createTask(employee.id, { assignee: to.id, ...input });
+        const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         const lowered = input.difficulty === 'critical' && task.difficulty === 'hard' ? ' Zorluk “kritik” yerine “zor” sayıldı: kritik işi koordinatör ya da ekip lideri açar.' : '';
         return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).${lowered}`;
       },
@@ -391,7 +420,7 @@ export function officeTools(o: {
       name: 'taskCreate',
       description:
         'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done". Give a difficulty: when difficulty models are on in the constitution, the task starts on its model (by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
-      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
+      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
       kinds: LEADS,
       run: ({ employee }, args) => {
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn') };
@@ -399,18 +428,18 @@ export function officeTools(o: {
         if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
           throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
         }
-        const task = company.createTask(employee.id, { assignee: to.id, ...input });
+        const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}.`;
       },
     },
     {
       name: 'taskAssign',
       description: 'Give a waiting or blocked task to someone else (coordinator); with difficulty, also say anew how hard it is.',
-      inputSchema: object({ taskId: s('The task id.'), assignee: s('Employee id or name.'), difficulty }, ['taskId', 'assignee']),
+      inputSchema: object({ taskId: s('The task id.'), assignee: s('Employee id or name.'), difficulty, reviewer }, ['taskId', 'assignee']),
       kinds: LEADS,
       run: ({ employee }, args) => {
         const to = findPerson(str(args, 'assignee'));
-        const task = company.assign(employee.id, str(args, 'taskId'), to.id, { difficulty: difficultyArg(args) });
+        const task = company.assign(employee.id, str(args, 'taskId'), to.id, { difficulty: difficultyArg(args), reviewer: reviewerArg(args) });
         return `“${task.title}” artık ${to.name} adlı çalışanda.`;
       },
     },
