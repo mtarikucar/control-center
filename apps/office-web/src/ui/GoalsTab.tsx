@@ -29,19 +29,23 @@ function GoalCard({ goal }: { goal: Goal }) {
         <span className={`badge goal-${goal.status}`}>{GOAL_STATUS_LABELS[goal.status]}</span>
       </header>
       <p className="muted">{goal.why}</p>
+      <span className="goal-label">Bitti tanımı</span>
       <ul>
         {goal.done.map((d, i) => (
           <li key={i}>{d}</li>
         ))}
       </ul>
       {plans.length > 0 && (
-        <ul className="goal-plans">
-          {plans.map((p) => (
-            <li key={p.id}>
-              {p.title} <span className={`badge plan-${p.status}`}>{PLAN_STATUS_LABELS[p.status]}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <span className="goal-label">Planlar</span>
+          <ul className="goal-plans">
+            {plans.map((p) => (
+              <li key={p.id}>
+                {p.title} <span className={`badge plan-${p.status}`}>{PLAN_STATUS_LABELS[p.status]}</span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       {goal.note && <p className="muted">{goal.note}</p>}
       {goal.status === 'active' && (

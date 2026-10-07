@@ -104,6 +104,22 @@ her şirkette aynıdır ve şirketin el kitabına yazılmaz. El kitabında yaln�
 - **Değerlendirme:** bir planın son görevi kapanınca koordinatör `planRetro` ile değerlendirir; şirkete özgü dersi el
   kitabına, her şirkete yarayacak yöntem önerisini `yöntem-önerisi` etiketli nota yazar.
 
+## Proje yöneticisi ve yaşayan döngü
+
+Koordinatör projenin proje yöneticisidir; proje sizin her adımı söylemenizi beklemeden döner.
+
+- **Hedefler:** koordinatör şirket özetindeki misyondan hedefler koyar (`goalSet`): neden önemli olduğu ve ölçülebilir
+  bitti tanımıyla. Aynı anda en fazla birkaç aktif hedef olur (Anayasa: "En fazla aktif hedef"). Şirket görünümünün
+  **Hedefler** sekmesi her hedefi, nedenini, bitti tanımını ve planlarını gösterir.
+- **Tam serbest (varsayılan):** koordinatör planlarını sizi beklemeden başlatır; kartta "Koordinatör başlattı" yazar.
+  Anayasa'da **Tam serbest** kapatılırsa her plan yine sizin onayınızı bekler. Satın almalar, geri alınamaz işler ve
+  bütçe sınırları her durumda sizdedir.
+- **Nabız:** ofisin kodu projeyi izler (model kullanmaz) ve koordinatörü yalnız karar gerektiğinde uyandırır: bir plan
+  bitince (değerlendirme), bir hedefin süren planı kalmayınca, hiç hedef ve iş yokken (en fazla "Nabız aralığı" saatte
+  bir). Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp dinlenir.
+- **Sizin denetiminiz:** her süren planda ve her aktif hedefte **Durdur** (açık görevler iptal olur); üst çubukta
+  **Şirketi duraklat / Sürdür** (duraklatılmışken ofis kimseye iş ve not vermez; siz yine yazabilirsiniz).
+
 ## Öneriler ve ekip liderleri
 
 - Çalışanlar **ihtiyaç**, **fikir**, **itiraz** ("yanlış yoldayız") ve **satın alma** taleplerini `propose` ile açar.
