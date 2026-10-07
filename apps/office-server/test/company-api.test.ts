@@ -23,7 +23,7 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, argvLog: f.argvLog, events: s.events, engine: f.engine };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -223,5 +223,31 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', '/api/company/resume')).status).toBe(200);
     office = await call(t.port, 'GET', '/api/office');
     expect(office.body.paused).toBe(false);
+  });
+
+  it('review focus: the owner parks, releases and prioritizes from the sheet; running, reviewing and hand-over tasks refuse a release', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    const a = t.company.createTask(c.id, { assignee: ada.id, title: 'A' });
+    const parked = await call(t.port, 'POST', `/api/tasks/${a.id}/park`, { until: '+1d', reason: 'yarına' });
+    expect(parked.body).toMatchObject({ id: a.id, status: 'parked', parkedReason: 'yarına' });
+    expect((await call(t.port, 'POST', `/api/tasks/${a.id}/park`, { until: 'dün', reason: 'x' })).status).toBe(400);
+    const released = await call(t.port, 'POST', `/api/tasks/${a.id}/release`);
+    expect(released.body).toMatchObject({ id: a.id, status: 'waiting', notBefore: null, priority: 1 });
+    const b = t.company.createTask(c.id, { assignee: ada.id, title: 'B' });
+    expect((await call(t.port, 'POST', `/api/tasks/${b.id}/prioritize`, { priority: 1 })).body.priority).toBe(1);
+    t.company.start(b.id);
+    expect((await call(t.port, 'POST', `/api/tasks/${b.id}/release`)).status).toBe(409);
+    const r = t.company.createTask(c.id, { assignee: ada.id, title: 'R', reviewer: can.id });
+    t.company.finish(ada.id, r.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect((await call(t.port, 'POST', `/api/tasks/${r.id}/release`)).status).toBe(409);
+    expect((await call(t.port, 'POST', `/api/tasks/${r.id}/park`, { until: '+1h', reason: 'x' })).status).toBe(409);
+    const h = t.company.beginHandover(can.id);
+    expect((await call(t.port, 'POST', `/api/tasks/${h.id}/release`)).status).toBe(409);
+    expect((await call(t.port, 'POST', '/api/tasks/00000000-0000-0000-0000-000000000000/release')).status).toBe(404);
+    const heard = t.notices.pending(c.id).filter((n) => n.topic === 'agenda.owner_changed');
+    expect(heard.length).toBe(3);
   });
 });

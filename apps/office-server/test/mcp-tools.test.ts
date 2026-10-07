@@ -21,7 +21,8 @@ function make() {
     const tool = tools.find((t: McpTool) => t.name === name);
     if (!tool) throw new Error(`no tool ${name}`);
     const current = s.roster.get(employee.id);
-    if (!tool.kinds.includes(current.kind)) throw new Error(`closed: ${name}`);
+    // The protocol's own refusal (mcp/protocol.ts) for a tool outside the caller's kinds.
+    if (!tool.kinds.includes(current.kind)) throw new Error(`Bilinmeyen ya da bu çalışana kapalı araç: ${name}`);
     return tool.run({ employee: current }, args);
   };
   return { ...s, ...c, engine: f.engine, tools, call };
@@ -33,9 +34,9 @@ describe('office tools', () => {
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
     expect(names('member')).toEqual([
       'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend', 'reviewDecide',
-      'taskFinish', 'taskPass', 'taskUpdate',
+      'taskFinish', 'taskPark', 'taskPass', 'taskUpdate',
     ]);
-    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
+    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark']);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
       'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
     ]);
@@ -128,7 +129,7 @@ describe('office tools', () => {
     expect(await t.call(ada, 'playbookRead', { topic: 'video ÜRETİMİ' })).toContain('Önce senaryo, sonra ses.');
     await t.call(c, 'decisionRecord', { title: 'Ses aracı', chosen: 'ElevenLabs', reason: 'Türkçe', alternatives: ['Polly'] });
     expect(await t.call(ada, 'decisionsRead')).toMatch(/Ses aracı → ElevenLabs — Türkçe \[alternatifler: Polly\]/);
-    await expect(t.call(ada, 'decisionRecord', { title: 'x', chosen: 'y', reason: 'z' })).rejects.toThrow(/closed/);
+    await expect(t.call(ada, 'decisionRecord', { title: 'x', chosen: 'y', reason: 'z' })).rejects.toThrow(/kapalı/);
     t.roster.update(ada.id, { kind: 'lead' });
     expect(await t.call(ada, 'playbookUpdate', { topic: 'Video üretimi', text: 'Senaryo, ses, kurgu.' })).toContain('sürüm 2');
   });
@@ -310,5 +311,35 @@ describe('office tools — task difficulty', () => {
     const c = t.company.hireCoordinator('sonnet');
     expect(await t.call(c, 'restUntil', { hours: 12, reason: 'Sahibinin cevabı bekleniyor' })).toMatch(/Dinleniyorsun/);
     expect(t.state.restUntil()).toBeGreaterThan(Date.now());
+  });
+
+  it('taskPark sets a task aside with a reason and says when it returns; taskUnpark brings it back', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'Pencere' });
+    t.company.start(task.id);
+    const reply = await t.call(ada, 'taskPark', { taskId: task.id, until: '+6h', reason: 'ölçüm penceresi dolsun' });
+    expect(reply).toMatch(/ertelendi/);
+    expect(reply).toMatch(/\d\d:\d\d/);
+    expect(t.tasks.get(task.id)).toMatchObject({ status: 'parked', parkedReason: 'ölçüm penceresi dolsun' });
+    await expect(Promise.resolve().then(() => t.call(ada, 'taskPark', { taskId: task.id, until: 'yarın', reason: 'x' }))).rejects.toThrow(/Dönüş saati/);
+    await expect(Promise.resolve().then(() => t.call(ada, 'taskUnpark', { taskId: task.id }))).rejects.toThrow(/kapalı/);
+    expect(await t.call(c, 'taskUnpark', { taskId: task.id })).toMatch(/sıraya döndü/);
+    expect(t.tasks.get(task.id).status).toBe('waiting');
+  });
+
+  it('taskCreate and taskPass take a start time and a due date', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    expect(await t.call(c, 'taskCreate', { assignee: 'Ada', title: 'Sonra', startAfter: '+1d', dueAt: '+3d' })).toMatch(/başlangıç/);
+    const created = t.tasks.list({ assignee: ada.id })[0]!;
+    expect(created.notBefore).toBeGreaterThan(Date.now());
+    expect(created.dueAt).toBeGreaterThan(created.notBefore!);
+    await t.call(ada, 'taskPass', { to: 'Can', title: 'Takip', startAfter: '+2h' });
+    expect(t.tasks.list({ assignee: can.id })[0]!.notBefore).toBeGreaterThan(Date.now());
+    await expect(Promise.resolve().then(() => t.call(c, 'taskCreate', { assignee: 'Ada', title: 'X', dueAt: '+400d' }))).rejects.toThrow(/Son tarih/);
   });
 });

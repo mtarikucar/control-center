@@ -4,6 +4,7 @@ import type { Company } from '../company/company.ts';
 import { methodText } from '../company/craft.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
+import { formatWhen } from '../company/time.ts';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
@@ -71,6 +72,9 @@ const difficulty = {
 };
 const difficultyArg = (args: Args) => optStr(args, 'difficulty') as TaskDifficulty | undefined;
 const reviewer = s('Who checks the hand-in before it closes (id or name); never the one who does the task. Give one for any task with a quality risk.');
+const until = s('When: relative (+30m, +6h, +1d) or a local time (2026-10-08T14:55).');
+const startAfter = { ...until, description: 'Do not hand this out before this time: relative (+6h, +1d) or a local time (2026-10-08T14:55). For follow-ups and waiting periods.' };
+const dueAt = { ...until, description: 'Should be done by this time (same forms). Nearer due dates go first within a priority; the coordinator hears once when it passes.' };
 const method = {
   type: 'object',
   description: 'How the work is done (read methodRead first): the work type, at least two stages with who does each and whether someone else checks it, and at least one quality check.',
@@ -144,6 +148,27 @@ export function officeTools(o: {
       },
     },
     {
+      name: 'taskPark',
+      description:
+        'Set a task aside until a time, with a reason — your own task, or (coordinator, lead) one you manage. It stays open but frees the slot: the office hands out the next task meanwhile and brings this one back at the time. Use it for waiting periods (a measurement window, an answer you wait for) instead of keeping the task open. The third park of the same task tells the coordinator.',
+      inputSchema: object({ taskId: s('The task id.'), until, reason: s('Why it waits (shown in the agenda).') }, ['taskId', 'until', 'reason']),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        const task = company.parkTask(employee.id, str(args, 'taskId'), str(args, 'until'), str(args, 'reason'));
+        return `“${task.title}” ertelendi: ${formatWhen(task.notBefore ?? Date.now(), Date.now())} saatinde sırana geri gelecek. Sıran boş; ofis sıradaki işini verir.`;
+      },
+    },
+    {
+      name: 'taskUnpark',
+      description: 'Bring a parked or start-timed task back to the queue now (coordinator; lead for their team).',
+      inputSchema: object({ taskId: s('The task id.') }, ['taskId']),
+      kinds: LEADS,
+      run: ({ employee }, args) => {
+        const task = company.unparkTask(employee.id, str(args, 'taskId'));
+        return `“${task.title}” sıraya döndü (öncelik ${task.priority}).`;
+      },
+    },
+    {
       name: 'reviewDecide',
       description:
         'Decide a review task (its title starts with "İnceleme:"): approve closes the reviewed task; changes sends it back to whoever did it with your findings. Check every claim yourself first. Give each finding a severity (critical: wrong or harmful; important: misses the definition of done; minor: an improvement) and a concrete failure scenario. Approve only without critical or important findings. Never review your own work.',
@@ -178,11 +203,11 @@ export function officeTools(o: {
     {
       name: 'taskPass',
       description: 'Pass a piece of work to a colleague (by id or name). It goes to the end of their queue; they are not interrupted. Say what, why and when it counts as done.',
-      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer }, ['to', 'title']),
+      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer, startAfter, dueAt }, ['to', 'title']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         // Arguments first: a malformed call should say what is malformed, not that a person was not found.
-        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args) };
+        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt') };
         const to = findPerson(str(args, 'to'));
         const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         const lowered = input.difficulty === 'critical' && task.difficulty === 'hard' ? ' Zorluk “kritik” yerine “zor” sayıldı: kritik işi koordinatör ya da ekip lideri açar.' : '';
@@ -423,16 +448,17 @@ export function officeTools(o: {
       name: 'taskCreate',
       description:
         'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done". Give a difficulty: when difficulty models are on in the constitution, the task starts on its model (by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
-      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
+      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.'), startAfter, dueAt }, ['assignee', 'title']),
       kinds: LEADS,
       run: ({ employee }, args) => {
-        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn') };
+        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn'), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt') };
         const to = findPerson(str(args, 'assignee'));
         if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
           throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
         }
         const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
-        return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}.`;
+        const when = [task.notBefore ? `başlangıç ${formatWhen(task.notBefore, Date.now())}` : '', task.dueAt ? `son tarih ${formatWhen(task.dueAt, Date.now())}` : ''].filter(Boolean).join(', ');
+        return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}${when ? ` (${when})` : ''}.`;
       },
     },
     {

@@ -49,6 +49,7 @@ const DECISION_ROUTE = /^\/api\/decisions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 const PROPOSAL_ROUTE = /^\/api\/proposals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|reject)$/;
 const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline|stop)$/;
 const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/;
+const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
 const EMPLOYEE_ROUTE =
   /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file))?$/;
 
@@ -147,6 +148,18 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     }
     const goalStop = GOAL_ROUTE.exec(url.pathname);
     if (method === 'POST' && goalStop) return sendJson(res, 200, company.stopGoal(goalStop[1] ?? ''));
+    // The owner's buttons on the agenda sheet (spec §6.3): "Park et…", "Şimdi başlasın" (also priority 1), "Öne al".
+    const taskAction = TASK_ROUTE.exec(url.pathname);
+    if (method === 'POST' && taskAction) {
+      const id = taskAction[1] ?? '';
+      const body = (await readJson(req)) as { until?: unknown; reason?: unknown; priority?: unknown } | null;
+      if (taskAction[2] === 'park') {
+        return sendJson(res, 200, company.parkTask(OWNER, id, typeof body?.until === 'string' ? body.until : '', typeof body?.reason === 'string' && body.reason.trim() ? body.reason : 'Sahibi erteledi'));
+      }
+      if (taskAction[2] === 'release') return sendJson(res, 200, company.unparkTask(OWNER, id, { priority: 1 }));
+      // "Öne al" always means priority 1: a `priority` in the body is accepted and ignored.
+      return sendJson(res, 200, company.ownerPrioritize(id));
+    }
     if (method === 'POST' && url.pathname === '/api/company/pause') {
       company.pause();
       return sendJson(res, 200, { paused: true });
