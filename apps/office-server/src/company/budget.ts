@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, MODEL_ALIASES, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend } from '@cc/shared';
+import { AUTONOMY_LEVELS, DEFAULT_CONSTITUTION, MODEL_ALIASES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -22,7 +22,7 @@ export interface BudgetDeps {
 
 const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri' } as const;
 type SwitchKey = keyof typeof SWITCHES;
-type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | SwitchKey>;
+type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | SwitchKey>;
 
 const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
@@ -33,6 +33,8 @@ const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number
   openTasksPerPlan: { label: 'Plan başına açık görev', min: 1, max: () => 500, integer: true },
   idleSleepMinutes: { label: 'Boşta uyuma süresi (dk)', min: 0, max: () => 1440, integer: true },
   cacheTtlMinutes: { label: 'Önbellek süresi (dk)', min: 0, max: () => 60, integer: true },
+  activeGoals: { label: 'En fazla aktif hedef', min: 1, max: () => 10, integer: true },
+  pulseHours: { label: 'Nabız aralığı (saat)', min: 0, max: () => 168, integer: true },
 };
 
 const MODEL_MAPS = {
@@ -88,6 +90,11 @@ export class Budget {
       if (!Object.hasOwn(DEFAULT_CONSTITUTION, key)) throw new ValidationError(`Bilinmeyen anayasa maddesi: ${key}`);
       if (key === 'digestHours') {
         checked.digestHours = digestHours(value);
+        continue;
+      }
+      if (key === 'autonomy') {
+        if (!(AUTONOMY_LEVELS as readonly unknown[]).includes(value)) throw new ValidationError('Anayasa: Serbestlik free (tam serbest) ya da plans (planlar sahibine) olmalı.');
+        checked.autonomy = value as Autonomy;
         continue;
       }
       if (Object.hasOwn(SWITCHES, key)) {

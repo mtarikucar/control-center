@@ -1,5 +1,5 @@
 import type { BudgetSummary, Spend } from './budget.ts';
-import type { Plan, PlanChange, Task, TaskChange } from './company.ts';
+import type { Goal, GoalChange, Plan, PlanChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Decision } from './memory.ts';
 import type { Proposal, ProposalChange } from './proposal.ts';
@@ -53,6 +53,8 @@ export type OfficeEvent =
   | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string }
   | { type: 'task.changed'; change: TaskChange; task: Task }
   | { type: 'plan.changed'; change: PlanChange; plan: Plan }
+  | { type: 'goal.changed'; change: GoalChange; goal: Goal }
+  | { type: 'company.paused'; paused: boolean }
   | { type: 'company.report'; text: string }
   /** The coordinator was reminded to report, for the digest hour `slot` (so a restart does not remind again). */
   | { type: 'report.reminded'; slot: number }
@@ -104,6 +106,10 @@ export interface OfficeSnapshot {
   proposals?: Proposal[];
   /** The constitution, the reserve and the money (absent from servers without the company layer). */
   budget?: BudgetSummary;
+  /** Active goals and the last closed ones. */
+  goals?: Goal[];
+  /** The owner paused the company: nothing is handed out. */
+  paused?: boolean;
 }
 
 export type ServerMessage =

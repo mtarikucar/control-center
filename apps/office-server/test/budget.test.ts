@@ -75,6 +75,15 @@ describe('Budget — constitution', () => {
       expect(() => t.budget.setConstitution(JSON.parse(`{"${key}": 1}`)), key).toThrow(/Bilinmeyen anayasa maddesi/);
     }
   });
+
+  it('the PM keys: autonomy free by default, the active-goal limit and the pulse interval, validated in Turkish', () => {
+    const t = make();
+    expect(t.budget.constitution()).toMatchObject({ autonomy: 'free', activeGoals: 3, pulseHours: 6 });
+    expect(t.budget.setConstitution({ autonomy: 'plans', activeGoals: 5, pulseHours: 0 })).toMatchObject({ autonomy: 'plans', activeGoals: 5, pulseHours: 0 });
+    expect(() => t.budget.setConstitution({ autonomy: 'yarım' })).toThrow(/Serbestlik/);
+    expect(() => t.budget.setConstitution({ activeGoals: 0 })).toThrow(/aktif hedef/);
+    expect(() => t.budget.setConstitution({ pulseHours: 200 })).toThrow(/Nabız/);
+  });
 });
 
 describe('Budget — the owner’s reserve', () => {

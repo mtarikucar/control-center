@@ -17,14 +17,15 @@ function tables(db: Db): string[] {
 }
 const V4_TABLES = [...V3_TABLES, 'constitution', 'spend'].sort();
 const V5_TABLES = [...V4_TABLES, 'proposals'].sort();
+const V9_TABLES = [...V5_TABLES, 'company_state', 'goals'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(8);
-    expect(tables(db)).toEqual(V5_TABLES);
+    expect(migrateUp(db)).toBe(9);
+    expect(tables(db)).toEqual(V9_TABLES);
   });
 
   it('round-trips up → down → up', () => {
@@ -33,14 +34,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(8);
-    expect(tables(db)).toEqual(V5_TABLES);
+    expect(migrateUp(db)).toBe(9);
+    expect(tables(db)).toEqual(V9_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(8);
+    expect(migrateUp(db)).toBe(9);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -181,6 +182,27 @@ describe('migrations', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
     expect(db.prepare('SELECT COUNT(*) AS n FROM plans').get()).toMatchObject({ n: 1 });
     expect(migrateDown(db, 7)).toBe(7);
-    expect(migrateUp(db)).toBe(8);
+    expect(migrateUp(db, upTo(8))).toBe(8);
+  });
+
+  it('v9 adds goals and the company state, and a plan’s goal and who started it; v9 down restores v8 and keeps plans', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(8));
+    db.prepare(
+      `INSERT INTO plans (id, title, goal, approach, people, steps, risks, status, version, proposed_by, created_at, updated_at)
+       VALUES ('p1', 'eski plan', 'g', 'a', '', '[]', '', 'approved', 1, 'c', 1, 1)`,
+    ).run();
+    migrateUp(db);
+    expect(tables(db)).toContain('goals');
+    expect(tables(db)).toContain('company_state');
+    expect({ ...(db.prepare('SELECT goal_id, approved_by FROM plans').get() as object) }).toEqual({ goal_id: null, approved_by: null });
+    expect(migrateDown(db, 8)).toBe(8);
+    expect(tables(db)).not.toContain('goals');
+    expect(tables(db)).not.toContain('company_state');
+    expect(columns(db, 'plans')).not.toContain('goal_id');
+    expect(columns(db, 'plans')).not.toContain('approved_by');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM plans').get()).toMatchObject({ n: 1 });
+    expect(migrateDown(db, 8)).toBe(8);
+    expect(migrateUp(db)).toBe(9);
   });
 });

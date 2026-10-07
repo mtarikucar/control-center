@@ -231,6 +231,8 @@ interface PlanRow {
   updated_at: number;
   approved_at: number | null;
   method: string | null;
+  goal_id: string | null;
+  approved_by: string | null;
 }
 
 function planFromRow(r: PlanRow): Plan {
@@ -252,6 +254,8 @@ function planFromRow(r: PlanRow): Plan {
     updatedAt: r.updated_at,
     approvedAt: r.approved_at,
     method: r.method ? (JSON.parse(r.method) as PlanMethod) : null,
+    goalId: r.goal_id ?? null,
+    approvedBy: (r.approved_by as Plan['approvedBy']) ?? null,
   };
 }
 
@@ -267,6 +271,8 @@ export interface NewPlan {
   risks: string;
   proposedBy: string;
   method?: PlanMethod | null;
+  goalId?: string | null;
+  approvedBy?: 'owner' | 'coordinator' | null;
 }
 
 export type PlanPatch = Partial<Omit<Plan, 'id' | 'createdAt' | 'proposedBy'>>;
@@ -282,7 +288,7 @@ export class PlanStore {
 
   create(p: NewPlan): Plan {
     const at = this.#now();
-    const plan: Plan = { ...p, method: p.method ?? null, id: randomUUID(), status: 'draft', version: 1, createdAt: at, updatedAt: at, approvedAt: null };
+    const plan: Plan = { ...p, method: p.method ?? null, goalId: p.goalId ?? null, approvedBy: p.approvedBy ?? null, id: randomUUID(), status: 'draft', version: 1, createdAt: at, updatedAt: at, approvedAt: null };
     this.#write(plan, true);
     return plan;
   }
@@ -329,19 +335,19 @@ export class PlanStore {
   }
 
   #write(p: Plan, insert: boolean): void {
-    const values = [p.title, p.goal, p.approach, p.people, JSON.stringify(p.steps), p.quotaPct, p.usd, p.days, p.risks, p.status, p.version, p.updatedAt, p.approvedAt, p.method ? JSON.stringify(p.method) : null];
+    const values = [p.title, p.goal, p.approach, p.people, JSON.stringify(p.steps), p.quotaPct, p.usd, p.days, p.risks, p.status, p.version, p.updatedAt, p.approvedAt, p.method ? JSON.stringify(p.method) : null, p.goalId ?? null, p.approvedBy ?? null];
     if (insert) {
       this.#db
         .prepare(
-          `INSERT INTO plans (title, goal, approach, people, steps, quota_pct, usd, days, risks, status, version, updated_at, approved_at, method, id, proposed_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO plans (title, goal, approach, people, steps, quota_pct, usd, days, risks, status, version, updated_at, approved_at, method, goal_id, approved_by, id, proposed_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(...values, p.id, p.proposedBy, p.createdAt);
     } else {
       this.#db
         .prepare(
           `UPDATE plans SET title = ?, goal = ?, approach = ?, people = ?, steps = ?, quota_pct = ?, usd = ?, days = ?, risks = ?, status = ?,
-             version = ?, updated_at = ?, approved_at = ?, method = ? WHERE id = ?`,
+             version = ?, updated_at = ?, approved_at = ?, method = ?, goal_id = ?, approved_by = ? WHERE id = ?`,
         )
         .run(...values, p.id);
     }
