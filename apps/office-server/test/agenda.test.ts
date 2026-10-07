@@ -33,6 +33,38 @@ function make() {
   return { ...s, ...c, coordinator, ada, can, agenda, history, advance: (ms: number) => (clock += ms) };
 }
 
+/**
+ * An office of `n` people made straight on the roster (more than the constitution lets the company hire), with an
+ * agenda that counts its task reads.
+ */
+function office(n: number) {
+  const s = setup(n + 1, () => T0);
+  const f = fakeEngine(s);
+  cleanups.push(f.cleanup, s.cleanup);
+  const c = companyFor(s, f, undefined, () => T0);
+  const people = Array.from({ length: n }, (_, i) => s.roster.create({ name: `Kişi ${i}`, role: 'r' }));
+  let lists = 0;
+  const tasks = {
+    list: (o?: Parameters<typeof c.tasks.list>[0]) => {
+      lists += 1;
+      return c.tasks.list(o);
+    },
+    get: (id: string) => c.tasks.get(id),
+    durations: (o: Parameters<typeof c.tasks.durations>[0]) => c.tasks.durations(o),
+  };
+  const agenda = new Agenda({ roster: s.roster, tasks, schedules: c.schedules, company: c.company, now: () => T0 });
+  const task = (assignee: string, title: string, dependsOn: string[] = []) =>
+    c.tasks.create({ planId: null, title, description: '', done: [], requester: OWNER, assignee, priority: 3, dependsOn, chainDepth: 0 });
+  /** Dependencies set after the fact, so a ring can close. */
+  const dependOn = (taskId: string, ids: string[]) => s.db.prepare('UPDATE tasks SET depends_on = ? WHERE id = ?').run(JSON.stringify(ids), taskId);
+  const reads = (read: () => unknown) => {
+    lists = 0;
+    read();
+    return lists;
+  };
+  return { people, agenda, task, dependOn, reads };
+}
+
 describe('Agenda (spec §6.1)', () => {
   it('review focus: a fresh office — no history — estimates with the constitution default and says so', () => {
     const t = make();
@@ -85,18 +117,38 @@ describe('Agenda (spec §6.1)', () => {
     expect(t.agenda.text()).toContain('T4');
   });
 
-  it('one report works each employee’s agenda out once, even when another’s waits on it', () => {
-    const t = make();
-    const theirs = t.company.createTask(t.coordinator.id, { assignee: t.can.id, title: 'Can’ın işi' });
-    t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Bağımlı', dependsOn: [theirs.id] });
-    const reads: string[] = [];
-    const list = t.tasks.list.bind(t.tasks);
-    t.tasks.list = (o = {}) => {
-      if (o.assignee) reads.push(o.assignee);
-      return list(o);
-    };
-    t.agenda.report();
-    expect(reads.filter((id) => id === t.can.id)).toHaveLength(1);
+  it('one read works each agenda out once: a ring of ten whose tasks wait on the next one’s', () => {
+    const o = office(10);
+    const pairs = o.people.map((p) => [o.task(p.id, `${p.name} A`), o.task(p.id, `${p.name} B`)] as const);
+    pairs.forEach(([a, b], i) => {
+      const [nextA, nextB] = pairs[(i + 1) % pairs.length]!;
+      o.dependOn(a.id, [nextB.id]);
+      o.dependOn(b.id, [nextA.id]);
+    });
+    expect(o.reads(() => o.agenda.report())).toBeLessThanOrEqual(10 + 1);
+    expect(o.reads(() => o.agenda.forEmployee(o.people[0]!.id))).toBeLessThanOrEqual(10 + 1);
+    const report = o.agenda.report();
+    expect(report.employees.every((e) => e.entries.length === 2 && e.entries.every((x) => x.lowConfidence))).toBe(true);
+  });
+
+  it('one read works each agenda out once: twenty people, fifteen tasks each, dependencies both ways', () => {
+    const n = 20;
+    const o = office(n);
+    const rounds: string[][] = [];
+    let deps = 0;
+    for (let r = 0; r < 15; r += 1) {
+      rounds.push(
+        o.people.map((p, i) => {
+          const wait = r > 0 && (i + r) % 3 === 0 ? [rounds[r - 1]![(i + (r % 2 ? 1 : n - 1)) % n]!] : [];
+          deps += wait.length;
+          return o.task(p.id, `${p.name} ${r}`, wait).id;
+        }),
+      );
+    }
+    expect(deps).toBeGreaterThanOrEqual(90);
+    expect(o.reads(() => o.agenda.report())).toBeLessThanOrEqual(n + 1);
+    expect(o.reads(() => o.agenda.forEmployee(o.people[7]!.id))).toBeLessThanOrEqual(n + 1);
+    expect(o.agenda.report().employees.every((e) => e.entries.length === 15)).toBe(true);
   });
 
   it('a task waiting on the same employee’s later task comes after it, as the dispatcher would hand them out', () => {
@@ -107,6 +159,25 @@ describe('Agenda (spec §6.1)', () => {
     expect(entries.map((e) => e.title)).toEqual(['Önce', 'Sonra']);
     expect(entries[0]).toMatchObject({ at: T0, until: T0 + 45 * MIN, lowConfidence: false });
     expect(entries[1]).toMatchObject({ at: T0 + 45 * MIN, note: '“Önce” bitince', lowConfidence: true });
+  });
+
+  it('shows every started task, the stuck one marked, and queues after the latest end', () => {
+    const t = make();
+    const stuck = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Takılan' });
+    t.company.start(stuck.id);
+    t.company.update(t.ada.id, stuck.id, { blocked: true, note: 'şifre yok' });
+    t.advance(10 * MIN);
+    const started = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Süren' });
+    t.company.start(started.id);
+    t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Sıradaki' });
+    expect(t.agenda.forEmployee(t.ada.id).entries.map((e) => [e.kind, e.title, e.at, e.until, e.note])).toEqual([
+      ['now', 'Takılan', T0, T0 + 45 * MIN, 'takıldı'],
+      ['now', 'Süren', T0 + 10 * MIN, T0 + 55 * MIN, null],
+      ['queued', 'Sıradaki', T0 + 55 * MIN, T0 + 100 * MIN, null],
+    ]);
+    expect(t.agenda.text(t.ada.id)).toMatch(/Şimdi: Takılan .*takıldı/);
+    t.advance(50 * MIN);
+    expect(t.agenda.forEmployee(t.ada.id).entries[0]).toMatchObject({ title: 'Takılan', note: 'takıldı · uzuyor' });
   });
 
   it('ready work fills the wait for another employee’s task', () => {

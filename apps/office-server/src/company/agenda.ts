@@ -16,7 +16,8 @@ const LABEL: Record<AgendaEntry['kind'], string> = { now: 'Şimdi', queued: 'Sı
 
 export interface AgendaDeps {
   roster: Roster;
-  tasks: TaskStore;
+  /** Only reads (a test counts them through a wrapper). */
+  tasks: Pick<TaskStore, 'list' | 'get' | 'durations'>;
   schedules: ScheduleStore;
   company: Company;
   budget?: { reserveActive(): boolean; constitution(): Constitution };
@@ -32,16 +33,18 @@ interface Estimate {
 
 /**
  * One read (a report, one employee, a text). A dependency's end comes from its owner's agenda, which may depend on
- * the first one's again: an employee whose agenda is being worked out is never asked for a second time (R6).
+ * the first one's again: an employee whose agenda is being worked out is never asked for a second time (R6), and each
+ * agenda is worked out once per pass — the first result is kept, so in a cycle what is shown depends on who was asked
+ * first (it stays low confidence either way).
  */
 interface Pass {
   now: number;
   /** Employees whose agenda is being worked out now. */
   open: Set<string>;
-  /** Agendas worked out in this pass, kept so one report works each out once. */
+  /** Agendas worked out in this pass. */
   done: Map<string, EmployeeAgenda>;
-  /** How often a dependency's end was left unknown because its owner was in `open`. */
-  cuts: number;
+  /** The roster (archived people left out), read once per pass when first needed. */
+  people: Map<string, Employee> | null;
 }
 
 /** A queued task and what it waits for. */
@@ -78,8 +81,9 @@ export class Agenda {
   }
 
   report(now: number = this.#now()): AgendaReport {
-    const pass = this.#pass(now);
-    const employees = this.#d.roster.list().map((e) => this.#forEmployee(e, pass));
+    const people = this.#d.roster.list();
+    const pass = this.#pass(now, people);
+    const employees = people.map((e) => this.#forEmployee(e, pass));
     return { generatedAt: now, horizonMs: this.#horizon, clock: this.#d.clock?.status(now) ?? NO_CLOCK, employees };
   }
 
@@ -103,24 +107,22 @@ export class Agenda {
     return people.map((p) => [`${p.name}${p.state ? ` — ${p.state}` : ''}`, ...(p.entries.length ? p.entries.map(line) : ['  (boş)'])].join('\n')).join('\n');
   }
 
-  #pass(now: number): Pass {
-    return { now, open: new Set(), done: new Map(), cuts: 0 };
+  #pass(now: number, people?: Employee[]): Pass {
+    return { now, open: new Set(), done: new Map(), people: people ? new Map(people.map((e) => [e.id, e])) : null };
   }
 
+  /** At most one build per employee per pass, however the dependencies run. */
   #forEmployee(e: Employee, pass: Pass): EmployeeAgenda {
     const known = pass.done.get(e.id);
     if (known) return known;
-    const cuts = pass.cuts;
     pass.open.add(e.id);
-    let agenda: EmployeeAgenda;
     try {
-      agenda = this.#build(e, pass);
+      const agenda = this.#build(e, pass);
+      pass.done.set(e.id, agenda);
+      return agenda;
     } finally {
       pass.open.delete(e.id);
     }
-    // Kept when nothing was cut on the way (a fresh read gives the same) or when it was asked for first (it is the one shown).
-    if (pass.cuts === cuts || pass.open.size === 0) pass.done.set(e.id, agenda);
-    return agenda;
   }
 
   #build(e: Employee, pass: Pass): EmployeeAgenda {
@@ -130,14 +132,16 @@ export class Agenda {
     /** The estimated end of each of this employee's tasks placed so far. */
     const ends = new Map<string, number>();
     let cursor = now;
-    const running = open.find((t) => t.status === 'in_progress' || t.status === 'blocked');
-    if (running) {
-      const est = this.#estimate(running);
-      const started = running.startedAt ?? now;
+    // Every started task, a stuck one too: the dispatcher hands out the next task while one is blocked, so both can be open.
+    const running = open.filter((t) => t.status === 'in_progress' || t.status === 'blocked').sort((a, b) => (a.startedAt ?? now) - (b.startedAt ?? now));
+    for (const t of running) {
+      const est = this.#estimate(t);
+      const started = t.startedAt ?? now;
       const until = Math.max(started + est.ms, now);
-      entries.push(this.#entry('now', running, started, until, est.basis, started + est.ms < now ? 'uzuyor' : null, false, now));
-      ends.set(running.id, until);
-      cursor = until;
+      const note = [t.status === 'blocked' ? 'takıldı' : null, started + est.ms < now ? 'uzuyor' : null].filter(Boolean).join(' · ') || null;
+      entries.push(this.#entry('now', t, started, until, est.basis, note, false, now));
+      ends.set(t.id, until);
+      cursor = Math.max(cursor, until);
     }
     // Handed out as the dispatcher does: the first task in delivery order that may start; while none may, the soonest.
     const queue: Waiting[] = this.#deliveryOrder(open.filter((t) => t.status === 'waiting' && (t.notBefore ?? now) <= now)).map((task) => {
@@ -213,11 +217,9 @@ export class Agenda {
 
   /** When another employee's task is expected to end: its `until` in their agenda; null when it has none or cannot be known. */
   #estimatedEnd(dep: Task, pass: Pass): number | null {
-    if (pass.open.has(dep.assignee)) {
-      pass.cuts += 1;
-      return null;
-    }
-    const owner = this.#d.roster.list().find((x) => x.id === dep.assignee);
+    if (pass.open.has(dep.assignee)) return null;
+    pass.people ??= new Map(this.#d.roster.list().map((e) => [e.id, e]));
+    const owner = pass.people.get(dep.assignee);
     if (!owner) return null;
     return this.#forEmployee(owner, pass).entries.find((x) => x.taskId === dep.id)?.until ?? null;
   }
