@@ -1,4 +1,4 @@
-import { AUTONOMY_LEVELS, DEFAULT_CONSTITUTION, MODEL_ALIASES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend } from '@cc/shared';
+import { AUTONOMY_LEVELS, DEFAULT_CONSTITUTION, MODEL_ALIASES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -71,11 +71,20 @@ function pctOf(w: QuotaWindow | null, now: number): number | null {
   return w.resetsAt <= now ? 0 : Math.round(w.utilization * 100);
 }
 
+/**
+ * The assignee handed this task in: for review, done, or decided (a review). A reviewed task is finished by its
+ * reviewer's decision, which is not its doer's turn.
+ */
+const handedIn = (change: TaskChange, task: Task): boolean =>
+  change === 'in_review' || change === 'reviewed' || (change === 'finished' && !task.reviewer);
+
 /** The owner's limits and the company's money and quota (spec §6). */
 export class Budget {
   readonly #d: BudgetDeps;
   readonly #now: () => number;
   #wasActive = false;
+  /** Each employee's turn under way and the task it is charged to (null: none yet); see chargeTurn. */
+  readonly #turns = new Map<string, string | null>();
 
   constructor(d: BudgetDeps) {
     this.#d = d;
@@ -193,10 +202,14 @@ export class Budget {
     return this.#d.spend.list({ planId, limit: 200 });
   }
 
-  /** A finished turn's Claude usage goes to the task the employee is on (nothing when they are on none). */
+  /**
+   * A finished turn's Claude usage goes to the task the turn was about: the one in progress when the turn started (it
+   * may be handed in, decided, parked or blocked before the turn ends), else the first one the employee handed in during
+   * it, else — no turn start seen — the one in progress now. Nothing when there is none.
+   */
   chargeTurn(employeeId: string, usd: number, tokens: number): void {
-    const task = this.#d.tasks.inProgressOf(employeeId);
-    if (task && (usd > 0 || tokens > 0)) this.#d.tasks.charge(task.id, usd, tokens);
+    const taskId = this.#turns.has(employeeId) ? this.#turns.get(employeeId) : this.#d.tasks.inProgressOf(employeeId)?.id;
+    if (taskId && (usd > 0 || tokens > 0)) this.#d.tasks.charge(taskId, usd, tokens);
   }
 
   summary(): BudgetSummary {
@@ -243,9 +256,14 @@ export class Budget {
   watch(): () => void {
     return this.#d.events.subscribe((stored) => {
       const ev = stored.event;
-      if (ev.type === 'turn.finished' && stored.employeeId) {
+      const id = stored.employeeId;
+      if (ev.type === 'turn.started' && id) this.#turns.set(id, this.#d.tasks.inProgressOf(id)?.id ?? null);
+      else if (ev.type === 'task.changed' && id && this.#turns.get(id) === null && handedIn(ev.change, ev.task)) this.#turns.set(id, ev.task.id);
+      else if (ev.type === 'turn.finished' && id) {
         const u = ev.usage;
-        this.chargeTurn(stored.employeeId, ev.costUsd, u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens);
+        this.chargeTurn(id, ev.costUsd, u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens);
+        // claude still holds queued messages: the same turn goes on and its next result is this task's too.
+        if (ev.queuedTurns === 0) this.#turns.delete(id);
       } else if (ev.type === 'quota.updated') this.checkReserve();
     });
   }

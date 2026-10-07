@@ -177,6 +177,82 @@ describe('Budget — Claude usage per plan', () => {
     t.events.append(c.id, { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0.05, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0.05 });
     expect(t.budget.summary().plans[plan.id]?.claudeUsd).toBe(0.05);
   });
+
+  /** A turn as the engine logs it: started, then one result per claude reply (queuedTurns > 0: the turn goes on). */
+  const turnOf = (t: ReturnType<typeof make>) => ({
+    start: (id: string) => t.events.append(id, { type: 'turn.started' }),
+    finish: (id: string, costUsd: number, usage: Usage, queuedTurns = 0) =>
+      t.events.append(id, { type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd, numTurns: 3, queuedTurns, sessionUsage: null, sessionCostUsd: 0 }),
+  });
+  const costOf = (t: ReturnType<typeof make>, id: string) =>
+    t.db.prepare('SELECT cost_usd AS usd, tokens FROM tasks WHERE id = ?').get(id) as unknown as { usd: number; tokens: number };
+
+  it('review focus: a turn that hands its task in (taskFinish) or decides its review (reviewDecide) is charged to that task', () => {
+    const t = make();
+    cleanups.push(t.budget.watch());
+    const turn = turnOf(t);
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(c.id, { name: 'Can', role: 'r' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'iş', planId: plan.id, reviewer: can.id, done: ['yazıldı'] });
+    // The office hands the task out and the turn opens; Ada hands it in before the turn ends.
+    t.company.start(task.id);
+    turn.start(ada.id);
+    t.company.finish(ada.id, task.id, { summary: 'bitti', outputs: [], learned: '', evidence: ['dosya yazıldı'] });
+    turn.finish(ada.id, 0.3, { inputTokens: 100, outputTokens: 20, cacheReadTokens: 1000, cacheCreationTokens: 50 });
+    expect(costOf(t, task.id)).toEqual({ usd: 0.3, tokens: 1170 });
+    // Can's review the same way: decided within the turn that delivered it.
+    const review = t.tasks.list({ assignee: can.id }).find((x) => x.kind === 'review')!;
+    t.company.start(review.id);
+    turn.start(can.id);
+    t.company.reviewDecide(can.id, review.id, { decision: 'approve' });
+    turn.finish(can.id, 0.2, { inputTokens: 40, outputTokens: 10, cacheReadTokens: 500, cacheCreationTokens: 0 });
+    expect(costOf(t, review.id)).toEqual({ usd: 0.2, tokens: 550 });
+    expect(costOf(t, task.id)).toEqual({ usd: 0.3, tokens: 1170 });
+    expect(t.budget.summary().plans[plan.id]?.claudeUsd).toBe(0.5);
+  });
+
+  it('review focus: the turn’s task is the one running at its start through every queued reply, else the one handed in during it; else nothing', () => {
+    const t = make();
+    cleanups.push(t.budget.watch());
+    const turn = turnOf(t);
+    const usage: Usage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(c.id, { name: 'Can', role: 'r' });
+    // Parked in the first reply; the queued reply after it is still that turn's.
+    const parked = t.company.createTask(c.id, { assignee: ada.id, title: 'bekleyen' });
+    t.company.start(parked.id);
+    turn.start(ada.id);
+    t.company.parkTask(ada.id, parked.id, '+1d', 'pencere dolsun');
+    turn.finish(ada.id, 0.25, usage, 1);
+    turn.finish(ada.id, 0.125, usage);
+    expect(costOf(t, parked.id)).toEqual({ usd: 0.375, tokens: 30 });
+    // Blocked before the turn (so nothing runs at its start), unblocked and handed in during it.
+    const blocked = t.company.createTask(c.id, { assignee: ada.id, title: 'takılan' });
+    t.company.start(blocked.id);
+    t.company.update(ada.id, blocked.id, { blocked: true, note: 'cevap bekliyorum' });
+    turn.start(ada.id);
+    t.company.update(ada.id, blocked.id, { blocked: false });
+    t.company.finish(ada.id, blocked.id, { summary: 'bitti', outputs: [], learned: '' });
+    turn.finish(ada.id, 0.2, usage);
+    expect(costOf(t, blocked.id)).toEqual({ usd: 0.2, tokens: 15 });
+    // A turn about no task: Can approving Ada's hand-in meanwhile is his work, not this turn's.
+    const reviewed = t.company.createTask(c.id, { assignee: ada.id, title: 'incelenen', reviewer: can.id });
+    t.company.finish(ada.id, reviewed.id, { summary: 'bitti', outputs: [], learned: '' });
+    turn.start(ada.id);
+    t.company.reviewDecide(can.id, t.tasks.list({ assignee: can.id }).find((x) => x.kind === 'review')!.id, { decision: 'approve' });
+    turn.finish(ada.id, 0.4, usage);
+    expect(costOf(t, reviewed.id)).toEqual({ usd: 0, tokens: 0 });
+    // That turn is over. A result whose start was not seen (main.ts recovers sessions before it watches) goes to the
+    // task running now.
+    const later = t.company.createTask(c.id, { assignee: ada.id, title: 'sonraki' });
+    t.company.start(later.id);
+    turn.finish(ada.id, 0.3, usage);
+    expect(costOf(t, later.id)).toEqual({ usd: 0.3, tokens: 15 });
+  });
 });
 
 describe('Budget — status for the coordinator', () => {
