@@ -24,6 +24,7 @@ import { EventStore } from './event-store.ts';
 import { acquireLock } from './lock.ts';
 import { TokenRegistry } from './mcp/tokens.ts';
 import { officeTools } from './mcp/tools.ts';
+import { performanceReport } from './performance.ts';
 import { QuotaTracker } from './quota.ts';
 import { Roster } from './roster.ts';
 
@@ -73,8 +74,15 @@ const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, compa
 // Who does what when (spec §6.1): reads only, for the sheet and agendaRead.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 
+// How the work went (B4): read from the log on demand, the last `days` or all time.
+const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };
+
 const api = createApi(
-  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda }) }, company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda } },
+  {
+    engine, roster, events, quota,
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance }) },
+    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance },
+  },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {

@@ -13,6 +13,7 @@ import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } 
 import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
+import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
 import type { Roster } from './roster.ts';
 import { resolveInside, sendFile } from './static.ts';
@@ -25,7 +26,10 @@ export interface ApiDeps {
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
   /** The company layer: plans, tasks and the coordinator (absent: v1 office); `clock` is the office clock (spec §5), `agenda` the per-employee sheet (§6.1). */
-  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport } };
+  company?: {
+    service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport };
+    performance?: { report(o: { days?: number }): PerformanceReport };
+  };
 }
 
 export interface ApiOptions {
@@ -191,6 +195,12 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'GET' && url.pathname === '/api/memory/notes') return sendJson(res, 200, memory.notes(url.searchParams.get('q') ?? undefined, 100));
     const budget = d.company.budget;
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
+    if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {
+      const raw = url.searchParams.get('days');
+      const days = raw === null ? undefined : Number(raw);
+      if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new ValidationError('days 1 ile 365 arasında bir tam sayı olmalı.');
+      return sendJson(res, 200, d.company.performance.report({ days }));
+    }
     if (method === 'GET' && url.pathname === '/api/budget/spend') return sendJson(res, 200, budget.spending(url.searchParams.get('planId') ?? undefined));
     if (method === 'POST' && url.pathname === '/api/constitution') {
       const body = await readJson(req);

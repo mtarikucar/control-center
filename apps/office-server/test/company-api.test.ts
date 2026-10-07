@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
+import { performanceReport } from '../src/performance.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
@@ -21,7 +22,9 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
   const agenda = new Agenda({ roster: s.roster, tasks: c.tasks, schedules: c.schedules, company: c.company, budget: c.budget });
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
+  // Wired like main.ts: the performance report reads the same database.
+  const performance = { report: (r: { days?: number } = {}) => performanceReport(s.db, { since: r.days ? Date.now() - r.days * 86_400_000 : null }) };
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
@@ -183,6 +186,22 @@ describe('company API', () => {
     expect((await call(t.port, 'GET', `/api/memory/playbook/history?topic=${encodeURIComponent('test')}`)).body.map((p: { version: number }) => p.version)).toEqual([2, 1]);
     expect((await call(t.port, 'GET', `/api/memory/notes?q=${encodeURIComponent('elevenlabs')}`)).body[0].note.title).toBe('Seslendirme');
     expect((await call(t.port, 'GET', '/api/memory/notes')).body).toHaveLength(1);
+  });
+
+  it('shows the owner the performance report, all time or the last days', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const task = t.company.createTask(c.id, { assignee: c.id, title: 'iş' });
+    t.company.start(task.id);
+    t.events.append(c.id, { type: 'turn.started' });
+    t.company.finish(c.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    t.events.append(c.id, { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0.5, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0.5 });
+    const all = (await call(t.port, 'GET', '/api/performance')).body;
+    expect(all).toMatchObject({ since: null, total: { turns: 1, usd: 0.5, assignedUsd: 0.5, unassignedUsd: 0 } });
+    expect(all.tasks).toEqual([expect.objectContaining({ id: task.id, status: 'done', usd: 0.5, turns: 1 })]);
+    expect(all.employees).toEqual([expect.objectContaining({ id: c.id, done: 1, usd: 0.5 })]);
+    expect((await call(t.port, 'GET', '/api/performance?days=7')).body.since).toBeGreaterThan(Date.now() - 8 * 86_400_000);
+    expect((await call(t.port, 'GET', '/api/performance?days=0')).status).toBe(400);
   });
 
   it('shows the owner the budget and lets them change the constitution', async () => {
