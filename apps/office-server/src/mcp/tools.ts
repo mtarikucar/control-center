@@ -1,6 +1,7 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, TASK_DIFFICULTIES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
+import { MODEL_ALIASES, PROPOSAL_KINDS, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
+import { methodText } from '../company/craft.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
@@ -196,6 +197,14 @@ export function officeTools(o: {
         const entry = memory.playbookTopic(topic);
         return `# ${entry.topic} (sürüm ${entry.version}, ${company.nameOf(entry.by)}, ${day(entry.ts)})\n\n${entry.text}`;
       },
+    },
+    {
+      name: 'methodRead',
+      description:
+        'Read how a kind of work is done well (the office’s coordination craft, the same in every company): without a type, the list of work types; with one, its stages, roles, quality checks, evidence, common mistakes and model advice. Read it before planning work; the company’s own rules are in playbookRead.',
+      inputSchema: object({ type: { type: 'string', enum: [...WORK_TYPES], description: 'Work type; omit for the list.' } }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => methodText(optStr(args, 'type')),
     },
     {
       name: 'decisionsRead',

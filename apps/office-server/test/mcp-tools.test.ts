@@ -32,7 +32,7 @@ describe('office tools', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
     expect(names('member')).toEqual([
-      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend',
+      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend',
       'taskFinish', 'taskPass', 'taskUpdate',
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
@@ -230,5 +230,13 @@ describe('office tools — task difficulty', () => {
     expect(byTitle('Yazım')).toMatchObject({ assignee: ada.id, difficulty: 'medium' });
     await expect(t.call(c, 'taskCreate', { assignee: ada.id, title: 'x', difficulty: 'trivial' })).rejects.toThrow(/Zorluk/);
     expect(t.tools.find((x) => x.name === 'taskCreate')!.description).toMatch(/easy → haiku, medium → sonnet, hard → opus, critical → fable/);
+  });
+
+  it('lets anyone read the work-type methods', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    expect(await t.call(ada, 'methodRead')).toContain('content');
+    expect(await t.call(ada, 'methodRead', { type: 'research' })).toContain('## Kanıt');
+    await expect(Promise.resolve().then(() => t.call(ada, 'methodRead', { type: 'x' }))).rejects.toThrow(/Bilinmeyen iş türü/);
   });
 });
