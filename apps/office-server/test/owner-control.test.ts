@@ -62,4 +62,32 @@ describe('the owner’s controls (spec §6.4)', () => {
     expect(seen).toEqual([true, false]);
     expect(OWNER).toBe('owner');
   });
+
+  it('final review: a task cancelled by a stopped plan cannot be revived — not blocked, not reassigned', () => {
+    const t = make();
+    const running = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'süren', planId: t.plan.id });
+    t.company.start(running.id);
+    t.company.stopPlan(t.plan.id);
+    expect(() => t.company.update(t.ada.id, running.id, { blocked: true, note: 'devam etmek istiyorum' })).toThrow(/kapandı/);
+    expect(() => t.company.assign(t.coordinator.id, running.id, t.can.id)).toThrow(/kapandı/);
+    expect(t.tasks.get(running.id).status).toBe('cancelled');
+    expect(t.tasks.openInPlan(t.plan.id)).toBe(0);
+  });
+
+  it('final review: a goal the owner stopped stays stopped — the coordinator cannot reopen it', () => {
+    const t = make();
+    t.company.stopGoal(t.goal.id);
+    expect(() => t.company.goalSet(t.coordinator.id, { goalId: t.goal.id, status: 'active' })).toThrow(/sahibi durdurdu/i);
+    expect(t.goals.get(t.goal.id).status).toBe('dropped');
+  });
+
+  it('final review: a finished plan of a closed goal does not reopen for new work', () => {
+    const t = make();
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'tek iş', planId: t.plan.id });
+    t.company.finish(t.ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect(t.plans.get(t.plan.id).status).toBe('done');
+    t.company.goalSet(t.coordinator.id, { goalId: t.goal.id, status: 'done' });
+    expect(() => t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'yeni', planId: t.plan.id })).toThrow(/hedefi .* kapalı/);
+    expect(t.plans.get(t.plan.id).status).toBe('done');
+  });
 });

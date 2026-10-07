@@ -57,4 +57,15 @@ describe('autonomy (spec §6.2)', () => {
     expect(t.company.approve(a.id)).toMatchObject({ status: 'approved', approvedBy: 'owner' });
     expect(t.company.revise(t.coordinator.id, b.id, { days: 1 })).toMatchObject({ status: 'approved', approvedBy: 'coordinator' });
   });
+
+  it('final review: revising a finished plan under free keeps it finished until it gets new work', () => {
+    const t = make('free');
+    const plan = t.company.propose(t.coordinator.id, DRAFT);
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.coordinator.id, title: 'iş', planId: plan.id });
+    t.company.finish(t.coordinator.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect(t.plans.get(plan.id).status).toBe('done');
+    expect(t.company.revise(t.coordinator.id, plan.id, { days: 2 }).status).toBe('done');
+    t.company.createTask(t.coordinator.id, { assignee: t.coordinator.id, title: 'yeni iş', planId: plan.id });
+    expect(t.plans.get(plan.id).status).toBe('approved');
+  });
 });

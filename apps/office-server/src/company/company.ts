@@ -250,6 +250,10 @@ export class Company {
       if (plan.status === 'draft') throw new ConflictError(`“${plan.title}” planı henüz onaylanmadı; görevleri onaydan sonra aç.`);
       if (plan.status === 'declined') throw new ConflictError(`“${plan.title}” planından vazgeçildi; gerekiyorsa yeni bir plan öner.`);
       if (plan.status === 'stopped') throw new ConflictError(`“${plan.title}” planı durduruldu; gerekiyorsa yeni bir plan öner.`);
+      if (plan.status === 'done' && plan.goalId && this.#d.goals) {
+        const goal = this.#d.goals.get(plan.goalId);
+        if (goal.status !== 'active') throw new ConflictError(`“${plan.title}” planının hedefi (“${goal.title}”) kapalı; bitmiş bu plan yeniden açılamaz. Gerekiyorsa aktif bir hedefe yeni bir plan öner.`);
+      }
       if (this.#d.tasks.openInPlan(planId) >= rules.openTasksPerPlan) throw new ConflictError(`Bu planda en fazla ${rules.openTasksPerPlan} açık görev olabilir.`);
     }
     const dependsOn = (input.dependsOn ?? []).filter(Boolean);
@@ -384,6 +388,8 @@ export class Company {
   update(by: string, taskId: string, u: { note?: string; blocked?: boolean }): Task {
     const task = this.#d.tasks.get(taskId);
     if (task.assignee !== by) throw new ForbiddenError('Yalnız görevi üstlenen durumunu güncelleyebilir.');
+    // A closed task stays closed: a stopped plan's cancelled work must not come back through a status note.
+    if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev kapandı; durumu değiştirilemez.');
     if (task.status === 'review') throw new ConflictError('Bu görev incelemede; inceleyicinin kararını bekle.');
     const note = u.note === undefined ? task.note : clean(u.note, 'Not', 2000, false) || null;
     let status = task.status;
@@ -566,7 +572,9 @@ export class Company {
     const free = this.#rules().autonomy === 'free';
     if (free) {
       // Full autonomy: the revision goes on at once, as the coordinator's.
-      const plan = this.#d.plans.update(planId, { ...merged, method, version: current.version + 1, status: 'approved', approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
+      // A finished plan stays finished until it gets new work (a task reopens it): an empty "approved" would look running forever.
+      const status = current.status === 'done' && this.#d.tasks.openInPlan(planId) === 0 ? 'done' : 'approved';
+      const plan = this.#d.plans.update(planId, { ...merged, method, version: current.version + 1, status, approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
       this.#d.plans.clearApproved(planId);
       this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
       return plan;
@@ -651,7 +659,10 @@ export class Company {
       return goal;
     }
     const current = store.get(input.goalId);
-    if (status === 'active' && current.status !== 'active') this.#assertGoalRoom();
+    if (status === 'active' && current.status !== 'active') {
+      if (this.#d.state?.get(`goal.ownerStopped.${current.id}`)) throw new ConflictError('Bu hedefi sahibi durdurdu; yeniden açılamaz. Gerekiyorsa sahibine sor ya da yeni bir hedef öner.');
+      this.#assertGoalRoom();
+    }
     const closing = status !== undefined && status !== 'active' && current.status === 'active';
     const goal = store.update(current.id, {
       title: input.title === undefined ? current.title : clean(input.title, 'Hedef başlığı', 160, true),
@@ -719,6 +730,8 @@ export class Company {
     const running = this.#d.plans.list(1000).filter((p) => p.goalId === goalId && (p.status === 'approved' || p.status === 'draft'));
     for (const p of running) this.stopPlan(p.id, { quiet: true });
     const goal = store.update(goalId, { status: 'dropped', closedAt: this.#now(), note: 'Sahibi durdurdu' });
+    // The owner's word is final (spec §2): the coordinator cannot reopen this goal.
+    this.#d.state?.set(`goal.ownerStopped.${goalId}`, '1');
     const c = this.coordinator();
     const plansLine = running.length ? ` Süren planları da durdu: ${running.map((p) => `“${p.title}”`).join(', ')}.` : '';
     if (c) this.#d.notices.add(c.id, 'goal.stopped', `Sahibi “${goal.title}” hedefini durdurdu.${plansLine} Bu hedef için iş açma; gerekiyorsa sahibine sor.`);

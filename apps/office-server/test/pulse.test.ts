@@ -91,4 +91,27 @@ describe('the pulse (spec §6.3)', () => {
     expect(() => t.company.restUntil(c.id, 0, 'x')).toThrow(/1 ile 168/);
     expect(() => t.company.restUntil(c.id, 5, ' ')).toThrow(/boş olamaz/);
   });
+
+  it('final review: while the coordinator is working the pulse waits — no stale notice, no marker', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    t.roster.update(c.id, { lifecycle: 'working' });
+    expect(t.pulse().check()).toEqual([]);
+    expect(t.state.get(`pulse.goal.${t.goals.list()[0]!.id}`)).toBeNull();
+    t.roster.update(c.id, { lifecycle: 'idle' });
+    expect(t.pulse().check()).toEqual(['pulse.goal_idle']);
+  });
+
+  it('final review: an approved plan that never got a task stops counting as running after a grace period', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const goal = t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    const plan = t.company.propose(c.id, { title: 'Boş plan', goal: 'g', approach: 'a', method: METHOD, goalId: goal.id });
+    expect(plan.status).toBe('approved');
+    expect(t.pulse().check()).toEqual([]);
+    t.advance(11 * 60_000);
+    expect(t.pulse().check()).toEqual(['pulse.goal_idle']);
+    expect(t.notices.pending(c.id).find((n) => n.topic === 'pulse.goal_idle')?.text).toContain('Boş plan');
+  });
 });
