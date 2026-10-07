@@ -295,7 +295,8 @@ describe('Dispatcher — notice kinds and the digest', () => {
     expect(turns[0]).toContain('## Ofisten özet — 2 not, 10:00');
     expect(turns[0]).toContain('Teslimler (1):\n- “Yaz” (Ada): Yazıldı. Ayrıntı ikinci satırda.');
     expect(turns[0]).toContain('Rol/lider değişiklikleri (1):\n- Can artık İçerik ekibinin lideri.');
-    expect(turns[0]).toContain('Özet turunda beklenen yalnız kayıt');
+    // Under "open the tasks" the digest does not say "open no work".
+    expect(turns[0]).not.toContain('Özet turunda beklenen yalnız kayıt');
     expect(t.notices.pending(coord.id)).toEqual([]);
   });
 
@@ -346,6 +347,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     await until(() => t.turns(coord.id).length === 1, 8000);
     expect(t.turns(coord.id)[0]).toContain('Teslimler (1):\n- “Yaz” (Ada): Yazıldı.');
     expect(t.turns(coord.id)[0]).toContain('Günlük rapor zamanı');
+    expect(t.turns(coord.id)[0]).toContain('Özet turunda beklenen yalnız kayıt');
     t.company.report(coord.id, 'Yaz bitti.');
     t.setClock(at(8, 9));
     await sleep(300);
@@ -381,6 +383,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     await until(() => t.turns(ada.id).length === 1, 8000);
     expect(t.turns(ada.id)[0]).toMatch(/^Ofisten notlar:\n- “Altyazı” önerin kabul edildi\./);
     expect(t.turns(ada.id)[0]).toContain('Can artık İçerik ekibinin lideri.');
+    expect(t.turns(ada.id)[0]).not.toContain('Bu özet bilgi içindir');
     expect(t.roster.get(coord.id).lifecycle).toBe('sleeping');
   });
 

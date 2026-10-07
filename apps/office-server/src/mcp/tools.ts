@@ -130,14 +130,15 @@ export function officeTools(o: {
     {
       name: 'taskPass',
       description: 'Pass a piece of work to a colleague (by id or name). It goes to the end of their queue; they are not interrupted. Say what, why and when it counts as done.',
-      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty }, ['to', 'title']),
+      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` } }, ['to', 'title']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         // Arguments first: a malformed call should say what is malformed, not that a person was not found.
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args) };
         const to = findPerson(str(args, 'to'));
         const task = company.createTask(employee.id, { assignee: to.id, ...input });
-        return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).`;
+        const lowered = input.difficulty === 'critical' && task.difficulty === 'hard' ? ' Zorluk “kritik” yerine “zor” sayıldı: kritik işi koordinatör ya da ekip lideri açar.' : '';
+        return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).${lowered}`;
       },
     },
     {

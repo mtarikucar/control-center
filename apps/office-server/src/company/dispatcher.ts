@@ -144,7 +144,8 @@ export class Dispatcher {
       this.#maybeSleep(employee, focus ?? null);
       return;
     }
-    const digest = infos.length > 0 || report !== null ? digestText(infos, { coordinator: employee.kind === 'coordinator', report: report !== null }) : '';
+    const alone = !body && decisions.length === 0;
+    const digest = infos.length > 0 || report !== null ? digestText(infos, { coordinator: employee.kind === 'coordinator', report: report !== null, alone }) : '';
     const text = [decisions.length ? `${NOTICES_PREFIX}\n${decisions.map((n) => `- ${n.text}`).join('\n')}` : '', body, digest].filter(Boolean).join('\n\n');
     try {
       this.#d.engine.send(id, text, 'system', hint);

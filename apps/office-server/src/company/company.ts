@@ -243,7 +243,7 @@ export class Company {
       throw new ConflictError(`Bir çalışan günde en fazla ${rules.tasksPerDay} görev açabilir.`);
     }
     const task = this.#d.tasks.create({
-      planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: difficultyOf(input.difficulty), dependsOn, chainDepth: Math.max(0, chainDepth),
+      planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), dependsOn, chainDepth: Math.max(0, chainDepth),
     });
     this.#taskEvent('created', task);
     if (planId !== null) this.#reopenPlan(planId);
@@ -382,7 +382,11 @@ export class Company {
     }
     const next = this.#d.tasks.update(taskId, { status: 'done', result: archived, finishedAt });
     const line = `“${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
-    if (task.requester !== OWNER && task.requester !== by) this.#d.notices.add(task.requester, 'task.finished', line);
+    if (task.requester !== OWNER && task.requester !== by) {
+      // A requester stuck on their own task is likely waiting for this one: they can go on now.
+      const waiting = this.#d.tasks.list({ assignee: task.requester, statuses: ['blocked'], limit: 1 }).length > 0;
+      this.#d.notices.add(task.requester, waiting ? 'task.awaited' : 'task.finished', line);
+    }
     if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, 'task.finished', line);
     this.#taskEvent('finished', next);
     this.#d.memory?.learnedFrom(next, handed);
@@ -700,6 +704,13 @@ export class Company {
 
   #assertCoordinator(by: string): void {
     if (this.#d.roster.get(by).kind !== 'coordinator') throw new ForbiddenError('Yalnız koordinatör bunu yapabilir.');
+  }
+
+  /** A critical task runs on the strongest model: only the owner, the coordinator and leads ask for it; anyone else's counts as hard. */
+  #difficultyBy(by: string, value: unknown): TaskDifficulty | null {
+    const difficulty = difficultyOf(value);
+    if (difficulty !== 'critical' || by === OWNER || this.#d.roster.get(by).kind !== 'member') return difficulty;
+    return 'hard';
   }
 
   #tellCoordinator(about: string, topic: NoticeTopic, text: string): void {

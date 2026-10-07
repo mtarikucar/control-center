@@ -19,6 +19,8 @@ export const NOTICE_TOPICS = {
   /** A task that never started went to someone else. */
   'task.moved': 'info',
   'task.finished': 'info',
+  /** A task the requester passed is done while their own task is blocked: they can go on. */
+  'task.awaited': 'decision',
   /** Someone was let go; their open tasks wait for a new assignee. */
   'task.orphaned': 'decision',
   'employee.leaving': 'decision',
@@ -35,8 +37,9 @@ export const NOTICE_TOPICS = {
   'reserve.changed': 'decision',
   /** The monthly cap or a plan's budget was exceeded: the coordinator brings it to the owner. */
   'spend.over': 'decision',
-  'limit.chain': 'info',
-  'limit.tasks_per_day': 'info',
+  /** Someone hit the pass chain or the daily task limit and was told to leave the work to the coordinator. */
+  'limit.chain': 'decision',
+  'limit.tasks_per_day': 'decision',
   /** The owner reverted a decision: do what follows from it. */
   'decision.reverted': 'decision',
 } as const satisfies Record<string, NoticeKind>;
@@ -75,12 +78,11 @@ const GROUP_LINES = 8;
 const LINE_CHARS = 160;
 
 const GROUPS: Array<{ title: string; topics: readonly string[] }> = [
-  { title: 'Teslimler', topics: ['task.finished'] },
+  { title: 'Teslimler', topics: ['task.finished', 'task.awaited'] },
   { title: 'Plan durumu', topics: ['plan.done'] },
   { title: 'Görevler', topics: ['task.moved'] },
   { title: 'Öneriler', topics: ['proposal.to_owner'] },
   { title: 'Rol/lider değişiklikleri', topics: ['role.changed'] },
-  { title: 'Uyarılar', topics: ['limit.chain', 'limit.tasks_per_day'] },
 ];
 
 const MONTHS = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
@@ -100,8 +102,11 @@ function oneLine(text: string): string {
   return line.length > LINE_CHARS ? `${line.slice(0, LINE_CHARS - 1)}…` : line;
 }
 
-/** The digest the office writes itself (no model): information grouped by topic, its count and time span in the heading. */
-export function digestText(notices: readonly Notice[], o: { coordinator: boolean; report: boolean }): string {
+/**
+ * The digest the office writes itself (no model): information grouped by topic, its count and time span in the heading.
+ * `alone`: the turn is only this digest, so it ends with what such a turn is for (not under a decision or a task).
+ */
+export function digestText(notices: readonly Notice[], o: { coordinator: boolean; report: boolean; alone: boolean }): string {
   const lines: string[] = [];
   if (notices.length === 0) lines.push(`${DIGEST_HEADING} — yeni not yok`);
   else {
@@ -117,6 +122,6 @@ export function digestText(notices: readonly Notice[], o: { coordinator: boolean
     if (items.length > GROUP_LINES) lines.push(`- +${items.length - GROUP_LINES} daha`);
   }
   if (o.report) lines.push('', REPORT_LINE);
-  lines.push('', o.coordinator ? COORDINATOR_HINT : MEMBER_HINT);
+  if (o.alone) lines.push('', o.coordinator ? COORDINATOR_HINT : MEMBER_HINT);
   return lines.join('\n');
 }

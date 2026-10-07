@@ -222,6 +222,8 @@ describe('office tools — task difficulty', () => {
     const can = t.company.hire(c.id, { name: 'Can', role: 'r' });
     await t.call(c, 'taskCreate', { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
     await t.call(ada, 'taskPass', { to: can.id, title: 'Yazım', difficulty: 'easy' });
+    expect(await t.call(ada, 'taskPass', { to: can.id, title: 'Acil', difficulty: 'critical' })).toMatch(/“kritik” yerine “zor”/);
+    expect(t.tools.find((x) => x.name === 'taskPass')!.inputSchema).toMatchObject({ properties: { difficulty: { description: expect.stringMatching(/counts as hard/) } } });
     const byTitle = (title: string) => t.tasks.list({ limit: 100 }).find((x) => x.title === title)!;
     expect([byTitle('Mimari').difficulty, byTitle('Yazım').difficulty]).toEqual(['hard', 'easy']);
     await t.call(c, 'taskAssign', { taskId: byTitle('Yazım').id, assignee: ada.id, difficulty: 'medium' });
