@@ -280,4 +280,17 @@ describe('office tools — task difficulty', () => {
     t.company.approve(plan.id);
     expect(await t.call(c, 'planRetro', { planId: plan.id, wentWell: 'iyi', stuck: 'yok', change: 'erken başla' })).toMatch(/playbookUpdate/);
   });
+
+  it('final review: reviewDecide says when the one who did the work is gone and the task needs someone else', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'Metin', reviewer: c.id });
+    t.company.finish(ada.id, task.id, { summary: 'yaptım', outputs: [], learned: '' });
+    t.roster.update(ada.id, { lifecycle: 'archived' });
+    const review = t.tasks.list({ assignee: c.id }).find((x) => x.reviewOf === task.id)!;
+    const reply = await t.call(c, 'reviewDecide', { taskId: review.id, decision: 'changes', findings: [{ severity: 'important', text: 'eksik' }] });
+    expect(reply).toMatch(/işten çıkarıldı/);
+    expect(reply).toMatch(/taskAssign/);
+  });
 });

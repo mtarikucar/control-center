@@ -308,9 +308,13 @@ export class Company {
       work.push(task);
       if (task.status !== 'waiting') this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null, nudged: false }));
     }
-    if (work.length === 0) return;
-    const list = work.map((t) => `“${t.title}” (no ${t.id})`).join(', ');
-    this.#tellCoordinator(id, 'task.orphaned', `${this.nameOf(id)} işten çıkarıldı; açık görevleri sahipsiz bekliyor: ${list}. taskAssign ile yeniden dağıt.`);
+    // A task waiting for its review stays in review; if it comes back with changes it needs a new assignee.
+    const inReview = this.#d.tasks.list({ assignee: id, statuses: ['review'] });
+    if (work.length === 0 && inReview.length === 0) return;
+    const name = (t: Task) => `“${t.title}” (no ${t.id})`;
+    const open = work.length ? ` açık görevleri sahipsiz bekliyor: ${work.map(name).join(', ')}. taskAssign ile yeniden dağıt.` : '';
+    const review = inReview.length ? ` İncelemede olanlar: ${inReview.map(name).join(', ')} — onaylanırsa kapanır; değişiklik istenirse taskAssign ile başkasına ver.` : '';
+    this.#tellCoordinator(id, 'task.orphaned', `${this.nameOf(id)} işten çıkarıldı;${open}${review}`);
   }
 
   /**
@@ -454,7 +458,11 @@ export class Company {
     const round = task.round ?? 1;
     const line = `İnceleme: “${task.title}” için değişiklik istendi (tur ${round}, ${me.name}): ${tally}.`;
     const doer = this.#person(task.assignee);
-    if (!doer || doer.lifecycle === 'archived') this.#tellCoordinator(by, 'task.orphaned', `${line} ${this.nameOf(task.assignee)} işten çıkarıldı; görevi taskAssign ile başkasına ver.`);
+    if (!doer || doer.lifecycle === 'archived') {
+      // Told even when the coordinator is the one deciding: no one else would ever hand this task out again.
+      const c = this.coordinator();
+      if (c) this.#d.notices.add(c.id, 'task.orphaned', `${line} ${this.nameOf(task.assignee)} işten çıkarıldı; görevi taskAssign ile başkasına ver.`);
+    }
     else if (round >= REVIEW_ROUNDS) this.#tellCoordinator(by, 'review.stuck', `${line} Bu iş ${round} turdur geçemiyor: yaklaşımı değiştir (başka kişi, başka model, işi böl) ya da sahibine götür.`);
     else this.#tellCoordinator(by, 'review.changes', line);
     return back;

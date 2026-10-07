@@ -157,9 +157,10 @@ export function officeTools(o: {
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         const task = company.reviewDecide(employee.id, str(args, 'taskId'), { decision: str(args, 'decision'), findings: args.findings, note: optStr(args, 'note') });
-        return task.status === 'done'
-          ? `Onaylandı: “${task.title}” kapandı; yapan ve isteyen haberdar edildi.`
-          : `Değişiklik istendi: “${task.title}” bulgularınla ${company.nameOf(task.assignee)} adlı çalışana döndü (tur ${task.round ?? 1}).`;
+        if (task.status === 'done') return `Onaylandı: “${task.title}” kapandı; yapan ve isteyen haberdar edildi.`;
+        const doer = roster.list({ includeArchived: true }).find((e) => e.id === task.assignee);
+        if (!doer || doer.lifecycle === 'archived') return `Değişiklik istendi, ama “${task.title}” görevini yapan ${company.nameOf(task.assignee)} işten çıkarıldı: görevi taskAssign ile başkasına ver (bulgular onunla gider).`;
+        return `Değişiklik istendi: “${task.title}” bulgularınla ${company.nameOf(task.assignee)} adlı çalışana döndü (tur ${task.round ?? 1}).`;
       },
     },
     {

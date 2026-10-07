@@ -163,4 +163,26 @@ describe('the review gate (spec §5.2)', () => {
     expect(() => t.company.update(t.ada.id, t.task.id, { blocked: true, note: 'bekliyorum' })).toThrow(/incelemede/);
     expect(t.tasks.get(t.task.id).status).toBe('review');
   });
+
+  it('final review: the coordinator as reviewer sends back a let-go doer’s task — it still hears it must hand the task to someone else', () => {
+    const t = make();
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Koordinatör inceler', reviewer: t.coordinator.id });
+    t.company.finish(t.ada.id, task.id, { summary: 'yaptım', outputs: [], learned: '' });
+    t.roster.update(t.ada.id, { lifecycle: 'archived' });
+    const review = t.tasks.list({ assignee: t.coordinator.id }).find((x) => x.reviewOf === task.id)!;
+    t.company.reviewDecide(t.coordinator.id, review.id, { decision: 'changes', findings: [{ severity: 'important', text: 'eksik' }] });
+    const orphaned = t.notices.pending(t.coordinator.id).find((n) => n.topic === 'task.orphaned');
+    expect(orphaned?.text).toMatch(/taskAssign/);
+    expect(orphaned?.text).toContain('Koordinatör inceler');
+  });
+
+  it('final review: letting go someone with a task in review names that task to the coordinator', () => {
+    const t = make();
+    t.handIn();
+    t.company.releaseTasksOf(t.ada.id);
+    const orphaned = t.notices.pending(t.coordinator.id).find((n) => n.topic === 'task.orphaned');
+    expect(orphaned?.text).toContain('Tanıtım metni');
+    expect(orphaned?.text).toMatch(/[iİ]ncelemede/);
+    expect(t.tasks.get(t.task.id).status).toBe('review');
+  });
 });
