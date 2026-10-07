@@ -118,7 +118,7 @@ let busy = null;
 
 async function turn(text, uuid) {
   if (!initSent) {
-    out({ type: 'system', subtype: 'init', model: 'fake-model', cwd: process.cwd(), permissionMode: 'bypassPermissions', mcp_servers: [{ name: 'office', status: 'connected' }] });
+    out({ type: 'system', subtype: 'init', model: opt('--model') ?? 'fake-model', cwd: process.cwd(), permissionMode: 'bypassPermissions', mcp_servers: [{ name: 'office', status: 'connected' }] });
     initSent = true;
   }
   ack(uuid, text);
@@ -158,6 +158,15 @@ async function turn(text, uuid) {
     say(`slow-done${injected.length ? ` saw:${injected.join(',')}` : ''}`);
     rateLimit('allowed', 3600);
     result({ num_turns: 2, result: 'slow-done' });
+    return;
+  }
+  if (text.includes('HOLD') && process.env.FAKE_CLAUDE_HOLD_DIR) {
+    // A long piece of work: the turn lasts until the test releases it (a file named after the session).
+    const release = join(process.env.FAKE_CLAUDE_HOLD_DIR, sessionId);
+    while (!existsSync(release)) await sleep(10);
+    unlinkSync(release);
+    say('held-done');
+    result();
     return;
   }
   if (text.includes('WHAT DID I SAY')) {
