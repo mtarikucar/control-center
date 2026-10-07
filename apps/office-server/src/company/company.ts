@@ -1,6 +1,6 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
+import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
 import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, REVIEW_DECISIONS, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
@@ -566,6 +566,27 @@ export class Company {
     this.#emit(desk, { type: 'plan.changed', change: 'declined', plan });
     return plan;
   }
+  /** The coordinator assesses a plan (spec §5.4): a note tagged retro; a method suggestion becomes its own note. */
+  retro(by: string, planId: string, r: { wentWell: string; stuck: string; change: string; methodSuggestion?: string }): { retro: Note; suggestion: Note | null } {
+    this.#assertCoordinator(by);
+    const plan = this.#d.plans.get(planId);
+    if (plan.status === 'draft' || plan.status === 'declined') throw new ConflictError('Bu plan başlamadı; değerlendirilecek bir iş yok.');
+    const memory = this.#d.memory;
+    if (!memory) throw new ConflictError('Bu ofiste şirket hafızası açık değil.');
+    const wentWell = clean(r.wentWell, 'Ne iyi gitti', 3000, true);
+    const stuck = clean(r.stuck, 'Ne takıldı', 3000, true);
+    const change = clean(r.change, 'Bir dahaki sefere', 3000, true);
+    const suggestionText = clean(r.methodSuggestion, 'Yöntem önerisi', 3000, false);
+    const type = plan.method?.workType;
+    const tags = (first: string) => (type ? [first, type] : [first]);
+    const text = [`Plan: ${plan.title} (sürüm ${plan.version})`, '', '## Ne iyi gitti', '', wentWell, '', '## Ne takıldı', '', stuck, '', '## Bir dahaki sefere', '', change].join('\n');
+    const retro = memory.writeNote(by, { title: `Değerlendirme: ${plan.title}`, text, tags: tags('retro'), source: `plan:${plan.id}` });
+    const suggestion = suggestionText
+      ? memory.writeNote(by, { title: `Yöntem önerisi (${type ?? 'general'}): ${plan.title}`, text: suggestionText, tags: tags('yöntem-önerisi'), source: `plan:${plan.id}` })
+      : null;
+    return { retro, suggestion };
+  }
+
   // ── proposals ─────────────────────────────────────────────────────────────
 
   /**
@@ -764,8 +785,8 @@ export class Company {
     const desk = this.#planDesk(done);
     this.#d.notices.add(
       desk,
-      'plan.done',
-      `“${plan.title}” planının açık görevi kalmadı. İş bittiyse sonucu reportToOwner ile sahibine raporla; sürüyorsa bu plana yeni görev açabilirsin (plan yeniden açılır).`,
+      'plan.retro',
+      `“${plan.title}” planının açık görevi kalmadı. İş bittiyse planRetro ile değerlendir (ne iyi gitti, ne takıldı, ne değişecek; her şirkete yarayacak bir yöntem önerin varsa methodSuggestion), şirkete özgü dersi playbookUpdate ile el kitabına yaz ve reportToOwner ile sahibine kısaca raporla. Sürüyorsa bu plana yeni görev açabilirsin (plan yeniden açılır).`,
     );
     this.#emit(desk, { type: 'plan.changed', change: 'done', plan: done });
   }

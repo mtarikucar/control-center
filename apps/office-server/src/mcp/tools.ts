@@ -477,6 +477,17 @@ export function officeTools(o: {
       },
     },
     {
+      name: 'planRetro',
+      description:
+        'Assess a plan when it ends (coordinator): what went well, what got stuck, what to change next time, and — if it would help every company — a method suggestion for the office’s craft. Then write company-specific lessons with playbookUpdate and report to the owner.',
+      inputSchema: object({ planId: s('The plan id.'), wentWell: s('What went well.'), stuck: s('What got stuck or went wrong.'), change: s('What to do differently next time.'), methodSuggestion: s('A change to the work-type method that would help any company (optional).') }, ['planId', 'wentWell', 'stuck', 'change']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const { suggestion } = company.retro(employee.id, str(args, 'planId'), { wentWell: str(args, 'wentWell'), stuck: str(args, 'stuck'), change: str(args, 'change'), methodSuggestion: optStr(args, 'methodSuggestion') });
+        return `Değerlendirme şirket notlarına yazıldı${suggestion ? ' (yöntem önerisi ayrıca)' : ''}. Şirkete özgü dersleri playbookUpdate ile el kitabına işle, sonra reportToOwner ile sahibine kısaca raporla.`;
+      },
+    },
+    {
       name: 'hire',
       description: `Hire a new employee (coordinator): name, job title, team, the role card text (responsibilities, how to work, what "done" means), the model (${MODEL_ALIASES.join(', ')}) and the look (characterId). Desks are limited.`,
       inputSchema: {

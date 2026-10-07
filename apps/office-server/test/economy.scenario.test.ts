@@ -39,18 +39,24 @@ const BASELINE_NOTE = join(NOTES, '2026-10-07-economy-baseline.md');
 const BASELINE_LOG = join(NOTES, '2026-10-07-economy-baseline.log.json');
 /**
  * Deliberate changes to main's day since the golden was recorded, applied to the golden before comparing (everything
- * else must still match it message by message): the coordinator craft asks for evidence in every task's closing line.
+ * else must still match it message by message): the coordinator craft asks for evidence in every task's closing line,
+ * and a plan's end asks for a retro.
  */
 const SINCE_GOLDEN: Array<[string, string]> = [
   [
     'İş bitince `taskFinish` ile teslim et (görev no, kısa özet, ürettiğin dosyalar, öğrendiklerin). Takılırsan `taskUpdate` ile "blocked" yap ve nedenini yaz; başka birinin yapması gereken bir parça çıkarsa `taskPass` kullan.',
     WORK_CLOSING,
   ],
+  [
+    'İş bittiyse sonucu reportToOwner ile sahibine raporla; sürüyorsa bu plana yeni görev açabilirsin (plan yeniden açılır).',
+    'İş bittiyse planRetro ile değerlendir (ne iyi gitti, ne takıldı, ne değişecek; her şirkete yarayacak bir yöntem önerin varsa methodSuggestion), şirkete özgü dersi playbookUpdate ile el kitabına yaz ve reportToOwner ile sahibine kısaca raporla. Sürüyorsa bu plana yeni görev açabilirsin (plan yeniden açılır).',
+  ],
 ];
 const sinceGolden = (message: string) => SINCE_GOLDEN.reduce((m, [was, now]) => m.replaceAll(was, now), message);
 
 /** The plan "Ofis ekonomisi" targets: the coordinator's turns for this day, and its modelled cost at most 30 % of main's (measured on e2889e8). */
-const MAX_COORDINATOR_TURNS = 5;
+// 5 from the economy plan, + 1 since the coordination craft: a plan's end is a decision (retro, then report).
+const MAX_COORDINATOR_TURNS = 6;
 const BASELINE_COORDINATOR_COST = 225;
 const MAX_COORDINATOR_COST_SHARE = 0.3;
 const TASKS = 10;

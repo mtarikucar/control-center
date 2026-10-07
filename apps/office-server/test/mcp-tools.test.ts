@@ -37,7 +37,7 @@ describe('office tools', () => {
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
+      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
@@ -271,5 +271,13 @@ describe('office tools — task difficulty', () => {
     expect(await t.call(ada, 'myTasks')).toContain('İnceleme: Çeviri');
     expect(await t.call(ada, 'reviewDecide', { taskId: review.id, decision: 'changes', findings: [{ severity: 'important', text: 'bir paragraf eksik' }] })).toMatch(/Değişiklik istendi/);
     expect(t.tasks.get(task.id).status).toBe('waiting');
+  });
+
+  it('lets the coordinator write a plan’s retro', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a', method: METHOD });
+    t.company.approve(plan.id);
+    expect(await t.call(c, 'planRetro', { planId: plan.id, wentWell: 'iyi', stuck: 'yok', change: 'erken başla' })).toMatch(/playbookUpdate/);
   });
 });

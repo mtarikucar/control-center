@@ -192,7 +192,10 @@ describe('Company — plans', () => {
     t.company.start(task.id);
     t.company.finish(ada.id, task.id, { summary: 'tamam', outputs: [], learned: '' });
     expect(t.plans.get(plan.id).status).toBe('done');
-    expect(t.notices.pending(c.id).at(-1)?.text).toContain('sahibine raporla');
+    // Since the coordination craft the plan's end is a decision: assess it (planRetro), then report.
+    expect(t.notices.pending(c.id).at(-1)).toMatchObject({ kind: 'decision', topic: 'plan.retro' });
+    expect(t.notices.pending(c.id).at(-1)?.text).toContain('planRetro');
+    expect(t.notices.pending(c.id).at(-1)?.text).toContain('reportToOwner');
   });
 
   it('only the coordinator proposes plans and reports to the owner', () => {
@@ -417,7 +420,7 @@ describe('Company — notice kinds', () => {
     t.company.update(can.id, passed.id, { blocked: false });
     t.company.finish(can.id, passed.id, { summary: 'çevrildi', outputs: [], learned: '' });
     expect(last(ada.id)).toBe('info task.finished');
-    expect(t.notices.pending(c.id).slice(-2).map((n) => `${n.kind} ${n.topic}`)).toEqual(['info task.finished', 'info plan.done']);
+    expect(t.notices.pending(c.id).slice(-2).map((n) => `${n.kind} ${n.topic}`)).toEqual(['info task.finished', 'decision plan.retro']);
 
     const waiting = t.company.createTask(c.id, { assignee: ada.id, title: 'bekleyen' });
     t.company.assign(c.id, waiting.id, can.id);

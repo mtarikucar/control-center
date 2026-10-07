@@ -11,6 +11,8 @@ export const NOTICE_TOPICS = {
   'plan.declined': 'decision',
   'plan.revision_declined': 'decision',
   'plan.done': 'info',
+  /** A plan has no open task left: assess it (planRetro), write the lessons, report, go on (spec §5.4). */
+  'plan.retro': 'decision',
   'task.blocked': 'decision',
   /** Still open after the office's reminder: the queue behind it is stuck. */
   'task.stalled': 'decision',
