@@ -1,4 +1,4 @@
-import { reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
+import { PROFILE_SPEC, reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, formatWhenTR, summarizeToolInput } from './format.ts';
 import { lifecycleLabel } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
@@ -155,6 +155,8 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note error">{`Saat: ${e.job} başarısız — ${e.message}`}</div>;
     case 'brief.updated':
       return <div className="note">Şirket özeti güncellendi</div>;
+    case 'profile.updated':
+      return <div className="note">{`Şirket profili: ${PROFILE_SPEC[e.entry.section].label} (sürüm ${e.entry.version}${e.entry.assumed ? ', varsayım' : ''})`}</div>;
     case 'role.changed':
       return <div className="note">Rol: {e.title || e.kind}</div>;
     case 'decision.recorded':

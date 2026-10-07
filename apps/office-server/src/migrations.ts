@@ -364,4 +364,23 @@ export const MIGRATIONS: Migration[] = [
     up: `ALTER TABLE tasks ADD COLUMN nudged_at INTEGER;`,
     down: `ALTER TABLE tasks DROP COLUMN nudged_at;`,
   },
+  {
+    version: 12,
+    name: 'company profile: sections, one row per version',
+    // Append-only: a section's current state is its row with the highest version; the version is company-wide.
+    up: `
+      CREATE TABLE IF NOT EXISTS company_profile (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL UNIQUE,
+        section TEXT NOT NULL,
+        json TEXT NOT NULL,
+        assumed INTEGER NOT NULL,
+        by TEXT NOT NULL,
+        ts INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS company_profile_section ON company_profile (section, version);`,
+    down: `
+      DROP INDEX IF EXISTS company_profile_section;
+      DROP TABLE IF EXISTS company_profile;`,
+  },
 ];

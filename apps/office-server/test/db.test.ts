@@ -19,14 +19,15 @@ const V4_TABLES = [...V3_TABLES, 'constitution', 'spend'].sort();
 const V5_TABLES = [...V4_TABLES, 'proposals'].sort();
 const V9_TABLES = [...V5_TABLES, 'company_state', 'goals'].sort();
 const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
+const V12_TABLES = [...V10_TABLES, 'company_profile'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(11);
-    expect(tables(db)).toEqual(V10_TABLES);
+    expect(migrateUp(db)).toBe(12);
+    expect(tables(db)).toEqual(V12_TABLES);
   });
 
   it('round-trips up → down → up', () => {
@@ -35,14 +36,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(11);
-    expect(tables(db)).toEqual(V10_TABLES);
+    expect(migrateUp(db)).toBe(12);
+    expect(tables(db)).toEqual(V12_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(11);
+    expect(migrateUp(db)).toBe(12);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -235,14 +236,31 @@ describe('migrations', () => {
       `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, nudged, created_at, started_at)
        VALUES ('t1', NULL, 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'in_progress', 0, 1, 1, 2)`,
     ).run();
-    migrateUp(db);
+    migrateUp(db, upTo(11));
     expect(appliedVersion(db)).toBe(11);
     expect({ ...(db.prepare('SELECT nudged, nudged_at FROM tasks').get() as object) }).toEqual({ nudged: 1, nudged_at: null });
     expect(migrateDown(db, 10)).toBe(10);
     expect(columns(db, 'tasks')).toEqual(before);
     expect({ ...(db.prepare('SELECT id, status, nudged FROM tasks').get() as object) }).toEqual({ id: 't1', status: 'in_progress', nudged: 1 });
     expect(migrateDown(db, 10)).toBe(10);
-    expect(migrateUp(db)).toBe(11);
+    expect(migrateUp(db, upTo(11))).toBe(11);
     expect(columns(db, 'tasks')).toContain('nudged_at');
+  });
+
+  it('v12 adds the company profile, empty on a database from before; v12 down restores v11 exactly and keeps the rest', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(11));
+    db.prepare("INSERT INTO goals (id, title, why, done, status, created_by, created_at) VALUES ('g1', 'eski', 'neden', '[]', 'active', 'c', 1)").run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(12);
+    expect(tables(db)).toEqual(V12_TABLES);
+    expect(columns(db, 'company_profile')).toEqual(['id', 'version', 'section', 'json', 'assumed', 'by', 'ts']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM company_profile').get()).toMatchObject({ n: 0 });
+    db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p1', 1, 'identity', '{}', 0, 'c', 1)").run();
+    expect(() => db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p2', 1, 'offer', '{}', 0, 'c', 1)").run()).toThrow(/UNIQUE/);
+    expect(migrateDown(db, 11)).toBe(11);
+    expect(tables(db)).toEqual(V10_TABLES);
+    expect(db.prepare('SELECT title FROM goals').get()).toMatchObject({ title: 'eski' });
+    expect(migrateUp(db)).toBe(12);
   });
 });
