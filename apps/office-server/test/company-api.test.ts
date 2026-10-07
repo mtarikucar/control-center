@@ -188,4 +188,22 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', `/api/proposals/${idea.id}/approve`)).status).toBe(409);
     expect((await call(t.port, 'GET', '/api/office')).body.proposals.map((p: { status: string }) => p.status).sort()).toEqual(['accepted', 'open']);
   });
+
+  it('lets the owner stop a plan and a goal and pause the company, and shows goals and the pause in the snapshot', async () => {
+    const t = await start();
+    t.budget.setConstitution({ autonomy: 'free' });
+    const c = t.company.hireCoordinator();
+    const goal = t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Site', goal: 'g', approach: 'a', goalId: goal.id });
+    expect((await call(t.port, 'POST', `/api/plans/${plan.id}/stop`)).body).toMatchObject({ id: plan.id, status: 'stopped' });
+    expect((await call(t.port, 'POST', `/api/plans/${plan.id}/stop`)).status).toBe(409);
+    expect((await call(t.port, 'POST', `/api/goals/${goal.id}/stop`)).body).toMatchObject({ status: 'dropped' });
+    expect((await call(t.port, 'POST', '/api/company/pause')).status).toBe(200);
+    let office = await call(t.port, 'GET', '/api/office');
+    expect(office.body).toMatchObject({ paused: true });
+    expect(office.body.goals.map((g: { title: string }) => g.title)).toEqual(['Lansman']);
+    expect((await call(t.port, 'POST', '/api/company/resume')).status).toBe(200);
+    office = await call(t.port, 'GET', '/api/office');
+    expect(office.body.paused).toBe(false);
+  });
 });

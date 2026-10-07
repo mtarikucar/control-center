@@ -50,6 +50,12 @@ export const NOTICE_TOPICS = {
   'review.changes': 'info',
   /** A task was sent back for the third time or more: the coordinator changes the approach or brings it to the owner. */
   'review.stuck': 'decision',
+  /** The owner stopped a plan: its open work was cancelled. */
+  'plan.stopped': 'decision',
+  /** The owner stopped a goal (and its running plans). */
+  'goal.stopped': 'decision',
+  /** A task you hold was cancelled (its plan was stopped): stop working on it. */
+  'task.cancelled': 'decision',
   /** Digest off: the daily report reminder as a notice of its own (with the digest on it is a line of the digest). */
   'report.reminder': 'decision',
 } as const satisfies Record<string, NoticeKind>;

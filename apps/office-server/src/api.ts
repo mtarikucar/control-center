@@ -45,7 +45,8 @@ const MAX_BODY_BYTES = 1_000_000;
 const WS_OPEN = 1;
 const DECISION_ROUTE = /^\/api\/decisions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/revert$/;
 const PROPOSAL_ROUTE = /^\/api\/proposals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|reject)$/;
-const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline)$/;
+const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline|stop)$/;
+const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/;
 const EMPLOYEE_ROUTE =
   /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file))?$/;
 
@@ -60,7 +61,10 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   if (!d.company) return base;
   const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked'] });
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
-  return { ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals) };
+  return {
+    ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
+    goals: d.company.service.goals(), paused: d.company.service.paused(),
+  };
 }
 
 /** Blocks DNS rebinding (Host) and cross-site requests from other pages in the owner's browser (Origin). */
@@ -135,7 +139,20 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
   if (d.company) {
     const company = d.company.service;
     const plan = PLAN_ROUTE.exec(url.pathname);
-    if (method === 'POST' && plan) return sendJson(res, 200, plan[2] === 'approve' ? company.approve(plan[1] ?? '') : company.decline(plan[1] ?? ''));
+    if (method === 'POST' && plan) {
+      const id = plan[1] ?? '';
+      return sendJson(res, 200, plan[2] === 'approve' ? company.approve(id) : plan[2] === 'decline' ? company.decline(id) : company.stopPlan(id));
+    }
+    const goalStop = GOAL_ROUTE.exec(url.pathname);
+    if (method === 'POST' && goalStop) return sendJson(res, 200, company.stopGoal(goalStop[1] ?? ''));
+    if (method === 'POST' && url.pathname === '/api/company/pause') {
+      company.pause();
+      return sendJson(res, 200, { paused: true });
+    }
+    if (method === 'POST' && url.pathname === '/api/company/resume') {
+      company.resume();
+      return sendJson(res, 200, { paused: false });
+    }
     if (method === 'POST' && url.pathname === '/api/company/coordinator/hire') return sendJson(res, 201, company.hireCoordinator());
     if (method === 'POST' && url.pathname === '/api/company/coordinator') {
       const id = (await readJson(req) as { employeeId?: unknown }).employeeId;

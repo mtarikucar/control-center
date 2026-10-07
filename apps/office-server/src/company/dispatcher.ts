@@ -74,7 +74,7 @@ export class Dispatcher {
         if (ev.to === 'idle') this.#idleSince.set(stored.employeeId, this.#now());
         else this.#idleSince.delete(stored.employeeId);
         if (ev.to === 'idle') this.#schedule(stored.employeeId);
-      } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed'].includes(ev.type)) this.#scheduleSweep();
+      } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed', 'company.paused'].includes(ev.type)) this.#scheduleSweep();
     });
     const timer = setInterval(() => {
       this.#d.budget?.checkReserve();
@@ -114,6 +114,8 @@ export class Dispatcher {
   #consider(id: string): void {
     const employee = this.#person(id);
     if (!employee) return;
+    // The owner paused the company: nothing is handed out, no one is woken (spec §6.4); the owner's messages go straight to the engine.
+    if (this.#d.company.paused()) return;
     if (employee.lifecycle === 'sleeping') {
       if (this.#hasWorkFor(employee)) this.#wake(id);
       return;

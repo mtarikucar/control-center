@@ -629,3 +629,26 @@ describe('Dispatcher — reviews', () => {
     expect(systemMessages(t.events.list({ limit: 5000 }), can.id).find((m) => m.startsWith(NUDGE_PREFIX))).toContain('reviewDecide');
   });
 });
+
+describe('Dispatcher — a paused company', () => {
+  it('hands out nothing while paused — no task, no notice, no wake — and delivers what waited, once, on resume', async () => {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget });
+    const stop = dispatcher.start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    const ada = c.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => f.engine.ready(ada.id), 8000);
+    c.company.pause();
+    const task = c.company.createTask(OWNER, { assignee: ada.id, title: 'Duraklatılmışken' });
+    await sleep(600);
+    expect(c.tasks.get(task.id).status).toBe('waiting');
+    expect(systemMessages(s.events.list({ limit: 5000 }), ada.id)).toHaveLength(0);
+    c.company.resume();
+    await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('Duraklatılmışken'));
+    await sleep(300);
+    // One delivery (a later reminder about the open task may follow; it is not a second delivery).
+    expect(systemMessages(s.events.list({ limit: 5000 }), ada.id).filter((m) => m.startsWith('## Görev: Duraklatılmışken'))).toHaveLength(1);
+  });
+});

@@ -249,6 +249,7 @@ export class Company {
       const plan = this.#d.plans.get(planId);
       if (plan.status === 'draft') throw new ConflictError(`“${plan.title}” planı henüz onaylanmadı; görevleri onaydan sonra aç.`);
       if (plan.status === 'declined') throw new ConflictError(`“${plan.title}” planından vazgeçildi; gerekiyorsa yeni bir plan öner.`);
+      if (plan.status === 'stopped') throw new ConflictError(`“${plan.title}” planı durduruldu; gerekiyorsa yeni bir plan öner.`);
       if (this.#d.tasks.openInPlan(planId) >= rules.openTasksPerPlan) throw new ConflictError(`Bu planda en fazla ${rules.openTasksPerPlan} açık görev olabilir.`);
     }
     const dependsOn = (input.dependsOn ?? []).filter(Boolean);
@@ -687,6 +688,64 @@ export class Company {
     if (this.#goals().activeCount() >= max) throw new ConflictError(`En fazla ${max} aktif hedef olabilir; önce birini kapat (goalSet: status done ya da dropped).`);
   }
 
+  /** The owner stops a running plan (spec §6.4): its open work is cancelled; it never starts again. */
+  stopPlan(planId: string, o: { quiet?: boolean } = {}): Plan {
+    const plan = this.#d.plans.get(planId);
+    if (plan.status === 'stopped') throw new ConflictError('Bu plan zaten durduruldu.');
+    if (plan.status !== 'approved' && plan.status !== 'draft') throw new ConflictError('Yalnız süren ya da onay bekleyen bir plan durdurulabilir.');
+    const at = this.#now();
+    for (const task of this.#d.tasks.list({ planId, statuses: ['waiting', 'in_progress', 'review', 'blocked'] })) {
+      const holder = this.#person(task.assignee);
+      if (holder && holder.lifecycle !== 'archived' && (task.status === 'in_progress' || task.status === 'blocked')) {
+        this.#d.notices.add(holder.id, 'task.cancelled', `“${task.title}” görevi (no ${task.id}) iptal edildi: sahibi “${plan.title}” planını durdurdu. Üzerinde çalışmayı bırak.`);
+      }
+      this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'cancelled', finishedAt: at }));
+    }
+    this.#d.plans.clearApproved(planId);
+    const stopped = this.#d.plans.update(planId, { status: 'stopped' });
+    const desk = this.#planDesk(stopped);
+    if (!o.quiet) {
+      this.#d.notices.add(desk, 'plan.stopped', `Sahibi “${plan.title}” planını durdurdu; açık görevleri iptal edildi. Durdurulan plan yeniden başlamaz; gerekiyorsa yeni bir plan öner.`);
+    }
+    this.#emit(desk, { type: 'plan.changed', change: 'stopped', plan: stopped });
+    return stopped;
+  }
+
+  /** The owner stops a goal: it is dropped and its running plans stop (one notice for all). */
+  stopGoal(goalId: string): Goal {
+    const store = this.#goals();
+    const current = store.get(goalId);
+    if (current.status !== 'active') throw new ConflictError('Bu hedef zaten kapalı.');
+    const running = this.#d.plans.list(1000).filter((p) => p.goalId === goalId && (p.status === 'approved' || p.status === 'draft'));
+    for (const p of running) this.stopPlan(p.id, { quiet: true });
+    const goal = store.update(goalId, { status: 'dropped', closedAt: this.#now(), note: 'Sahibi durdurdu' });
+    const c = this.coordinator();
+    const plansLine = running.length ? ` Süren planları da durdu: ${running.map((p) => `“${p.title}”`).join(', ')}.` : '';
+    if (c) this.#d.notices.add(c.id, 'goal.stopped', `Sahibi “${goal.title}” hedefini durdurdu.${plansLine} Bu hedef için iş açma; gerekiyorsa sahibine sor.`);
+    this.#emit(c?.id ?? goal.createdBy, { type: 'goal.changed', change: 'stopped', goal });
+    return goal;
+  }
+
+  /** The owner pauses the whole company (spec §6.4): nothing is handed out until resume. */
+  pause(): void {
+    this.#state().setPaused(true);
+    this.#emit(this.coordinator()?.id ?? null, { type: 'company.paused', paused: true });
+  }
+
+  resume(): void {
+    this.#state().setPaused(false);
+    this.#emit(this.coordinator()?.id ?? null, { type: 'company.paused', paused: false });
+  }
+
+  paused(): boolean {
+    return this.#d.state?.paused() ?? false;
+  }
+
+  #state(): CompanyStateStore {
+    if (!this.#d.state) throw new ConflictError('Bu ofiste şirket durumu açık değil.');
+    return this.#d.state;
+  }
+
   // ── proposals ─────────────────────────────────────────────────────────────
 
   /**
@@ -964,7 +1023,7 @@ export class Company {
     this.#emit(task.assignee, { type: 'task.changed', change, task });
   }
 
-  #emit(employeeId: string, event: OfficeEvent): void {
+  #emit(employeeId: string | null, event: OfficeEvent): void {
     this.#d.events.append(employeeId, event);
   }
 }
