@@ -16,7 +16,7 @@ function make() {
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
   const c = companyFor(s, f, ['coder', 'designer']);
-  const tools = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder', 'designer'], memory: c.memory, budget: c.budget, engine: f.engine });
+  const tools = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder', 'designer'], memory: c.memory, budget: c.budget, engine: f.engine, plans: () => c.plans.list() });
   const call = async (employee: Employee, name: string, args: Record<string, unknown> = {}) => {
     const tool = tools.find((t: McpTool) => t.name === name);
     if (!tool) throw new Error(`no tool ${name}`);
@@ -35,9 +35,9 @@ describe('office tools', () => {
       'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend', 'reviewDecide',
       'taskFinish', 'taskPass', 'taskUpdate',
     ]);
-    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
+    expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
+      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
@@ -292,5 +292,16 @@ describe('office tools — task difficulty', () => {
     const reply = await t.call(c, 'reviewDecide', { taskId: review.id, decision: 'changes', findings: [{ severity: 'important', text: 'eksik' }] });
     expect(reply).toMatch(/işten çıkarıldı/);
     expect(reply).toMatch(/taskAssign/);
+  });
+
+  it('lets the coordinator set goals and anyone in charge read them with their plans', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    expect(await t.call(c, 'goalSet', { title: 'Lansman', why: 'Misyon', done: ['site yayında'] })).toMatch(/Hedef açıldı/);
+    const goal = t.goals.list()[0]!;
+    await t.call(c, 'planPropose', { title: 'Site', goal: 'g', approach: 'a', method: METHOD, goalId: goal.id });
+    const read = await t.call(c, 'goalsRead');
+    expect(read).toContain('Lansman');
+    expect(read).toContain('Site');
   });
 });

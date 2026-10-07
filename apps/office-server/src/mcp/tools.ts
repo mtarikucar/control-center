@@ -1,4 +1,4 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
+import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText } from '../company/craft.ts';
@@ -94,8 +94,10 @@ export function officeTools(o: {
   memory: Memory;
   budget: Budget;
   engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown; sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }> };
+  /** Every plan, newest first (goalsRead lists each goal's plans). */
+  plans: () => Plan[];
 }): McpTool[] {
-  const { company, roster, tasks, memory, budget, engine } = o;
+  const { company, roster, tasks, memory, budget, engine, plans } = o;
 
   /** A colleague by id or by name (case and Turkish dotted/dotless i insensitive). */
   const findPerson = (who: string): Employee => {
@@ -460,10 +462,10 @@ export function officeTools(o: {
       name: 'planPropose',
       description:
         'Propose a plan card to the owner before starting any work they asked for: goal, approach, the method (work type, stages with who does and who checks each, quality checks — read methodRead first), who works on it (existing people and roles to hire), draft tasks, estimates (share of weekly quota %, money in USD, days) and risks. The owner approves it on screen.',
-      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), method, people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach', 'method']),
+      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), method, goalId: s('The active goal this plan serves (from goalSet / goalsRead).'), people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach', 'method']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), method: args.method, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
+        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), method: args.method, goalId: optStr(args, 'goalId') ?? null, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
         return `Plan kartı açıldı (${plan.id}). Sahibinin onayını bekle; onay gelince sana haber verilecek.`;
       },
     },
@@ -486,6 +488,35 @@ export function officeTools(o: {
       run: ({ employee }, args) => {
         const { suggestion } = company.retro(employee.id, str(args, 'planId'), { wentWell: str(args, 'wentWell'), stuck: str(args, 'stuck'), change: str(args, 'change'), methodSuggestion: optStr(args, 'methodSuggestion') });
         return `Değerlendirme şirket notlarına yazıldı${suggestion ? ' (yöntem önerisi ayrıca)' : ''}. Şirkete özgü dersleri playbookUpdate ile el kitabına işle, sonra reportToOwner ile sahibine kısaca raporla.`;
+      },
+    },
+    {
+      name: 'goalSet',
+      description:
+        'Open, change or close a goal (coordinator) — the lasting aims above the plans, taken from the company mission: a title, why it serves the mission, and a measurable definition of done. Without goalId it opens a new one; with goalId it changes it (status done or dropped closes it, active reopens it). Keep few goals active.',
+      inputSchema: object({ goalId: s('The goal to change; omit to open a new one.'), title: s('Goal title.'), why: s('Why it matters to the mission.'), done: strings('When it counts as reached, one measurable item each.'), status: { type: 'string', enum: ['active', 'done', 'dropped'] }, note: s('A note, e.g. why it was closed.') }),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const goal = company.goalSet(employee.id, { goalId: optStr(args, 'goalId'), title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, status: optStr(args, 'status'), note: optStr(args, 'note') });
+        if (!optStr(args, 'goalId')) return `Hedef açıldı (${goal.id}): “${goal.title}”. Planlarını planPropose ile goalId vererek başlat.`;
+        return `Hedef güncellendi: “${goal.title}” (${goal.status}).`;
+      },
+    },
+    {
+      name: 'goalsRead',
+      description: 'Read the company’s goals (coordinator or team lead): each active goal with why, its definition of done and its plans; then the recently closed ones.',
+      inputSchema: object({}),
+      kinds: LEADS,
+      run: () => {
+        const goals = company.goals();
+        if (goals.length === 0) return 'Henüz hedef yok.';
+        const plansOf = (id: string) => plans().filter((p) => p.goalId === id);
+        return goals
+          .map((g) => {
+            const own = plansOf(g.id).map((p) => `   - ${p.title} [${p.status}]`).join('\n');
+            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${own ? `\n${own}` : ''}`;
+          })
+          .join('\n');
       },
     },
     {

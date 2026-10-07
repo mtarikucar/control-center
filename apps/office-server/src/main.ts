@@ -9,6 +9,7 @@ import { Company } from './company/company.ts';
 import { Memory } from './company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
 import { Dispatcher } from './company/dispatcher.ts';
+import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
 import { NoticeStore, PlanStore, TaskStore } from './company/store.ts';
 import { loadConfig } from './config.ts';
@@ -47,6 +48,8 @@ const tasks = new TaskStore(db);
 const plans = new PlanStore(db);
 const notices = new NoticeStore(db);
 const proposals = new ProposalStore(db);
+const goals = new GoalStore(db);
+const state = new CompanyStateStore(db);
 const memory = new Memory({
   roster, events, notices, tasks, plans, dataDir: config.dataDir,
   decisions: new DecisionStore(db), playbook: new PlaybookStore(db), notes: new NoteStore(db), employeeNotes: new EmployeeNoteStore(db),
@@ -55,11 +58,11 @@ const budget = new Budget({
   constitution: new ConstitutionStore(db), spend: new SpendStore(db), tasks, plans, roster, events, notices, quota, deskCount: config.deskCount,
 });
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state });
 const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget });
 
 const api = createApi(
-  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
+  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list() }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
   { allowedOrigins: config.allowedOrigins, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {

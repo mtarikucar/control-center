@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, REVIEW_DECISIONS, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
+import type { Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, REVIEW_DECISIONS, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -9,6 +9,7 @@ import type { Roster } from '../roster.ts';
 import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
+import type { CompanyStateStore, GoalStore } from './goal-store.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
@@ -55,6 +56,9 @@ export interface CompanyDeps {
   proposals?: ProposalStore;
   /** The company memory: a hand-in's lesson becomes a note (absent in tests that do not care). */
   memory?: Memory;
+  /** Goals and the company's own state (stage 2; absent in tests that do not care). */
+  goals?: GoalStore;
+  state?: CompanyStateStore;
   now?: () => number;
 }
 
@@ -84,6 +88,17 @@ export interface PlanDraft {
   risks?: string;
   /** How the work is done (spec §5.1): required on a proposal, kept on a revision unless given. */
   method?: unknown;
+  /** The active goal it serves (spec §6.1). */
+  goalId?: string | null;
+}
+
+export interface GoalInput {
+  goalId?: string;
+  title?: string;
+  why?: string;
+  done?: string[];
+  status?: string;
+  note?: string;
 }
 
 export interface StatusLine {
@@ -519,7 +534,8 @@ export class Company {
   propose(by: string, draft: PlanDraft): Plan {
     this.#assertCoordinator(by);
     const fields = this.#draft(draft);
-    const plan = this.#d.plans.create({ ...fields, method: planMethod(draft.method), proposedBy: by });
+    const goalId = this.#goalOf(draft.goalId);
+    const plan = this.#d.plans.create({ ...fields, method: planMethod(draft.method), goalId, proposedBy: by });
     this.#emit(by, { type: 'plan.changed', change: 'proposed', plan });
     return plan;
   }
@@ -594,6 +610,67 @@ export class Company {
       ? memory.writeNote(by, { title: `Yöntem önerisi (${type ?? 'general'}): ${plan.title}`, text: suggestionText, tags: tags('yöntem-önerisi'), source: `plan:${plan.id}` })
       : null;
     return { retro, suggestion };
+  }
+
+  // ── goals ─────────────────────────────────────────────────────────────────
+
+  /** The coordinator opens, changes or closes a goal (spec §6.1). */
+  goalSet(by: string, input: GoalInput): Goal {
+    this.#assertCoordinator(by);
+    const store = this.#goals();
+    if (input.done !== undefined && !(Array.isArray(input.done) && input.done.every((d) => typeof d === 'string'))) {
+      throw new ValidationError('Hedefin bitti tanımı (done) metinlerden oluşan bir liste olmalı.');
+    }
+    if (input.status !== undefined && !(GOAL_STATUSES as readonly string[]).includes(input.status)) throw new ValidationError('Hedef durumu active, done ya da dropped olmalı.');
+    const status = input.status as GoalStatus | undefined;
+    if (!input.goalId) {
+      this.#assertGoalRoom();
+      const goal = store.create({
+        title: clean(input.title, 'Hedef başlığı', 160, true),
+        why: clean(input.why, 'Neden (misyona bağı)', 2000, true),
+        done: this.#goalDone(input.done),
+        createdBy: by,
+      });
+      this.#d.state?.setRest(0, '');
+      this.#emit(by, { type: 'goal.changed', change: 'set', goal });
+      return goal;
+    }
+    const current = store.get(input.goalId);
+    if (status === 'active' && current.status !== 'active') this.#assertGoalRoom();
+    const closing = status !== undefined && status !== 'active' && current.status === 'active';
+    const goal = store.update(current.id, {
+      title: input.title === undefined ? current.title : clean(input.title, 'Hedef başlığı', 160, true),
+      why: input.why === undefined ? current.why : clean(input.why, 'Neden (misyona bağı)', 2000, true),
+      done: input.done === undefined ? current.done : this.#goalDone(input.done),
+      status: status ?? current.status,
+      closedAt: closing ? this.#now() : status === 'active' ? null : current.closedAt,
+      note: input.note === undefined ? current.note : clean(input.note, 'Not', 2000, false) || null,
+    });
+    this.#emit(by, { type: 'goal.changed', change: closing ? 'closed' : 'updated', goal });
+    return goal;
+  }
+
+  /** Active goals first (oldest first), then the last 20 closed. */
+  goals(): Goal[] {
+    if (!this.#d.goals) return [];
+    return [...this.#d.goals.list({ statuses: ['active'] }), ...this.#d.goals.list({ statuses: ['done', 'dropped'] }).slice(-20)];
+  }
+
+  #goals(): GoalStore {
+    if (!this.#d.goals) throw new ConflictError('Bu ofiste hedefler açık değil.');
+    return this.#d.goals;
+  }
+
+  #goalDone(done: string[] | undefined): string[] {
+    const items = lines(done, 'Hedefin bitti tanımı', 12, 300);
+    if (items.length === 0) throw new ValidationError('Hedefin en az bir maddelik bitti tanımı (done) olmalı: neye ulaşınca hedef tamam?');
+    return items;
+  }
+
+  /** Checked before anything is written: one more active goal must fit the constitution's limit. */
+  #assertGoalRoom(): void {
+    const max = this.#rules().activeGoals;
+    if (this.#goals().activeCount() >= max) throw new ConflictError(`En fazla ${max} aktif hedef olabilir; önce birini kapat (goalSet: status done ya da dropped).`);
   }
 
   // ── proposals ─────────────────────────────────────────────────────────────
@@ -811,6 +888,14 @@ export class Company {
   /** Where plan news goes: today's coordinator (the one who proposed it may since have been replaced). */
   #planDesk(plan: Plan): string {
     return this.coordinator()?.id ?? plan.proposedBy;
+  }
+
+  /** A plan names an active goal, or none. */
+  #goalOf(id: string | null | undefined): string | null {
+    if (id === undefined || id === null || id === '') return null;
+    const goal = this.#goals().get(id);
+    if (goal.status !== 'active') throw new ConflictError(`“${goal.title}” hedefi aktif değil; plana aktif bir hedef ver ya da hedefsiz öner.`);
+    return goal.id;
   }
 
   #person(id: string): Employee | null {

@@ -2,6 +2,7 @@ import type { QuotaState } from '@cc/shared';
 import { Budget } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { Company } from '../src/company/company.ts';
+import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
 import { Memory } from '../src/company/memory.ts';
 import { ProposalStore } from '../src/company/proposal-store.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
@@ -15,6 +16,8 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const plans = new PlanStore(s.db, now);
   const notices = new NoticeStore(s.db, now);
   const proposals = new ProposalStore(s.db, now);
+  const goals = new GoalStore(s.db, now);
+  const state = new CompanyStateStore(s.db);
   const memory = new Memory({
     roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir,
     decisions: new DecisionStore(s.db, now), playbook: new PlaybookStore(s.db, now), notes: new NoteStore(s.db, now), employeeNotes: new EmployeeNoteStore(s.db, now),
@@ -26,11 +29,11 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   });
   const reloaded: string[] = [];
   const company = new Company({
-    roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals,
+    roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
     reload: (id) => void reloaded.push(id), now,
   });
   return {
-    tasks, plans, notices, memory, company, reloaded, budget, proposals,
+    tasks, plans, notices, memory, company, reloaded, budget, proposals, goals, state,
     setQuota: (q: QuotaState | null) => {
       quotaState = q;
     },
