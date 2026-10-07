@@ -56,6 +56,10 @@ export const NOTICE_TOPICS = {
   'goal.stopped': 'decision',
   /** A task you hold was cancelled (its plan was stopped): stop working on it. */
   'task.cancelled': 'decision',
+  /** The pulse: an active goal has no running plan — start the next one or close the goal. */
+  'pulse.goal_idle': 'decision',
+  /** The pulse: no goal and no work — set a goal from the mission or rest. */
+  'pulse.no_goal': 'decision',
   /** Digest off: the daily report reminder as a notice of its own (with the digest on it is a line of the digest). */
   'report.reminder': 'decision',
 } as const satisfies Record<string, NoticeKind>;

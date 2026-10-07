@@ -726,6 +726,16 @@ export class Company {
     return goal;
   }
 
+  /** Nothing worth doing now (spec §6.3): the "no goal" pulse waits until then. Returns the time it ends. */
+  restUntil(by: string, hours: number, reason: string): number {
+    this.#assertCoordinator(by);
+    if (!Number.isFinite(hours) || hours < 1 || hours > 168) throw new ValidationError('Dinlenme süresi 1 ile 168 saat arasında olmalı.');
+    const why = clean(reason, 'Gerekçe', 1000, true);
+    const until = this.#now() + Math.round(hours * 60 * 60_000);
+    this.#state().setRest(until, why);
+    return until;
+  }
+
   /** The owner pauses the whole company (spec §6.4): nothing is handed out until resume. */
   pause(): void {
     this.#state().setPaused(true);

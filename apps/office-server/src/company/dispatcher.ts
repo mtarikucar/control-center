@@ -29,6 +29,8 @@ export interface DispatcherDeps {
   now?: () => number;
   /** How often the reserve is re-checked and everyone swept again (the quota resets on its own clock). */
   tickMs?: number;
+  /** The project's pulse (spec §6.3), run on each tick. */
+  pulse?: { check(): unknown };
 }
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
@@ -79,14 +81,25 @@ export class Dispatcher {
     const timer = setInterval(() => {
       this.#d.budget?.checkReserve();
       if (!this.#rules().digestEnabled) this.#remindReport();
+      this.#pulse();
       this.#scheduleSweep();
     }, this.#d.tickMs ?? 60_000);
     timer.unref();
+    this.#pulse();
     this.#scheduleSweep();
     return () => {
       off();
       clearInterval(timer);
     };
+  }
+
+  /** The office looks at the project; a failing pulse never stops the office (the next tick looks again). */
+  #pulse(): void {
+    try {
+      this.#d.pulse?.check();
+    } catch {
+      // A pulse that fails never stops the office; the next tick looks again.
+    }
   }
 
   sweep(): void {

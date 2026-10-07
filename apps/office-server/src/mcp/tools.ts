@@ -521,6 +521,16 @@ export function officeTools(o: {
       },
     },
     {
+      name: 'restUntil',
+      description: 'Say there is nothing worth doing now (coordinator): for how many hours (1–168) and why. The office stops reminding you about having no goal until then; a new goal ends the rest. Never invent work to stay busy.',
+      inputSchema: object({ hours: number('Hours to rest (1–168).'), reason: s('Why there is nothing worth doing now.') }, ['hours', 'reason']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const until = company.restUntil(employee.id, num(args, 'hours') ?? 0, str(args, 'reason'));
+        return `Dinleniyorsun: ${new Date(until).toLocaleString('tr-TR')} tarihine kadar hedef hatırlatması gelmeyecek. Sahibinin isteği ya da yeni bir hedef bunu bitirir.`;
+      },
+    },
+    {
       name: 'hire',
       description: `Hire a new employee (coordinator): name, job title, team, the role card text (responsibilities, how to work, what "done" means), the model (${MODEL_ALIASES.join(', ')}) and the look (characterId). Desks are limited.`,
       inputSchema: {

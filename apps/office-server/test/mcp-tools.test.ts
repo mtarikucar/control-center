@@ -37,7 +37,7 @@ describe('office tools', () => {
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
+      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
@@ -303,5 +303,12 @@ describe('office tools — task difficulty', () => {
     const read = await t.call(c, 'goalsRead');
     expect(read).toContain('Lansman');
     expect(read).toContain('Site');
+  });
+
+  it('lets the coordinator rest when there is nothing worth doing', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    expect(await t.call(c, 'restUntil', { hours: 12, reason: 'Sahibinin cevabı bekleniyor' })).toMatch(/Dinleniyorsun/);
+    expect(t.state.restUntil()).toBeGreaterThan(Date.now());
   });
 });

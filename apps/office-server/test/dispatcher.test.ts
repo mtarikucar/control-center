@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
+import { Pulse } from '../src/company/pulse.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { companyFor, METHOD, PLANS_ONLY } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
@@ -650,5 +651,19 @@ describe('Dispatcher — a paused company', () => {
     await sleep(300);
     // One delivery (a later reminder about the open task may follow; it is not a second delivery).
     expect(systemMessages(s.events.list({ limit: 5000 }), ada.id).filter((m) => m.startsWith('## Görev: Duraklatılmışken'))).toHaveLength(1);
+  });
+
+  it('runs the pulse on its tick: a goal with no plan reaches the coordinator as a decision', async () => {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const coordinator = c.company.hireCoordinator('sonnet');
+    c.company.goalSet(coordinator.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    const pulse = new Pulse({ company: c.company, goals: c.goals, state: c.state, plans: c.plans, tasks: c.tasks, notices: c.notices, budget: c.budget });
+    const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget, pulse, tickMs: 200 });
+    const stop = dispatcher.start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    const msg = await waitFor(s.events, (e) => e.employeeId === coordinator.id && e.event.type === 'message.user' && e.event.text.includes('Lansman'));
+    expect((msg.event as { text: string }).text).toContain('goalSet');
   });
 });

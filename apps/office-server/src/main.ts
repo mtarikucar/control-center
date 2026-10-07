@@ -11,6 +11,7 @@ import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './co
 import { Dispatcher } from './company/dispatcher.ts';
 import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
+import { Pulse } from './company/pulse.ts';
 import { NoticeStore, PlanStore, TaskStore } from './company/store.ts';
 import { loadConfig } from './config.ts';
 import { migrateUp, openDb } from './db.ts';
@@ -59,7 +60,8 @@ const budget = new Budget({
 });
 const characters = manifestCharacters(config.assetsDir);
 const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state });
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget });
+const pulse = new Pulse({ company, goals, state, plans, tasks, notices, budget });
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse });
 
 const api = createApi(
   { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list() }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
