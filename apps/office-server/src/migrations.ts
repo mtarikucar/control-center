@@ -394,4 +394,29 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS company_profile_section;
       DROP TABLE IF EXISTS company_profile;`,
   },
+  {
+    // v15 is kept for B3 (the integration registry), spec 2026-10-08-onboarding-design §4.
+    version: 14,
+    name: 'onboarding: the owner\'s sentence and the rounds of questions',
+    // One onboarding runs at a time; finished ones stay. A round is the block of questions asked in one message.
+    up: `
+      CREATE TABLE IF NOT EXISTS onboarding (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_by TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS onboarding_rounds (
+        onboarding_id TEXT NOT NULL,
+        round INTEGER NOT NULL,
+        questions TEXT NOT NULL,
+        asked_at INTEGER NOT NULL,
+        PRIMARY KEY (onboarding_id, round)
+      );`,
+    down: `
+      DROP TABLE IF EXISTS onboarding_rounds;
+      DROP TABLE IF EXISTS onboarding;`,
+  },
 ];

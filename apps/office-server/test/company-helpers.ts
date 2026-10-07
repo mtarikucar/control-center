@@ -4,6 +4,7 @@ import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { Company } from '../src/company/company.ts';
 import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
 import { Memory } from '../src/company/memory.ts';
+import { OnboardingStore } from '../src/company/onboarding-store.ts';
 import { ProfileStore } from '../src/company/profile-store.ts';
 import { ProposalStore } from '../src/company/proposal-store.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
@@ -40,7 +41,7 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const clock = { touch: () => void (touched += 1) };
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
-    reload: (id) => void reloaded.push(id), schedules, clock, now, profile: new ProfileStore(s.db, now),
+    reload: (id) => void reloaded.push(id), schedules, clock, now, profile: new ProfileStore(s.db, now), onboarding: new OnboardingStore(s.db, now),
   });
   const scheduling = new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
   /** A restarted office's due-processor on the same database. */

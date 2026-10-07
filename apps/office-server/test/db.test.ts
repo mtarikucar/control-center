@@ -20,14 +20,15 @@ const V5_TABLES = [...V4_TABLES, 'proposals'].sort();
 const V9_TABLES = [...V5_TABLES, 'company_state', 'goals'].sort();
 const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
 const V13_TABLES = [...V10_TABLES, 'company_profile'].sort();
+const V14_TABLES = [...V13_TABLES, 'onboarding', 'onboarding_rounds'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(13);
-    expect(tables(db)).toEqual(V13_TABLES);
+    expect(migrateUp(db)).toBe(14);
+    expect(tables(db)).toEqual(V14_TABLES);
   });
 
   it('numbers the migrations 1, 2, 3 … with no gap and no repeat (a merge that numbers two alike or skips one fails here)', () => {
@@ -40,14 +41,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(13);
-    expect(tables(db)).toEqual(V13_TABLES);
+    expect(migrateUp(db)).toBe(14);
+    expect(tables(db)).toEqual(V14_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(13);
+    expect(migrateUp(db)).toBe(14);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -269,7 +270,7 @@ describe('migrations', () => {
     const db = openDb(':memory:');
     migrateUp(db, upTo(12));
     db.prepare("INSERT INTO goals (id, title, why, done, status, created_by, created_at) VALUES ('g1', 'eski', 'neden', '[]', 'active', 'c', 1)").run();
-    migrateUp(db);
+    migrateUp(db, upTo(13));
     expect(appliedVersion(db)).toBe(13);
     expect(tables(db)).toEqual(V13_TABLES);
     expect(columns(db, 'company_profile')).toEqual(['id', 'version', 'section', 'json', 'assumed', 'assumed_fields', 'by', 'ts']);
@@ -280,6 +281,23 @@ describe('migrations', () => {
     expect(tables(db)).toEqual(V10_TABLES);
     expect(columns(db, 'goals')).toContain('kpis');
     expect(db.prepare('SELECT title FROM goals').get()).toMatchObject({ title: 'eski' });
-    expect(migrateUp(db)).toBe(13);
+    expect(migrateUp(db, upTo(13))).toBe(13);
+  });
+
+  it('v14 adds the onboarding and its rounds, empty; one round per number per onboarding; v14 down restores v13 exactly', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(13));
+    db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p1', 1, 'identity', '{}', 0, 'c', 1)").run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(14);
+    expect(tables(db)).toEqual(V14_TABLES);
+    expect(columns(db, 'onboarding')).toEqual(['id', 'description', 'status', 'started_by', 'started_at', 'finished_at']);
+    expect(columns(db, 'onboarding_rounds')).toEqual(['onboarding_id', 'round', 'questions', 'asked_at']);
+    db.prepare("INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at) VALUES ('o1', 1, '[]', 1)").run();
+    expect(() => db.prepare("INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at) VALUES ('o1', 1, '[]', 2)").run()).toThrow(/UNIQUE|PRIMARY/);
+    expect(migrateDown(db, 13)).toBe(13);
+    expect(tables(db)).toEqual(V13_TABLES);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM company_profile').get()).toMatchObject({ n: 1 });
+    expect(migrateUp(db)).toBe(14);
   });
 });
