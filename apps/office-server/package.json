@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/main.ts",
     "test": "vitest run",
-    "smoke": "OFFICE_SMOKE=1 vitest run test/smoke.real.test.ts test/model-switch.real.test.ts",
+    "smoke": "OFFICE_SMOKE=1 vitest run test/smoke.real.test.ts test/model-switch.real.test.ts test/craft.smoke.real.test.ts",
     "economy-report": "node scripts/economy-report.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

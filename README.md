@@ -84,6 +84,26 @@ saatleri ve hangi işin hangi modelde koşacağı.
   metriklerini canlı veriden yazar; `node apps/office-server/scripts/migration-rehearsal.ts --from <yedek>` göçleri bir
   kopyada prova eder. Kabul ve yayın: `docs/superpowers/notes/economy-acceptance.md`, `economy-release-runbook.md`.
 
+## Koordinatörlük yetisi
+
+Koordinatör işi nasıl yöneteceğini bilerek gelir; bu bilgi ürünün parçasıdır (`apps/office-server/src/company/craft/`),
+her şirkette aynıdır ve şirketin el kitabına yazılmaz. El kitabında yalnız o şirkete özgü kurallar durur.
+
+- **Çekirdek** (`craft/coordination.md`): koordinatörün ve ekip liderlerinin rehberine her açılışta eklenir — önce
+  yöntem, ölçülebilir bitti, yapan ≠ denetleyen, kanıt, inceleme turları, maliyet, geri alınamaz işler sahibinden geçer,
+  değerlendirme, dürüst rapor. Herkesin rehberine kanıt ve inceleme kuralları (`craft/working.md`) eklenir.
+- **İş türü yöntemleri** (`craft/methods/`): yazılım, içerik ve pazarlama, araştırma, müşteri ve satış, operasyon ve
+  satın alma, genel. Her turda yüklenmez; `methodRead` ile gerektiğinde okunur.
+- **Plan kartında yöntem:** her plan iş türünü, aşamaları (kim yapar, kim denetler) ve kalite kontrollerini taşır;
+  yöntemsiz plan kabul edilmez. Kartta **Nasıl yapılacak** bölümü görünür.
+- **İnceleme kapısı:** bir göreve `reviewer` verilirse teslim edilince kapanmaz, **İncelemede** sütununa geçer ve
+  inceleyiciye bir inceleme görevi açılır. İnceleyici `reviewDecide` ile onaylar ya da bulgularıyla (kritik / önemli /
+  küçük) geri gönderir; iş tur tur döner, üçüncü turda koordinatör karar verir. Kimse kendi işini onaylayamaz.
+- **Kanıtla teslim:** `taskFinish` bitti tanımının her maddesi için bir kanıt ister; arşivdeki `teslim.md` madde–kanıt
+  çiftlerini yazar.
+- **Değerlendirme:** bir planın son görevi kapanınca koordinatör `planRetro` ile değerlendirir; şirkete özgü dersi el
+  kitabına, her şirkete yarayacak yöntem önerisini `yöntem-önerisi` etiketli nota yazar.
+
 ## Öneriler ve ekip liderleri
 
 - Çalışanlar **ihtiyaç**, **fikir**, **itiraz** ("yanlış yoldayız") ve **satın alma** taleplerini `propose` ile açar.
