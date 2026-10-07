@@ -178,11 +178,12 @@ export class Budget {
     const people = this.#d.roster.list();
     const usage = this.#d.quota.usageAll?.(people.map((e) => e.id)) ?? {};
     const top = people
-      .map((e) => ({ name: e.name, usd: usage[e.id]?.today.costUsd ?? 0 }))
-      .filter((x) => x.usd > 0)
-      .sort((a, b) => b.usd - a.usd)
+      .map((e) => ({ name: e.name, usd: usage[e.id]?.today.costUsd ?? 0, turns: usage[e.id]?.today.turns ?? 0, side: usage[e.id]?.today.sideAnswers ?? 0 }))
+      .filter((x) => x.usd > 0 || x.turns > 0 || x.side > 0)
+      .sort((a, b) => b.usd - a.usd || b.turns - a.turns)
       .slice(0, 5);
-    if (top.length) lines.push(`Bugün en çok kullananlar: ${top.map((x) => `${x.name} ~${money(x.usd)}`).join(', ')}.`);
+    const used = (x: (typeof top)[number]) => `${x.name} ~${money(x.usd)}, ${x.turns} tur${x.side ? ` + ${x.side} yan cevap` : ''}`;
+    if (top.length) lines.push(`Bugün en çok kullananlar: ${top.map(used).join('; ')}.`);
     return lines.join('\n');
   }
 

@@ -38,20 +38,22 @@ export interface OfficeData {
 
 export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, pings: {}, unseenReports: {} };
 
-const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
+const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 0, sideAnswers: 0 };
 
-function addTo(t: UsageTotals, u: Usage, cost: number): UsageTotals {
+function addTo(t: UsageTotals, u: Usage, cost: number, side: boolean): UsageTotals {
   return {
     inputTokens: t.inputTokens + u.inputTokens,
     outputTokens: t.outputTokens + u.outputTokens,
     cacheReadTokens: t.cacheReadTokens + u.cacheReadTokens,
     cacheCreationTokens: t.cacheCreationTokens + u.cacheCreationTokens,
     costUsd: t.costUsd + cost,
+    turns: t.turns + (side ? 0 : 1),
+    sideAnswers: t.sideAnswers + (side ? 1 : 0),
   };
 }
 
-function addUsage(current: EmployeeUsage | undefined, u: Usage, cost: number): EmployeeUsage {
-  return { today: addTo(current?.today ?? ZERO, u, cost), total: addTo(current?.total ?? ZERO, u, cost) };
+function addUsage(current: EmployeeUsage | undefined, u: Usage, cost: number, side = false): EmployeeUsage {
+  return { today: addTo(current?.today ?? ZERO, u, cost, side), total: addTo(current?.total ?? ZERO, u, cost, side) };
 }
 
 /**
@@ -145,7 +147,7 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
       if (s.seq > d.usageSeq) usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd) };
       break;
     case 'side.answer':
-      if (s.seq > d.usageSeq) usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd) };
+      if (s.seq > d.usageSeq) usage = { ...usage, [id]: addUsage(usage[id], ev.usage, ev.costUsd, true) };
       break;
     default:
       break;

@@ -28,7 +28,7 @@ beforeEach(() =>
     budget: summary(),
     plans: { p1: plan },
     views: { ada: { employee: ada, events: [], openTools: {}, idleSince: null, eventsLoaded: true } },
-    usage: { ada: { today: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 1.25 }, total: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 4 } } },
+    usage: { ada: { today: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 1.25, turns: 7, sideAnswers: 0 }, total: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 4, turns: 20, sideAnswers: 1 } } },
   }),
 );
 afterEach(() => {
@@ -47,6 +47,7 @@ describe('BudgetTab', () => {
     expect(within(row).getByText('~$3.2')).toBeTruthy();
     expect(row.className).toContain('over');
     expect(screen.getByRole('row', { name: /İçerik/ }).textContent).toContain('$1.25');
+    expect(screen.getByRole('row', { name: /İçerik/ }).textContent).toContain('7 tur');
     await waitFor(() => expect(api.budget).toHaveBeenCalled());
   });
 });

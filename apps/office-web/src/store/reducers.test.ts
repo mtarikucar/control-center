@@ -44,6 +44,7 @@ describe('applyEvent', () => {
     expect(d.usage.e1?.today).toMatchObject({ inputTokens: 10, outputTokens: 20, costUsd: 0.01 });
     d = applyEvent(d, stored({ type: 'side.answer', text: 'a', ok: true, usage, costUsd: 0.002 }));
     expect(d.usage.e1?.total.costUsd).toBeCloseTo(0.012);
+    expect(d.usage.e1?.total).toMatchObject({ turns: 1, sideAnswers: 1 });
   });
 
   it('keeps the turn open while claude has queued turns', () => {
@@ -105,7 +106,7 @@ describe('usage watermark', () => {
     seq, employeeId: 'e1', ts: seq,
     event: { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: input, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 },
   });
-  const counted = { today: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 }, total: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 } };
+  const counted = { today: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 1, sideAnswers: 0 }, total: { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 1, sideAnswers: 0 } };
 
   it('review focus: counts usage once across a reconnect (snapshot, then replay of events it already covers)', () => {
     let d = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 10, usage: { e1: counted } }));

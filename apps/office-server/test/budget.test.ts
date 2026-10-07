@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_CONSTITUTION, OWNER, type QuotaState } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, OWNER, type QuotaState, type Usage } from '@cc/shared';
+import { Budget } from '../src/company/budget.ts';
+import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
+import { QuotaTracker } from '../src/quota.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
@@ -141,5 +144,23 @@ describe('Budget — status for the coordinator', () => {
     expect(text).toContain('sınır %75');
     expect(text).toContain('Bu ay harcanan: $0');
     expect(text).toContain('“Video”');
+  });
+
+  it('names who used most today with their turns, side answers apart (the quota tracker wired like main.ts)', () => {
+    const t = make();
+    const budget = new Budget({
+      constitution: new ConstitutionStore(t.db), spend: new SpendStore(t.db), tasks: t.tasks, plans: t.plans, roster: t.roster, events: t.events, notices: t.notices,
+      quota: new QuotaTracker(t.db, t.events), deskCount: 8,
+    });
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    t.company.hire(c.id, { name: 'Can', role: 'r' });
+    const usage: Usage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    const turn = (id: string, costUsd: number) =>
+      t.events.append(id, { type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd, numTurns: 4, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 });
+    for (let i = 0; i < 12; i += 1) turn(c.id, 0.08);
+    for (let i = 0; i < 3; i += 1) turn(ada.id, 0.05);
+    t.events.append(ada.id, { type: 'side.answer', text: 'a', ok: true, usage, costUsd: 0.01 });
+    expect(budget.status()).toContain('Bugün en çok kullananlar: Koordinatör ~$0.96, 12 tur; Ada ~$0.16, 3 tur + 1 yan cevap.');
   });
 });

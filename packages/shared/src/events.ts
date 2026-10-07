@@ -74,7 +74,8 @@ export interface StoredEvent {
   event: OfficeEvent;
 }
 
-export type UsageTotals = Usage & { costUsd: number };
+/** Claude use summed over finished turns and side answers; `turns` counts turns, `sideAnswers` answers given aside (askColleague). */
+export type UsageTotals = Usage & { costUsd: number; turns: number; sideAnswers: number };
 
 export interface EmployeeUsage {
   today: UsageTotals;

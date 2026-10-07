@@ -29,11 +29,13 @@ export function BudgetTab() {
   const shown = Object.values(plans)
     .filter((p) => p.status === 'approved' || p.status === 'done')
     .sort((x, y) => y.updatedAt - x.updatedAt);
-  const teams = new Map<string, number>();
+  const teams = new Map<string, { usd: number; turns: number }>();
   for (const v of Object.values(views)) {
     if (v.employee.lifecycle === 'archived') continue;
     const team = v.employee.team || 'Ekipsiz';
-    teams.set(team, (teams.get(team) ?? 0) + (usage[v.employee.id]?.today.costUsd ?? 0));
+    const today = usage[v.employee.id]?.today;
+    const sum = teams.get(team) ?? { usd: 0, turns: 0 };
+    teams.set(team, { usd: sum.usd + (today?.costUsd ?? 0), turns: sum.turns + (today?.turns ?? 0) });
   }
   const cap = b.constitution.monthlyUsdCap;
   return (
@@ -94,10 +96,11 @@ export function BudgetTab() {
         <h3>Ekipler (bugün, Claude kullanımı)</h3>
         <table>
           <tbody>
-            {[...teams.entries()].map(([team, usd]) => (
+            {[...teams.entries()].map(([team, sum]) => (
               <tr key={team} aria-label={team}>
                 <td>{team}</td>
-                <td>{money(usd)}</td>
+                <td>{money(sum.usd)}</td>
+                <td>{`${sum.turns} tur`}</td>
               </tr>
             ))}
           </tbody>

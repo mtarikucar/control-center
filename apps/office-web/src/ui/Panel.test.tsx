@@ -32,7 +32,7 @@ const events: StoredEvent[] = [
 beforeEach(() => {
   useOffice.setState({
     views: { e1: { employee, events, openTools: {}, idleSince: null, eventsLoaded: true } },
-    usage: { e1: { today: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.04 }, total: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.04 } } },
+    usage: { e1: { today: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.04, turns: 1, sideAnswers: 0 }, total: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.04, turns: 1, sideAnswers: 0 } } },
     selectedId: 'e1',
     terminalCommands: {},
     typingAt: {},
