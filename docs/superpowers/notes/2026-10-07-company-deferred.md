@@ -23,7 +23,8 @@ small. Grouped by area, roughly most useful first.
 ## Budget
 - "Kota payı devrede" repeats after every office restart (`#wasActive` starts false).
 - `wake` tool says "uyandı" for someone not asleep; `setModel` reply says "yeniden açılıyor" even when deferred.
-- Notices still cost an awake member a turn during the reserve.
+- Notices still cost an awake member a turn during the reserve. *(office-economy: closed for information notices, which
+  wait during the reserve; a decision notice still opens a turn, by design.)*
 - A sleeper whose hand-over is done is not let go (practically unreachable).
 - `chargeTurn` ignores blocked tasks.
 - "1,000" parses as 1 in the Anayasa form; no colour for `.badge.sleeping`.
@@ -36,7 +37,9 @@ small. Grouped by area, roughly most useful first.
 - Old proposal cards outside the snapshot window may show Onayla/Reddet (the server answers 409).
 - Lead rights key on `team`, routing on `reportsTo`; two leads per team are allowed.
 - Daily reminder edges: a fresh coordinator with an old `createdAt`, a stopped coordinator accumulating reminders, the
-  in-memory map across restarts.
+  in-memory map across restarts. *(office-economy: the reminder is no longer a notice but a line of the last digest hour's
+  digest, so nothing accumulates and `createdAt` is not used; the in-memory map remains: after a restart an unanswered
+  reminder can come once more.)*
 - `askColleague` has no per-day cap and can hold an MCP call up to 120 s.
 - `taskCreate`/`taskAssign`/`taskReprioritize` descriptions still say "(coordinator)"; the proposer is not told on a
   lead → coordinator escalation.

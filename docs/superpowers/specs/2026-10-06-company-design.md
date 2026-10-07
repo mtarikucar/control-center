@@ -110,8 +110,17 @@ plan, bağımlılıklar (başka görevler: "şu parça gelince başla"), durum (
 - Her çalışanın öncelik sıralı kuyruğu vardır (öncelik, sonra açılış zamanı; bağımlılığı bitmemiş görev atlanır).
 - Çalışan boşa çıkınca (`idle`) ofis sıradaki görevi **sistem mesajı** olarak verir (başlık, açıklama, bitti tanımı,
   bağlam: plan, isteyen, ilgili kararlar) ve görevi `sürüyor` yapar. Uyuyorsa önce uyandırır.
-- Çalışan `taskFinish` ile teslim eder; isteyen ve koordinatör bilgilenir (görev panosu, isteyene sistem mesajı
-  sıradaki boşluğunda). Takılırsa `taskUpdate(takıldı, neden)`; koordinatör görür.
+- Çalışan `taskFinish` ile teslim eder; isteyen ve koordinatör bilgilenir (görev panosu ve bir **bilgi notu**). Takılırsa
+  `taskUpdate(takıldı, neden)`; koordinatöre **karar notu** gider.
+- **Not türleri** (`notices.kind`, `notices.topic`; tablo: `company/notices.ts`). *Karar* (`decision`): alıcı şimdi karar
+  vermeli ya da bir şey yapmalı — boşa düşünce hemen bir tur açar, uyuyanı uyandırır (plan onayı/reddi, takılma, duran iş,
+  öneri açıldı/yükseltildi/karara bağlandı, sahibinin payı, harcama sınırı aşımı, işten çıkarma/devir, başlamış görevin
+  elinden alınması, koordinatörlük, geri alınan karar). *Bilgi* (`info`): yalnız kayıt (görev bitti, planın açık görevi
+  kalmadı, rol/lider değişikliği, başlamamış görevin başkasına verilmesi, sahibine giden satın alma, zincir/gün sınırı) —
+  tek başına tur açmaz, kimseyi uyandırmaz: o an giden her tura (karar notu, görev, hatırlatma) "## Ofisten özet" olarak
+  biner, ya da anayasadaki **özet saatlerinde** (`digestHours`, varsayılan 9 ve 17, yerel saat) tek turda gelir; bekleyen
+  bilgi yoksa özet atlanır; sahibinin payı devredeyken bekler. Özet metnini sunucu yazar (model yok): konuya göre gruplu,
+  başlıkta not sayısı ve kapsadığı süre, grup başına en çok 8 satır.
 - v1 kuralı sürer: işin ortasına yalnız sahibi girer; görevler ve paslar kuyruğa düşer.
 
 ### 4.4 Paslama ve öneriler
@@ -127,7 +136,8 @@ plan, bağımlılıklar (başka görevler: "şu parça gelince başla"), durum (
 - Büyük değişiklik: `planRevise` + "onay bekliyor"; sahibi onaylayana dek planın yeni kapsamına geçilmez (eski
   görevler sürebilir).
 - Rapor: plan bitince, büyük değişiklikte ve günde bir kısa özet (sahibi açıksa panelde, değilse koordinatörün
-  etiketinde bildirim).
+  etiketinde bildirim). Günlük rapor hatırlatması ayrı tur açmaz: günün son özet saatindeki özete bir satır olarak biner,
+  yalnız son rapordan o saate dek bir görev açıldı, başladı ya da bittiyse (gerekirse uyuyan koordinatörü uyandırır).
 
 ### 4.6 Sonsuz döngüye karşı (anayasa)
 
@@ -218,7 +228,8 @@ Yeni göç sürümleri (her biri `up` + `down`, `down` yalnız kendi eklediğini
 - `tasks.kind` (`work` | `handover`).
 - `decisions` (id, zaman, veren, başlık, seçilen, gerekçe, alternatifler, plan, `reverts`).
 - `playbook` (konu, sürüm, metin, yazan, gerekçe, zaman). `notes` (+ FTS5 dizini). `spend`. `proposals`.
-  `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, `chainDepth`, `tasksPerDay`, `openTasksPerPlan`, `idleSleepMinutes`); `tasks.cost_usd`, `tasks.tokens`.
+  `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, `chainDepth`, `tasksPerDay`, `openTasksPerPlan`, `idleSleepMinutes`, `digestHours`); `tasks.cost_usd`, `tasks.tokens`.
+- `notices.kind` (`decision` \| `info`), `notices.topic` (göç 6; eski notlar `decision`).
 - Olaylar (`OfficeEvent`): `plan.*`, `task.*`, `proposal.changed`, `decision.recorded`, `spend.recorded`, `brief.updated`,
   `lifecycle.changed` (`sleeping`), `role.changed` — v1 olay kaydına ve canlı akışa girer (ekran bunlardan beslenir).
 
