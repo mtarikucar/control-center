@@ -123,4 +123,13 @@ describe('ConstitutionTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kaydet' }));
     await waitFor(() => expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ autonomy: 'plans', activeGoals: 4, pulseHours: 0 })));
   });
+
+  it('edits the scheduler keys', async () => {
+    render(<ConstitutionTab />);
+    fireEvent.change(screen.getByLabelText('Varsayılan görev süresi (dk)'), { target: { value: '30' } });
+    fireEvent.change(screen.getByLabelText('Rutin aralığı en az (dk)'), { target: { value: '120' } });
+    fireEvent.change(screen.getByLabelText('En fazla rutin'), { target: { value: '5' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ defaultTaskMinutes: 30, minScheduleMinutes: 120, maxSchedules: 5 }));
+  });
 });

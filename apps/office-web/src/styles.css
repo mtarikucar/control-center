@@ -232,3 +232,94 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .goal-label { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .goal-card ul.goal-plans { list-style: none; margin-left: 0; }
 .goal-plans li { display: flex; gap: 6px; align-items: center; }
+
+/* The agenda (spec §6.2): who does what when. Running blue, parked grey, late red, routines green; estimates carry ~. */
+.agenda { display: flex; flex-direction: column; gap: 12px; font-size: 14px; min-width: 0; }
+.agenda-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.agenda-clock { margin: 0; overflow-wrap: anywhere; }
+.agenda-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+.segmented { display: inline-flex; }
+.segmented button { border-radius: 0; font-size: 13px; padding: 4px 10px; }
+.segmented button:first-child { border-radius: 8px 0 0 8px; }
+.segmented button:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+.segmented button[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.agenda-warn { margin: 0; padding: 8px 12px; border-radius: var(--radius); background: #fff7e0; font-size: 13px; }
+.agenda-person, .agenda-routines { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); min-width: 0; }
+.agenda-person-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.agenda-person h3, .agenda-routines h3, .agenda-section h3 { margin: 0; font-size: 14px; }
+.agenda-state { font-size: 12px; font-weight: 400; color: var(--warn); }
+.agenda-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.agenda-row, .routine-row {
+  display: grid; grid-template-columns: 7.5em minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 6px 8px;
+  border-radius: 8px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line);
+}
+.routine-row { grid-template-columns: minmax(0, 1fr) auto; }
+.agenda-row.kind-now { border-left-color: var(--info); }
+.agenda-row.kind-queued { border-left-color: color-mix(in srgb, var(--info) 40%, var(--line)); }
+.agenda-row.kind-parked, .routine-row.paused, .routine-row.stopped { border-left-color: var(--muted); }
+.agenda-row.kind-not_before { border-left-color: var(--accent); }
+.agenda-row.kind-review_wait { border-left-color: var(--warn); }
+.agenda-row.kind-scheduled, .routine-row.active { border-left-color: var(--ok); }
+.agenda-row.overdue { border-left-color: var(--bad); }
+.routine-row.stopped { opacity: 0.65; }
+.agenda-time { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agenda-time.low { font-style: italic; color: var(--muted); }
+.agenda-until { display: block; font-size: 12px; color: var(--muted); }
+.agenda-what { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.agenda-what strong { font-weight: 600; overflow-wrap: anywhere; }
+.agenda-badges { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.agenda-badges .badge { font-size: 11px; padding: 1px 7px; white-space: nowrap; }
+.badge.kind-now { color: var(--info); }
+.badge.kind-parked { color: var(--muted); }
+.badge.kind-not_before { color: var(--accent); }
+.badge.kind-review_wait { color: var(--warn); }
+.badge.kind-scheduled, .badge.schedule-active { color: var(--ok); }
+.badge.schedule-paused { color: var(--warn); }
+.badge.schedule-stopped { color: var(--muted); }
+.badge.overdue { color: var(--bad); font-weight: 600; }
+.badge.estimate { color: var(--muted); }
+.agenda-note { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.cron { font-size: 11px; color: var(--muted); }
+.agenda-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.agenda-actions button { padding: 3px 8px; font-size: 12px; white-space: nowrap; }
+.agenda-error { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.park-form { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px; border-radius: 8px; background: var(--surface-2); }
+.park-presets, .park-submit { display: flex; flex-wrap: wrap; gap: 4px; }
+.park-form button { padding: 3px 8px; font-size: 12px; }
+.park-form input { padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; min-width: 0; }
+.park-form input[aria-label='Gerekçe'] { flex: 1 1 12em; }
+.agenda-timeline { min-width: 0; }
+.agenda-timeline svg { display: block; width: 100%; height: auto; }
+.agenda-timeline text { font-size: 11px; fill: var(--text); }
+.agenda-timeless { margin: 4px 0 0; font-size: 12px; }
+.tl-bg { fill: var(--surface); }
+.tl-grid { stroke: var(--line); stroke-width: 1; }
+.tl-grid.major { stroke: var(--muted); stroke-opacity: 0.5; }
+.tl-axis text { fill: var(--muted); }
+.tl-now { stroke: var(--accent); stroke-width: 2; }
+.tl-empty { fill: var(--muted) !important; }
+.tl-bar rect { fill: var(--info); }
+.tl-bar.queued rect { fill: color-mix(in srgb, var(--info) 22%, var(--surface)); stroke: var(--info); stroke-width: 1; }
+.tl-bar.overdue rect { fill: var(--bad); }
+.tl-bar.overdue.queued rect { fill: color-mix(in srgb, var(--bad) 18%, var(--surface)); stroke: var(--bad); }
+.tl-bar.low rect { stroke-dasharray: 4 3; }
+.tl-bar.now text, .tl-bar.overdue:not(.queued) text { fill: #fff; }
+.agenda-timeline .tl-bar text.tl-outside { fill: var(--text); }
+.tl-mark path { fill: var(--muted); }
+.tl-mark.scheduled path { fill: var(--ok); }
+.tl-mark.not_before path { fill: var(--accent); }
+.tl-mark.overdue path { fill: var(--bad); }
+.agenda-section { display: flex; flex-direction: column; gap: 6px; max-height: 30%; min-height: 4em; overflow-y: auto; flex-shrink: 0; font-size: 13px; }
+.agenda-section .agenda-row { grid-template-columns: 6.5em minmax(0, 1fr); padding: 5px 6px; }
+.agenda-section .agenda-actions { grid-column: 2; justify-content: flex-start; }
+.badge.parked { color: var(--muted); align-self: flex-start; }
+.task-card.parked { border-style: dashed; opacity: 0.8; }
+@media (max-width: 600px) {
+  .agenda-row { grid-template-columns: minmax(0, 1fr); }
+  .agenda-row .agenda-actions, .routine-row .agenda-actions { justify-content: flex-start; }
+  .routine-row { grid-template-columns: minmax(0, 1fr); }
+  .agenda-section .agenda-row { grid-template-columns: minmax(0, 1fr); }
+  .agenda-section .agenda-actions { grid-column: auto; }
+  .agenda-time { white-space: normal; }
+  .agenda-until { display: inline; margin-left: 6px; }
+}

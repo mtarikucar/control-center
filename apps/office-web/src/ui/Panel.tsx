@@ -4,6 +4,7 @@ import { useOffice } from '../store/office.ts';
 import { EventItem } from './EventItem.tsx';
 import { formatCost, formatTokens, tokensOf } from './format.ts';
 import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
+import { AgendaSection } from './AgendaTab.tsx';
 import { EmployeeFileSection } from './EmployeeFile.tsx';
 import { FireControls } from './FireControls.tsx';
 
@@ -142,6 +143,7 @@ export function Panel({ id }: { id: string }) {
       )}
       {e.lastError && <p className="error">{e.lastError}</p>}
       <EmployeeFileSection id={id} />
+      <AgendaSection id={id} />
       <div
         className="stream"
         ref={stream}

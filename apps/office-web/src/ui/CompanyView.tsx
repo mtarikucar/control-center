@@ -3,7 +3,9 @@ import { TASK_DIFFICULTY_LABELS, type Employee, type Task, type TaskStatus } fro
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
+import { AgendaTab } from './AgendaTab.tsx';
 import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
+import { formatWhenTR } from './format.ts';
 import { GoalsTab } from './GoalsTab.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
@@ -11,6 +13,7 @@ import { ProposalCard } from './ProposalCard.tsx';
 const TABS = [
   ['org', 'Örgüt'],
   ['goals', 'Hedefler'],
+  ['agenda', 'Ajanda'],
   ['tasks', 'Görevler'],
   ['proposals', 'Öneriler'],
   ['decisions', 'Kararlar'],
@@ -22,6 +25,9 @@ const TABS = [
 type Tab = (typeof TABS)[number][0];
 
 const COLUMNS: TaskStatus[] = ['waiting', 'in_progress', 'review', 'blocked', 'done'];
+/** A parked task waits too: it shows in Bekliyor (after the ones that may start), with when it comes back. */
+const inColumn = (t: Task, status: TaskStatus) => t.status === status || (status === 'waiting' && t.status === 'parked');
+const parkedLast = (t: Task) => (t.status === 'parked' ? 1 : 0);
 
 function NoCoordinator({ people }: { people: Employee[] }) {
   const [pick, setPick] = useState('');
@@ -173,6 +179,8 @@ export function CompanyView() {
           </div>
         ) : tab === 'goals' ? (
           <GoalsTab />
+        ) : tab === 'agenda' ? (
+          <AgendaTab />
         ) : tab === 'tasks' ? (
           <div className="board-wrap">
             <div className="row board-filters">
@@ -203,8 +211,8 @@ export function CompanyView() {
             <div className="board">
               {COLUMNS.map((status) => {
                 const items = shown
-                  .filter((t) => t.status === status)
-                  .sort((a, b) => (status === 'done' ? (b.finishedAt ?? 0) - (a.finishedAt ?? 0) : a.priority - b.priority || a.createdAt - b.createdAt))
+                  .filter((t) => inColumn(t, status))
+                  .sort((a, b) => (status === 'done' ? (b.finishedAt ?? 0) - (a.finishedAt ?? 0) : parkedLast(a) - parkedLast(b) || a.priority - b.priority || a.createdAt - b.createdAt))
                   .slice(0, status === 'done' ? 20 : undefined);
                 return (
                   <section key={status} aria-label={TASK_STATUS_LABELS[status]} className="board-col">
@@ -216,6 +224,11 @@ export function CompanyView() {
                         <strong>{t.title}</strong>
                         {t.difficulty && <span className={`badge difficulty ${t.difficulty}`}>{TASK_DIFFICULTY_LABELS[t.difficulty]}</span>}
                         {t.kind === 'review' && <span className="badge review">İnceleme</span>}
+                        {t.status === 'parked' && (
+                          <span className="badge parked" title={t.parkedReason ?? undefined}>
+                            ertelendi · {t.notBefore ? formatWhenTR(t.notBefore, Date.now()) : '—'}
+                          </span>
+                        )}
                         <span className="muted">
                           {nameOf(t.assignee)} · P{t.priority}
                           {t.planId && plans[t.planId] ? ` · ${plans[t.planId]!.title}` : ''}

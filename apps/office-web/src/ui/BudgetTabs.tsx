@@ -128,6 +128,9 @@ const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; null
   { key: 'autonomy', label: 'Tam serbest', hint: 'Açıkken koordinatör hedef koyar ve planlarını sormadan başlatır; kapalıyken her plan senin onayını bekler.', toggle: true, choice: ['free', 'plans'] },
   { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
   { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre en çok bu sıklıkla hatırlatılır; 0 = hiç.' },
+  { key: 'defaultTaskMinutes', label: 'Varsayılan görev süresi (dk)', hint: 'Geçmişi olmayan bir işin ajandadaki tahmini süresi (5–480).' },
+  { key: 'minScheduleMinutes', label: 'Rutin aralığı en az (dk)', hint: 'Bir rutin bundan daha sık çalışamaz (1–1440).' },
+  { key: 'maxSchedules', label: 'En fazla rutin', hint: 'Aynı anda en çok bu kadar rutin (durdurulanlar sayılmaz); 0 = hiç.' },
 ];
 
 const shown = (v: Constitution[keyof Constitution]): string =>

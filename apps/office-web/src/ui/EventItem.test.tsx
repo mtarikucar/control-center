@@ -73,4 +73,19 @@ describe('EventItem', () => {
     rerender(<EventItem stored={{ seq: 3, employeeId: 'c', ts: 0, event: { type: 'company.paused', paused: true } }} />);
     expect(screen.getByText('Şirket duraklatıldı')).toBeTruthy();
   });
+
+  it('notes parks, returns and routines in the feed', () => {
+    const base = { id: 't1', kind: 'work' as const, planId: null, title: 'Pencere', description: '', done: [], requester: 'owner', assignee: 'ada', priority: 3, dependsOn: [], status: 'parked' as const, chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null, notBefore: 5, parkedReason: 'ölçüm' };
+    const { rerender } = render(<EventItem stored={{ seq: 1, employeeId: 'ada', ts: 0, event: { type: 'task.changed', change: 'parked', task: base } }} />);
+    expect(screen.getByText(/Görev ertelendi: Pencere/)).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 2, employeeId: 'ada', ts: 0, event: { type: 'task.changed', change: 'returned', task: { ...base, status: 'waiting' } } }} />);
+    expect(screen.getByText('Görev sıraya döndü: Pencere')).toBeTruthy();
+    const schedule = { id: 's1', title: 'Günlük', description: '', done: [], assignee: 'ada', reviewer: null, planId: null, priority: 3, difficulty: null, cron: '0 9 * * *', until: null, status: 'active' as const, nextRunAt: 5, lastRunAt: null, lastTaskId: null, skipCount: 0, failCount: 0, createdBy: 'c', createdAt: 1, note: null };
+    rerender(<EventItem stored={{ seq: 3, employeeId: 'c', ts: 0, event: { type: 'schedule.changed', change: 'fired', schedule } }} />);
+    expect(screen.getByText('Rutin çalıştı: Günlük')).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 4, employeeId: null, ts: 0, event: { type: 'clock.jumped', expectedAt: 1, actualAt: 2 } }} />);
+    expect(screen.getByText(/Saat atladı/)).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 5, employeeId: null, ts: 0, event: { type: 'clock.error', job: 'rutin s1', message: 'veritabanı kilitli' } }} />);
+    expect(screen.getByText('Saat: rutin s1 başarısız — veritabanı kilitli')).toBeTruthy();
+  });
 });

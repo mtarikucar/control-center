@@ -1,5 +1,5 @@
-import { reviewTally, type PlanChange, type StoredEvent } from '@cc/shared';
-import { formatClock, formatCost, formatTokens, summarizeToolInput } from './format.ts';
+import { reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
+import { formatClock, formatCost, formatTokens, formatWhenTR, summarizeToolInput } from './format.ts';
 import { lifecycleLabel } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
@@ -12,6 +12,16 @@ const PLAN_CHANGE: Record<PlanChange, string> = {
   done: 'açık görevi kalmadı',
   reopened: 'yeniden açıldı',
   kept: 'revizyon reddedildi, onaylı sürümüyle sürüyor',
+  stopped: 'durduruldu',
+};
+
+const SCHEDULE_CHANGE: Record<ScheduleChange, string> = {
+  created: 'açıldı',
+  updated: 'güncellendi',
+  fired: 'çalıştı',
+  skipped: 'atlandı',
+  paused: 'duraklatıldı',
+  resumed: 'sürdürüldü',
   stopped: 'durduruldu',
 };
 
@@ -119,6 +129,12 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
           </div>
         );
       }
+      if (e.change === 'parked') {
+        const back = e.task.notBefore ? formatWhenTR(e.task.notBefore, Date.now()) : null;
+        const why = [back, e.task.parkedReason].filter(Boolean).join(' — ');
+        return <div className="note">{`Görev ertelendi: ${e.task.title}${why ? ` (${why})` : ''}`}</div>;
+      }
+      if (e.change === 'returned') return <div className="note">Görev sıraya döndü: {e.task.title}</div>;
       if (e.change !== 'created' && e.change !== 'finished' && e.change !== 'started') return null;
       return (
         <div className="note">
@@ -126,6 +142,16 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
         </div>
       );
     }
+    case 'schedule.changed':
+      return (
+        <div className="note">
+          Rutin {SCHEDULE_CHANGE[e.change]}: {e.schedule.title}
+        </div>
+      );
+    case 'clock.jumped':
+      return <div className="note warn">{`Saat atladı: beklenen ${formatWhenTR(e.expectedAt, Date.now())}, gerçek ${formatWhenTR(e.actualAt, Date.now())}`}</div>;
+    case 'clock.error':
+      return <div className="note error">{`Saat: ${e.job} başarısız — ${e.message}`}</div>;
     case 'brief.updated':
       return <div className="note">Şirket özeti güncellendi</div>;
     case 'role.changed':

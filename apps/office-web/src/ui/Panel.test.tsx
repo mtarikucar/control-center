@@ -15,6 +15,7 @@ vi.mock('../net/api.ts', () => ({
     fire: vi.fn(async () => null),
     events: vi.fn(async () => []),
     office: vi.fn(async () => ({ employees: [], quota: null, usage: {}, lastSeq: 0 })),
+    agenda: vi.fn(async () => ({ generatedAt: 0, horizonMs: 0, clock: { nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null }, employees: [{ id: 'e1', name: 'Ada', state: null, entries: [{ kind: 'queued', taskId: 't', scheduleId: null, title: 'Sıradaki iş', at: 1, until: 2, basis: 'varsayılan', note: null, priority: 3, dueAt: null, overdue: false, lowConfidence: false }] }] })),
   },
 }));
 const { api } = await import('../net/api.ts');
@@ -137,6 +138,11 @@ describe('Panel', () => {
     render(<Panel id="e1" />);
     expect(screen.getByText('Oturum s1')).toBeTruthy();
     expect(screen.getByText(new RegExp(`açılış (\\S+ )?${hh}:40`))).toBeTruthy();
+  });
+
+  it('shows the employee’s own agenda', async () => {
+    render(<Panel id="e1" />);
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Ajanda' }).textContent).toContain('Sıradaki iş'));
   });
 
   it('says so when the employee does not exist, once the roster is in', () => {

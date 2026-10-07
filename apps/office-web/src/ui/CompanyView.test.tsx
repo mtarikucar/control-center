@@ -4,7 +4,12 @@ import type { Employee, Task } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { CompanyView } from './CompanyView.tsx';
 
-vi.mock('../net/api.ts', () => ({ api: { hireCoordinator: vi.fn(async () => ({ id: 'new' })), appointCoordinator: vi.fn(async () => ({})), events: vi.fn(async () => []) } }));
+vi.mock('../net/api.ts', () => ({
+  api: {
+    hireCoordinator: vi.fn(async () => ({ id: 'new' })), appointCoordinator: vi.fn(async () => ({})), events: vi.fn(async () => []),
+    agenda: vi.fn(async () => ({ generatedAt: 0, horizonMs: 0, clock: { nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null }, employees: [] })),
+  },
+}));
 const { api } = await import('../net/api.ts');
 
 const person = (id: string, over: Partial<Employee> = {}): Employee => ({
@@ -66,7 +71,7 @@ describe('CompanyView', () => {
   it('puts tasks in columns by state and filters them by person', () => {
     office(
       [person('koor', { kind: 'coordinator' }), person('ada', { name: 'Ada' }), person('can', { name: 'Can' })],
-      [task('Bekleyen iş'), task('Süren iş', { status: 'in_progress', difficulty: 'hard' }), task('Takılan iş', { status: 'blocked', note: 'şifre yok' }), task('Biten iş', { status: 'done', finishedAt: 5 }), task('Can işi', { assignee: 'can' })],
+      [task('Bekleyen iş'), task('Süren iş', { status: 'in_progress', difficulty: 'hard' }), task('Takılan iş', { status: 'blocked', note: 'şifre yok' }), task('Biten iş', { status: 'done', finishedAt: 5 }), task('Can işi', { assignee: 'can' }), task('Ertelenen', { status: 'parked', notBefore: Date.now() + 3_600_000, parkedReason: 'bekle' })],
     );
     render(<CompanyView />);
     fireEvent.click(screen.getByRole('tab', { name: 'Görevler' }));
@@ -75,9 +80,20 @@ describe('CompanyView', () => {
     expect(within(screen.getByRole('region', { name: 'Sürüyor' })).getByText('zor').className).toContain('difficulty');
     expect(within(screen.getByRole('region', { name: 'Takıldı' })).getByText(/şifre yok/)).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Bitti' })).getByText('Biten iş')).toBeTruthy();
+    // A parked task waits in Bekliyor with its return time (no column of its own).
+    expect(within(screen.getByRole('region', { name: 'Bekliyor' })).getByText(/ertelendi/)).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Ertelendi' })).toBeNull();
     fireEvent.change(screen.getByLabelText('Kişi'), { target: { value: 'can' } });
     expect(screen.queryByText('Bekleyen iş')).toBeNull();
     expect(screen.getByText('Can işi')).toBeTruthy();
+  });
+
+  it('has an Ajanda tab that shows the agenda', async () => {
+    office([person('koor', { kind: 'coordinator' })]);
+    render(<CompanyView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Ajanda' }));
+    await waitFor(() => expect(api.agenda).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Zaman çizelgesi' })).toBeTruthy();
   });
 
   it('opens an employee’s panel from the chart and closes', () => {

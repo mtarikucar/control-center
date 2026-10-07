@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatClock, formatCost, formatPercent, formatReset, formatTokens, summarizeToolInput, tokensOf } from './format.ts';
+import { formatClock, formatCost, formatPercent, formatReset, formatTokens, formatWhenTR, summarizeToolInput, tokensOf } from './format.ts';
 import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
 
 describe('format', () => {
@@ -22,6 +22,17 @@ describe('format', () => {
     expect(formatReset(new Date(2026, 9, 6, 15, 40).getTime(), now)).toBe('15:40');
     expect(formatReset(new Date(2026, 9, 8, 9, 5).getTime(), now)).toBe('Per 09:05');
     expect(formatClock(new Date(2026, 9, 6, 8, 7, 3).getTime())).toBe('08:07');
+  });
+
+  it('says when like the office does: today and tomorrow by name, the year only when it differs', () => {
+    const now = new Date(2026, 9, 7, 14, 10).getTime();
+    expect(formatWhenTR(new Date(2026, 9, 7, 14, 55).getTime(), now)).toBe('bugün 14:55');
+    expect(formatWhenTR(new Date(2026, 9, 8, 9, 0).getTime(), now)).toBe('yarın 09:00');
+    expect(formatWhenTR(new Date(2026, 9, 12, 14, 55).getTime(), now)).toBe('12 Eki 14:55');
+    expect(formatWhenTR(new Date(2027, 0, 3, 8, 30).getTime(), now)).toBe('3 Oca 2027 08:30');
+    expect(formatWhenTR(new Date(2026, 9, 6, 23, 5).getTime(), now)).toBe('6 Eki 23:05');
+    // Tomorrow across a month end.
+    expect(formatWhenTR(new Date(2026, 10, 1, 7, 0).getTime(), new Date(2026, 9, 31, 22, 0).getTime())).toBe('yarın 07:00');
   });
 
   it('summarizes tool input by tool', () => {

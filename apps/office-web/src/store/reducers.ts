@@ -1,4 +1,4 @@
-import type { BudgetSummary, Employee, EmployeeUsage, OfficeSnapshot, Plan, Proposal, QuotaState, StoredEvent, Task, Usage, UsageTotals, Goal } from '@cc/shared';
+import type { BudgetSummary, ClockStatus, Employee, EmployeeUsage, OfficeSnapshot, Plan, Proposal, QuotaState, Schedule, StoredEvent, Task, Usage, UsageTotals, Goal } from '@cc/shared';
 
 export const MAX_EVENTS = 500;
 
@@ -38,9 +38,15 @@ export interface OfficeData {
   pings: Record<string, { text: string; at: number }>;
   /** Reports the owner has not read yet, per employee (the coordinator's tag shows them). */
   unseenReports: Record<string, number>;
+  /** Routines: active, paused and the last stopped ones. */
+  schedules: Record<string, Schedule>;
+  /** The office clock as of the last snapshot (null: an office without one). */
+  clock: ClockStatus | null;
+  /** Bumped by everything that can change an agenda, so an open agenda fetches it again. */
+  agendaRev: number;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false, schedules: {}, clock: null, agendaRev: 0 };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 0, sideAnswers: 0 };
 
@@ -91,8 +97,15 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     plans: Object.fromEntries((s.plans ?? []).map((p) => [p.id, p])),
     goals: Object.fromEntries((s.goals ?? []).map((g) => [g.id, g])),
     paused: s.paused ?? false,
+    schedules: Object.fromEntries((s.schedules ?? []).map((x) => [x.id, x])),
+    clock: s.clock ?? null,
+    // From `current`: a log that started over must still move it, or an open agenda would keep the old office.
+    agendaRev: current.agendaRev + 1,
   };
 }
+
+/** Events after which an agenda may read differently (spec §6.1). */
+const AGENDA_EVENTS = new Set(['task.changed', 'plan.changed', 'schedule.changed', 'lifecycle.changed', 'budget.changed', 'company.paused', 'clock.jumped']);
 
 const freshView = (employee: Employee): EmployeeView => ({ employee, events: [], openTools: {}, idleSince: null, eventsLoaded: false });
 
@@ -117,6 +130,8 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'proposal.changed') next.proposals = { ...d.proposals, [ev.proposal.id]: ev.proposal };
   if (ev.type === 'goal.changed') next.goals = { ...d.goals, [ev.goal.id]: ev.goal };
   if (ev.type === 'company.paused') next.paused = ev.paused;
+  if (ev.type === 'schedule.changed') next.schedules = { ...d.schedules, [ev.schedule.id]: ev.schedule };
+  if (AGENDA_EVENTS.has(ev.type)) next.agendaRev = d.agendaRev + 1;
   if (ev.type === 'task.changed' && ev.change === 'created' && ev.task.requester !== 'owner' && ev.task.requester !== ev.task.assignee) {
     next.pings = { ...d.pings, [ev.task.assignee]: { text: `Yeni iş: ${ev.task.title}`, at: s.ts } };
   }

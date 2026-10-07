@@ -52,3 +52,18 @@ export function summarizeToolInput(name: string, input: unknown): string {
 export function formatWhen(ts: number): string {
   return new Date(ts).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
+
+const MONTHS = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+
+/** "bugün 14:55", "yarın 09:00", "12 Eki 14:55", "3 Oca 2027 08:30": the office's own wording (server `formatWhen`). */
+export function formatWhenTR(ms: number, now: number): string {
+  const d = new Date(ms);
+  const n = new Date(now);
+  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const time = formatClock(ms);
+  if (sameDay(d, n)) return `bugün ${time}`;
+  if (sameDay(d, new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1))) return `yarın ${time}`;
+  const year = d.getFullYear() === n.getFullYear() ? '' : ` ${d.getFullYear()}`;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${year} ${time}`;
+}
+

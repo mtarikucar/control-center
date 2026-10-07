@@ -293,3 +293,29 @@ describe('proposals, passes and reports', () => {
     expect(d.paused).toBe(false);
   });
 });
+
+describe('the scheduler', () => {
+  it('keeps routines and the clock from the snapshot and events, and bumps agendaRev on what changes the agenda', () => {
+    const schedule = { id: 's1', title: 'Günlük', description: '', done: [], assignee: 'e1', reviewer: null, planId: null, priority: 3, difficulty: null, cron: '0 9 * * *', until: null, status: 'active' as const, nextRunAt: 5, lastRunAt: null, lastTaskId: null, skipCount: 0, failCount: 0, createdBy: 'c', createdAt: 1, note: null };
+    let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 1, schedules: [schedule], clock: { nextDueAt: 5, nextDueLabel: 'Günlük · Ada (rutin)', lastRunAt: 1, lastJumpAt: null } }, 'live');
+    expect(d.schedules.s1?.title).toBe('Günlük');
+    expect(d.clock?.nextDueLabel).toBe('Günlük · Ada (rutin)');
+    const rev = d.agendaRev;
+    d = applyEvent(d, stored({ type: 'schedule.changed', change: 'paused', schedule: { ...schedule, status: 'paused' } }, 'c', 10));
+    expect(d.schedules.s1?.status).toBe('paused');
+    expect(d.agendaRev).toBe(rev + 1);
+    d = applyEvent(d, stored({ type: 'company.paused', paused: true }, 'c', 11));
+    expect(d.agendaRev).toBe(rev + 2);
+    d = applyEvent(d, stored({ type: 'note.written', id: 1, title: 'n', tags: [] }, 'c', 12));
+    expect(d.agendaRev).toBe(rev + 2);
+  });
+
+  it('a snapshot always moves agendaRev, even one that starts the office over', () => {
+    const first = applySnapshot(EMPTY_DATA, snapshot({ lastSeq: 900 }));
+    expect(first.agendaRev).toBe(1);
+    const fresh = applySnapshot(first, snapshot({ lastSeq: 3 }), 'live');
+    expect(fresh.agendaRev).toBe(2);
+    expect(applySnapshot(EMPTY_DATA, snapshot()).schedules).toEqual({});
+    expect(applySnapshot(EMPTY_DATA, snapshot()).clock).toBeNull();
+  });
+});

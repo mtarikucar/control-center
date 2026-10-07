@@ -1,4 +1,4 @@
-import type { BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Spend, StoredEvent, Task } from '@cc/shared';
+import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -64,4 +64,11 @@ export const api = {
   openTerminal: (id: string) => request<{ command: string; employee: Employee }>('POST', `${employee(id)}/terminal`),
   closeTerminal: (id: string) => request<Employee>('DELETE', `${employee(id)}/terminal`),
   events: (id: string, tail = 500) => request<StoredEvent[]>('GET', `${employee(id)}/events?tail=${tail}`),
+  agenda: () => request<AgendaReport>('GET', '/api/agenda'),
+  /** `until`: relative (`+6h`, `+1d`) or local `YYYY-MM-DDTHH:MM`. */
+  parkTask: (id: string, until: string, reason: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/park`, { until, reason }),
+  /** "Şimdi başlasın": no park or start time any more, priority 1. */
+  releaseTask: (id: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/release`),
+  prioritizeTask: (id: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/prioritize`, { priority: 1 }),
+  scheduleAction: (id: string, action: 'pause' | 'resume' | 'stop') => request<Schedule>('POST', `/api/schedules/${encodeURIComponent(id)}/${action}`),
 };
