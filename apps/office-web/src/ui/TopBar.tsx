@@ -1,3 +1,4 @@
+import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { QuotaHud } from './QuotaHud.tsx';
 
@@ -8,6 +9,8 @@ export function TopBar() {
   const setHireOpen = useOffice((s) => s.setHireOpen);
   const setCompanyOpen = useOffice((s) => s.setCompanyOpen);
   const reserve = useOffice((s) => s.budget?.reserve.active ?? false);
+  const paused = useOffice((s) => s.paused);
+  const company = useOffice((s) => s.budget !== null);
   const waiting = useOffice(
     (s) => Object.values(s.plans).filter((p) => p.status === 'draft').length + Object.values(s.proposals).filter((p) => p.status === 'owner').length,
   );
@@ -23,6 +26,12 @@ export function TopBar() {
         <span className="badge reserve" title="Kota kullanımı sahibinin payına dayandı: ofis yalnız acil işleri başlatıyor.">
           Sahibinin payı korunuyor
         </span>
+      )}
+      {company && paused && <span className="badge paused">Şirket duraklatıldı</span>}
+      {company && (
+        <button type="button" onClick={() => void (paused ? api.resumeCompany() : api.pauseCompany()).catch(() => undefined)}>
+          {paused ? 'Sürdür' : 'Şirketi duraklat'}
+        </button>
       )}
       <button type="button" onClick={() => setCompanyOpen(true)}>
         Şirket

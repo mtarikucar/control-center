@@ -4,11 +4,13 @@ import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
 import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
+import { GoalsTab } from './GoalsTab.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 
 const TABS = [
   ['org', 'Örgüt'],
+  ['goals', 'Hedefler'],
   ['tasks', 'Görevler'],
   ['proposals', 'Öneriler'],
   ['decisions', 'Kararlar'],
@@ -169,6 +171,8 @@ export function CompanyView() {
               ))}
             </div>
           </div>
+        ) : tab === 'goals' ? (
+          <GoalsTab />
         ) : tab === 'tasks' ? (
           <div className="board-wrap">
             <div className="row board-filters">

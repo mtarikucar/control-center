@@ -4,8 +4,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
+import { Pulse } from '../src/company/pulse.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
-import { companyFor, METHOD } from './company-helpers.ts';
+import { companyFor, METHOD, PLANS_ONLY } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, tempDir, until, waitFor } from './helpers.ts';
 
@@ -20,7 +21,7 @@ function make() {
   const tasks = new TaskStore(s.db);
   const plans = new PlanStore(s.db);
   const notices = new NoticeStore(s.db);
-  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
+  const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
   const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks, notices, plans, company, engine: f.engine });
   const stop = dispatcher.start();
   cleanups.push(stop, f.cleanup, s.cleanup);
@@ -627,5 +628,42 @@ describe('Dispatcher — reviews', () => {
     t.company.finish(ada.id, task.id, { summary: 'yazdım', outputs: [], learned: '' });
     await until(() => systemMessages(t.events.list({ limit: 5000 }), can.id).some((m) => m.startsWith(NUDGE_PREFIX)), 8000);
     expect(systemMessages(t.events.list({ limit: 5000 }), can.id).find((m) => m.startsWith(NUDGE_PREFIX))).toContain('reviewDecide');
+  });
+});
+
+describe('Dispatcher — a paused company', () => {
+  it('hands out nothing while paused — no task, no notice, no wake — and delivers what waited, once, on resume', async () => {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget });
+    const stop = dispatcher.start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    const ada = c.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => f.engine.ready(ada.id), 8000);
+    c.company.pause();
+    const task = c.company.createTask(OWNER, { assignee: ada.id, title: 'Duraklatılmışken' });
+    await sleep(600);
+    expect(c.tasks.get(task.id).status).toBe('waiting');
+    expect(systemMessages(s.events.list({ limit: 5000 }), ada.id)).toHaveLength(0);
+    c.company.resume();
+    await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('Duraklatılmışken'));
+    await sleep(300);
+    // One delivery (a later reminder about the open task may follow; it is not a second delivery).
+    expect(systemMessages(s.events.list({ limit: 5000 }), ada.id).filter((m) => m.startsWith('## Görev: Duraklatılmışken'))).toHaveLength(1);
+  });
+
+  it('runs the pulse on its tick: a goal with no plan reaches the coordinator as a decision', async () => {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const coordinator = c.company.hireCoordinator('sonnet');
+    c.company.goalSet(coordinator.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    const pulse = new Pulse({ company: c.company, goals: c.goals, state: c.state, plans: c.plans, tasks: c.tasks, notices: c.notices, budget: c.budget });
+    const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget, pulse, tickMs: 200 });
+    const stop = dispatcher.start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    const msg = await waitFor(s.events, (e) => e.employeeId === coordinator.id && e.event.type === 'message.user' && e.event.text.includes('Lansman'));
+    expect((msg.event as { text: string }).text).toContain('goalSet');
   });
 });

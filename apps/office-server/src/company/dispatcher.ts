@@ -29,6 +29,8 @@ export interface DispatcherDeps {
   now?: () => number;
   /** How often the reserve is re-checked and everyone swept again (the quota resets on its own clock). */
   tickMs?: number;
+  /** The project's pulse (spec §6.3), run on each tick. */
+  pulse?: { check(): unknown };
 }
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
@@ -74,19 +76,30 @@ export class Dispatcher {
         if (ev.to === 'idle') this.#idleSince.set(stored.employeeId, this.#now());
         else this.#idleSince.delete(stored.employeeId);
         if (ev.to === 'idle') this.#schedule(stored.employeeId);
-      } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed'].includes(ev.type)) this.#scheduleSweep();
+      } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed', 'company.paused'].includes(ev.type)) this.#scheduleSweep();
     });
     const timer = setInterval(() => {
       this.#d.budget?.checkReserve();
       if (!this.#rules().digestEnabled) this.#remindReport();
+      this.#pulse();
       this.#scheduleSweep();
     }, this.#d.tickMs ?? 60_000);
     timer.unref();
+    this.#pulse();
     this.#scheduleSweep();
     return () => {
       off();
       clearInterval(timer);
     };
+  }
+
+  /** The office looks at the project; a failing pulse never stops the office (the next tick looks again). */
+  #pulse(): void {
+    try {
+      this.#d.pulse?.check();
+    } catch {
+      // A pulse that fails never stops the office; the next tick looks again.
+    }
   }
 
   sweep(): void {
@@ -114,6 +127,8 @@ export class Dispatcher {
   #consider(id: string): void {
     const employee = this.#person(id);
     if (!employee) return;
+    // The owner paused the company: nothing is handed out, no one is woken (spec §6.4); the owner's messages go straight to the engine.
+    if (this.#d.company.paused()) return;
     if (employee.lifecycle === 'sleeping') {
       if (this.#hasWorkFor(employee)) this.#wake(id);
       return;

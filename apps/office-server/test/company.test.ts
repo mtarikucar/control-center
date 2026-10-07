@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { METHOD } from './company-helpers.ts';
+import { METHOD, PLANS_ONLY } from './company-helpers.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
@@ -22,7 +22,7 @@ function make(characters: string[] = ['coder', 'designer']) {
   const plans = new PlanStore(s.db);
   const notices = new NoticeStore(s.db);
   const reloaded: string[] = [];
-  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, reload: (id) => void reloaded.push(id) });
+  const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, reload: (id) => void reloaded.push(id) });
   return { ...s, engine: f.engine, tasks, plans, notices, company, reloaded };
 }
 
@@ -304,7 +304,7 @@ describe('Company — hand-ins feed the memory', () => {
     const notices = new NoticeStore(s.db);
     const notes = new NoteStore(s.db);
     const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes, employeeNotes: new EmployeeNoteStore(s.db) });
-    const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'], memory });
+    const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'], memory });
     const ada = company.hire(OWNER, { name: 'Ada', role: 'r' });
     writeFileSync(join(deskDir(s.dataDir, ada.slug), 'not.md'), 'içerik');
     const task = company.createTask(OWNER, { assignee: ada.id, title: 'Not yaz' });

@@ -280,4 +280,33 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE tasks DROP COLUMN reviewer;
       ALTER TABLE plans DROP COLUMN method;`,
   },
+  {
+    version: 9,
+    name: 'coordinator as project manager: goals, company state, a plan’s goal',
+    up: `
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        why TEXT NOT NULL,
+        done TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        closed_at INTEGER,
+        note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS goals_status ON goals (status, created_at);
+      CREATE TABLE IF NOT EXISTS company_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      ALTER TABLE plans ADD COLUMN goal_id TEXT;
+      ALTER TABLE plans ADD COLUMN approved_by TEXT;`,
+    down: `
+      ALTER TABLE plans DROP COLUMN approved_by;
+      ALTER TABLE plans DROP COLUMN goal_id;
+      DROP TABLE IF EXISTS company_state;
+      DROP INDEX IF EXISTS goals_status;
+      DROP TABLE IF EXISTS goals;`,
+  },
 ];

@@ -7,7 +7,7 @@ import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
   constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17],
     coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
-    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false },
+    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 3, pulseHours: 6 },
   reserve: { active: true, limitPct: 75, fiveHourPct: 82, sevenDayPct: 40 },
   month: { key: '2026-10', usd: 31.5 },
   plans: { p1: { spentUsd: 25, claudeUsd: 3.2 } },
@@ -111,5 +111,16 @@ describe('ConstitutionTab', () => {
     fireEvent.change(screen.getByLabelText('Sahibinin kota payı (%)'), { target: { value: '40' } });
     act(() => useOffice.setState({ budget: summary({ month: { key: '2026-10', usd: 99 } }) }));
     expect((screen.getByLabelText('Sahibinin kota payı (%)') as HTMLInputElement).value).toBe('40');
+  });
+
+  it('edits autonomy, the active-goal limit and the pulse interval', async () => {
+    render(<ConstitutionTab />);
+    const free = screen.getByLabelText('Tam serbest') as HTMLInputElement;
+    expect(free.checked).toBe(true);
+    fireEvent.click(free);
+    fireEvent.change(screen.getByLabelText('En fazla aktif hedef'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Nabız aralığı (saat)'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Kaydet' }));
+    await waitFor(() => expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ autonomy: 'plans', activeGoals: 4, pulseHours: 0 })));
   });
 });

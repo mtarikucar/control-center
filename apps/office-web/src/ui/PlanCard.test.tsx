@@ -4,7 +4,7 @@ import type { Plan } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { PlanCard } from './PlanCard.tsx';
 
-vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})) } }));
+vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})) } }));
 const { api } = await import('../net/api.ts');
 
 const plan = (over: Partial<Plan> = {}): Plan => ({
@@ -46,7 +46,7 @@ describe('PlanCard', () => {
     useOffice.setState({
       plans: { p1: plan({ status: 'approved' }) },
       budget: {
-        constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false },
+        constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 3, pulseHours: 6 },
         reserve: { active: false, limitPct: 75, fiveHourPct: null, sevenDayPct: null }, month: { key: '2026-10', usd: 0 }, plans: { p1: { spentUsd: 30, claudeUsd: 1.5 } },
       },
     });
@@ -68,5 +68,14 @@ describe('PlanCard', () => {
   it('a plan without a method shows no method section', () => {
     render(<PlanCard plan={plan({ method: null })} />);
     expect(screen.queryByRole('region', { name: 'Nasıl yapılacak' })).toBeNull();
+  });
+
+  it('marks a plan the coordinator started and lets the owner stop a running plan', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    useOffice.setState({ plans: { p1: plan({ status: 'approved', approvedBy: 'coordinator' }) } });
+    render(<PlanCard plan={plan({ status: 'approved', approvedBy: 'coordinator' })} />);
+    expect(screen.getByText('Koordinatör başlattı')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Durdur' }));
+    await waitFor(() => expect(api.stopPlan).toHaveBeenCalledWith('p1'));
   });
 });

@@ -1,4 +1,4 @@
-import type { BudgetSummary, Constitution, Decision, Employee, EmployeeFile, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Spend, StoredEvent, Task } from '@cc/shared';
+import type { BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -37,6 +37,10 @@ export const api = {
   hire: (input: HireInput) => request<Employee>('POST', '/api/employees', input),
   approvePlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/approve`),
   declinePlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/decline`),
+  stopPlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/stop`),
+  stopGoal: (id: string) => request<Goal>('POST', `/api/goals/${encodeURIComponent(id)}/stop`),
+  pauseCompany: () => request<{ paused: boolean }>('POST', '/api/company/pause'),
+  resumeCompany: () => request<{ paused: boolean }>('POST', '/api/company/resume'),
   appointCoordinator: (employeeId: string) => request<Employee>('POST', '/api/company/coordinator', { employeeId }),
   hireCoordinator: () => request<Employee>('POST', '/api/company/coordinator/hire'),
   /** Without `now` the company first asks for a hand-over and answers with that task; `now` fires at once (null). */

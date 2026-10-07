@@ -109,7 +109,28 @@ export interface PlanMethod {
   checks: string[];
 }
 
-export const PLAN_STATUSES = ['draft', 'approved', 'done', 'declined'] as const;
+/** How free the coordinator is (spec §6.2): 'free' starts its plans at once; 'plans' waits for the owner on each. */
+export const AUTONOMY_LEVELS = ['free', 'plans'] as const;
+export type Autonomy = (typeof AUTONOMY_LEVELS)[number];
+
+export const GOAL_STATUSES = ['active', 'done', 'dropped'] as const;
+export type GoalStatus = (typeof GOAL_STATUSES)[number];
+/** A lasting aim above the plans (spec §6.1): why it matters to the mission and when it counts as reached. */
+export interface Goal {
+  id: string;
+  title: string;
+  why: string;
+  done: string[];
+  status: GoalStatus;
+  createdBy: string;
+  createdAt: number;
+  closedAt: number | null;
+  note: string | null;
+}
+/** `set`: opened; `updated`: changed or reopened; `closed`: done or dropped by the coordinator; `stopped`: by the owner. */
+export type GoalChange = 'set' | 'updated' | 'closed' | 'stopped';
+
+export const PLAN_STATUSES = ['draft', 'approved', 'done', 'declined', 'stopped'] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];
 
 export interface Plan {
@@ -128,6 +149,10 @@ export interface Plan {
   risks: string;
   /** How the work is done (spec §5.1); null for plans from before methods. */
   method?: PlanMethod | null;
+  /** The goal it serves (spec §6.1), if any. */
+  goalId?: string | null;
+  /** Who started it: the owner's approval, or the coordinator itself under full autonomy (spec §6.2). */
+  approvedBy?: 'owner' | 'coordinator' | null;
   status: PlanStatus;
   version: number;
   proposedBy: string;
@@ -138,5 +163,5 @@ export interface Plan {
 
 /** `in_review`: handed in, waiting for its reviewer. `reviewed`: a review task was decided. */
 export type TaskChange = 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized' | 'in_review' | 'reviewed';
-/** `reopened`: a done plan got a new task. `kept`: the owner declined a revision; the plan goes on as approved. */
-export type PlanChange = 'proposed' | 'revised' | 'approved' | 'declined' | 'done' | 'reopened' | 'kept';
+/** `reopened`: a done plan got a new task. `kept`: the owner declined a revision; the plan goes on as approved. `stopped`: by the owner. */
+export type PlanChange = 'proposed' | 'revised' | 'approved' | 'declined' | 'done' | 'reopened' | 'kept' | 'stopped';

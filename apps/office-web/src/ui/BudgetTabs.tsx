@@ -110,7 +110,7 @@ export function BudgetTab() {
   );
 }
 
-const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean; models?: readonly string[]; toggle?: boolean }> = [
+const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean; models?: readonly string[]; toggle?: boolean; choice?: readonly [string, string] }> = [
   { key: 'maxEmployees', label: 'Çalışan sınırı', hint: 'Koordinatör dahil; masa sayısını aşamaz.' },
   { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
   { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
@@ -125,6 +125,9 @@ const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; null
   { key: 'digestEnabled', label: 'Özet açık', hint: 'Kapalıyken bilgi notları da karar notu gibi hemen gelir.', toggle: true },
   { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır (koordinatör de).', toggle: true },
   { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },
+  { key: 'autonomy', label: 'Tam serbest', hint: 'Açıkken koordinatör hedef koyar ve planlarını sormadan başlatır; kapalıyken her plan senin onayını bekler.', toggle: true, choice: ['free', 'plans'] },
+  { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
+  { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre en çok bu sıklıkla hatırlatılır; 0 = hiç.' },
 ];
 
 const shown = (v: Constitution[keyof Constitution]): string =>
@@ -140,7 +143,8 @@ export function ConstitutionTab() {
   // While the owner is typing, a budget update (someone's spending) must not reset the form.
   const dirty = useRef(false);
   useEffect(() => {
-    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, shown(current[f.key])])));
+    // A choice toggle is on when the setting holds its first value (autonomy: 'free').
+    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, f.choice ? String(current[f.key] === f.choice[0]) : shown(current[f.key])])));
   }, [current]);
   if (!current) return <p className="muted">Yükleniyor…</p>;
   const save = async (e: FormEvent) => {
@@ -151,7 +155,8 @@ export function ConstitutionTab() {
     const patch: Record<string, unknown> = {};
     for (const f of FIELDS) {
       if (f.toggle) {
-        patch[f.key] = draft[f.key] === 'true';
+        const on = draft[f.key] === 'true';
+        patch[f.key] = f.choice ? (on ? f.choice[0] : f.choice[1]) : on;
         continue;
       }
       if (f.models) {

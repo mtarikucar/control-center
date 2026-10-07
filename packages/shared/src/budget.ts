@@ -1,4 +1,4 @@
-import type { TaskDifficulty } from './company.ts';
+import type { Autonomy, TaskDifficulty } from './company.ts';
 import type { ModelAlias } from './employee.ts';
 
 /** The owner's fixed limits (spec §4.6, §6). */
@@ -37,6 +37,12 @@ export interface Constitution {
   digestEnabled: boolean;
   modelPolicyEnabled: boolean;
   difficultyModelsEnabled: boolean;
+  /** 'free': the coordinator sets goals and starts its plans without waiting (spec §6.2); 'plans': each plan waits for the owner. */
+  autonomy: Autonomy;
+  /** Goals active at once, at most (spec §6.1). */
+  activeGoals: number;
+  /** With neither goals nor work, the coordinator is told at most this often, hours; 0 = never (spec §6.3). */
+  pulseHours: number;
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
@@ -54,6 +60,9 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   digestEnabled: false,
   modelPolicyEnabled: false,
   difficultyModelsEnabled: false,
+  autonomy: 'free',
+  activeGoals: 3,
+  pulseHours: 6,
 };
 
 /** Money an employee spent on an outside service (the office cannot see it; they record it). */

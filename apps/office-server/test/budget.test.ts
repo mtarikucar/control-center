@@ -12,6 +12,9 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
+/** companyFor keeps the owner's approval flow (autonomy 'plans'); otherwise the defaults. */
+const HELPER_DEFAULTS = { ...DEFAULT_CONSTITUTION, autonomy: 'plans' as const };
+
 function make() {
   const s = setup();
   const f = fakeEngine(s);
@@ -29,7 +32,7 @@ const quota = (five: number, seven = 0.1, resetsIn = 3_600_000): QuotaState => (
 describe('Budget — constitution', () => {
   it('starts from the defaults and takes the owner’s changes', () => {
     const t = make();
-    expect(t.budget.constitution()).toEqual(DEFAULT_CONSTITUTION);
+    expect(t.budget.constitution()).toEqual(HELPER_DEFAULTS);
     expect(t.budget.setConstitution({ ownerReservePct: 40, monthlyUsdCap: 100, maxEmployees: 5 })).toMatchObject({ ownerReservePct: 40, monthlyUsdCap: 100, maxEmployees: 5 });
     expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'budget.changed')).toBe(true);
     expect(t.budget.setConstitution({ digestHours: [18, 8, 18] }).digestHours).toEqual([8, 18]);
@@ -66,7 +69,7 @@ describe('Budget — constitution', () => {
     ]) {
       expect(() => t.budget.setConstitution(bad), JSON.stringify(bad)).toThrow(/Anayasa|anayasa/);
     }
-    expect(t.budget.constitution()).toEqual(DEFAULT_CONSTITUTION);
+    expect(t.budget.constitution()).toEqual(HELPER_DEFAULTS);
   });
 
   it('review focus: names from the object prototype are unknown settings too, refused in Turkish', () => {
@@ -74,6 +77,15 @@ describe('Budget — constitution', () => {
     for (const key of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
       expect(() => t.budget.setConstitution(JSON.parse(`{"${key}": 1}`)), key).toThrow(/Bilinmeyen anayasa maddesi/);
     }
+  });
+
+  it('the PM keys: autonomy free by default, the active-goal limit and the pulse interval, validated in Turkish', () => {
+    const t = make();
+    expect(DEFAULT_CONSTITUTION).toMatchObject({ autonomy: 'free', activeGoals: 3, pulseHours: 6 });
+    expect(t.budget.setConstitution({ autonomy: 'plans', activeGoals: 5, pulseHours: 0 })).toMatchObject({ autonomy: 'plans', activeGoals: 5, pulseHours: 0 });
+    expect(() => t.budget.setConstitution({ autonomy: 'yarım' })).toThrow(/Serbestlik/);
+    expect(() => t.budget.setConstitution({ activeGoals: 0 })).toThrow(/aktif hedef/);
+    expect(() => t.budget.setConstitution({ pulseHours: 200 })).toThrow(/Nabız/);
   });
 });
 

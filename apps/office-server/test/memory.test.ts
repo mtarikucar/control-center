@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { METHOD } from './company-helpers.ts';
+import { METHOD, PLANS_ONLY } from './company-helpers.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
@@ -26,7 +26,7 @@ function make() {
     roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir,
     decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes: new NoteStore(s.db), employeeNotes: new EmployeeNoteStore(s.db),
   });
-  const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
+  const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
   const c = company.hireCoordinator();
   const ada = company.hire(c.id, { name: 'Ada', role: 'r' });
   return { ...s, tasks, plans, notices, memory, company, c, ada };

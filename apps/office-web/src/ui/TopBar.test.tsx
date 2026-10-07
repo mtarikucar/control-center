@@ -1,7 +1,11 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useOffice } from '../store/office.ts';
 import { TopBar } from './TopBar.tsx';
+
+vi.mock('../net/api.ts', () => ({ api: { pauseCompany: vi.fn(async () => ({ paused: true })), resumeCompany: vi.fn(async () => ({ paused: false })) } }));
+const { api } = await import('../net/api.ts');
+const RESERVE_OFF = { reserve: { active: false, limitPct: 75, fiveHourPct: null, sevenDayPct: null } } as never;
 
 afterEach(cleanup);
 
@@ -13,5 +17,17 @@ describe('TopBar — what waits for the owner', () => {
     });
     render(<TopBar />);
     expect(screen.getByRole('button', { name: /Şirket/ }).textContent).toContain('2');
+  });
+
+  it('pauses and resumes the company, and says when it is paused', async () => {
+    useOffice.setState({ paused: false, budget: RESERVE_OFF });
+    const { rerender } = render(<TopBar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Şirketi duraklat' }));
+    await waitFor(() => expect(api.pauseCompany).toHaveBeenCalled());
+    useOffice.setState({ paused: true });
+    rerender(<TopBar />);
+    expect(screen.getByText('Şirket duraklatıldı')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sürdür' }));
+    await waitFor(() => expect(api.resumeCompany).toHaveBeenCalled());
   });
 });

@@ -233,7 +233,7 @@ describe('company memory', () => {
 
 describe('budget', () => {
   const summary = (pct: number): BudgetSummary => ({
-    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false },
+    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 3, pulseHours: 6 },
     reserve: { active: false, limitPct: 100 - pct, fiveHourPct: null, sevenDayPct: null },
     month: { key: '2026-10', usd: 0 },
     plans: {},
@@ -280,5 +280,16 @@ describe('proposals, passes and reports', () => {
     d = applyEvent(d, stored({ type: 'company.report', text: 'bir' }));
     d = applyEvent(d, stored({ type: 'company.report', text: 'iki' }));
     expect(d.unseenReports.e1).toBe(2);
+  });
+
+  it('keeps goals and the pause from the snapshot and from events', () => {
+    const goal = { id: 'g1', title: 'Lansman', why: 'w', done: ['d'], status: 'active' as const, createdBy: 'c', createdAt: 1, closedAt: null, note: null };
+    let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 1, goals: [goal], paused: true }, 'live');
+    expect(d.goals.g1?.title).toBe('Lansman');
+    expect(d.paused).toBe(true);
+    d = applyEvent(d, stored({ type: 'goal.changed', change: 'stopped', goal: { ...goal, status: 'dropped' } }, 'c', 10));
+    expect(d.goals.g1?.status).toBe('dropped');
+    d = applyEvent(d, stored({ type: 'company.paused', paused: false }, 'c', 11));
+    expect(d.paused).toBe(false);
   });
 });

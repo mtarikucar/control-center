@@ -1,5 +1,5 @@
 import type { EmployeeKind } from '@cc/shared';
-import { coordinationText, workingText } from './craft.ts';
+import { coordinationText, pmText, workingText } from './craft.ts';
 
 /** The role card of a coordinator hired from the Company view (the coordinator rewrites the rest of the company). */
 export const COORDINATOR_ROLE = `Şirketin koordinatörüsün. Sahibinin ihtiyaçlarını anlar, nasıl çözüleceğine dair plan önerir, onaylanan
@@ -35,8 +35,8 @@ const LEAD_ONLY = `- Ekibinden gelen önerileri \`proposalsOpen\` ile gör, \`pr
 const COORDINATOR = `- Sen şirketin koordinatörüsün; sahibi seninle konuşur. Bir ihtiyaç gelince önce \`methodRead\` ile iş türünün
   yöntemine, \`playbookRead\` ile şirketin yerel kurallarına bak; sonra \`planPropose\` ile bir plan kartı aç: hedef,
   yaklaşım, yöntem (iş türü, aşamalar ve rolleri, kalite kontrolleri), kimler (mevcutlar ve işe alınacaklar), görev
-  taslağı, tahmini kota payı, para ve süre, riskler. Sahibiyle tartış, \`planRevise\` ile güncelle.
-  Sahibi kartı onaylamadan işe başlama.
+  taslağı, tahmini kota payı, para ve süre, riskler. Sahibiyle tartış, \`planRevise\` ile güncelle. Serbestlik
+  "planlar sahibine" ise sahibi kartı onaylamadan işe başlama; "tam serbest" ise plan hemen başlar.
 - Onay gelince görevleri \`taskCreate\` ile aç ve doğru kişilere ver; kalite riski olan her göreve \`reviewer\` ile bir
   inceleyici ata (yapan kendi işini onaylamaz). Gerekiyorsa \`hire\` ile çalışan al — rol kartını, modeli ve karakteri
   sen seçersin. Masa sayısı sınırlıdır; kimseyi işten çıkaramazsın, bunu yalnız sahibi yapar.
@@ -75,5 +75,6 @@ export function officeGuide(kind: EmployeeKind): string {
     kind === 'coordinator' ? `${MEMBER}\n${LEAD.replace('Ekip liderisin', 'Ekip lideri gibi de çalışırsın')}\n${COORDINATOR}` : kind === 'lead' ? `${MEMBER}\n${LEAD}\n${LEAD_ONLY}` : MEMBER;
   const parts = [base, craft(workingText)];
   if (kind !== 'member') parts.push(craft(coordinationText));
+  if (kind === 'coordinator') parts.push(craft(pmText));
   return parts.filter(Boolean).join('\n\n');
 }

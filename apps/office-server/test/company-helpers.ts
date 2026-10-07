@@ -1,7 +1,8 @@
-import type { QuotaState } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, type QuotaState } from '@cc/shared';
 import { Budget } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { Company } from '../src/company/company.ts';
+import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
 import { Memory } from '../src/company/memory.ts';
 import { ProposalStore } from '../src/company/proposal-store.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
@@ -15,22 +16,28 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const plans = new PlanStore(s.db, now);
   const notices = new NoticeStore(s.db, now);
   const proposals = new ProposalStore(s.db, now);
+  const goals = new GoalStore(s.db, now);
+  const state = new CompanyStateStore(s.db);
   const memory = new Memory({
     roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir,
     decisions: new DecisionStore(s.db, now), playbook: new PlaybookStore(s.db, now), notes: new NoteStore(s.db, now), employeeNotes: new EmployeeNoteStore(s.db, now),
   });
   let quotaState: QuotaState | null = null;
+  // The approval flow is what most tests are about (tests of full autonomy set it themselves); written to the store
+  // directly so no budget.changed event joins the log (the economy scenario compares the log with main's).
+  const constitutionStore = new ConstitutionStore(s.db);
+  constitutionStore.set({ autonomy: 'plans' });
   const budget = new Budget({
-    constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices,
+    constitution: constitutionStore, spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices,
     quota: { state: () => quotaState }, deskCount: 8, now,
   });
   const reloaded: string[] = [];
   const company = new Company({
-    roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals,
+    roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
     reload: (id) => void reloaded.push(id), now,
   });
   return {
-    tasks, plans, notices, memory, company, reloaded, budget, proposals,
+    tasks, plans, notices, memory, company, reloaded, budget, proposals, goals, state,
     setQuota: (q: QuotaState | null) => {
       quotaState = q;
     },
@@ -46,3 +53,6 @@ export const METHOD = {
   ],
   checks: ['Bitti tanımı karşılandı'],
 } as const satisfies import('@cc/shared').PlanMethod;
+
+/** The owner approves each plan (autonomy 'plans'): for tests about the approval flow, which the default 'free' skips. */
+export const PLANS_ONLY = (): import('@cc/shared').Constitution => ({ ...DEFAULT_CONSTITUTION, autonomy: 'plans' });
