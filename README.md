@@ -69,7 +69,9 @@ saatleri ve hangi işin hangi modelde koşacağı.
   `taskAssign` → `difficulty`: kolay, orta, zor, kritik); görev başlarken çalışan o zorluğun modeline geçer
   (`difficultyModels`: haiku, sonnet, opus, fable), görev ortasında asla. Model değişimi oturumu yeniden açar ve önbelleği
   soğutur: daha güçlü modele hemen geçilir, daha zayıfa yalnız son turdan `cacheTtlMinutes` (varsayılan 5) sonra —
-  sohbet modeller arasında gidip gelmez; görev başı istisnadır. Elle `setModel` bir sonraki seçime dek geçerlidir.
+  sohbet modeller arasında gidip gelmez; görev başı istisnadır. Görev modeli yalnız o görev içindir: çalışanın kendi
+  modeli (`setModel` ile değişir) zorluksuz görevde, yan soruda ve sizin mesajınızda kullanılır. Kritik işi yalnız
+  koordinatör ve liderler açar.
 - Koordinatör `budgetStatus` ile bütçeyi ve bugün kimin kaç tur kullandığını görür, `setModel` ile birinin modelini
   değiştirir, `sleep`/`wake` kullanır. Ölçüm: `docs/superpowers/notes/2026-10-07-economy-results.md`.
 

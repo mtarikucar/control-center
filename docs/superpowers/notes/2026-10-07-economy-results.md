@@ -64,6 +64,16 @@ Hiçbir görev zorluğunun modelinden güçlü bir modelde koşmaz (test eşiği
 - askColleague (yan cevaplar), teslim etmeyen üyeler (hatırlatma ve tırmandırma turları) ve sahibinin payı senaryoda
   yok. Kota ortaktır; tabloda yalnız ofisin payı var.
 
+## İnceleme düzeltmelerinden sonra (aynı gün)
+
+Bağımsız incelemenin 8 bulgusu kapatıldı (sınır notları ve beklenen teslim karar notu; özetin kapanış satırı yalnız tek
+başına gelen özette; görev modeli yalnız oturumu taşır, kadrodaki model kalır; model geçişi başarısız olursa eski modelle
+sürer, mesaj kaybolmaz; payda karar notu yalnız koordinatörü uyandırır; rapor hatırlatması günlükte; çalışanın kritik
+pası zor sayılır). Senaryo yeniden çalıştırıldı: **sayılar değişmedi** (koordinatör 5 tur, 18,2; toplam 16 tur, 28,4;
+oturumlar 5 + 11). Beklenen: senaryodaki her görevin zorluğu var (kadro modeli devreye girmez), sınırlara ve payda
+uyandırmaya değmez, paslanan iş ve takılı isteyen yok. Düzeltmeler senaryonun dışındaki yolları kapatır; her biri kendi
+testinde.
+
 ## Gerçek kullanımda bakılacaklar
 
 - `budgetStatus` artık bugün kimin kaç tur kullandığını söylüyor; Bütçe sekmesi ekip başına tur gösteriyor. Birkaç gün

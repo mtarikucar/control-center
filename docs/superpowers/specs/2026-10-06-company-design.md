@@ -114,13 +114,16 @@ plan, bağımlılıklar (başka görevler: "şu parça gelince başla"), durum (
   `taskUpdate(takıldı, neden)`; koordinatöre **karar notu** gider.
 - **Not türleri** (`notices.kind`, `notices.topic`; tablo: `company/notices.ts`). *Karar* (`decision`): alıcı şimdi karar
   vermeli ya da bir şey yapmalı — boşa düşünce hemen bir tur açar, uyuyanı uyandırır (plan onayı/reddi, takılma, duran iş,
-  öneri açıldı/yükseltildi/karara bağlandı, sahibinin payı, harcama sınırı aşımı, işten çıkarma/devir, başlamış görevin
-  elinden alınması, koordinatörlük, geri alınan karar). *Bilgi* (`info`): yalnız kayıt (görev bitti, planın açık görevi
-  kalmadı, rol/lider değişikliği, başlamamış görevin başkasına verilmesi, sahibine giden satın alma, zincir/gün sınırı) —
+  öneri açıldı/yükseltildi/karara bağlandı, sahibinin payı, harcama sınırı aşımı, zincir/gün sınırı, işten çıkarma/devir,
+  başlamış görevin elinden alınması, koordinatörlük, geri alınan karar, kendi görevi takılıyken paslayanın beklediği
+  teslim). Sahibinin payı devredeyken karar notu yalnız koordinatörü uyandırır; elinden alınan görev notu kimseyi
+  uyandırmaz (uyuyan zaten çalışmıyor). *Bilgi* (`info`): yalnız kayıt (görev bitti, planın açık görevi
+  kalmadı, rol/lider değişikliği, başlamamış görevin başkasına verilmesi, sahibine giden satın alma) —
   tek başına tur açmaz, kimseyi uyandırmaz: o an giden her tura (karar notu, görev, hatırlatma) "## Ofisten özet" olarak
   biner, ya da anayasadaki **özet saatlerinde** (`digestHours`, varsayılan 9 ve 17, yerel saat) tek turda gelir; bekleyen
   bilgi yoksa özet atlanır; sahibinin payı devredeyken bekler. Özet metnini sunucu yazar (model yok): konuya göre gruplu,
-  başlıkta not sayısı ve kapsadığı süre, grup başına en çok 8 satır.
+  başlıkta not sayısı ve kapsadığı süre, grup başına en çok 8 satır; "yalnız kayıt tut" kapanışı yalnız tek başına gelen
+  özette. Rapor hatırlatması `report.reminded` olayıyla günlüğe yazılır (yeniden başlatmada tekrarlanmaz).
 - v1 kuralı sürer: işin ortasına yalnız sahibi girer; görevler ve paslar kuyruğa düşer.
 
 ### 4.4 Paslama ve öneriler
@@ -182,9 +185,13 @@ görev sayısı ≤ 60. Aşınca araç reddeder ve koordinatöre not düşer.
 - **Görünürlük:** karakter başına token/maliyet (v1) + plan ve ekip başına toplam kota, para, kalan bütçe.
 - **Model seçimi (anayasa):** her gönderim bir model ipucu taşıyabilir. Koordinatöre sahibinin mesajı
   `coordinatorModels.owner` (fable), karar notu/görev/hatırlatma `decision` (sonnet), yalnız özet `digest` (haiku);
-  görev başında çalışana `difficultyModels[zorluk]` (kolay haiku, orta sonnet, zor opus, kritik fable; zorluk yoksa ipucu
-  yok). Model değişimi oturumu yeniden açar (hafıza sürer, önbellek soğur): daha güçlü modele hemen, daha zayıfa yalnız
-  son turdan `cacheTtlMinutes` (5) sonra geçilir; görev başı her iki yöne geçer; görev ya da tur ortasında asla.
+  görev başında çalışana `difficultyModels[zorluk]` (kolay haiku, orta sonnet, zor opus, kritik fable; zorluk yoksa
+  çalışanın kendi modeli). Kritik işi yalnız sahibi, koordinatör ve liderler açar; başkasınınki zor sayılır. İpucu yalnız
+  oturumu taşır: çalışanın kendi (rol) modeli kadroda kalır ve yalnız `setModel` ile değişir; yan soru, sahibinin
+  mesajı ve uyku/durdurma sonrası ilk oturum kendi modelinde. Model değişimi oturumu yeniden açar (hafıza sürer, önbellek
+  soğur): daha güçlü modele hemen, daha zayıfa yalnız son turdan `cacheTtlMinutes` (5) sonra geçilir; görev başı her iki
+  yöne geçer; görev ya da tur ortasında asla. Oturum yeni modelde açılamazsa eski modelle sürer, mesaj ona gider ve o
+  model 10 dk istenmez; hiç oturum açılamazsa görev kuyruğa, notlar teslim edilmemişe döner.
 - Plan başına Claude kullanımı: her bitmiş turun maliyeti çalışanın o an sürdüğü göreve, görevler de planlarına yazılır; plan başına kota payı tahmin olarak kalır (kota ortak).
 
 ## 7. Ofis araç seti (MCP)
