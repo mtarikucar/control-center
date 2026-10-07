@@ -127,12 +127,57 @@ export type Autonomy = (typeof AUTONOMY_LEVELS)[number];
 
 export const GOAL_STATUSES = ['active', 'done', 'dropped'] as const;
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
+
+/** How a KPI is measured (spec 2026-10-08-goal-kpis-design): read by hand, from a connection, or from the office's own metrics. */
+export const KPI_SOURCES = ['manual', 'office', 'capability'] as const;
+export type KpiSource = (typeof KPI_SOURCES)[number];
+export const KPI_DIRECTIONS = ['atLeast', 'atMost'] as const;
+export type KpiDirection = (typeof KPI_DIRECTIONS)[number];
+export const KPI_CADENCES = ['daily', 'weekly', 'monthly'] as const;
+export type KpiCadence = (typeof KPI_CADENCES)[number];
+/** The office's performance metrics a KPI can follow (B4's group metrics), with their label and unit. */
+export const KPI_OFFICE_METRICS = {
+  firstPassRate: { label: 'ilk geçişte onay oranı', unit: '%' },
+  avgRounds: { label: 'onaya kadar ortalama tur', unit: 'tur' },
+  usdPerDone: { label: 'görev başı ortalama maliyet', unit: 'USD' },
+  avgLeadHours: { label: 'ortalama süre', unit: 'saat' },
+  avgWorkHours: { label: 'ortalama iş süresi', unit: 'saat' },
+  done: { label: 'biten iş', unit: 'adet' },
+  blocks: { label: 'takılma', unit: 'adet' },
+  parks: { label: 'park', unit: 'adet' },
+  overdue: { label: 'gecikme', unit: 'adet' },
+} as const;
+export type KpiOfficeMetric = keyof typeof KPI_OFFICE_METRICS;
+/** A measurable aim of a goal: reach `target` (at least or at most) in `unit`, read from `source` every `cadence`. */
+export interface Kpi {
+  name: string;
+  target: number;
+  direction: KpiDirection;
+  unit: string;
+  source: KpiSource;
+  /** Only for source 'office'. */
+  metric: KpiOfficeMetric | null;
+  cadence: KpiCadence;
+}
+
+const KPI_SOURCE_TR: Record<Exclude<KpiSource, 'office'>, string> = { manual: 'elle', capability: 'bağlantıdan' };
+const KPI_CADENCE_TR: Record<KpiCadence, string> = { daily: 'günlük', weekly: 'haftalık', monthly: 'aylık' };
+
+/** One KPI as goalsRead and the Goals tab show it: `Onay oranı ≥ %70 (ofis: ilk geçişte onay oranı, haftalık)`. */
+export function kpiText(k: Kpi): string {
+  const value = k.unit === '%' ? `%${k.target}` : `${k.target} ${k.unit}`;
+  const source = k.source === 'office' && k.metric ? `ofis: ${KPI_OFFICE_METRICS[k.metric].label}` : KPI_SOURCE_TR[k.source as Exclude<KpiSource, 'office'>];
+  return `${k.name} ${k.direction === 'atLeast' ? '≥' : '≤'} ${value} (${source}, ${KPI_CADENCE_TR[k.cadence]})`;
+}
+
 /** A lasting aim above the plans (spec §6.1): why it matters to the mission and when it counts as reached. */
 export interface Goal {
   id: string;
   title: string;
   why: string;
   done: string[];
+  /** Its measurable KPIs (B16); none for goals from before them. */
+  kpis: Kpi[];
   status: GoalStatus;
   createdBy: string;
   createdAt: number;

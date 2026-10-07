@@ -364,4 +364,12 @@ export const MIGRATIONS: Migration[] = [
     up: `ALTER TABLE tasks ADD COLUMN nudged_at INTEGER;`,
     down: `ALTER TABLE tasks DROP COLUMN nudged_at;`,
   },
+  {
+    // feat/company-profile also takes 12: whichever merges second becomes 13 (spec 2026-10-08-goal-kpis-design §5).
+    version: 12,
+    name: 'goal KPIs',
+    // Goals from before: no KPIs.
+    up: `ALTER TABLE goals ADD COLUMN kpis TEXT NOT NULL DEFAULT '[]';`,
+    down: `ALTER TABLE goals DROP COLUMN kpis;`,
+  },
 ];
