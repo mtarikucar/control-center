@@ -11,6 +11,9 @@ export function employeeSettings(home: string = homedir()) {
   };
 }
 
+/** Claude's own scheduler is closed in the office (spec §8): time goes through the office's clock, which the owner sees and the rules govern. */
+export const DISALLOWED_TOOLS = ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'RemoteTrigger'] as const;
+
 function settingsArgs(home: string | undefined): string[] {
   return ['--setting-sources', 'user,project,local', '--settings', JSON.stringify(employeeSettings(home ?? homedir()))];
 }
@@ -29,6 +32,8 @@ export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: b
     '--permission-mode',
     'bypassPermissions',
     ...settingsArgs(o.home),
+    '--disallowedTools',
+    ...DISALLOWED_TOOLS,
     // The office tools come on top of every connection the owner has (no --strict-mcp-config).
     ...(o.mcpConfig ? ['--mcp-config', o.mcpConfig] : []),
     ...(o.resume ? ['--resume', o.sessionId] : ['--session-id', o.sessionId]),

@@ -120,6 +120,37 @@ Koordinatör projenin proje yöneticisidir; proje sizin her adımı söylemenizi
 - **Sizin denetiminiz:** her süren planda ve her aktif hedefte **Durdur** (açık görevler iptal olur); üst çubukta
   **Şirketi duraklat / Sürdür** (duraklatılmışken ofis kimseye iş ve not vermez; siz yine yazabilirsiniz).
 
+## Zamanlama ve ajanda
+
+Ofis "bunu daha sonra yap" diyebilir. Herkes aynı anda tek görev yapar; beklemesi gereken bir iş artık kimsenin
+sırasını kilitlemez.
+
+- **Park:** bir pencerenin dolmasını ya da bir cevabı bekleyen görev `taskPark` ile park edilir: dönüş saati (`+30m`,
+  `+6h`, `+1d` ya da yerel `2026-10-08T14:55`; en fazla 30 gün ileri) ve gerekçe. Görevi yapan kendi işini, koordinatör
+  ve lider yönettiklerinin işini park eder ve `taskUnpark` ile hemen sıraya alır. Park edilen görev açık kalır ama sırayı
+  boşaltır: ofis sıradaki işi verir, park edileni saatinde geri getirir. İncelemedeki ve devir görevleri park edilemez;
+  aynı görev üçüncü kez ertelenince koordinatöre karar notu gider.
+- **Başlangıç saati ve son tarih:** `taskCreate` ve `taskPass` görevi `startAfter` (o saatten önce verilmez) ve `dueAt`
+  (son tarih; aynı öncelikte yakın olan önce gelir, geçince koordinatöre bir kez haber gider) ile açabilir.
+- **Rutinler:** tekrarlayan iş `scheduleCreate` ile kurulur (cron, yerel saat; Türkçe gösterilir: "her gün 09:00",
+  "hafta içi 18:00"). Her tetiklenme sıradan bir görev açar; inceleme kapısı, kanıt, kota payı ve duraklatma aynen
+  uygulanır. Önceki örnek hâlâ açıksa yenisi açılmaz. Anayasa sınırları: **Rutin aralığı en az (dk)** (varsayılan 60) ve
+  **En fazla rutin** (varsayılan 20). `scheduleList` ve `scheduleUpdate` koordinatör ve liderlerindir.
+- **Saat:** ofisin tek zamanlayıcısı vadeleri veritabanından okur, en yakın vadeye (en geç 60 saniye sonraya) kurulur;
+  14:55'in işi 14:55'te başlar. Ofis kapalıyken geçen vadeler açılışta, duraklatma boyunca kaçan rutinler sürdürülünce
+  **bir kez** telafi edilir: park edilen görev bir kez sıraya döner, rutin tek bir görev açar. Duraklatılmışken park
+  dönüşü sıraya girer ama kimseye verilmez. Uyku ya da saat değişimi olay kaydına not düşer.
+- **Ajanda:** şirket görünümünün **Ajanda** sekmesi kimin ne zaman ne yaptığını gösterir (**Liste** ve **Zaman
+  çizelgesi**, 24 saat / 7 gün); süreler çalışanın kendi geçmişinden tahmin edilir (`~`). Üstte sıradaki saatli iş
+  yazar, altta **Rutinler** listesi durur. Çalışan panelinde de aynı kişinin ajandası vardır. Koordinatör ve liderler
+  `agendaRead` ile kimin ne zaman boş olduğuna bakar.
+- **Sizin düğmeleriniz:** **Şimdi başlasın** (park ya da başlangıç saatini kaldırır, öncelik 1), **Park et…** (+1 saat,
+  +6 saat, yarın 09:00, yarın aynı saat ya da bir tarih-saat, gerekçeyle), **Öne al** (öncelik 1) ve rutinlerde
+  **Duraklat / Sürdür / Durdur**. Her düğme koordinatöre bilgi notu bırakır.
+- **Claude'un kendi zamanlayıcısı kapalı:** çalışan oturumları `--disallowedTools CronCreate CronDelete CronList
+  ScheduleWakeup RemoteTrigger` ile açılır. Bu araçlar oturuma özeldir, ofisten görünmez ve duraklatmayı dinlemez;
+  zamana bağlı her iş ofisin saatinden geçer.
+
 ## Öneriler ve ekip liderleri
 
 - Çalışanlar **ihtiyaç**, **fikir**, **itiraz** ("yanlış yoldayız") ve **satın alma** taleplerini `propose` ile açar.

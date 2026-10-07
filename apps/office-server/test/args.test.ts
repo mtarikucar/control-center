@@ -55,4 +55,13 @@ describe('claude args', () => {
     expect(args[args.indexOf('--model') + 1]).toBe('fable');
     expect(sessionArgs({ model: 'haiku', sessionId: 's', resume: false })).not.toContain('--mcp-config');
   });
+
+  it('closes Claude’s own scheduler in every employee session', () => {
+    const args = sessionArgs({ model: 'haiku', sessionId: 's', resume: false, home: '/home/test' });
+    const i = args.indexOf('--disallowedTools');
+    expect(i).toBeGreaterThan(0);
+    expect(args.slice(i + 1, i + 6)).toEqual(['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'RemoteTrigger']);
+    // The list must come before the session id so nothing is swallowed into it.
+    expect(args.indexOf('--session-id')).toBeGreaterThan(i + 5);
+  });
 });

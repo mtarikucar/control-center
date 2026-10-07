@@ -52,6 +52,15 @@ describe('the coordination craft (ships with the office)', () => {
     expect(officeGuide('coordinator')).toContain('methodRead');
   });
 
+  it('points everyone to the office’s clock instead of Claude’s own scheduler', () => {
+    expect(workingText()).toContain('taskPark');
+    expect(workingText()).toContain('CronCreate');
+    expect(coordinationText()).toContain('startAfter');
+    expect(coordinationText()).toContain('scheduleCreate');
+    expect(coordinationText()).toContain('agendaRead');
+    expect(pmText()).toContain('taskPark');
+  });
+
   it('the coordinator’s guide says it is the project manager and how autonomy works; leads and members do not get it', () => {
     expect(pmText()).toContain('goalSet');
     expect(pmText()).toContain('restUntil');

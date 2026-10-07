@@ -20,5 +20,9 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
 8. **Değerlendirme.** Plan bitince `planRetro`: ne iyi gitti, ne takıldı, bir dahaki sefere ne değişecek. Şirkete özgü
    dersi `playbookUpdate` ile el kitabına yaz; her şirkete yarayacak bir yöntem önerin varsa `methodSuggestion` olarak ekle.
 9. **Raporlama.** Kısa, sayılarla, doğrulanmış; belirsizliği ve riski gizleme.
+10. **Zamanı ofise bırak.** Zamana bağlı işin üç yolu var: `taskCreate`'te `startAfter` (şu saatten sonra başla) ve
+    `dueAt` (son tarih); bekleyen işi `taskPark` ile park etmek; tekrarlayan işi `scheduleCreate` ile rutin yapmak.
+    Rutinler kota yer: az tut, anayasanın izin verdiğinden sık kurma. `agendaRead` kimin ne zaman boş olduğunu söyler;
+    iş dağıtmadan önce bak.
 
 Ekip lideri bunları kendi ekibinin ölçeğinde uygular.

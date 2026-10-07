@@ -2,7 +2,9 @@
 
 - Tarih: 2026-10-07
 - Durum: sahibiyle konuşmada beş bölüm halinde onaylandı (genel mimari, zamanlama modeli, saat servisi, ajanda ve
-  sheet, araçlar ve kilit); yazılı belge incelemede. Tasarım ve plan Fable'da, uygulama Opus'ta.
+  sheet, araçlar ve kilit); uygulandı (`feat/office-scheduler`) — plan
+  `docs/superpowers/plans/2026-10-07-office-scheduler.md` ve `…-part-2.md`; kilit ve park gerçek CLI ile denendi
+  (`lockdown.real`, `scheduler.smoke.real`). Tasarım ve plan Fable'da, uygulama Opus'ta.
 - Dayandığı: `2026-10-06-company-design.md` (şirket katmanı), `2026-10-07-coordinator-craft-design.md` (koordinatörlük
   yetisi, nabız, duraklatma), `office-economy` (bildirim türleri, kota payı). Göç v10.
 
