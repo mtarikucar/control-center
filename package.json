@@ -9,6 +9,7 @@
   "scripts": {
     "office": "pnpm --filter @cc/office-web build && pnpm --filter @cc/office-server start",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "economy-report": "node apps/office-server/scripts/economy-report.ts"
   }
 }
