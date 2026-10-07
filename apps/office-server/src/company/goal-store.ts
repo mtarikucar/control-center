@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Goal, GoalStatus } from '@cc/shared';
+import type { Goal, GoalStatus, Kpi } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 
@@ -8,6 +8,7 @@ interface GoalRow {
   title: string;
   why: string;
   done: string;
+  kpis: string;
   status: string;
   created_by: string;
   created_at: number;
@@ -16,7 +17,7 @@ interface GoalRow {
 }
 
 const goalFromRow = (r: GoalRow): Goal => ({
-  id: r.id, title: r.title, why: r.why, done: JSON.parse(r.done) as string[], status: r.status as GoalStatus, createdBy: r.created_by,
+  id: r.id, title: r.title, why: r.why, done: JSON.parse(r.done) as string[], kpis: JSON.parse(r.kpis) as Kpi[], status: r.status as GoalStatus, createdBy: r.created_by,
   createdAt: r.created_at, closedAt: r.closed_at, note: r.note,
 });
 
@@ -24,10 +25,11 @@ export interface NewGoal {
   title: string;
   why: string;
   done: string[];
+  kpis?: Kpi[];
   createdBy: string;
 }
 
-export type GoalPatch = Partial<Pick<Goal, 'title' | 'why' | 'done' | 'status' | 'closedAt' | 'note'>>;
+export type GoalPatch = Partial<Pick<Goal, 'title' | 'why' | 'done' | 'kpis' | 'status' | 'closedAt' | 'note'>>;
 
 export class GoalStore {
   readonly #db: Db;
@@ -39,10 +41,10 @@ export class GoalStore {
   }
 
   create(g: NewGoal): Goal {
-    const goal: Goal = { ...g, id: randomUUID(), status: 'active', createdAt: this.#now(), closedAt: null, note: null };
+    const goal: Goal = { ...g, kpis: g.kpis ?? [], id: randomUUID(), status: 'active', createdAt: this.#now(), closedAt: null, note: null };
     this.#db
-      .prepare('INSERT INTO goals (id, title, why, done, status, created_by, created_at, closed_at, note) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)')
-      .run(goal.id, goal.title, goal.why, JSON.stringify(goal.done), goal.status, goal.createdBy, goal.createdAt);
+      .prepare('INSERT INTO goals (id, title, why, done, kpis, status, created_by, created_at, closed_at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)')
+      .run(goal.id, goal.title, goal.why, JSON.stringify(goal.done), JSON.stringify(goal.kpis), goal.status, goal.createdBy, goal.createdAt);
     return goal;
   }
 
@@ -62,8 +64,8 @@ export class GoalStore {
   update(id: string, patch: GoalPatch): Goal {
     const next = { ...this.get(id), ...patch };
     this.#db
-      .prepare('UPDATE goals SET title = ?, why = ?, done = ?, status = ?, closed_at = ?, note = ? WHERE id = ?')
-      .run(next.title, next.why, JSON.stringify(next.done), next.status, next.closedAt, next.note, id);
+      .prepare('UPDATE goals SET title = ?, why = ?, done = ?, kpis = ?, status = ?, closed_at = ?, note = ? WHERE id = ?')
+      .run(next.title, next.why, JSON.stringify(next.done), JSON.stringify(next.kpis), next.status, next.closedAt, next.note, id);
     return next;
   }
 

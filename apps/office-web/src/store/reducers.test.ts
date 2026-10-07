@@ -283,7 +283,7 @@ describe('proposals, passes and reports', () => {
   });
 
   it('keeps goals and the pause from the snapshot and from events', () => {
-    const goal = { id: 'g1', title: 'Lansman', why: 'w', done: ['d'], status: 'active' as const, createdBy: 'c', createdAt: 1, closedAt: null, note: null };
+    const goal = { id: 'g1', title: 'Lansman', why: 'w', done: ['d'], kpis: [], status: 'active' as const, createdBy: 'c', createdAt: 1, closedAt: null, note: null };
     let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 1, goals: [goal], paused: true }, 'live');
     expect(d.goals.g1?.title).toBe('Lansman');
     expect(d.paused).toBe(true);

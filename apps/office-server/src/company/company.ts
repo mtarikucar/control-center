@@ -10,6 +10,7 @@ import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
 import type { CompanyStateStore, GoalStore } from './goal-store.ts';
+import { checkKpis } from './kpi.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
@@ -130,6 +131,8 @@ export interface GoalInput {
   title?: string;
   why?: string;
   done?: string[];
+  /** The whole KPI list (replaces it; [] clears it); checked by checkKpis. */
+  kpis?: unknown;
   status?: string;
   note?: string;
 }
@@ -944,12 +947,14 @@ export class Company {
     }
     if (input.status !== undefined && !(GOAL_STATUSES as readonly string[]).includes(input.status)) throw new ValidationError('Hedef durumu active, done ya da dropped olmalı.');
     const status = input.status as GoalStatus | undefined;
+    const kpis = input.kpis === undefined ? undefined : checkKpis(input.kpis);
     if (!input.goalId) {
       this.#assertGoalRoom();
       const goal = store.create({
         title: clean(input.title, 'Hedef başlığı', 160, true),
         why: clean(input.why, 'Neden (misyona bağı)', 2000, true),
         done: this.#goalDone(input.done),
+        kpis: kpis ?? [],
         createdBy: by,
       });
       this.#d.state?.setRest(0, '');
@@ -966,6 +971,7 @@ export class Company {
       title: input.title === undefined ? current.title : clean(input.title, 'Hedef başlığı', 160, true),
       why: input.why === undefined ? current.why : clean(input.why, 'Neden (misyona bağı)', 2000, true),
       done: input.done === undefined ? current.done : this.#goalDone(input.done),
+      kpis: kpis ?? current.kpis,
       status: status ?? current.status,
       closedAt: closing ? this.#now() : status === 'active' ? null : current.closedAt,
       note: input.note === undefined ? current.note : clean(input.note, 'Not', 2000, false) || null,

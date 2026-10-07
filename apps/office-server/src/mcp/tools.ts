@@ -1,4 +1,4 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText } from '../company/craft.ts';
@@ -595,10 +595,26 @@ export function officeTools(o: {
       name: 'goalSet',
       description:
         'Open, change or close a goal (coordinator) — the lasting aims above the plans, taken from the company mission: a title, why it serves the mission, and a measurable definition of done. Without goalId it opens a new one; with goalId it changes it (status done or dropped closes it, active reopens it). Keep few goals active.',
-      inputSchema: object({ goalId: s('The goal to change; omit to open a new one.'), title: s('Goal title.'), why: s('Why it matters to the mission.'), done: strings('When it counts as reached, one measurable item each.'), status: { type: 'string', enum: ['active', 'done', 'dropped'] }, note: s('A note, e.g. why it was closed.') }),
+      inputSchema: object({
+        goalId: s('The goal to change; omit to open a new one.'), title: s('Goal title.'), why: s('Why it matters to the mission.'), done: strings('When it counts as reached, one measurable item each.'),
+        status: { type: 'string', enum: ['active', 'done', 'dropped'] }, note: s('A note, e.g. why it was closed.'),
+        kpis: {
+          type: 'array',
+          maxItems: 8,
+          description: `The goal's KPIs, the whole list (replaces it; [] clears it; omit to keep them): each a name, a target number, direction atLeast or atMost, a unit (%, gün, sipariş …), the source — manual (read by hand), capability (from a connection) or office (one of the office's own metrics: ${Object.keys(KPI_OFFICE_METRICS).join(', ')}; its unit comes with it) — and how often it is read.`,
+          items: {
+            type: 'object',
+            properties: {
+              name: s('KPI name.'), target: { type: 'number', description: 'Target value (a % is 0–100).' }, direction: { type: 'string', enum: [...KPI_DIRECTIONS] }, unit: s('Unit; not needed for source office.'),
+              source: { type: 'string', enum: [...KPI_SOURCES] }, metric: { type: 'string', enum: Object.keys(KPI_OFFICE_METRICS), description: 'Only for source office.' }, cadence: { type: 'string', enum: [...KPI_CADENCES] },
+            },
+            required: ['name', 'target', 'direction', 'source', 'cadence'],
+          },
+        },
+      }),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const goal = company.goalSet(employee.id, { goalId: optStr(args, 'goalId'), title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, status: optStr(args, 'status'), note: optStr(args, 'note') });
+        const goal = company.goalSet(employee.id, { goalId: optStr(args, 'goalId'), title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, kpis: args.kpis, status: optStr(args, 'status'), note: optStr(args, 'note') });
         if (!optStr(args, 'goalId')) return `Hedef açıldı (${goal.id}): “${goal.title}”. Planlarını planPropose ile goalId vererek başlat.`;
         return `Hedef güncellendi: “${goal.title}” (${goal.status}).`;
       },
@@ -631,7 +647,8 @@ export function officeTools(o: {
         return goals
           .map((g) => {
             const own = plansOf(g.id).map((p) => `   - ${p.title} [${p.status}]`).join('\n');
-            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${own ? `\n${own}` : ''}`;
+            const kpis = g.kpis.length ? `\n   KPI: ${g.kpis.map(kpiText).join('; ')}` : '';
+            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${kpis}${own ? `\n${own}` : ''}`;
           })
           .join('\n');
       },

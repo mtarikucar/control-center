@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { Goal } from '@cc/shared';
+import { kpiText, type Goal } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { GOAL_STATUS_LABELS, PLAN_STATUS_LABELS } from './labels.ts';
@@ -35,6 +35,16 @@ function GoalCard({ goal }: { goal: Goal }) {
           <li key={i}>{d}</li>
         ))}
       </ul>
+      {goal.kpis.length > 0 && (
+        <>
+          <span className="goal-label">KPI'lar</span>
+          <ul className="goal-kpis">
+            {goal.kpis.map((k) => (
+              <li key={k.name}>{kpiText(k)}</li>
+            ))}
+          </ul>
+        </>
+      )}
       {plans.length > 0 && (
         <>
           <span className="goal-label">Planlar</span>

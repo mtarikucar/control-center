@@ -65,7 +65,7 @@ describe('EventItem', () => {
   });
 
   it('notes goals and the pause in the feed', () => {
-    const goal = { id: 'g1', title: 'Lansman', why: 'w', done: ['d'], status: 'active' as const, createdBy: 'c', createdAt: 1, closedAt: null, note: null };
+    const goal = { id: 'g1', title: 'Lansman', why: 'w', done: ['d'], kpis: [], status: 'active' as const, createdBy: 'c', createdAt: 1, closedAt: null, note: null };
     const { rerender } = render(<EventItem stored={{ seq: 1, employeeId: 'c', ts: 0, event: { type: 'goal.changed', change: 'set', goal } }} />);
     expect(screen.getByText('Hedef: Lansman')).toBeTruthy();
     rerender(<EventItem stored={{ seq: 2, employeeId: 'c', ts: 0, event: { type: 'goal.changed', change: 'stopped', goal: { ...goal, status: 'dropped' } } }} />);
