@@ -1,6 +1,7 @@
 # control-center — Yapısal şirket profili (B2) tasarım notu
 
 - Tarih: 2026-10-08 · Yazan: Mert · Görev: 30953c2f (plan "Çekirdek 1", B2) · İnceleyen: Kerem
+- Sürüm 2 (inceleme turu 1, Kerem): varsayım bölüm düzeyinden **alan düzeyine** indi, `assumed` zorunlu oldu (§3, §5, §8).
 - Dayandığı: `company/archive/kesif-firma-isini-soyler-ofis-kurar-urun/…11f1e11c…/bosluk-analizi.md` §2 B2 satırı ve
   §3 "B2 — Yapısal şirket profili yok"; `…c4e24d8f…/hedef-mimari.md` §4 A (A1 diyalog, A2 profil şeması), §5 veri akışı,
   §6 veri modeli. Göç v12. Dal `feat/company-profile` (main `840e9d8`'den).
@@ -29,7 +30,7 @@ masaya kopyalanır ve çalışan bağlamını değiştirir), web sekmesi ve sahi
 
 ## 3. Şema
 
-Hedef mimari §6 satırı birebir: `company_profile(id, version, section, json, assumed, by, ts)`.
+Hedef mimari §6 satırı + bir sütun: `company_profile(id, version, section, json, assumed, assumed_fields, by, ts)`.
 
 ```sql
 CREATE TABLE company_profile (
@@ -37,7 +38,8 @@ CREATE TABLE company_profile (
   version INTEGER NOT NULL UNIQUE,   -- şirket çapında artan sürüm: 1, 2, 3 … (bölüm başına değil)
   section TEXT NOT NULL,             -- aşağıdaki yedi bölümden biri
   json TEXT NOT NULL,                -- bölümün bu sürümdeki TAM hali (alan → metin | metin listesi)
-  assumed INTEGER NOT NULL,          -- 1: sahibinden değil varsayımla dolduruldu
+  assumed INTEGER NOT NULL,          -- 1: bölümün en az bir alanı varsayım (assumed_fields boş değil)
+  assumed_fields TEXT NOT NULL DEFAULT '[]',  -- varsayım olan alanların listesi (JSON), bölümün alan sırasıyla
   by TEXT NOT NULL,                  -- yazan çalışan id
   ts INTEGER NOT NULL
 );
@@ -46,6 +48,10 @@ CREATE INDEX company_profile_section ON company_profile (section, version);
 
 - **Yalnız ekleme:** her değişiklik yeni bir satırdır; bir bölümün güncel hali en büyük sürümlü satırıdır. Tablo aynı
   zamanda değişiklik geçmişidir (kim, ne zaman, ne, varsayım mı).
+- **Neden ek sütun:** onboarding bir bölümü karışık kaynakla doldurur (bir alan sahibinden, öteki tahmin). Bayrak
+  bölüm düzeyinde olunca sahibinden gelen tek bir alan, bölümdeki tahminleri de "doğrulanmış" gösteriyordu
+  (Kerem, inceleme turu 1). `json` düz alan haritası olarak kalır (`json_extract(json, '$.sector')` ile sorgulanır);
+  hangi alanın varsayım olduğu ayrı sütunda tutulur, `assumed` "herhangi biri" özetidir.
 - **Profil sürümü** = `MAX(version)`. Blueprint (B5, hedef mimari §6 `blueprints.profile_version`) hangi profilden
   üretildiğini bu sayıyla tutar; bu yüzden sürüm bölüm başına değil şirket çapındadır.
 
@@ -71,16 +77,20 @@ profil sorgulanabilir kalır (B5/B6 kodu `fields.sector` gibi bilinen anahtarlar
 
 ```
 profileRead(section?: Section, history?: boolean)          kim: herkes
-profileUpdate(section: Section, fields: object, assumed?: boolean)   kim: koordinatör
+profileUpdate(section: Section, fields: object, assumed: boolean)   kim: koordinatör
 ```
 
-- **profileRead** — bölüm vermeden: profilin tamamı (sürüm, her bölüm etiketiyle, dolu alanlar, varsayımsa
-  "(varsayım)", boş bölümler "boş" diye; koordinatör neyin eksik olduğunu görür). `section` ile yalnız o bölüm;
+- **profileRead** — bölüm vermeden: profilin tamamı (sürüm, her bölüm etiketiyle, dolu alanlar; varsayım olan her
+  alanın yanında "(varsayım)", böyle bir alanı olan bölümün başlığında "(varsayım var)"; boş bölümler "boş" diye;
+  koordinatör neyin eksik ve neyin doğrulanmamış olduğunu görür). `section` ile yalnız o bölüm;
   `history: true` ile o bölümün sürümleri, yeniden eskiye (en fazla 20).
 - **profileUpdate** — verilen alanları bölümün güncel haline **birleştirir** (diyalog bölümü parça parça doldurur);
-  `null`, boş metin ya da boş liste o alanı siler. `assumed` (varsayılan false) bölümün bu güncellemeden sonraki
-  halinin tamamı için geçerlidir; sahibi doğrulayınca `assumed: false` ile yeniden yazılır. Hiçbir şey değişmiyorsa
-  yeni sürüm açılmaz ("Değişiklik yok").
+  `null`, boş metin ya da boş liste o alanı siler. `assumed` **zorunludur** ve **yalnız bu çağrıda verilen alanlar**
+  için geçerlidir: `true` → bu alanlar varsayım; `false` → bu alanlar sahibinin sözü (varsayım olan bir alan aynı
+  değerle `false` verilerek doğrulanır). Verilmeyen alanlar işaretlerini korur; silinen alan varsayım sayılmaz.
+  Sessiz bir varsayılan yoktur: `assumed` verilmezse çağrı reddedilir ("assumed gerekli"), çünkü varsayılan `false`
+  bir tahmini sahibinden gelmiş gibi kaydederdi. Hiçbir şey değişmiyorsa (alanlar ve işaretler aynı) yeni sürüm
+  açılmaz ("Değişiklik yok"); yalnız işaretin değişmesi de bir değişikliktir.
 - Hedef mimari A1'deki `confidence` parametresi `assumed` olarak alındı: tablo zaten `assumed` tutuyor ve iki düzey
   (sahibinden / varsayım) doğrulanabilir bir ayrım; sayısal güven puanı doğrulanamaz.
 
@@ -99,4 +109,12 @@ profileUpdate(section: Section, fields: object, assumed?: boolean)   kim: koordi
   olay), araçlar (çıktı metni, geçmiş, kimin görebildiği), göç v12 (yukarı/aşağı, eski veri korunur), özet ve plan
   kartının profilden etkilenmediği.
 - Mutasyon kontrolü: birleştirme yerine değiştirme, silmenin kalkması, varsayımın yok sayılması, değişmeyen güncellemede
-  sürüm açılması, bilinmeyen alanın kabulü, aracın herkese açılması, profilin özeti de yazması.
+  sürüm açılması, bilinmeyen alanın kabulü, aracın herkese açılması, profilin özeti de yazması; turu 1'den sonra:
+  varsayımın bölüm düzeyine yayılması, `assumed`'ın sessizce `false` olması, `false`'un doğrulamaması, işaret
+  değişikliğinin sürüm açmaması, okumada/geçmişte işaretlerin kaybolması.
+
+## 8. Değişiklik günlüğü
+
+- Sürüm 2 (inceleme turu 1, Kerem, [önemli]): kısmi güncellemede varsayım işareti sessizce siliniyordu (bölüm düzeyi
+  bayrak + `assumed` verilmezse `false`). Düzeltme: alan düzeyinde `assumed_fields`, `assumed` zorunlu ve yalnız
+  verilen alanlara uygulanır; profileRead alan ve bölüm işaretini, geçmiş varsayılan alanları gösterir.

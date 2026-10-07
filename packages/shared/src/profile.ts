@@ -41,7 +41,9 @@ export interface ProfileEntry {
   version: number;
   section: ProfileSection;
   fields: ProfileFields;
-  /** Filled in by assumption, not from the owner. */
+  /** The fields filled in by assumption, not from the owner (in the section's field order). */
+  assumedFields: string[];
+  /** Any field is an assumption (assumedFields is not empty). */
   assumed: boolean;
   by: string;
   ts: number;

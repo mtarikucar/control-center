@@ -8,12 +8,14 @@ interface ProfileRow {
   section: string;
   json: string;
   assumed: number;
+  assumed_fields: string;
   by: string;
   ts: number;
 }
 
 const entryFromRow = (r: ProfileRow): ProfileEntry => ({
-  id: r.id, version: r.version, section: r.section as ProfileSection, fields: JSON.parse(r.json) as ProfileFields, assumed: r.assumed === 1, by: r.by, ts: r.ts,
+  id: r.id, version: r.version, section: r.section as ProfileSection, fields: JSON.parse(r.json) as ProfileFields,
+  assumedFields: JSON.parse(r.assumed_fields) as string[], assumed: r.assumed === 1, by: r.by, ts: r.ts,
 });
 
 /** The company profile, one row per version (spec 2026-10-08-company-profile-design §3): nothing is overwritten. */
@@ -27,11 +29,13 @@ export class ProfileStore {
   }
 
   /** A section's new state, under the next company-wide version. */
-  write(section: ProfileSection, fields: ProfileFields, assumed: boolean, by: string): ProfileEntry {
+  write(section: ProfileSection, fields: ProfileFields, assumedFields: string[], by: string): ProfileEntry {
     const id = randomUUID();
     this.#db
-      .prepare('INSERT INTO company_profile (id, version, section, json, assumed, by, ts) SELECT ?, COALESCE(MAX(version), 0) + 1, ?, ?, ?, ?, ? FROM company_profile')
-      .run(id, section, JSON.stringify(fields), assumed ? 1 : 0, by, this.#now());
+      .prepare(
+        'INSERT INTO company_profile (id, version, section, json, assumed, assumed_fields, by, ts) SELECT ?, COALESCE(MAX(version), 0) + 1, ?, ?, ?, ?, ?, ? FROM company_profile',
+      )
+      .run(id, section, JSON.stringify(fields), assumedFields.length > 0 ? 1 : 0, JSON.stringify(assumedFields), by, this.#now());
     return entryFromRow(this.#db.prepare('SELECT * FROM company_profile WHERE id = ?').get(id) as unknown as ProfileRow);
   }
 

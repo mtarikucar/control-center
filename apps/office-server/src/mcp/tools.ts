@@ -679,14 +679,14 @@ export function officeTools(o: {
     },
     {
       name: 'profileUpdate',
-      description: `Write one section of the company profile (coordinator): the fields given replace theirs, null or an empty value removes one, the others stay; every change is a new version. assumed: true when you filled it in without the owner saying so (confirm later with assumed: false). The brief is not changed. Sections and fields (name[] = a list of texts): ${profileFieldsHelp()}.`,
+      description: `Write one section of the company profile (coordinator): the fields given replace theirs, null or an empty value removes one, the others stay; every change is a new version. assumed (required) is about the fields given in this call only: true when you filled them in without the owner saying so, false when they are the owner's word — give an assumed field again with assumed: false once the owner confirms it; the other fields keep their mark. The brief is not changed. Sections and fields (name[] = a list of texts): ${profileFieldsHelp()}.`,
       inputSchema: object(
         {
           section: { type: 'string', enum: [...PROFILE_SECTIONS], description: 'The section.' },
           fields: { type: 'object', description: 'Field → text, list of texts, or null to remove.' },
-          assumed: { type: 'boolean', description: 'Filled in by assumption, not from the owner (default false).' },
+          assumed: { type: 'boolean', description: 'The fields given here: true = your assumption, false = the owner said so.' },
         },
-        ['section', 'fields'],
+        ['section', 'fields', 'assumed'],
       ),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
@@ -695,7 +695,7 @@ export function officeTools(o: {
         const label = PROFILE_SPEC[entry.section].label;
         if (entry.version <= before) return `Değişiklik yok: ${label} (sürüm ${entry.version}) zaten böyle.`;
         return entry.assumed
-          ? `Profil güncellendi: ${label} (sürüm ${entry.version}, varsayım). Sahibi doğrulayınca assumed: false ile yeniden yaz.`
+          ? `Profil güncellendi: ${label} (sürüm ${entry.version}; varsayım: ${entry.assumedFields.join(', ')}). Sahibi doğrulayınca bu alanları assumed: false ile yeniden yaz.`
           : `Profil güncellendi: ${label} (sürüm ${entry.version}).`;
       },
     },

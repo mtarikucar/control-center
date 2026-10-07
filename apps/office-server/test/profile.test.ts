@@ -42,18 +42,18 @@ describe('Company profile — store and rules', () => {
     const c = t.coordinator.id;
     expect(t.company.profile()).toEqual({ version: 0, sections: {} });
     const first = t.company.profileUpdate(c, { section: 'identity', fields: { name: 'Tatlı Fırın', sector: 'gıda perakende' }, assumed: true });
-    expect(first).toMatchObject({ version: 1, section: 'identity', fields: { name: 'Tatlı Fırın', sector: 'gıda perakende' }, assumed: true, by: c });
-    t.company.profileUpdate(c, { section: 'customers', fields: { segments: ['mahalle sakinleri', 'kafeler'], channels: ['Instagram'] } });
-    // A later update adds a field and changes one; the others stay; the owner's word clears the assumption.
+    expect(first).toMatchObject({ version: 1, section: 'identity', fields: { name: 'Tatlı Fırın', sector: 'gıda perakende' }, assumed: true, assumedFields: ['name', 'sector'], by: c });
+    t.company.profileUpdate(c, { section: 'customers', fields: { segments: ['mahalle sakinleri', 'kafeler'], channels: ['Instagram'] }, assumed: false });
+    // A later update adds a field and changes one; the others stay. The owner's word confirms the fields it gives: the name stays an assumption.
     const third = t.company.profileUpdate(c, { section: 'identity', fields: { sector: 'fırın', languages: ['tr', 'en'] }, assumed: false });
-    expect(third).toMatchObject({ version: 3, fields: { name: 'Tatlı Fırın', sector: 'fırın', languages: ['tr', 'en'] }, assumed: false });
+    expect(third).toMatchObject({ version: 3, fields: { name: 'Tatlı Fırın', sector: 'fırın', languages: ['tr', 'en'] }, assumed: true, assumedFields: ['name'] });
     const profile = t.company.profile();
     expect(profile.version).toBe(3);
     expect(profile.sections.identity?.fields).toEqual({ name: 'Tatlı Fırın', sector: 'fırın', languages: ['tr', 'en'] });
-    expect(profile.sections.customers).toMatchObject({ version: 2, assumed: false, fields: { segments: ['mahalle sakinleri', 'kafeler'], channels: ['Instagram'] } });
-    expect(t.company.profileHistory('identity').map((e) => [e.version, e.fields.sector, e.assumed])).toEqual([
-      [3, 'fırın', false],
-      [1, 'gıda perakende', true],
+    expect(profile.sections.customers).toMatchObject({ version: 2, assumed: false, assumedFields: [], fields: { segments: ['mahalle sakinleri', 'kafeler'], channels: ['Instagram'] } });
+    expect(t.company.profileHistory('identity').map((e) => [e.version, e.fields.sector, e.assumedFields])).toEqual([
+      [3, 'fırın', ['name']],
+      [1, 'gıda perakende', ['name', 'sector']],
     ]);
     expect(profileEvents(t).map((e) => [e.employeeId, (e.event as { entry: { version: number } }).entry.version])).toEqual([[c, 1], [c, 2], [c, 3]]);
   });
@@ -61,16 +61,37 @@ describe('Company profile — store and rules', () => {
   it('removes a field given null, empty text or an empty list; an update that changes nothing opens no version', () => {
     const t = make();
     const c = t.coordinator.id;
-    t.company.profileUpdate(c, { section: 'constraints', fields: { budget: 'aylık 500 TL', legal: ['KVKK'], timezone: 'Europe/Istanbul', brandVoice: 'samimi' } });
-    const next = t.company.profileUpdate(c, { section: 'constraints', fields: { budget: null, legal: [], brandVoice: '  ' } });
+    t.company.profileUpdate(c, { section: 'constraints', fields: { budget: 'aylık 500 TL', legal: ['KVKK'], timezone: 'Europe/Istanbul', brandVoice: 'samimi' }, assumed: false });
+    const next = t.company.profileUpdate(c, { section: 'constraints', fields: { budget: null, legal: [], brandVoice: '  ' }, assumed: false });
     expect(next).toMatchObject({ version: 2, fields: { timezone: 'Europe/Istanbul' } });
     expect(Object.keys(next.fields)).toEqual(['timezone']);
-    const same = t.company.profileUpdate(c, { section: 'constraints', fields: { timezone: ' Europe/Istanbul ' } });
+    const same = t.company.profileUpdate(c, { section: 'constraints', fields: { timezone: ' Europe/Istanbul ' }, assumed: false });
     expect(same.version).toBe(2);
     expect(t.company.profile().version).toBe(2);
     expect(profileEvents(t)).toHaveLength(2);
-    // Only the assumption changes: that is a change.
-    expect(t.company.profileUpdate(c, { section: 'constraints', fields: {}, assumed: true })).toMatchObject({ version: 3, assumed: true, fields: { timezone: 'Europe/Istanbul' } });
+    // Only where it came from changes: that is a change.
+    expect(t.company.profileUpdate(c, { section: 'constraints', fields: { timezone: 'Europe/Istanbul' }, assumed: true })).toMatchObject({ version: 3, assumed: true, assumedFields: ['timezone'], fields: { timezone: 'Europe/Istanbul' } });
+    // No fields: nothing to say about any of them.
+    expect(t.company.profileUpdate(c, { section: 'constraints', fields: {}, assumed: false }).version).toBe(3);
+  });
+
+  it('review focus (Kerem, round 1): the assumption is per field — the owner’s word confirms only the fields it gives; confirming or removing a field clears its mark; where it came from is said every time', async () => {
+    const t = make();
+    const c = t.coordinator.id;
+    t.company.profileUpdate(c, { section: 'customers', fields: { segments: ['KOBİ (tahmin)'], channels: ['Instagram (tahmin)'] }, assumed: true });
+    const owner = t.company.profileUpdate(c, { section: 'customers', fields: { platforms: ['Trendyol'] }, assumed: false });
+    expect(owner).toMatchObject({ version: 2, assumed: true, assumedFields: ['segments', 'channels'], fields: { segments: ['KOBİ (tahmin)'], channels: ['Instagram (tahmin)'], platforms: ['Trendyol'] } });
+    expect(await t.call(t.ada, 'profileRead', { section: 'customers' })).toContain(
+      '## Müşteri ve kanallar (varsayım var)\n- Müşteriler: KOBİ (tahmin) (varsayım)\n- Kanallar: Instagram (tahmin) (varsayım)\n- Platformlar: Trendyol',
+    );
+    // The owner confirms the segments as they are: the same value, a new version.
+    expect(t.company.profileUpdate(c, { section: 'customers', fields: { segments: ['KOBİ (tahmin)'] }, assumed: false })).toMatchObject({ version: 3, assumed: true, assumedFields: ['channels'] });
+    // A removed field is no assumption, even when removed by one.
+    expect(t.company.profileUpdate(c, { section: 'customers', fields: { channels: null }, assumed: true })).toMatchObject({ version: 4, assumed: false, assumedFields: [] });
+    expect(await t.call(t.ada, 'profileRead', { section: 'customers' })).toContain('## Müşteri ve kanallar\n- Müşteriler: KOBİ (tahmin)\n- Platformlar: Trendyol');
+    expect(() => t.company.profileUpdate(c, { section: 'customers', fields: { platforms: ['Hepsiburada'] } })).toThrow(/assumed gerekli/);
+    await expect(t.call(t.coordinator, 'profileUpdate', { section: 'customers', fields: { platforms: ['Hepsiburada'] } })).rejects.toThrow(/assumed gerekli/);
+    expect(t.company.profile().version).toBe(4);
   });
 
   it('review focus: refuses unknown sections and fields, wrong types and oversize values, changing nothing; only the coordinator writes', () => {
@@ -88,12 +109,12 @@ describe('Company profile — store and rules', () => {
       ['identity', ['x'], /alanlar \(fields\) bir nesne olmalı/],
     ];
     for (const [section, fields, error] of bad) {
-      expect(() => t.company.profileUpdate(c, { section: section as never, fields: fields as never }), JSON.stringify([section, fields])).toThrow(error);
+      expect(() => t.company.profileUpdate(c, { section: section as never, fields: fields as never, assumed: false }), JSON.stringify([section, fields])).toThrow(error);
     }
     expect(() => t.company.profileUpdate(c, { section: 'identity', fields: { name: 'x' }, assumed: 'yes' as never })).toThrow(/assumed true ya da false olmalı/);
     // Nothing to write into an empty section: no empty version.
-    expect(() => t.company.profileUpdate(c, { section: 'offer', fields: { pricing: null, products: [] } })).toThrow(/Teklif bölümü boş; yazacak bir alan ver/);
-    expect(() => t.company.profileUpdate(t.ada.id, { section: 'identity', fields: { name: 'x' } })).toThrow(/Yalnız koordinatör/);
+    expect(() => t.company.profileUpdate(c, { section: 'offer', fields: { pricing: null, products: [] }, assumed: false })).toThrow(/Teklif bölümü boş; yazacak bir alan ver/);
+    expect(() => t.company.profileUpdate(t.ada.id, { section: 'identity', fields: { name: 'x' }, assumed: false })).toThrow(/Yalnız koordinatör/);
     expect(t.company.profile()).toEqual({ version: 0, sections: {} });
     expect(profileEvents(t)).toEqual([]);
   });
@@ -108,31 +129,31 @@ describe('Company profile — tools', () => {
     expect(empty).toContain('Şirket profili henüz boş');
     for (const label of ['Kimlik', 'Teklif', 'Müşteri ve kanallar', 'Araçlar ve hesaplar', 'Kısıtlar', 'Hedefler ve KPI\'lar', 'Başarı tanımı']) expect(empty).toContain(`## ${label}\nboş`);
     expect(await t.call(t.coordinator, 'profileUpdate', { section: 'identity', fields: { name: 'Tatlı Fırın', summary: 'Mahallede ekşi maya ekmek satıyoruz.' }, assumed: true })).toBe(
-      'Profil güncellendi: Kimlik (sürüm 1, varsayım). Sahibi doğrulayınca assumed: false ile yeniden yaz.',
+      'Profil güncellendi: Kimlik (sürüm 1; varsayım: name, summary). Sahibi doğrulayınca bu alanları assumed: false ile yeniden yaz.',
     );
-    expect(await t.call(t.coordinator, 'profileUpdate', { section: 'offer', fields: { products: ['ekşi maya ekmek', 'kurabiye'], pricing: 'ekmek 60 TL' } })).toBe('Profil güncellendi: Teklif (sürüm 2).');
-    expect(await t.call(t.coordinator, 'profileUpdate', { section: 'offer', fields: { pricing: 'ekmek 60 TL' } })).toBe('Değişiklik yok: Teklif (sürüm 2) zaten böyle.');
+    expect(await t.call(t.coordinator, 'profileUpdate', { section: 'offer', fields: { products: ['ekşi maya ekmek', 'kurabiye'], pricing: 'ekmek 60 TL' }, assumed: false })).toBe('Profil güncellendi: Teklif (sürüm 2).');
+    expect(await t.call(t.coordinator, 'profileUpdate', { section: 'offer', fields: { pricing: 'ekmek 60 TL' }, assumed: false })).toBe('Değişiklik yok: Teklif (sürüm 2) zaten böyle.');
     const text = await t.call(t.ada, 'profileRead');
     expect(text).toContain('# Şirket profili (sürüm 2)');
-    expect(text).toContain('## Kimlik (varsayım)\n- Ad: Tatlı Fırın\n- Ne yapıyor: Mahallede ekşi maya ekmek satıyoruz.');
+    expect(text).toContain('## Kimlik (varsayım var)\n- Ad: Tatlı Fırın (varsayım)\n- Ne yapıyor: Mahallede ekşi maya ekmek satıyoruz. (varsayım)');
     expect(text).toContain('## Teklif\n- Ürün ve hizmetler: ekşi maya ekmek; kurabiye\n- Fiyatlandırma: ekmek 60 TL');
     expect(text).toContain('## Kısıtlar\nboş');
     const one = await t.call(t.ada, 'profileRead', { section: 'offer' });
     expect(one).toContain('## Teklif');
     expect(one).not.toContain('Kimlik');
-    await expect(t.call(t.ada, 'profileUpdate', { section: 'identity', fields: { name: 'x' } })).rejects.toThrow(/kapalı araç/);
+    await expect(t.call(t.ada, 'profileUpdate', { section: 'identity', fields: { name: 'x' }, assumed: false })).rejects.toThrow(/kapalı araç/);
   });
 
   it('profileRead with history lists a section’s versions, newest first, who wrote them and whether assumed', async () => {
     const t = make();
     await t.call(t.coordinator, 'profileUpdate', { section: 'identity', fields: { sector: 'gıda' }, assumed: true });
-    await t.call(t.coordinator, 'profileUpdate', { section: 'offer', fields: { pricing: 'x' } });
-    await t.call(t.coordinator, 'profileUpdate', { section: 'identity', fields: { sector: 'fırın' } });
+    await t.call(t.coordinator, 'profileUpdate', { section: 'offer', fields: { pricing: 'x' }, assumed: false });
+    await t.call(t.coordinator, 'profileUpdate', { section: 'identity', fields: { sector: 'fırın' }, assumed: false });
     const history = await t.call(t.ada, 'profileRead', { section: 'identity', history: true });
     const lines = history.split('\n').filter((l) => l.startsWith('• '));
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^• sürüm 3, Koordinatör, .+: \{"sector":"fırın"\}$/);
-    expect(lines[1]).toMatch(/^• sürüm 1, Koordinatör, .+ \(varsayım\): \{"sector":"gıda"\}$/);
+    expect(lines[1]).toMatch(/^• sürüm 1, Koordinatör, .+ \(varsayım: sector\): \{"sector":"gıda"\}$/);
     await expect(t.call(t.ada, 'profileRead', { history: true })).rejects.toThrow(/Geçmiş için bir bölüm \(section\) ver/);
   });
 });
@@ -145,8 +166,8 @@ describe('Company profile — the brief and the plan cards work as before', () =
     const brief = t.company.brief();
     const copy = readFileSync(desk, 'utf8');
     const briefEvents = () => t.events.list({ limit: 5000 }).filter((e) => e.event.type === 'brief.updated').length;
-    await t.call(t.coordinator, 'profileUpdate', { section: 'identity', fields: { name: 'Tatlı Fırın', summary: 'ekmek' } });
-    await t.call(t.coordinator, 'profileUpdate', { section: 'success', fields: { done: ['ayda 300 ekmek'] } });
+    await t.call(t.coordinator, 'profileUpdate', { section: 'identity', fields: { name: 'Tatlı Fırın', summary: 'ekmek' }, assumed: false });
+    await t.call(t.coordinator, 'profileUpdate', { section: 'success', fields: { done: ['ayda 300 ekmek'] }, assumed: true });
     expect(t.company.brief()).toBe(brief);
     expect(await t.call(t.ada, 'briefRead')).toBe('# Özet\n\nMisyon: ekmek.\n');
     expect(readFileSync(desk, 'utf8')).toBe(copy);
@@ -160,7 +181,7 @@ describe('Company profile — the brief and the plan cards work as before', () =
   it('a plan card is the same with a profile as without one', async () => {
     const card = async (withProfile: boolean) => {
       const t = make();
-      if (withProfile) await t.call(t.coordinator, 'profileUpdate', { section: 'goals', fields: { goals: ['ilk ay 100 sipariş'], kpis: ['haftalık sipariş'] } });
+      if (withProfile) await t.call(t.coordinator, 'profileUpdate', { section: 'goals', fields: { goals: ['ilk ay 100 sipariş'], kpis: ['haftalık sipariş'] }, assumed: false });
       const answer = await t.call(t.coordinator, 'planPropose', { title: 'Açılış', goal: 'ilk siparişler', approach: 'Instagram', steps: ['menü', 'gönderi'], method: METHOD });
       const plan = t.plans.list()[0]!;
       t.company.approve(plan.id);

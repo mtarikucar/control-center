@@ -368,6 +368,7 @@ export const MIGRATIONS: Migration[] = [
     version: 12,
     name: 'company profile: sections, one row per version',
     // Append-only: a section's current state is its row with the highest version; the version is company-wide.
+    // assumed_fields: which fields are assumptions; assumed: any of them is.
     up: `
       CREATE TABLE IF NOT EXISTS company_profile (
         id TEXT PRIMARY KEY,
@@ -375,6 +376,7 @@ export const MIGRATIONS: Migration[] = [
         section TEXT NOT NULL,
         json TEXT NOT NULL,
         assumed INTEGER NOT NULL,
+        assumed_fields TEXT NOT NULL DEFAULT '[]',
         by TEXT NOT NULL,
         ts INTEGER NOT NULL
       );

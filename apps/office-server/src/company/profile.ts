@@ -27,22 +27,33 @@ function fieldValue(field: { label: string; kind: ProfileFieldKind }, raw: unkno
 
 /**
  * A section after an update: the given fields replace theirs, null / empty text / empty list remove them, the rest
- * stay. Unknown fields and wrong values are refused. Keys come out in the section's own order, so that equal contents
- * are equal JSON.
+ * stay. Where a value came from is kept per field: `assumed` says it for the fields given (true: an assumption, false:
+ * from the owner — which also confirms an assumed value given again); the other fields keep theirs, and a removed
+ * field is no assumption. Unknown fields and wrong values are refused. Keys come out in the section's own order, so
+ * that equal contents are equal JSON.
  */
-export function mergeProfile(section: ProfileSection, current: ProfileFields, patch: unknown): ProfileFields {
+export function mergeProfile(
+  section: ProfileSection,
+  current: { fields: ProfileFields; assumedFields: string[] },
+  patch: unknown,
+  assumed: boolean,
+): { fields: ProfileFields; assumedFields: string[] } {
   if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
     throw new ValidationError('Profilde alanlar (fields) bir nesne olmalı: alan adı → metin ya da metin listesi.');
   }
   const spec = PROFILE_SPEC[section];
-  const next: ProfileFields = { ...current };
+  const next: ProfileFields = { ...current.fields };
+  const guessed = new Set(current.assumedFields);
   for (const [key, raw] of Object.entries(patch)) {
     if (!Object.hasOwn(spec.fields, key)) throw new ValidationError(`${spec.label} bölümünde “${key}” alanı yok. Alanlar: ${Object.keys(spec.fields).join(', ')}.`);
     const value = fieldValue(spec.fields[key]!, raw);
     if (value === null) delete next[key];
     else next[key] = value;
+    if (value !== null && assumed) guessed.add(key);
+    else guessed.delete(key);
   }
-  return Object.fromEntries(Object.keys(spec.fields).flatMap((k) => (next[k] === undefined ? [] : [[k, next[k]]])));
+  const keys = Object.keys(spec.fields).filter((k) => next[k] !== undefined);
+  return { fields: Object.fromEntries(keys.map((k) => [k, next[k]!])), assumedFields: keys.filter((k) => guessed.has(k)) };
 }
 
 /** What each section holds, for the tools' descriptions: `identity (Kimlik): name, sector, …, languages[]`. */
@@ -55,12 +66,14 @@ export function profileFieldsHelp(): string {
 
 function sectionText(section: ProfileSection, entry: ProfileEntry | undefined): string {
   const spec = PROFILE_SPEC[section];
-  if (!entry || Object.keys(entry.fields).length === 0) return `## ${spec.label}${entry?.assumed ? ' (varsayım)' : ''}\nboş`;
-  const rows = Object.entries(entry.fields).map(([k, v]) => `- ${spec.fields[k]?.label ?? k}: ${Array.isArray(v) ? v.join('; ') : v}`);
-  return [`## ${spec.label}${entry.assumed ? ' (varsayım)' : ''}`, ...rows].join('\n');
+  if (!entry || Object.keys(entry.fields).length === 0) return `## ${spec.label}\nboş`;
+  const rows = Object.entries(entry.fields).map(
+    ([k, v]) => `- ${spec.fields[k]?.label ?? k}: ${Array.isArray(v) ? v.join('; ') : v}${entry.assumedFields.includes(k) ? ' (varsayım)' : ''}`,
+  );
+  return [`## ${spec.label}${entry.assumed ? ' (varsayım var)' : ''}`, ...rows].join('\n');
 }
 
-/** The profile as profileRead shows it: every section (or one), the empty ones as empty, the assumed ones marked. */
+/** The profile as profileRead shows it: every section (or one), the empty ones as empty, the assumed fields marked. */
 export function profileText(p: CompanyProfile, only?: ProfileSection): string {
   const head = p.version === 0 ? 'Şirket profili henüz boş: bölümleri koordinatör profileUpdate ile doldurur.' : `# Şirket profili (sürüm ${p.version})`;
   const sections = only ? [only] : [...PROFILE_SECTIONS];
@@ -71,6 +84,6 @@ export function profileText(p: CompanyProfile, only?: ProfileSection): string {
 export function profileHistoryText(section: ProfileSection, entries: ProfileEntry[], nameOf: (id: string) => string): string {
   const label = PROFILE_SPEC[section].label;
   if (entries.length === 0) return `${label} bölümü henüz hiç yazılmadı.`;
-  const rows = entries.map((e) => `• sürüm ${e.version}, ${nameOf(e.by)}, ${new Date(e.ts).toLocaleString('tr-TR')}${e.assumed ? ' (varsayım)' : ''}: ${JSON.stringify(e.fields)}`);
+  const rows = entries.map((e) => `• sürüm ${e.version}, ${nameOf(e.by)}, ${new Date(e.ts).toLocaleString('tr-TR')}${e.assumed ? ` (varsayım: ${e.assumedFields.join(', ')})` : ''}: ${JSON.stringify(e.fields)}`);
   return [`# Şirket profili — ${label} geçmişi (yeniden eskiye)`, ...rows].join('\n');
 }

@@ -254,7 +254,7 @@ describe('migrations', () => {
     migrateUp(db);
     expect(appliedVersion(db)).toBe(12);
     expect(tables(db)).toEqual(V12_TABLES);
-    expect(columns(db, 'company_profile')).toEqual(['id', 'version', 'section', 'json', 'assumed', 'by', 'ts']);
+    expect(columns(db, 'company_profile')).toEqual(['id', 'version', 'section', 'json', 'assumed', 'assumed_fields', 'by', 'ts']);
     expect(db.prepare('SELECT COUNT(*) AS n FROM company_profile').get()).toMatchObject({ n: 0 });
     db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p1', 1, 'identity', '{}', 0, 'c', 1)").run();
     expect(() => db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p2', 1, 'offer', '{}', 0, 'c', 1)").run()).toThrow(/UNIQUE/);

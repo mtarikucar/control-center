@@ -1256,20 +1256,21 @@ export class Company {
   }
 
   /**
-   * The coordinator writes one section: the given fields merged into it, under the next version. Returns the section
-   * as it stands; when nothing changes no version is opened and the current entry comes back. The brief is not touched.
+   * The coordinator writes one section: the given fields merged into it, under the next version, each marked an
+   * assumption or the owner's word as `assumed` says (required: no silent default). Returns the section as it stands;
+   * when nothing changes no version is opened and the current entry comes back. The brief is not touched.
    */
   profileUpdate(by: string, input: ProfileInput): ProfileEntry {
     this.#assertCoordinator(by);
     const store = this.#profile();
     const section = profileSection(input.section);
-    if (input.assumed !== undefined && typeof input.assumed !== 'boolean') throw new ValidationError('assumed true ya da false olmalı.');
-    const assumed = input.assumed ?? false;
+    if (input.assumed === undefined) throw new ValidationError('assumed gerekli: bu alanlar sahibinden mi (false), varsayım mı (true)?');
+    if (typeof input.assumed !== 'boolean') throw new ValidationError('assumed true ya da false olmalı.');
     const current = store.current().sections[section];
-    const fields = mergeProfile(section, current?.fields ?? {}, input.fields);
-    if (current && current.assumed === assumed && JSON.stringify(current.fields) === JSON.stringify(fields)) return current;
-    if (!current && !assumed && Object.keys(fields).length === 0) throw new ValidationError(`${PROFILE_SPEC[section].label} bölümü boş; yazacak bir alan ver.`);
-    const entry = store.write(section, fields, assumed, by);
+    const next = mergeProfile(section, current ?? { fields: {}, assumedFields: [] }, input.fields, input.assumed);
+    if (current && JSON.stringify([current.fields, current.assumedFields]) === JSON.stringify([next.fields, next.assumedFields])) return current;
+    if (!current && Object.keys(next.fields).length === 0) throw new ValidationError(`${PROFILE_SPEC[section].label} bölümü boş; yazacak bir alan ver.`);
+    const entry = store.write(section, next.fields, next.assumedFields, by);
     this.#emit(by, { type: 'profile.updated', entry });
     return entry;
   }
