@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { METHOD, PLANS_ONLY } from './company-helpers.ts';
+import { companyFor, METHOD, PLANS_ONLY } from './company-helpers.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
@@ -463,5 +463,49 @@ describe('Company — notice kinds', () => {
     expect(t.company.createTask(c.id, { assignee: can.id, title: 'mimari', difficulty: 'critical' }).difficulty).toBe('critical');
     t.company.appointLead(c.id, ada.id);
     expect(t.company.createTask(ada.id, { assignee: can.id, title: 'karar', difficulty: 'critical' }).difficulty).toBe('critical');
+  });
+});
+
+describe('Company — the office’s reminder', () => {
+  it('every change that resets the reminder also forgets when it came: start, park, return, unpark, assign, release, a review sent back', () => {
+    let clock = new Date(2026, 9, 7, 14, 10).getTime();
+    const s = setup(8, () => clock);
+    const f = fakeEngine(s);
+    cleanups.push(f.cleanup, s.cleanup);
+    const c = companyFor(s, f, undefined, () => clock);
+    const coord = c.company.hireCoordinator('sonnet');
+    const [ada, can] = [c.company.hire(coord.id, { name: 'Ada', role: 'r' }), c.company.hire(coord.id, { name: 'Can', role: 'r' })];
+    const remind = (id: string) => c.tasks.update(id, { nudged: true, nudgedAt: clock });
+    const forgotten = (id: string) => expect(c.tasks.get(id)).toMatchObject({ nudged: false, nudgedAt: null });
+    const task = c.company.createTask(coord.id, { assignee: ada.id, title: 'pilot' });
+    remind(task.id);
+    c.company.start(task.id);
+    forgotten(task.id);
+    remind(task.id);
+    c.company.parkTask(ada.id, task.id, '+1h', 'arka plan koşusu');
+    forgotten(task.id);
+    remind(task.id);
+    clock += 61 * 60_000;
+    expect(c.company.returnFromPark(task.id, clock)).not.toBeNull();
+    forgotten(task.id);
+    c.company.parkTask(ada.id, task.id, '+1h', 'yine bekle');
+    remind(task.id);
+    c.company.unparkTask(coord.id, task.id);
+    forgotten(task.id);
+    c.company.start(task.id);
+    remind(task.id);
+    c.company.assign(coord.id, task.id, can.id);
+    forgotten(task.id);
+    c.company.start(task.id);
+    remind(task.id);
+    c.company.releaseTasksOf(can.id);
+    forgotten(task.id);
+    const reviewed = c.company.createTask(coord.id, { assignee: ada.id, title: 'metin', reviewer: can.id });
+    c.company.start(reviewed.id);
+    c.company.finish(ada.id, reviewed.id, { summary: 'yazdım', outputs: [], learned: '' });
+    remind(reviewed.id);
+    const review = c.tasks.list({ assignee: can.id }).find((x) => x.kind === 'review')!;
+    c.company.reviewDecide(can.id, review.id, { decision: 'changes', findings: [{ severity: 'important', text: 'eksik' }] });
+    forgotten(reviewed.id);
   });
 });

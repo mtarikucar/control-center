@@ -19,6 +19,7 @@ interface TaskRow {
   note: string | null;
   result: string | null;
   nudged: number;
+  nudged_at: number | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
@@ -60,6 +61,7 @@ function taskFromRow(r: TaskRow): Task {
     note: r.note,
     result: r.result ? (JSON.parse(r.result) as TaskResult) : null,
     nudged: r.nudged === 1,
+    nudgedAt: r.nudged_at ?? null,
     createdAt: r.created_at,
     startedAt: r.started_at,
     finishedAt: r.finished_at,
@@ -90,7 +92,7 @@ export interface NewTask {
   chainDepth: number;
 }
 
-export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'reviewer' | 'round' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt' | 'notBefore' | 'dueAt' | 'parkedReason' | 'parkCount'>>;
+export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'reviewer' | 'round' | 'status' | 'note' | 'result' | 'nudged' | 'nudgedAt' | 'startedAt' | 'finishedAt' | 'notBefore' | 'dueAt' | 'parkedReason' | 'parkCount'>>;
 
 const OPEN = "('waiting', 'in_progress', 'review', 'blocked', 'parked')";
 /** Statuses the clock watches for a due date. */
@@ -109,7 +111,7 @@ export class TaskStore {
     const task: Task = {
       ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, reviewer: t.reviewer ?? null, reviewOf: t.reviewOf ?? null, round: 0,
       notBefore: t.notBefore ?? null, dueAt: t.dueAt ?? null, parkedReason: null, parkCount: 0, scheduleId: t.scheduleId ?? null,
-      id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null,
+      id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, nudgedAt: null, createdAt: this.#now(), startedAt: null, finishedAt: null,
     };
     this.#db
       .prepare(
@@ -147,15 +149,17 @@ export class TaskStore {
     return rows.map(taskFromRow);
   }
 
+  /** A reset reminder takes its time with it: every change that sets `nudged` false clears `nudgedAt` too. */
   update(id: string, patch: TaskPatch): Task {
     const next = { ...this.get(id), ...patch };
+    if (!next.nudged) next.nudgedAt = null;
     this.#db
       .prepare(
-        `UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, reviewer = ?, round = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ?,
+        `UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, reviewer = ?, round = ?, status = ?, note = ?, result = ?, nudged = ?, nudged_at = ?, started_at = ?, finished_at = ?,
            not_before = ?, due_at = ?, parked_reason = ?, park_count = ? WHERE id = ?`,
       )
       .run(
-        next.assignee, next.priority, next.difficulty ?? null, next.reviewer ?? null, next.round ?? 0, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt,
+        next.assignee, next.priority, next.difficulty ?? null, next.reviewer ?? null, next.round ?? 0, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.nudgedAt ?? null, next.startedAt, next.finishedAt,
         next.notBefore ?? null, next.dueAt ?? null, next.parkedReason ?? null, next.parkCount ?? 0, id,
       );
     return next;
@@ -251,7 +255,7 @@ export class TaskStore {
   /** A parked task comes back to the queue — once, and only when its time has come (atomic; a second call changes nothing). */
   returnParked(id: string, now: number): boolean {
     const r = this.#db
-      .prepare("UPDATE tasks SET status = 'waiting', not_before = NULL, started_at = NULL, nudged = 0 WHERE id = ? AND status = 'parked' AND not_before IS NOT NULL AND not_before <= ?")
+      .prepare("UPDATE tasks SET status = 'waiting', not_before = NULL, started_at = NULL, nudged = 0, nudged_at = NULL WHERE id = ? AND status = 'parked' AND not_before IS NOT NULL AND not_before <= ?")
       .run(id, now);
     return Number(r.changes) > 0;
   }

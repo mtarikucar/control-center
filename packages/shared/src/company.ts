@@ -87,8 +87,10 @@ export interface Task {
   chainDepth: number;
   note: string | null;
   result: TaskResult | null;
-  /** The office reminded the assignee once that this task is still open. */
+  /** The office reminded the assignee that this task is still open (since it last started or moved). */
   nudged: boolean;
+  /** When the office last reminded them (epoch ms); null with no reminder, or one from before the time was kept. */
+  nudgedAt?: number | null;
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;

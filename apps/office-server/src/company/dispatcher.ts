@@ -43,10 +43,15 @@ export const WORK_CLOSING =
 export const REVIEW_CLOSING =
   'Kararını `reviewDecide` ile ver: bu inceleme görevinin no’su, approve ya da changes, bulgular (her biri için severity — critical, important ya da minor — ve somut bir senaryo). Her iddiayı kendin doğrula; düzeltmeyi kendin yapma, yapana bırak. `taskFinish` kullanma.';
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** An unanswered reminder comes again after this long (a sleep or a restart may have stopped the work it waited for). */
+export const RENUDGE_MS = 30 * 60_000;
+/** The coordinator hears about the same stalled task again only after this long. */
+export const ESCALATE_MS = 2 * 60 * 60_000;
 
 /**
  * Hands work to employees when they are free: the next task in their queue, the notices that need them (a plan was
- * approved, someone is stuck), or one reminder about a task they left open. Notices for the record (a colleague
+ * approved, someone is stuck), or a reminder about a task they left open (again every RENUDGE_MS while it stays
+ * unanswered, and then the coordinator hears, at most every ESCALATE_MS). Notices for the record (a colleague
  * handed in) ride along on those turns, or come together in one digest at the constitution's digest hours; the
  * coordinator's daily report reminder comes with the day's last digest. Never interrupts: it waits for the employee
  * to be idle (v1 rule: only the owner interrupts).
@@ -55,8 +60,8 @@ export class Dispatcher {
   readonly #d: DispatcherDeps;
   readonly #defer: (fn: () => void) => void;
   readonly #queued = new Set<string>();
-  /** Stalled tasks the coordinator has been told about (once per office run). */
-  readonly #escalated = new Set<string>();
+  /** When the coordinator was last told about each stalled task (again only after ESCALATE_MS; kept per office run). */
+  readonly #escalated = new Map<string, number>();
   /** Being let go after their hand-over (fire is under way). */
   readonly #leaving = new Set<string>();
   readonly #now: () => number;
@@ -160,12 +165,18 @@ export class Dispatcher {
     const focus = handover && handover.status !== 'waiting' ? handover : this.#d.tasks.inProgressOf(id);
     let body = '';
     let started: Task | null = null;
+    let reminded: Task | null = null;
     if (handover?.status === 'waiting') {
       // Leaving comes first, even with another task open: that task goes back to the coordinator afterwards.
       started = this.#d.company.start(handover.id);
     } else if (focus) {
-      if (!focus.nudged) body = this.#nudge(focus);
-      else this.#escalate(id, focus);
+      // A reminder from before its time was kept counts as long ago. Until RENUDGE_MS has passed they work or wait.
+      const since = focus.nudged ? this.#now() - (focus.nudgedAt ?? 0) : null;
+      if (since === null || since >= RENUDGE_MS) {
+        reminded = focus;
+        body = this.#nudge(focus, since !== null);
+        if (since !== null) this.#escalate(id, focus);
+      }
     } else {
       const next = this.#d.tasks.nextFor(id);
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
@@ -195,7 +206,7 @@ export class Dispatcher {
       if (started) this.#putBack(id, started);
       return;
     }
-    if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
+    if (reminded) this.#d.tasks.update(reminded.id, { nudged: true, nudgedAt: this.#now() });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
     if (report !== null) this.#d.events.append(id, { type: 'report.reminded', slot: report });
   }
@@ -370,10 +381,11 @@ ${task.kind === 'review' ? REVIEW_CLOSING : WORK_CLOSING}`;
 
   /** Still open after the reminder: the queue behind it is stuck, so the coordinator decides (ask, or taskAssign). */
   #escalate(id: string, task: Task): void {
-    if (this.#escalated.has(task.id)) return;
+    const last = this.#escalated.get(task.id);
+    if (last !== undefined && this.#now() - last < ESCALATE_MS) return;
     const coordinator = this.#d.company.coordinator();
     if (!coordinator || coordinator.id === id) return;
-    this.#escalated.add(task.id);
+    this.#escalated.set(task.id, this.#now());
     const name = this.#d.company.nameOf(id);
     this.#d.notices.add(
       coordinator.id,
@@ -385,8 +397,19 @@ ${task.kind === 'review' ? REVIEW_CLOSING : WORK_CLOSING}`;
     this.#schedule(coordinator.id);
   }
 
-  #nudge(task: Task): string {
-    if (task.kind === 'review') return `${NUDGE_PREFIX} “${task.title}” (no ${task.id}) hâlâ açık. Kararını \`reviewDecide\` ile ver.`;
-    return `${NUDGE_PREFIX} “${task.title}” görevi (no ${task.id}) hâlâ açık görünüyor. Bitirdiysen \`taskFinish\` ile teslim et; takıldıysan \`taskUpdate\` ile durumunu yaz.`;
+  /** `again`: the last reminder went unanswered — the work may have stopped under them (a sleep, a restart). */
+  #nudge(task: Task, again: boolean): string {
+    if (!again) {
+      if (task.kind === 'review') return `${NUDGE_PREFIX} “${task.title}” (no ${task.id}) hâlâ açık. Kararını \`reviewDecide\` ile ver.`;
+      return `${NUDGE_PREFIX} “${task.title}” görevi (no ${task.id}) hâlâ açık görünüyor. Bitirdiysen \`taskFinish\` ile teslim et; takıldıysan \`taskUpdate\` ile durumunu yaz.`;
+    }
+    const stopped = 'Uyutulduysan ya da ofis yeniden başladıysa arka planda çalışan işin durmuş olabilir: kaldığın yerden devam et.';
+    if (task.kind === 'review') return `${NUDGE_PREFIX} “${task.title}” (no ${task.id}) hâlâ sende ve bir süredir karara bağlanmadı. ${stopped} Kararını \`reviewDecide\` ile ver.`;
+    // A hand-over cannot be parked.
+    const ways =
+      task.kind === 'handover'
+        ? 'Bitirdiysen `taskFinish` ile teslim et; takıldıysan `taskUpdate` ile yaz.'
+        : 'Bir şey bekliyorsan görevi `taskPark` ile park et; bitirdiysen `taskFinish` ile teslim et; takıldıysan `taskUpdate` ile yaz.';
+    return `${NUDGE_PREFIX} “${task.title}” görevi (no ${task.id}) hâlâ sende ve bir süredir ilerlemiyor. ${stopped} ${ways}`;
   }
 }

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
 import { Clock } from '../src/company/clock.ts';
 import { Company } from '../src/company/company.ts';
-import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
+import { Dispatcher, ESCALATE_MS, NOTICES_PREFIX, NUDGE_PREFIX, RENUDGE_MS } from '../src/company/dispatcher.ts';
 import { Pulse } from '../src/company/pulse.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { companyFor, METHOD, PLANS_ONLY } from './company-helpers.ts';
@@ -16,14 +16,15 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
-function make() {
+/** `now` (optional) is the dispatcher's clock, ticking every 50 ms. */
+function make(now?: () => number) {
   const s = setup();
   const f = fakeEngine(s);
   const tasks = new TaskStore(s.db);
   const plans = new PlanStore(s.db);
   const notices = new NoticeStore(s.db);
   const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
-  const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks, notices, plans, company, engine: f.engine });
+  const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks, notices, plans, company, engine: f.engine, ...(now ? { now, tickMs: 50 } : {}) });
   const stop = dispatcher.start();
   cleanups.push(stop, f.cleanup, s.cleanup);
   return { ...s, engine: f.engine, tasks, plans, notices, company };
@@ -92,12 +93,15 @@ describe('Dispatcher', () => {
     expect(systemMessages(t.events.list({ limit: 5000 }), ada.id)).toEqual([]);
   });
 
-  it('final review: tells the coordinator once when someone stalls after the reminder', async () => {
-    const t = make();
+  it('final review: tells the coordinator once when someone stalls after the reminder (with the second reminder)', async () => {
+    let clock = Date.now();
+    const t = make(() => clock);
     const c = t.company.hireCoordinator();
     const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
     t.company.createTask(c.id, { assignee: ada.id, title: 'Uzun iş' });
     const escalations = () => systemMessages(t.events.list({ limit: 5000 }), c.id).filter((m) => m.includes('teslim etmedi'));
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.startsWith(NUDGE_PREFIX)), 8000);
+    clock += RENUDGE_MS;
     await until(() => escalations().length > 0, 8000);
     await sleep(800);
     expect(escalations()).toHaveLength(1);
@@ -105,12 +109,103 @@ describe('Dispatcher', () => {
   });
 });
 
-describe('Dispatcher — hand-over and the brief', () => {
-  function makeFull() {
+describe('Dispatcher — stall recovery', () => {
+  const MIN = 60_000;
+  /** The dispatcher on a clock the test moves (its tick every 50 ms sweeps everyone, as the real 60 s one does). */
+  function makeClocked() {
     const s = setup();
     const f = fakeEngine(s);
     const c = companyFor(s, f);
-    const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine }).start();
+    let clock = Date.now();
+    const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, now: () => clock, tickMs: 50 }).start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    const stalled = () => s.db.prepare("SELECT text FROM notices WHERE topic = 'task.stalled' ORDER BY id").all().map((r) => (r as { text: string }).text);
+    const nudges = (id: string) => systemMessages(s.events.list({ limit: 5000 }), id).filter((m) => m.startsWith(NUDGE_PREFIX));
+    return { ...s, ...c, engine: f.engine, now: () => clock, advance: (ms: number) => (clock += ms), stalled, nudges };
+  }
+
+  it('A1: an unanswered reminder comes again after 30 minutes, not before, and the coordinator hears with it', async () => {
+    const t = makeClocked();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Pilot' });
+    await until(() => t.nudges(ada.id).length === 1, 8000);
+    expect(t.nudges(ada.id)[0]).toContain('hâlâ açık görünüyor');
+    expect(t.tasks.get(task.id)).toMatchObject({ status: 'in_progress', nudged: true, nudgedAt: t.now() });
+    t.advance(RENUDGE_MS - MIN);
+    await sleep(400);
+    expect(t.nudges(ada.id)).toHaveLength(1);
+    expect(t.stalled()).toEqual([]);
+    t.advance(MIN);
+    await until(() => t.nudges(ada.id).length === 2, 8000);
+    expect(t.nudges(ada.id)[1]).toBe(
+      `${NUDGE_PREFIX} “Pilot” görevi (no ${task.id}) hâlâ sende ve bir süredir ilerlemiyor. Uyutulduysan ya da ofis yeniden başladıysa arka planda çalışan işin durmuş olabilir: kaldığın yerden devam et. Bir şey bekliyorsan görevi \`taskPark\` ile park et; bitirdiysen \`taskFinish\` ile teslim et; takıldıysan \`taskUpdate\` ile yaz.`,
+    );
+    expect(t.tasks.get(task.id).nudgedAt).toBe(t.now());
+    expect(t.stalled()).toHaveLength(1);
+    expect(t.stalled()[0]).toContain('“Pilot”');
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Pilot') && m.includes('teslim etmedi')), 8000);
+    await sleep(300);
+    expect(t.nudges(ada.id)).toHaveLength(2);
+  });
+
+  it('A2: the coordinator hears about the same stalled task again only after 2 hours, and never about its own task', async () => {
+    const t = makeClocked();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    t.company.createTask(coord.id, { assignee: ada.id, title: 'Pilot' });
+    t.company.createTask(coord.id, { assignee: coord.id, title: 'Kendi işim' });
+    await until(() => t.nudges(ada.id).length === 1 && t.nudges(coord.id).length === 1, 8000);
+    const told: number[] = [];
+    for (let n = 2; n <= 6; n += 1) {
+      t.advance(RENUDGE_MS);
+      await until(() => t.nudges(ada.id).length === n && t.nudges(coord.id).length === n, 8000);
+      told.push(t.stalled().length);
+    }
+    // Told with the second reminder (30 min); at 60, 90 and 120 min that is under ESCALATE_MS ago; at 150 min, again.
+    expect(ESCALATE_MS).toBe(4 * RENUDGE_MS);
+    expect(told).toEqual([1, 1, 1, 1, 2]);
+    expect(t.stalled().every((x) => x.includes('“Pilot”'))).toBe(true);
+  });
+
+  it('A1: a task reminded before the time was kept (an office from before v11) is reminded again at once', async () => {
+    const t = makeClocked();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id), 8000);
+    await t.engine.stop(ada.id);
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Pilot' });
+    t.company.start(task.id);
+    t.tasks.update(task.id, { nudged: true });
+    t.engine.resume(ada.id);
+    await until(() => t.nudges(ada.id).length === 1, 8000);
+    expect(t.nudges(ada.id)[0]).toContain('hâlâ sende');
+    expect(t.tasks.get(task.id).nudgedAt).toBe(t.now());
+    expect(t.stalled()).toHaveLength(1);
+  });
+
+  it('A3: a review is reminded again to decide, with reviewDecide', async () => {
+    const t = makeClocked();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Metin', reviewer: can.id });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    t.company.finish(ada.id, task.id, { summary: 'yazdım', outputs: [], learned: '' });
+    await until(() => t.nudges(can.id).length === 1, 8000);
+    t.advance(RENUDGE_MS);
+    await until(() => t.nudges(can.id).length === 2, 8000);
+    expect(t.nudges(can.id)[1]).toContain('hâlâ sende');
+    expect(t.nudges(can.id)[1]).toContain('reviewDecide');
+    expect(t.nudges(can.id)[1]).not.toContain('taskFinish');
+  });
+});
+
+describe('Dispatcher — hand-over and the brief', () => {
+  function makeFull(now?: () => number) {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, ...(now ? { now, tickMs: 50 } : {}) }).start();
     cleanups.push(stop, f.cleanup, s.cleanup);
     return { ...s, ...c, engine: f.engine };
   }
@@ -162,7 +257,8 @@ describe('Dispatcher — hand-over and the brief', () => {
 
 
   it('important: a blocked hand-over still means leaving: no new work, one reminder, then the coordinator hears (no taskAssign)', async () => {
-    const t = makeFull();
+    let clock = Date.now();
+    const t = makeFull(() => clock);
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
     const handover = t.company.beginHandover(ada.id);
@@ -170,7 +266,11 @@ describe('Dispatcher — hand-over and the brief', () => {
     t.company.update(ada.id, handover.id, { blocked: true, note: 'ne yazacağımı bilmiyorum' });
     const work = t.company.createTask(coord.id, { assignee: ada.id, title: 'Yeni iş' });
     const escalated = () => systemMessages(t.events.list({ limit: 5000 }), coord.id).find((m) => m.includes('devir görevini'));
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.startsWith(NUDGE_PREFIX)), 8000);
+    clock += RENUDGE_MS;
     await until(() => escalated() !== undefined, 8000);
+    // A hand-over cannot be parked: its second reminder does not offer it.
+    expect(systemMessages(t.events.list({ limit: 5000 }), ada.id).filter((m) => m.startsWith(NUDGE_PREFIX)).at(-1)).not.toContain('taskPark');
     expect(escalated()).toContain('Hemen çıkar');
     expect(escalated()).not.toContain('taskAssign ile başkasına ver');
     await sleep(500);

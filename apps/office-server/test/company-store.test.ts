@@ -23,6 +23,19 @@ describe('TaskStore', () => {
     expect(created).toMatchObject({ status: 'waiting', done: ['a', 'b'], note: null, result: null, nudged: false, startedAt: null });
   });
 
+  it('keeps when the office last reminded, and forgets it with the reminder (an update or a park’s return)', () => {
+    const { tasks } = stores();
+    const created = tasks.create(task());
+    expect(created.nudgedAt).toBeNull();
+    expect(tasks.update(created.id, { status: 'in_progress', nudged: true, nudgedAt: 5 })).toMatchObject({ nudged: true, nudgedAt: 5 });
+    expect(tasks.get(created.id)).toMatchObject({ nudged: true, nudgedAt: 5 });
+    expect(tasks.update(created.id, { nudged: false })).toMatchObject({ nudged: false, nudgedAt: null });
+    expect(tasks.get(created.id)).toMatchObject({ nudged: false, nudgedAt: null });
+    tasks.update(created.id, { status: 'parked', notBefore: 10, nudged: true, nudgedAt: 6 });
+    expect(tasks.returnParked(created.id, 10)).toBe(true);
+    expect(tasks.get(created.id)).toMatchObject({ status: 'waiting', nudged: false, nudgedAt: null });
+  });
+
   it('gives the most urgent waiting task first, then the oldest, and skips tasks whose dependencies are not done', () => {
     const { tasks } = stores();
     const later = tasks.create(task({ title: 'sonra', priority: 3 }));

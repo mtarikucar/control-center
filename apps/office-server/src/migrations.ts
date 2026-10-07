@@ -357,4 +357,11 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE tasks DROP COLUMN due_at;
       ALTER TABLE tasks DROP COLUMN not_before;`,
   },
+  {
+    version: 11,
+    name: 'stall recovery: when a task was last reminded',
+    // Tasks from before: no time; one already reminded counts as reminded long ago, so it is reminded again.
+    up: `ALTER TABLE tasks ADD COLUMN nudged_at INTEGER;`,
+    down: `ALTER TABLE tasks DROP COLUMN nudged_at;`,
+  },
 ];

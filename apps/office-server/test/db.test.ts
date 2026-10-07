@@ -25,7 +25,7 @@ const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version)
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(10);
+    expect(migrateUp(db)).toBe(11);
     expect(tables(db)).toEqual(V10_TABLES);
   });
 
@@ -35,14 +35,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(10);
+    expect(migrateUp(db)).toBe(11);
     expect(tables(db)).toEqual(V10_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(10);
+    expect(migrateUp(db)).toBe(11);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -224,6 +224,25 @@ describe('migrations', () => {
     for (const col of ['not_before', 'due_at', 'parked_reason', 'park_count', 'schedule_id', 'overdue_notified']) expect(columns(db, 'tasks')).not.toContain(col);
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
     expect(migrateDown(db, 9)).toBe(9);
-    expect(migrateUp(db)).toBe(10);
+    expect(migrateUp(db, upTo(10))).toBe(10);
+  });
+
+  it('v11 gives tasks the time of their last reminder, none for older ones; v11 down restores v10 exactly and keeps them', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(10));
+    const before = columns(db, 'tasks');
+    db.prepare(
+      `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, nudged, created_at, started_at)
+       VALUES ('t1', NULL, 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'in_progress', 0, 1, 1, 2)`,
+    ).run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(11);
+    expect({ ...(db.prepare('SELECT nudged, nudged_at FROM tasks').get() as object) }).toEqual({ nudged: 1, nudged_at: null });
+    expect(migrateDown(db, 10)).toBe(10);
+    expect(columns(db, 'tasks')).toEqual(before);
+    expect({ ...(db.prepare('SELECT id, status, nudged FROM tasks').get() as object) }).toEqual({ id: 't1', status: 'in_progress', nudged: 1 });
+    expect(migrateDown(db, 10)).toBe(10);
+    expect(migrateUp(db)).toBe(11);
+    expect(columns(db, 'tasks')).toContain('nudged_at');
   });
 });

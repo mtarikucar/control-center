@@ -5,7 +5,7 @@ import { methodText } from '../company/craft.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
 import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
-import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
 
@@ -430,12 +430,18 @@ export function officeTools(o: {
     },
     {
       name: 'sleep',
-      description: 'Put an idle employee to sleep to free the machine (coordinator). Their session is kept; a task for them or a message wakes them.',
+      description:
+        'Put an idle employee to sleep to free the machine (coordinator). Their session is kept; a task for them or a message wakes them. Not while they hold a task in progress: sleeping stops their running work, so park it first or let it finish.',
       inputSchema: object({ employee: s('Employee id or name.') }, ['employee']),
       kinds: COORDINATOR,
       run: async ({ employee }, args) => {
         const who = findPerson(str(args, 'employee'));
         if (who.id === employee.id) throw new ValidationError('Kendini uyutamazsın.');
+        // Sleeping ends the session's process, and with it anything the session runs in the background.
+        const running = tasks.inProgressOf(who.id);
+        if (running) {
+          throw new ConflictError(`${who.name} “${running.title}” görevinde (no ${running.id}) çalışıyor; uyutmak süren işini durdurur. Önce görevi \`taskPark\` ile park et ya da bitirmesini bekle.`);
+        }
         await engine.sleep(who.id);
         return `${who.name} uyudu.`;
       },

@@ -177,6 +177,21 @@ describe('office tools', () => {
     await expect(t.call(c, 'sleep', { employee: c.id })).rejects.toThrow(/Kendini uyutamazsın/);
   });
 
+  it('A4: the coordinator cannot put to sleep someone running a task (it would stop their work); parked, they may sleep', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id));
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'Pilot' });
+    t.company.start(task.id);
+    const refused = t.call(c, 'sleep', { employee: 'Ada' });
+    await expect(refused).rejects.toMatchObject({ status: 409 });
+    await expect(refused).rejects.toThrow(`Ada “Pilot” görevinde (no ${task.id}) çalışıyor; uyutmak süren işini durdurur. Önce görevi \`taskPark\` ile park et ya da bitirmesini bekle.`);
+    expect(t.roster.get(ada.id).lifecycle).toBe('idle');
+    t.company.parkTask(c.id, task.id, '+1h', 'arka plan koşusu bitsin');
+    expect(await t.call(c, 'sleep', { employee: 'Ada' })).toBe('Ada uyudu.');
+  });
+
   it('lets anyone propose and the decider see and settle it; a purchase says it went to the owner', async () => {
     const t = make();
     const c = t.company.hireCoordinator();
