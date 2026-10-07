@@ -120,6 +120,7 @@ let initSent = false;
 let busy = null;
 
 async function turn(text, uuid) {
+  // The real CLI announces itself (system init) at every turn; once per process is enough for the office.
   if (!initSent) {
     out({ type: 'system', subtype: 'init', model: opt('--model') ?? 'fake-model', cwd: process.cwd(), permissionMode: 'bypassPermissions', mcp_servers: [{ name: 'office', status: 'connected' }] });
     initSent = true;

@@ -18,7 +18,10 @@ export interface Constitution {
   digestHours: number[];
   /** The coordinator's model by what a turn is for: the owner's messages, decisions (notices, tasks, reminders), digests. */
   coordinatorModels: { owner: ModelAlias; decision: ModelAlias; digest: ModelAlias };
-  /** Minutes a session's prompt cache stays warm: a session moves to a weaker model only after this long without a turn. */
+  /**
+   * A session moves to a weaker model only after this long without a turn, so a conversation does not flap between
+   * models. (Named for the prompt cache; the real CLI keeps it warm longer — over 6½ minutes, measured 2026-10-07.)
+   */
   cacheTtlMinutes: number;
   /** The model a task starts on, by its difficulty. */
   difficultyModels: Record<TaskDifficulty, ModelAlias>;
