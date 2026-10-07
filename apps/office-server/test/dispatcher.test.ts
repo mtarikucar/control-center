@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
 import { Clock } from '../src/company/clock.ts';
 import { Company } from '../src/company/company.ts';
-import { Dispatcher, ESCALATE_MS, NOTICES_PREFIX, NUDGE_PREFIX, RENUDGE_MS } from '../src/company/dispatcher.ts';
+import { Dispatcher, ESCALATE_MS, NOTICES_PREFIX, NUDGE_PREFIX, RENUDGE_MS, type DispatchEngine } from '../src/company/dispatcher.ts';
 import { Pulse } from '../src/company/pulse.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { companyFor, METHOD, PLANS_ONLY } from './company-helpers.ts';
@@ -111,92 +111,128 @@ describe('Dispatcher', () => {
 
 describe('Dispatcher — stall recovery', () => {
   const MIN = 60_000;
-  /** The dispatcher on a clock the test moves (its tick every 50 ms sweeps everyone, as the real 60 s one does). */
-  function makeClocked() {
+  /**
+   * Driven by the test, so it is exact under any load: the dispatcher's clock is moved by hand, its tick is called
+   * directly and its deferred work runs in `settle`; the engine only records what it is given, and everyone is idle
+   * again at once (a doer who answers without handing in). People are hired on the fake engine only to be on the roster.
+   */
+  function makeDriven() {
     const s = setup();
     const f = fakeEngine(s);
     const c = companyFor(s, f);
     let clock = Date.now();
-    const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, now: () => clock, tickMs: 50 }).start();
-    cleanups.push(stop, f.cleanup, s.cleanup);
+    const sent: Array<{ id: string; text: string }> = [];
+    const engine: DispatchEngine = {
+      ready: () => true,
+      send: (id, text) => void sent.push({ id, text }),
+      fire: async () => undefined,
+      sleep: async () => undefined,
+      wake: () => undefined,
+    };
+    const deferred: Array<() => void> = [];
+    const dispatcher = new Dispatcher({
+      events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine,
+      now: () => clock, defer: (fn) => void deferred.push(fn), tickMs: 3_600_000,
+    });
+    cleanups.push(dispatcher.start(), f.cleanup, s.cleanup);
+    /** Runs the dispatcher's deferred work until none is left. */
+    const settle = () => {
+      for (let round = 0; deferred.length > 0; round += 1) {
+        if (round > 100) throw new Error('the dispatcher never came to rest');
+        for (const fn of deferred.splice(0)) fn();
+      }
+    };
+    /** Time passes and the office's tick runs (the real one, every 60 s, sweeps everyone). */
+    const tickAfter = (ms: number) => {
+      clock += ms;
+      dispatcher.tick();
+      settle();
+    };
+    const received = (id: string) => sent.filter((m) => m.id === id).map((m) => m.text);
+    // A reminder may ride on a turn with notices: any paragraph that is one counts.
+    const reminders = (id: string) => received(id).flatMap((m) => m.split('\n\n').filter((p) => p.startsWith(NUDGE_PREFIX)));
     const stalled = () => s.db.prepare("SELECT text FROM notices WHERE topic = 'task.stalled' ORDER BY id").all().map((r) => (r as { text: string }).text);
-    const nudges = (id: string) => systemMessages(s.events.list({ limit: 5000 }), id).filter((m) => m.startsWith(NUDGE_PREFIX));
-    return { ...s, ...c, engine: f.engine, now: () => clock, advance: (ms: number) => (clock += ms), stalled, nudges };
+    return { ...s, ...c, now: () => clock, settle, tickAfter, received, reminders, stalled };
   }
 
-  it('A1: an unanswered reminder comes again after 30 minutes, not before, and the coordinator hears with it', async () => {
-    const t = makeClocked();
+  it('A1: an unanswered reminder comes again after 30 minutes, not before, and the coordinator hears with it', () => {
+    const t = makeDriven();
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
     const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Pilot' });
-    await until(() => t.nudges(ada.id).length === 1, 8000);
-    expect(t.nudges(ada.id)[0]).toContain('hâlâ açık görünüyor');
+    t.settle();
+    expect(t.received(ada.id)[0]).toContain('## Görev: Pilot');
+    expect(t.reminders(ada.id)).toHaveLength(1);
+    expect(t.reminders(ada.id)[0]).toContain('hâlâ açık görünüyor');
     expect(t.tasks.get(task.id)).toMatchObject({ status: 'in_progress', nudged: true, nudgedAt: t.now() });
-    t.advance(RENUDGE_MS - MIN);
-    await sleep(400);
-    expect(t.nudges(ada.id)).toHaveLength(1);
+    t.tickAfter(RENUDGE_MS - MIN);
+    expect(t.reminders(ada.id)).toHaveLength(1);
     expect(t.stalled()).toEqual([]);
-    t.advance(MIN);
-    await until(() => t.nudges(ada.id).length === 2, 8000);
-    expect(t.nudges(ada.id)[1]).toBe(
+    t.tickAfter(MIN);
+    expect(t.reminders(ada.id)).toHaveLength(2);
+    expect(t.reminders(ada.id)[1]).toBe(
       `${NUDGE_PREFIX} “Pilot” görevi (no ${task.id}) hâlâ sende ve bir süredir ilerlemiyor. Uyutulduysan ya da ofis yeniden başladıysa arka planda çalışan işin durmuş olabilir: kaldığın yerden devam et. Bir şey bekliyorsan görevi \`taskPark\` ile park et; bitirdiysen \`taskFinish\` ile teslim et; takıldıysan \`taskUpdate\` ile yaz.`,
     );
     expect(t.tasks.get(task.id).nudgedAt).toBe(t.now());
     expect(t.stalled()).toHaveLength(1);
     expect(t.stalled()[0]).toContain('“Pilot”');
-    await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Pilot') && m.includes('teslim etmedi')), 8000);
-    await sleep(300);
-    expect(t.nudges(ada.id)).toHaveLength(2);
+    expect(t.received(coord.id).some((m) => m.includes('Pilot') && m.includes('teslim etmedi'))).toBe(true);
+    // Nothing more at the same moment: the next reminder is 30 minutes away.
+    t.tickAfter(0);
+    expect(t.reminders(ada.id)).toHaveLength(2);
+    expect(t.stalled()).toHaveLength(1);
   });
 
-  it('A2: the coordinator hears about the same stalled task again only after 2 hours, and never about its own task', async () => {
-    const t = makeClocked();
+  it('A2: the coordinator hears about the same stalled task again only after 2 hours, and never about its own task', () => {
+    const t = makeDriven();
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
     t.company.createTask(coord.id, { assignee: ada.id, title: 'Pilot' });
     t.company.createTask(coord.id, { assignee: coord.id, title: 'Kendi işim' });
-    await until(() => t.nudges(ada.id).length === 1 && t.nudges(coord.id).length === 1, 8000);
+    t.settle();
+    expect([t.reminders(ada.id).length, t.reminders(coord.id).length]).toEqual([1, 1]);
     const told: number[] = [];
     for (let n = 2; n <= 6; n += 1) {
-      t.advance(RENUDGE_MS);
-      await until(() => t.nudges(ada.id).length === n && t.nudges(coord.id).length === n, 8000);
+      t.tickAfter(RENUDGE_MS);
+      expect([t.reminders(ada.id).length, t.reminders(coord.id).length]).toEqual([n, n]);
       told.push(t.stalled().length);
     }
     // Told with the second reminder (30 min); at 60, 90 and 120 min that is under ESCALATE_MS ago; at 150 min, again.
     expect(ESCALATE_MS).toBe(4 * RENUDGE_MS);
     expect(told).toEqual([1, 1, 1, 1, 2]);
     expect(t.stalled().every((x) => x.includes('“Pilot”'))).toBe(true);
+    expect(t.received(coord.id).some((m) => m.includes('Kendi işim') && m.includes('teslim etmedi'))).toBe(false);
   });
 
-  it('A1: a task reminded before the time was kept (an office from before v11) is reminded again at once', async () => {
-    const t = makeClocked();
+  it('A1: a task reminded before the time was kept (an office from before v11) is reminded again at once', () => {
+    const t = makeDriven();
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
-    await until(() => t.engine.ready(ada.id), 8000);
-    await t.engine.stop(ada.id);
     const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Pilot' });
     t.company.start(task.id);
     t.tasks.update(task.id, { nudged: true });
-    t.engine.resume(ada.id);
-    await until(() => t.nudges(ada.id).length === 1, 8000);
-    expect(t.nudges(ada.id)[0]).toContain('hâlâ sende');
+    t.settle();
+    expect(t.reminders(ada.id)).toHaveLength(1);
+    expect(t.reminders(ada.id)[0]).toContain('hâlâ sende');
     expect(t.tasks.get(task.id).nudgedAt).toBe(t.now());
     expect(t.stalled()).toHaveLength(1);
   });
 
-  it('A3: a review is reminded again to decide, with reviewDecide', async () => {
-    const t = makeClocked();
+  it('A3: a review is reminded again to decide, with reviewDecide', () => {
+    const t = makeDriven();
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
     const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
     const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Metin', reviewer: can.id });
-    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    t.settle();
+    expect(t.tasks.get(task.id).status).toBe('in_progress');
     t.company.finish(ada.id, task.id, { summary: 'yazdım', outputs: [], learned: '' });
-    await until(() => t.nudges(can.id).length === 1, 8000);
-    t.advance(RENUDGE_MS);
-    await until(() => t.nudges(can.id).length === 2, 8000);
-    expect(t.nudges(can.id)[1]).toContain('hâlâ sende');
-    expect(t.nudges(can.id)[1]).toContain('reviewDecide');
-    expect(t.nudges(can.id)[1]).not.toContain('taskFinish');
+    t.settle();
+    expect(t.reminders(can.id)).toHaveLength(1);
+    t.tickAfter(RENUDGE_MS);
+    expect(t.reminders(can.id)).toHaveLength(2);
+    expect(t.reminders(can.id)[1]).toContain('hâlâ sende');
+    expect(t.reminders(can.id)[1]).toContain('reviewDecide');
+    expect(t.reminders(can.id)[1]).not.toContain('taskFinish');
   });
 });
 
@@ -269,8 +305,11 @@ describe('Dispatcher — hand-over and the brief', () => {
     await until(() => systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.startsWith(NUDGE_PREFIX)), 8000);
     clock += RENUDGE_MS;
     await until(() => escalated() !== undefined, 8000);
-    // A hand-over cannot be parked: its second reminder does not offer it.
-    expect(systemMessages(t.events.list({ limit: 5000 }), ada.id).filter((m) => m.startsWith(NUDGE_PREFIX)).at(-1)).not.toContain('taskPark');
+    // A hand-over cannot be parked: its second reminder (logged before the coordinator was told) does not offer it.
+    const reminders = systemMessages(t.events.list({ limit: 5000 }), ada.id).flatMap((m) => m.split('\n\n').filter((p) => p.startsWith(NUDGE_PREFIX)));
+    expect(reminders).toHaveLength(2);
+    expect(reminders[1]).toContain('hâlâ sende');
+    expect(reminders[1]).not.toContain('taskPark');
     expect(escalated()).toContain('Hemen çıkar');
     expect(escalated()).not.toContain('taskAssign ile başkasına ver');
     await sleep(500);
