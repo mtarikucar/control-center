@@ -292,9 +292,9 @@ describe('migrations', () => {
     expect(appliedVersion(db)).toBe(14);
     expect(tables(db)).toEqual(V14_TABLES);
     expect(columns(db, 'onboarding')).toEqual(['id', 'description', 'status', 'started_by', 'started_at', 'finished_at']);
-    expect(columns(db, 'onboarding_rounds')).toEqual(['onboarding_id', 'round', 'questions', 'asked_at']);
-    db.prepare("INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at) VALUES ('o1', 1, '[]', 1)").run();
-    expect(() => db.prepare("INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at) VALUES ('o1', 1, '[]', 2)").run()).toThrow(/UNIQUE|PRIMARY/);
+    expect(columns(db, 'onboarding_rounds')).toEqual(['onboarding_id', 'round', 'questions', 'asked_at', 'seq']);
+    db.prepare("INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at, seq) VALUES ('o1', 1, '[]', 1, 7)").run();
+    expect(() => db.prepare("INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at, seq) VALUES ('o1', 1, '[]', 2, 8)").run()).toThrow(/UNIQUE|PRIMARY/);
     expect(migrateDown(db, 13)).toBe(13);
     expect(tables(db)).toEqual(V13_TABLES);
     expect(db.prepare('SELECT COUNT(*) AS n FROM company_profile').get()).toMatchObject({ n: 1 });

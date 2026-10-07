@@ -213,13 +213,18 @@ describe('company API', () => {
     t.company.onboardingNext(c.id);
     const view = (await call(t.port, 'GET', '/api/onboarding')).body;
     expect(view.onboarding).toMatchObject({ status: 'active', description: 'Mahallede ekşi maya ekmek satıyoruz.' });
+    // Shown to the owner, not yet replied to: asked counts the replied rounds only.
+    expect(view.onboarding.rounds).toEqual([expect.objectContaining({ round: 1, replied: false })]);
     expect(view.questions.slice(0, 2)).toEqual([
-      expect.objectContaining({ id: 'name', required: true, state: 'open', asked: 1, text: 'Firmanızın adı ne?' }),
-      expect.objectContaining({ id: 'sector', state: 'open', asked: 1 }),
+      expect.objectContaining({ id: 'name', required: true, state: 'open', asked: 0, text: 'Firmanızın adı ne?' }),
+      expect.objectContaining({ id: 'sector', state: 'open', asked: 0 }),
     ]);
     const answered = await call(t.port, 'POST', '/api/onboarding/answers', { answers: { name: 'Tatlı Fırın', tools: { social: ['Instagram'] } } });
     expect(answered.status).toBe(200);
     expect(answered.body.questions.filter((q: { state: string }) => q.state === 'answered').map((q: { id: string }) => q.id)).toEqual(['name', 'tools']);
+    // The answers on screen are the owner's reply to the round.
+    expect(answered.body.onboarding.rounds).toEqual([expect.objectContaining({ round: 1, replied: true })]);
+    expect(answered.body.questions.find((q: { id: string }) => q.id === 'sector')).toMatchObject({ state: 'open', asked: 1 });
     expect(t.company.profile().sections.identity).toMatchObject({ by: 'owner', assumedFields: [], fields: { name: 'Tatlı Fırın' } });
     expect((await call(t.port, 'POST', '/api/onboarding/answers', { answers: { revenue: '1M' } })).status).toBe(400);
     expect((await call(t.port, 'POST', '/api/onboarding/answers', {})).status).toBe(400);

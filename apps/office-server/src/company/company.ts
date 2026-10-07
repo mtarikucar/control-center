@@ -1,6 +1,6 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { CompanyProfile, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
+import type { CompanyProfile, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
 import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
@@ -143,6 +143,17 @@ export interface GoalInput {
   kpis?: unknown;
   status?: string;
   note?: string;
+}
+
+/** onboardingNext's answer: the round asked (or still waiting for the owner), and what to assume. */
+export interface OnboardingPlan {
+  round: OnboardingRound | null;
+  ask: OnboardingQuestionView[];
+  assume: OnboardingQuestionView[];
+  complete: boolean;
+  view: OnboardingView;
+  /** The last round has no reply from the owner yet: it is given again, nothing recorded. */
+  waiting: boolean;
 }
 
 export interface ProfileInput {
@@ -1324,29 +1335,49 @@ export class Company {
     return started;
   }
 
-  /** The next block of questions (recorded as a round when there is one) and the questions to fill by assumption. */
-  onboardingNext(by: string, o: { optional?: boolean } = {}): { round: OnboardingRound | null; ask: OnboardingQuestionView[]; assume: OnboardingQuestionView[]; complete: boolean; view: OnboardingView } {
+  /**
+   * The next block of questions, recorded as a round, and the questions to fill by assumption. While the last round
+   * has no reply from the owner it comes back as it is (`waiting`) and nothing is recorded: showing a block again is
+   * not asking it twice (review, Kerem round 1).
+   */
+  onboardingNext(by: string, o: { optional?: boolean } = {}): OnboardingPlan {
     this.#assertCoordinator(by);
     const active = this.#activeOnboarding();
-    const before = onboardingView(this.profile(), active);
-    const block = nextBlock(before, o.optional === true);
-    if (block.ask.length === 0) return { round: null, ...block, complete: before.complete, view: before };
-    const round = this.#onboarding().addRound(active.id, block.ask.map((q) => q.id));
-    const view = this.onboarding();
-    this.#emit(by, { type: 'onboarding.changed', change: 'round', onboarding: view.onboarding!, round });
-    return { round, ...block, complete: before.complete, view };
+    const plan = this.#onboardingPlan(active, o.optional === true);
+    if (plan.waiting || plan.ask.length === 0) return plan;
+    const round: OnboardingRound = { round: active.rounds.length + 1, questions: plan.ask.map((q) => q.id), askedAt: this.#now(), replied: false };
+    const announced = this.#emit(by, { type: 'onboarding.changed', change: 'round', onboarding: { ...active, rounds: [...active.rounds, round] }, round });
+    this.#onboarding().addRound(active.id, round, announced.seq);
+    return { ...plan, round, view: this.onboarding() };
+  }
+
+  /** What onboardingNext would give, recording nothing (onboardingRead). */
+  onboardingPeek(by: string, o: { optional?: boolean } = {}): OnboardingPlan {
+    this.#assertCoordinator(by);
+    return this.#onboardingPlan(this.#activeOnboarding(), o.optional === true);
+  }
+
+  #onboardingPlan(active: Onboarding, optional: boolean): OnboardingPlan {
+    const view = onboardingView(this.profile(), active);
+    const block = nextBlock(view, optional);
+    const last = active.rounds.at(-1);
+    if (last && !last.replied) {
+      const ask = view.questions.filter((v) => last.questions.includes(v.id) && v.state !== 'answered');
+      if (ask.length > 0) return { round: last, ask, assume: block.assume, complete: view.complete, view, waiting: true };
+    }
+    return { round: null, ...block, complete: view.complete, view, waiting: false };
   }
 
   /** The owner answers questions directly (API): every answer checked first, then written as their own word; the coordinator hears. */
   onboardingAnswer(answers: unknown): OnboardingView {
-    this.#activeOnboarding();
+    const active = this.#activeOnboarding();
     const { ids, patches } = answerPatches(answers);
     this.#writeProfile(OWNER, [...patches], false);
-    const view = this.onboarding();
     const coordinator = this.coordinator();
     if (coordinator) this.#d.notices.add(coordinator.id, 'onboarding.answered', `Sahibi onboarding sorularını cevapladı: ${ids.join(', ')}. onboardingNext ile devam et.`);
-    this.#emit(coordinator?.id ?? null, { type: 'onboarding.changed', change: 'answered', onboarding: view.onboarding! });
-    return view;
+    // This event is the owner's reply to the round asked before it: the view is read after it.
+    this.#emit(coordinator?.id ?? null, { type: 'onboarding.changed', change: 'answered', onboarding: active });
+    return this.onboarding();
   }
 
   /** Ends the onboarding once no required question is open (KÖ1's "profile complete" event). */
@@ -1488,7 +1519,7 @@ export class Company {
     this.#emit(task.assignee, { type: 'task.changed', change, task });
   }
 
-  #emit(employeeId: string | null, event: OfficeEvent): void {
-    this.#d.events.append(employeeId, event);
+  #emit(employeeId: string | null, event: OfficeEvent): StoredEvent {
+    return this.#d.events.append(employeeId, event);
   }
 }

@@ -38,11 +38,9 @@ export class OnboardingStore {
     return row ? this.#from(row) : null;
   }
 
-  /** A block of questions asked in one message: the next round. */
-  addRound(id: string, questions: string[]): OnboardingRound {
-    const round = { round: this.#rounds(id).length + 1, questions, askedAt: this.#now() };
-    this.#db.prepare('INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at) VALUES (?, ?, ?, ?)').run(id, round.round, JSON.stringify(questions), round.askedAt);
-    return round;
+  /** A block of questions asked in one message, with the seq of the event that announced it. */
+  addRound(id: string, round: OnboardingRound, seq: number): void {
+    this.#db.prepare('INSERT INTO onboarding_rounds (onboarding_id, round, questions, asked_at, seq) VALUES (?, ?, ?, ?, ?)').run(id, round.round, JSON.stringify(round.questions), round.askedAt, seq);
   }
 
   finish(id: string): Onboarding {
@@ -54,15 +52,32 @@ export class OnboardingStore {
     return this.#from(this.#db.prepare('SELECT * FROM onboarding WHERE id = ?').get(id) as unknown as OnboardingRow);
   }
 
-  #rounds(id: string): OnboardingRound[] {
-    const rows = this.#db.prepare('SELECT round, questions, asked_at FROM onboarding_rounds WHERE onboarding_id = ? ORDER BY round').all(id) as unknown as Array<{ round: number; questions: string; asked_at: number }>;
-    return rows.map((r) => ({ round: r.round, questions: JSON.parse(r.questions) as string[], askedAt: r.asked_at }));
+  #rounds(o: OnboardingRow): OnboardingRound[] {
+    const rows = this.#db.prepare('SELECT round, questions, asked_at, seq FROM onboarding_rounds WHERE onboarding_id = ? ORDER BY round').all(o.id) as unknown as Array<{ round: number; questions: string; asked_at: number; seq: number }>;
+    return rows.map((r) => ({ round: r.round, questions: JSON.parse(r.questions) as string[], askedAt: r.asked_at, replied: this.#repliedAfter(o, r.seq) }));
+  }
+
+  /**
+   * The owner replied after the event `seq`: a chat message of theirs to the one running the onboarding, or their
+   * answers on screen to this onboarding. System messages and the owner's words to anyone else do not count.
+   */
+  #repliedAfter(o: OnboardingRow, seq: number): boolean {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM events WHERE seq > ? AND (
+             (type = 'message.user' AND employee_id = ? AND json_extract(payload, '$.source') = 'owner')
+             OR (type = 'onboarding.changed' AND json_extract(payload, '$.change') = 'answered' AND json_extract(payload, '$.onboarding.id') = ?)
+           ) LIMIT 1`,
+        )
+        .get(seq, o.started_by, o.id) !== undefined
+    );
   }
 
   #from(r: OnboardingRow): Onboarding {
     return {
       id: r.id, description: r.description, status: r.status as Onboarding['status'], startedBy: r.started_by, startedAt: r.started_at, finishedAt: r.finished_at,
-      rounds: this.#rounds(r.id),
+      rounds: this.#rounds(r),
     };
   }
 }

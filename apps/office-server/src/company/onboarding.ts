@@ -9,7 +9,8 @@ export function onboardingView(profile: CompanyProfile, onboarding: Onboarding |
     const entry = profile.sections[q.section];
     const filled = q.fields.filter((f) => entry?.fields[f] !== undefined);
     const state = filled.length === 0 ? 'open' : filled.some((f) => entry!.assumedFields.includes(f)) ? 'assumed' : 'answered';
-    const asked = onboarding?.rounds.filter((r) => r.questions.includes(q.id)).length ?? 0;
+    // Asked = a round with it that the owner replied to; a block shown again before any reply is not asking twice.
+    const asked = onboarding?.rounds.filter((r) => r.replied && r.questions.includes(q.id)).length ?? 0;
     return { ...q, fields: [...q.fields], state, asked, value: Object.fromEntries(filled.map((f) => [f, entry!.fields[f]!])) };
   });
   return { onboarding, questions, complete: questions.every((v) => !v.required || v.state !== 'open') };
@@ -70,11 +71,25 @@ export function tally(view: OnboardingView): string {
   return `zorunlu ${req.length} sorunun ${ofThem(count('answered'))} sahibinden, ${ofThem(count('assumed'))} varsayım, ${ofThem(count('open'))} açık`;
 }
 
-/** What onboardingNext says: where it stands, the block to ask now (with the guesses to confirm), what to assume. */
-export function nextText(view: OnboardingView, block: { ask: OnboardingQuestionView[]; assume: OnboardingQuestionView[] }, round: number | null): string {
+/**
+ * What onboardingNext (mode 'next') and onboardingRead (mode 'read') say: where it stands, the block to ask now or
+ * still waiting for the owner (with the guesses to confirm), what to assume.
+ */
+export function nextText(
+  plan: { view: OnboardingView; ask: OnboardingQuestionView[]; assume: OnboardingQuestionView[]; round: { round: number } | null; waiting: boolean },
+  mode: 'next' | 'read' = 'next',
+): string {
+  const { view, ask, assume } = plan;
+  const block = { ask, assume };
   const lines = [`Onboarding: ${tally(view)}.`];
+  if (mode === 'read') lines.push('Salt okunur: hiçbir tur kaydedilmedi.');
   if (block.ask.length > 0) {
-    lines.push('', `Tur ${round} — sahibine tek mesajda sor:`);
+    const n = plan.round?.round ?? (view.onboarding?.rounds.length ?? 0) + 1;
+    const head =
+      mode === 'read'
+        ? plan.waiting ? `Tur ${n} sahibinin cevabını bekliyor:` : `Sıradaki tur (${n}) şunları soracak:`
+        : plan.waiting ? `Tur ${n} henüz cevaplanmadı — aynı soruları sor ya da sahibinin cevabını bekle (yeni tur açılmadı):` : `Tur ${n} — sahibine tek mesajda sor:`;
+    lines.push('', head);
     block.ask.forEach((v, i) => lines.push(`${i + 1}. ${v.text}${v.state === 'assumed' ? ` (şu an varsayım: ${shown(v)}; doğru mu?)` : ''}`));
     lines.push('', "Cevapları profileUpdate ile yaz: sahibinin söylediği assumed: false. Sahibi ekrandan da cevaplayabilir; o zaman sana bildirim gelir.");
   }

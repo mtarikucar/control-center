@@ -50,6 +50,8 @@ export interface OnboardingRound {
   round: number;
   questions: string[];
   askedAt: number;
+  /** The owner replied after it (a chat message to the coordinator or answers on screen): only then it counts as asked. */
+  replied: boolean;
 }
 
 export interface Onboarding {
@@ -65,7 +67,7 @@ export interface Onboarding {
 
 export interface OnboardingQuestionView extends OnboardingQuestion {
   state: OnboardingQuestionState;
-  /** How many rounds of this onboarding asked it. */
+  /** How many rounds of this onboarding asked it and got a reply from the owner. */
   asked: number;
   /** Its fields as the profile holds them now. */
   value: ProfileFields;

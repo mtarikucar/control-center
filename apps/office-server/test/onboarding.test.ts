@@ -31,7 +31,9 @@ function make() {
   const ada = c.company.hire(coordinator.id, { name: 'Ada', role: 'r' });
   const events = (change?: string) =>
     s.events.list({ limit: 5000 }).flatMap((e) => (e.event.type === 'onboarding.changed' && (!change || e.event.change === change) ? [e.event] : []));
-  return { ...s, ...c, tools, call, coordinator, ada, events };
+  /** The owner writes to someone in the chat, as the engine logs it. */
+  const ownerSays = (to: Employee, text = 'cevaplar') => s.events.append(to.id, { type: 'message.user', text, source: 'owner' });
+  return { ...s, ...c, tools, call, coordinator, ada, events, ownerSays, log: s.events };
 }
 
 /** The pilot's one sentence (pilot-senaryosu §2). */
@@ -85,10 +87,13 @@ describe('Onboarding — the dialog', () => {
     expect(text).toContain('2. Hangi sektörde çalışıyorsunuz? (şu an varsayım: dijital içerik ajansı; doğru mu?)');
     expect(text).toContain('5. Müşteriler size nereden geliyor, hangi kanallarda çalışıyorsunuz?');
     expect(text).not.toContain('6.');
-    expect(t.company.onboarding().onboarding!.rounds).toEqual([{ round: 1, questions: ['name', 'sector', 'products', 'segments', 'channels'], askedAt: expect.any(Number) }]);
+    expect(t.company.onboarding().onboarding!.rounds).toEqual([{ round: 1, questions: ['name', 'sector', 'products', 'segments', 'channels'], askedAt: expect.any(Number), replied: false }]);
     expect(t.events('round').map((e) => (e as { round: { questions: string[] } }).round.questions)).toEqual([['name', 'sector', 'products', 'segments', 'channels']]);
     const view = t.company.onboarding().questions.find((q) => q.id === 'sector')!;
-    expect(view).toMatchObject({ state: 'assumed', asked: 1, value: { sector: 'dijital içerik ajansı' } });
+    // Asked once the owner replies to the round, not before.
+    expect(view).toMatchObject({ state: 'assumed', asked: 0, value: { sector: 'dijital içerik ajansı' } });
+    t.ownerSays(t.coordinator);
+    expect(t.company.onboarding().questions.find((q) => q.id === 'sector')).toMatchObject({ asked: 1 });
   });
 
   it('answers fill the profile field by field: the owner’s word unmarked, guesses marked; twice unanswered goes to assumption; finish only with no required question open', async () => {
@@ -99,11 +104,13 @@ describe('Onboarding — the dialog', () => {
     write('identity' as never, { sector: 'dijital içerik ajansı' }, true);
     // Round 1: the owner answers three; segments stays unanswered, the sector unconfirmed.
     expect(t.company.onboardingNext(c).ask.map((q) => q.id)).toEqual(['name', 'sector', 'products', 'segments', 'channels']);
+    t.ownerSays(t.coordinator);
     write('identity' as never, { name: 'Kıvılcım İçerik' }, false);
     write('offer' as never, { products: ['sosyal medya içeriği', 'aylık rapor'] }, false);
     write('customers' as never, { channels: ['Instagram', 'TikTok', 'LinkedIn'] }, false);
     // Round 2: what is still open or a guess, asked fewer than twice, in order, five at most.
     expect(t.company.onboardingNext(c).ask.map((q) => q.id)).toEqual(['sector', 'segments', 'goals', 'success', 'tools']);
+    t.ownerSays(t.coordinator);
     write('goals' as never, { goals: ['haftalık takvim zamanında'] }, false);
     write('success' as never, { done: ['raporlar ayın 3. günü hazır'] }, false);
     write('tools' as never, { social: ['Instagram', 'TikTok', 'LinkedIn'] }, false);
@@ -112,9 +119,12 @@ describe('Onboarding — the dialog', () => {
     const third = t.company.onboardingNext(c);
     expect(third.ask.map((q) => q.id)).toEqual(['budget', 'limits']);
     expect(third.assume.map((q) => q.id)).toEqual(['segments']);
+    // Called again before the owner answers round 3: the same round, nothing recorded.
     const text = await t.call(t.coordinator, 'onboardingNext');
+    expect(text).toContain('Tur 3 henüz cevaplanmadı');
     expect(text).toContain('İki kez sorulup cevapsız kaldı — varsayımla doldur (profileUpdate, assumed: true):');
     expect(text).toContain('• segments → customers.segments: Müşterileriniz kimler (tür ve yaklaşık sayı)?');
+    t.ownerSays(t.coordinator);
     write('constraints' as never, { budget: 'aylık 2000 TL', other: ['yayın kararı bende'] }, false);
     write('customers' as never, { segments: ['KOBİ (tahmin)'] }, true);
     const done = t.company.onboardingNext(c);
@@ -128,6 +138,61 @@ describe('Onboarding — the dialog', () => {
     expect(t.company.profile().sections.identity?.assumedFields).toEqual(['sector']);
     expect(() => t.company.onboardingNext(c)).toThrow(/Sürmekte olan bir onboarding yok/);
     expect(t.company.onboardingStart(c, 'yeni iş').status).toBe('active');
+  });
+
+  it('review focus (Kerem, round 1): a round counts as asked only once the owner replied after it; asking again before that opens no round and assumes nothing', async () => {
+    const t = make();
+    const c = t.coordinator.id;
+    const FIRST = ['name', 'sector', 'products', 'segments', 'channels'];
+    t.ownerSays(t.coordinator, PILOT);
+    t.company.onboardingStart(c, PILOT);
+    // Asked three times with no reply: one round, the same five, nothing to assume.
+    for (let i = 0; i < 3; i += 1) {
+      const next = t.company.onboardingNext(c);
+      expect(next.ask.map((q) => q.id)).toEqual(FIRST);
+      expect(next).toMatchObject({ waiting: i > 0, assume: [], round: { round: 1, replied: false } });
+    }
+    expect(t.events('round')).toHaveLength(1);
+    expect(t.company.onboarding().questions.filter((q) => q.asked > 0)).toEqual([]);
+    expect(await t.call(t.coordinator, 'onboardingNext')).toContain('Tur 1 henüz cevaplanmadı — aynı soruları sor ya da sahibinin cevabını bekle (yeni tur açılmadı):');
+    // What does not count as the owner's reply: a system message to the coordinator, the owner writing to someone else.
+    t.log.append(c, { type: 'message.user', text: 'bildirim', source: 'system' });
+    t.ownerSays(t.ada);
+    expect(t.company.onboardingNext(c)).toMatchObject({ waiting: true, round: { round: 1 } });
+    // The owner replies (without answering): round 1 was asked once; the same five come as round 2.
+    t.ownerSays(t.coordinator, 'sonra bakarım');
+    expect(t.company.onboarding().onboarding!.rounds).toEqual([expect.objectContaining({ round: 1, replied: true })]);
+    expect(t.company.onboardingNext(c)).toMatchObject({ waiting: false, round: { round: 2, questions: FIRST }, assume: [] });
+    t.ownerSays(t.coordinator, 'yine sonra');
+    // Asked twice, replied twice, still open: now, and only now, to be assumed.
+    const third = t.company.onboardingNext(c);
+    expect(third.ask.map((q) => q.id)).toEqual(['goals', 'success', 'tools', 'budget', 'limits']);
+    expect(third.assume.map((q) => q.id)).toEqual(FIRST);
+    expect(t.events('round')).toHaveLength(3);
+  });
+
+  it('onboardingRead shows where the dialog stands and what comes next, recording nothing', async () => {
+    const t = make();
+    const c = t.coordinator.id;
+    await expect(t.call(t.ada, 'onboardingRead')).rejects.toThrow(/kapalı araç/);
+    t.company.onboardingStart(c, PILOT);
+    const before = await t.call(t.coordinator, 'onboardingRead');
+    expect(before).toContain('Salt okunur: hiçbir tur kaydedilmedi.');
+    expect(before).toContain('Sıradaki tur (1) şunları soracak:');
+    expect(before).toContain('1. Firmanızın adı ne?');
+    expect(t.company.onboarding().onboarding!.rounds).toEqual([]);
+    t.company.onboardingNext(c);
+    const waiting = await t.call(t.coordinator, 'onboardingRead');
+    expect(waiting).toContain('Tur 1 sahibinin cevabını bekliyor:');
+    // The name was in the owner's own sentence: written as their word, the waiting round no longer asks it.
+    t.company.profileUpdate(c, { section: 'identity', fields: { name: 'Kıvılcım İçerik' }, assumed: false });
+    const again = t.company.onboardingNext(c);
+    expect(again).toMatchObject({ waiting: true, round: { round: 1 } });
+    expect(again.ask.map((q) => q.id)).toEqual(['sector', 'products', 'segments', 'channels']);
+    expect(t.events('round')).toHaveLength(1);
+    t.ownerSays(t.coordinator);
+    expect(await t.call(t.coordinator, 'onboardingRead')).toContain('Sıradaki tur (2) şunları soracak:');
+    expect(t.company.onboarding().onboarding!.rounds).toHaveLength(1);
   });
 
   it('the owner answers directly: fields written as the owner’s word, guesses confirmed, the coordinator told; unknown questions and fields refused', () => {

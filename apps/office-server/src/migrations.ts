@@ -398,7 +398,8 @@ export const MIGRATIONS: Migration[] = [
     // v15 is kept for B3 (the integration registry), spec 2026-10-08-onboarding-design §4.
     version: 14,
     name: 'onboarding: the owner\'s sentence and the rounds of questions',
-    // One onboarding runs at a time; finished ones stay. A round is the block of questions asked in one message.
+    // One onboarding runs at a time; finished ones stay. A round is the block of questions asked in one message;
+    // seq: the event that announced it — the owner's reply after it is what makes it count as asked.
     up: `
       CREATE TABLE IF NOT EXISTS onboarding (
         id TEXT PRIMARY KEY,
@@ -413,6 +414,7 @@ export const MIGRATIONS: Migration[] = [
         round INTEGER NOT NULL,
         questions TEXT NOT NULL,
         asked_at INTEGER NOT NULL,
+        seq INTEGER NOT NULL,
         PRIMARY KEY (onboarding_id, round)
       );`,
     down: `

@@ -748,13 +748,19 @@ export function officeTools(o: {
     },
     {
       name: 'onboardingNext',
-      description: 'The next onboarding questions to ask the owner in one message (coordinator): at most five, required first, your guesses to confirm; and the questions asked twice without an answer, to fill by assumption. optional: true brings the optional questions once the required are in.',
+      description: 'The next onboarding questions to ask the owner in one message (coordinator): at most five, required first, your guesses to confirm; and the questions asked twice without an answer, to fill by assumption. A round counts once the owner replied after it; until then this gives the same round again and records nothing. optional: true brings the optional questions once the required are in.',
       inputSchema: object({ optional: { type: 'boolean', description: 'Also the optional questions (once the required are in).' } }),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const r = company.onboardingNext(employee.id, { optional: bool(args, 'optional') });
-        return nextText(r.view, r, r.round?.round ?? null);
+        return nextText(company.onboardingNext(employee.id, { optional: bool(args, 'optional') }));
       },
+    },
+    {
+      name: 'onboardingRead',
+      description: 'Where the onboarding stands (coordinator), recording nothing: the questions answered, assumed and open, the round still waiting for the owner or the one that would come next, and what to fill by assumption. Use it to look again, e.g. after your session restarted.',
+      inputSchema: object({ optional: { type: 'boolean', description: 'Show the optional questions that would come (once the required are in).' } }),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => nextText(company.onboardingPeek(employee.id, { optional: bool(args, 'optional') }), 'read'),
     },
     {
       name: 'onboardingFinish',
