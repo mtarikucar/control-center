@@ -17,7 +17,10 @@ if (process.env.FAKE_CLAUDE_ARGV_LOG) appendFileSync(process.env.FAKE_CLAUDE_ARG
 
 const failFlag = process.env.FAKE_CLAUDE_FAIL_FLAG;
 if (failFlag && existsSync(failFlag)) {
-  unlinkSync(failFlag);
+  // The file may hold how many starts in a row fail (default one).
+  const left = Number(readFileSync(failFlag, 'utf8')) || 1;
+  if (left > 1) writeFileSync(failFlag, String(left - 1));
+  else unlinkSync(failFlag);
   process.stderr.write('startup failure\n');
   process.exit(1);
 }

@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
@@ -5,7 +7,7 @@ import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatc
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
-import { setup, until, waitFor } from './helpers.ts';
+import { setup, tempDir, until, waitFor } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -266,7 +268,8 @@ describe('Dispatcher — notice kinds and the digest', () => {
     let clock = at(7, 10);
     const now = () => clock;
     const s = setup(8, now);
-    const f = fakeEngine(s, { engine: { now } });
+    const failFlag = join(tempDir('fake-claude-fail-'), 'fail');
+    const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag }, engine: { now } });
     const c = companyFor(s, f, undefined, now);
     c.budget.setConstitution({ idleSleepMinutes: 0 });
     const run = () =>
@@ -278,6 +281,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     cleanups.push(() => stop(), f.cleanup, s.cleanup);
     return {
       ...s, ...c, engine: f.engine, argvLog: f.argvLog, setClock: (t: number) => (clock = t), turns: (id: string) => systemMessages(s.events.list({ limit: 5000 }), id),
+      failNextStarts: (n: number) => writeFileSync(failFlag, String(n)),
       /** The office restarts: a new dispatcher over the same database. */
       restart: () => {
         stop();
@@ -476,5 +480,46 @@ describe('Dispatcher — notice kinds and the digest', () => {
     const urgent = t.company.createTask(coord.id, { assignee: ada.id, title: 'Acil', priority: 1 });
     await until(() => t.tasks.get(urgent.id).status === 'in_progress', 8000);
     expect(t.turns(ada.id)[0]).toContain('önerin kabul edildi');
+  });
+
+  it('critical: a task’s model is for that task: one without a difficulty runs on the employee’s own model, which only setModel changes', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r', model: 'opus' });
+    await until(() => t.engine.ready(ada.id));
+    const run = async (title: string, difficulty?: 'easy') => {
+      const task = t.company.createTask(coord.id, { assignee: ada.id, title, difficulty });
+      await until(() => t.turns(ada.id).some((m) => m.includes(`## Görev: ${title}`)), 8000);
+      t.company.finish(ada.id, task.id, { summary: 'tamam', outputs: [], learned: '' });
+      await until(() => t.engine.ready(ada.id), 8000);
+    };
+    await run('Kolay iş', 'easy');
+    expect(t.roster.get(ada.id).model).toBe('opus');
+    await run('Zorluksuz iş');
+    t.company.setModel(coord.id, ada.id, 'sonnet');
+    await run('Yine zorluksuz');
+    const models = (await readArgv(t.argvLog, 5)).filter((a) => a.cwd.includes('ada') && !a.args.includes('json')).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models).toEqual(['opus', 'haiku', 'opus', 'sonnet']);
+  });
+
+  it('critical: a delivery lost because no session would start puts the task and its notices back; they come again on resume', async () => {
+    const t = makeDigest();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id));
+    // A whole turn first: the session's process has surely started before the next starts are made to fail.
+    t.engine.send(ada.id, 'merhaba', 'system');
+    await until(() => t.events.list({ employeeId: ada.id, limit: 500 }).some((e) => e.event.type === 'turn.finished') && t.engine.ready(ada.id), 8000);
+    t.failNextStarts(2);
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
+    await until(() => t.roster.get(ada.id).lifecycle === 'error', 8000);
+    await until(() => t.tasks.get(task.id).status === 'waiting', 8000);
+    expect(t.notices.pending(ada.id).map((n) => n.topic)).toEqual(['proposal.decided']);
+    t.engine.resume(ada.id);
+    await until(() => t.tasks.get(task.id).status === 'in_progress' && t.engine.ready(ada.id), 8000);
+    const deliveries = t.turns(ada.id).filter((m) => m.includes('## Görev: Mimari'));
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries[1]).toContain('önerin kabul edildi');
+    expect(t.notices.pending(ada.id)).toEqual([]);
   });
 });

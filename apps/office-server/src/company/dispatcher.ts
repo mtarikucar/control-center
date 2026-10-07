@@ -1,5 +1,5 @@
 import { DEFAULT_CONSTITUTION, TASK_DIFFICULTY_LABELS, type Constitution, type Employee, type ModelAlias, type Task } from '@cc/shared';
-import type { ModelHint } from '../engine.ts';
+import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
@@ -8,7 +8,7 @@ import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 
 export interface DispatchEngine {
   ready(id: string): boolean;
-  send(id: string, text: string, source: 'system', hint?: ModelHint): void;
+  send(id: string, text: string, source: 'system', opts?: SendOptions): void;
   fire(id: string): Promise<void>;
   sleep(id: string): Promise<unknown>;
   wake(id: string): unknown;
@@ -145,16 +145,28 @@ export class Dispatcher {
     const alone = !body && decisions.length === 0;
     const digest = infos.length > 0 || report !== null ? digestText(infos, { coordinator: employee.kind === 'coordinator', report: report !== null, alone }) : '';
     const text = [decisions.length ? `${NOTICES_PREFIX}\n${decisions.map((n) => `- ${n.text}`).join('\n')}` : '', body, digest].filter(Boolean).join('\n\n');
+    // Lost on the way (no session could be started to read it): the task and the notices wait for the next idle moment.
+    const onLost = () => {
+      this.#d.notices.markUndelivered(pending.map((n) => n.id));
+      if (started) this.#putBack(id, started);
+      this.#scheduleSweep();
+    };
     try {
-      this.#d.engine.send(id, text, 'system', hint);
+      this.#d.engine.send(id, text, 'system', { ...hint, onLost });
     } catch {
       // The session went away between ready() and send(): put the task back; the next idle moment delivers it.
-      if (started) this.#d.tasks.update(started.id, { status: 'waiting', startedAt: null });
+      if (started) this.#putBack(id, started);
       return;
     }
     if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
     if (report !== null) this.#d.events.append(id, { type: 'report.reminded', slot: report });
+  }
+
+  /** A task started for a message that never reached its assignee waits in their queue again. */
+  #putBack(id: string, task: Task): void {
+    const current = this.#d.tasks.get(task.id);
+    if (current.assignee === id && current.status === 'in_progress') this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null });
   }
 
   #rules(): Constitution {
@@ -167,13 +179,14 @@ export class Dispatcher {
 
   /**
    * The model a turn should run on (spec §6; the engine switches only as its model policy allows): the coordinator's by
-   * what the turn is for — a decision (notices, a task, a reminder) or only a digest; anyone else's by the difficulty of
-   * the task it starts, so a model changes only at a task's start.
+   * what the turn is for — a decision (notices, a task, a reminder) or only a digest; anyone else's by the task it starts:
+   * its difficulty's model, or their own (the roster's) without one. A model changes only at a task's start: a reminder
+   * in the middle of a task, or notices, keep the session's model.
    */
   #hint(e: Employee, started: Task | null, decision: boolean): ModelHint {
     const rules = this.#rules();
     if (e.kind === 'coordinator') return { model: decision ? rules.coordinatorModels.decision : rules.coordinatorModels.digest };
-    return started?.difficulty ? { model: rules.difficultyModels[started.difficulty], taskStart: true } : {};
+    return started ? { model: started.difficulty ? rules.difficultyModels[started.difficulty] : e.model, taskStart: true } : {};
   }
 
   /**

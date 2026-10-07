@@ -1,7 +1,9 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { StoredEvent } from '@cc/shared';
 import { fakeEngine, readArgv, type ArgvEntry } from './engine-helpers.ts';
-import { setup, until } from './helpers.ts';
+import { setup, tempDir, until } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -14,7 +16,8 @@ function make() {
   let clock = new Date(2026, 9, 7, 10, 0).getTime();
   const now = () => clock;
   const s = setup(8, now);
-  const f = fakeEngine(s, { engine: { now, cacheTtlMinutes: () => 5 } });
+  const failFlag = join(tempDir('fake-claude-fail-'), 'fail');
+  const f = fakeEngine(s, { env: { FAKE_CLAUDE_FAIL_FLAG: failFlag }, engine: { now, cacheTtlMinutes: () => 5 } });
   cleanups.push(f.cleanup, s.cleanup);
   const turns = (id: string) => s.events.list({ employeeId: id, limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
   const said = (id: string) =>
@@ -22,7 +25,8 @@ function make() {
       .list({ employeeId: id, limit: 5000 })
       .filter((e): e is StoredEvent & { event: { type: 'message.assistant'; text: string } } => e.event.type === 'message.assistant')
       .map((e) => e.event.text);
-  return { ...s, engine: f.engine, argvLog: f.argvLog, advance: (ms: number) => (clock += ms), turns, said };
+  const errors = (id: string) => s.events.list({ employeeId: id, limit: 5000 }).flatMap((e) => (e.event.type === 'error' ? [e.event.message] : []));
+  return { ...s, engine: f.engine, argvLog: f.argvLog, advance: (ms: number) => (clock += ms), turns, said, errors, failNextStarts: (n: number) => writeFileSync(failFlag, String(n)) };
 }
 
 const modelOf = (a: ArgvEntry) => a.args[a.args.indexOf('--model') + 1];
@@ -41,7 +45,8 @@ describe('Engine — model hints', () => {
     expect(sessions(argv)).toEqual(['sonnet', 'fable']);
     expect(argv[1]!.args).toContain('--resume');
     expect(t.said(e.id).at(-1)).toBe('you said: merhaba');
-    expect(t.roster.get(e.id).model).toBe('fable');
+    // The hint moves the session only: the employee's own model stays.
+    expect(t.roster.get(e.id).model).toBe('sonnet');
 
     t.advance(4 * MIN);
     t.engine.send(e.id, 'karar notu', 'system', { model: 'sonnet' });
@@ -53,7 +58,51 @@ describe('Engine — model hints', () => {
     await until(() => t.turns(e.id) === 4, 8000);
     argv = await readArgv(t.argvLog, 3);
     expect(sessions(argv)).toEqual(['sonnet', 'fable', 'haiku']);
-    expect(t.events.list({ employeeId: e.id, limit: 5000 }).filter((x) => x.event.type === 'model.changed').map((x) => (x.event as { model: string }).model)).toEqual(['fable', 'haiku']);
+    expect(t.events.list({ employeeId: e.id, limit: 5000 }).some((x) => x.event.type === 'model.changed')).toBe(false);
+    // A side question asks the employee's own model, whatever the session runs on.
+    await t.engine.sideQuestion(e.id, 'ne yapıyorsun?');
+    const side = (await readArgv(t.argvLog, 4)).find((a) => a.args.includes('json'))!;
+    expect(side.args[side.args.indexOf('--model') + 1]).toBe('sonnet');
+    // So does the next session after a sleep.
+    await t.engine.sleep(e.id);
+    t.engine.send(e.id, 'uyan', 'system');
+    await until(() => t.turns(e.id) === 5, 8000);
+    expect(sessions(await readArgv(t.argvLog, 5))).toEqual(['sonnet', 'fable', 'haiku', 'sonnet']);
+  });
+
+  it('critical: when the session cannot start on the new model it goes on on the old one, the message delivered; that model is not asked for again for a while', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system');
+    await until(() => t.turns(e.id) === 1);
+    t.failNextStarts(1);
+    let lost = 0;
+    t.engine.send(e.id, 'zor iş', 'system', { model: 'opus', taskStart: true, onLost: () => (lost += 1) });
+    await until(() => t.turns(e.id) === 2, 8000);
+    expect(t.said(e.id).at(-1)).toBe('echo: zor iş');
+    expect(lost).toBe(0);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+    expect(t.errors(e.id).some((m) => m.includes('opus modelinde açılamadı; sonnet ile sürüyor'))).toBe(true);
+    expect(t.roster.get(e.id).lifecycle).toBe('idle');
+    t.engine.send(e.id, 'yine zor', 'system', { model: 'opus', taskStart: true });
+    await until(() => t.turns(e.id) === 3, 8000);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+    t.advance(11 * MIN);
+    t.engine.send(e.id, 'bir daha', 'system', { model: 'opus', taskStart: true });
+    await until(() => t.turns(e.id) === 4, 8000);
+    expect(sessions(await readArgv(t.argvLog, 4))).toEqual(['sonnet', 'opus', 'sonnet', 'opus']);
+  });
+
+  it('critical: when no session starts at all the message is reported lost (once), so its sender can put the work back', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Ada', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system');
+    await until(() => t.turns(e.id) === 1);
+    t.failNextStarts(2);
+    let lost = 0;
+    t.engine.send(e.id, 'zor iş', 'system', { model: 'opus', taskStart: true, onLost: () => (lost += 1) });
+    await until(() => t.roster.get(e.id).lifecycle === 'error', 8000);
+    expect(lost).toBe(1);
   });
 
   it('important: never switches in the middle of a turn, and messages sent while it switches follow in order', async () => {

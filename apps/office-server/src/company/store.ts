@@ -346,6 +346,11 @@ export class NoticeStore {
       .all(employeeId) as unknown as Notice[];
   }
 
+  /** The message that carried them was lost: they wait for the reader's next turn again. */
+  markUndelivered(ids: number[]): void {
+    for (const id of ids) this.#db.prepare('UPDATE notices SET delivered_at = NULL WHERE id = ?').run(id);
+  }
+
   markDelivered(ids: number[]): void {
     const at = this.#now();
     for (const id of ids) this.#db.prepare('UPDATE notices SET delivered_at = ? WHERE id = ?').run(at, id);
