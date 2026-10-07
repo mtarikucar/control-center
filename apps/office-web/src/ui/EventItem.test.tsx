@@ -50,4 +50,17 @@ describe('EventItem', () => {
     rerender(<EventItem stored={{ seq: 2, employeeId: 'e1', ts: 0, event: { type: 'model.changed', model: 'sonnet' } }} />);
     expect(screen.getByText('Model: sonnet')).toBeTruthy();
   });
+
+  it('says when a task goes to review and how a review was decided', () => {
+    const base = {
+      id: 't1', kind: 'work' as const, planId: null, title: 'Metin', description: '', done: [], requester: 'owner', assignee: 'ada', priority: 3, dependsOn: [],
+      status: 'review' as const, chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null,
+    };
+    const { rerender } = render(<EventItem stored={{ seq: 1, employeeId: 'ada', ts: 0, event: { type: 'task.changed', change: 'in_review', task: base } }} />);
+    expect(screen.getByText('Görev incelemede: Metin')).toBeTruthy();
+    const findings = [{ severity: 'important' as const, text: 'a' }, { severity: 'important' as const, text: 'b' }, { severity: 'minor' as const, text: 'c' }];
+    const review = { ...base, id: 't2', kind: 'review' as const, title: 'İnceleme: Metin (tur 1)', status: 'done' as const, result: { summary: 'x', outputs: [], learned: '', review: { decision: 'changes' as const, findings } } };
+    rerender(<EventItem stored={{ seq: 2, employeeId: 'can', ts: 0, event: { type: 'task.changed', change: 'reviewed', task: review } }} />);
+    expect(screen.getByText('İnceleme: Metin (tur 1) — değişiklik istendi (2 önemli, 1 küçük)')).toBeTruthy();
+  });
 });

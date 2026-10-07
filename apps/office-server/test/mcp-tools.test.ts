@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type Employee } from '@cc/shared';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup, until } from './helpers.ts';
 
@@ -32,12 +32,12 @@ describe('office tools', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
     expect(names('member')).toEqual([
-      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend',
+      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'propose', 'recordSpend', 'reviewDecide',
       'taskFinish', 'taskPass', 'taskUpdate',
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual(['decisionRecord', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'taskAssign', 'taskCreate', 'taskReprioritize']);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
+      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
@@ -53,7 +53,7 @@ describe('office tools', () => {
     expect(passed).toContain('Can');
     expect(t.tasks.list({ assignee: can.id })[0]).toMatchObject({ title: 'Grafikleri çiz', requester: ada.id, priority: 2 });
     t.company.start(task.id);
-    const handed = await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'Rapor hazır.', outputs: ['rapor.md'], learned: 'Veriler eksikti.' });
+    const handed = await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'Rapor hazır.', evidence: ['rapor.md yazıldı'], outputs: ['rapor.md'], learned: 'Veriler eksikti.' });
     expect(handed).toContain('teslim');
     expect(t.tasks.get(task.id)).toMatchObject({ status: 'done', result: { summary: 'Rapor hazır.', outputs: ['rapor.md'] } });
   });
@@ -79,7 +79,7 @@ describe('office tools', () => {
   it('lets the coordinator propose a plan, hire with a model and character, open and hand out tasks', async () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = await t.call(c, 'planPropose', { title: 'Lansman', goal: 'g', approach: 'a', people: 'bir yazar', steps: ['metin', 'görsel'], quotaPct: 10, usd: 25, days: 3, risks: 'kota' });
+    const plan = await t.call(c, 'planPropose', { method: METHOD, title: 'Lansman', goal: 'g', approach: 'a', people: 'bir yazar', steps: ['metin', 'görsel'], quotaPct: 10, usd: 25, days: 3, risks: 'kota' });
     expect(plan).toContain('onay');
     const draft = t.plans.list()[0]!;
     expect(draft).toMatchObject({ title: 'Lansman', steps: ['metin', 'görsel'], usd: 25 });
@@ -230,5 +230,67 @@ describe('office tools — task difficulty', () => {
     expect(byTitle('Yazım')).toMatchObject({ assignee: ada.id, difficulty: 'medium' });
     await expect(t.call(c, 'taskCreate', { assignee: ada.id, title: 'x', difficulty: 'trivial' })).rejects.toThrow(/Zorluk/);
     expect(t.tools.find((x) => x.name === 'taskCreate')!.description).toMatch(/easy → haiku, medium → sonnet, hard → opus, critical → fable/);
+  });
+
+  it('lets anyone read the work-type methods', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    expect(await t.call(ada, 'methodRead')).toContain('content');
+    expect(await t.call(ada, 'methodRead', { type: 'research' })).toContain('## Kanıt');
+    await expect(Promise.resolve().then(() => t.call(ada, 'methodRead', { type: 'x' }))).rejects.toThrow(/Bilinmeyen iş türü/);
+  });
+
+  it('planPropose takes the method and refuses a plan without one', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    await expect(Promise.resolve().then(() => t.call(c, 'planPropose', { title: 'P', goal: 'g', approach: 'a' }))).rejects.toThrow(/methodRead/);
+    expect(await t.call(c, 'planPropose', { title: 'P', goal: 'g', approach: 'a', method: METHOD })).toMatch(/Plan kartı açıldı/);
+    expect(t.plans.list()[0]!.method).toEqual(METHOD);
+    const schema = t.tools.find((x) => x.name === 'planPropose')!.inputSchema as { required: string[] };
+    expect(schema.required).toContain('method');
+  });
+
+  it('taskFinish takes evidence and says how many lines a hand-in needs', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Rapor', done: ['rapor.md var', 'sayılar kaynaklı'] });
+    await expect(Promise.resolve().then(() => t.call(ada, 'taskFinish', { taskId: task.id, summary: 'bitti' }))).rejects.toThrow(/2 madde var/);
+    await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'bitti', evidence: ['rapor.md yazıldı', 'her sayının yanında kaynak'] });
+    expect(t.tasks.get(task.id).result?.evidence).toHaveLength(2);
+  });
+
+  it('names a reviewer by name, and the reviewer decides with reviewDecide', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    await t.call(ada, 'taskPass', { to: 'Can', title: 'Çeviri', done: ['tr metin'], reviewer: 'Ada' });
+    const task = t.tasks.list({ assignee: can.id })[0]!;
+    expect(task.reviewer).toBe(ada.id);
+    expect(await t.call(can, 'taskFinish', { taskId: task.id, summary: 'çevirdim', evidence: ['ceviri.md'] })).toMatch(/incelemeye gitti/);
+    const review = t.tasks.list({ assignee: ada.id }).find((x) => x.kind === 'review')!;
+    expect(await t.call(ada, 'myTasks')).toContain('İnceleme: Çeviri');
+    expect(await t.call(ada, 'reviewDecide', { taskId: review.id, decision: 'changes', findings: [{ severity: 'important', text: 'bir paragraf eksik' }] })).toMatch(/Değişiklik istendi/);
+    expect(t.tasks.get(task.id).status).toBe('waiting');
+  });
+
+  it('lets the coordinator write a plan’s retro', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a', method: METHOD });
+    t.company.approve(plan.id);
+    expect(await t.call(c, 'planRetro', { planId: plan.id, wentWell: 'iyi', stuck: 'yok', change: 'erken başla' })).toMatch(/playbookUpdate/);
+  });
+
+  it('final review: reviewDecide says when the one who did the work is gone and the task needs someone else', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'Metin', reviewer: c.id });
+    t.company.finish(ada.id, task.id, { summary: 'yaptım', outputs: [], learned: '' });
+    t.roster.update(ada.id, { lifecycle: 'archived' });
+    const review = t.tasks.list({ assignee: c.id }).find((x) => x.reviewOf === task.id)!;
+    const reply = await t.call(c, 'reviewDecide', { taskId: review.id, decision: 'changes', findings: [{ severity: 'important', text: 'eksik' }] });
+    expect(reply).toMatch(/işten çıkarıldı/);
+    expect(reply).toMatch(/taskAssign/);
   });
 });

@@ -1,6 +1,7 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, TASK_DIFFICULTIES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
+import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
+import { methodText } from '../company/craft.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
@@ -50,11 +51,12 @@ function bool(args: Args, key: string): boolean | undefined {
   return v;
 }
 
-const STATUS_TR: Record<Task['status'], string> = { waiting: 'bekliyor', in_progress: 'sürüyor', blocked: 'takıldı', done: 'bitti', cancelled: 'iptal' };
+const STATUS_TR: Record<Task['status'], string> = { waiting: 'bekliyor', in_progress: 'sürüyor', review: 'incelemede', blocked: 'takıldı', done: 'bitti', cancelled: 'iptal' };
 
 function taskLine(t: Task, company: Company): string {
   const done = t.done.length ? ` — bitti tanımı: ${t.done.join('; ')}` : '';
-  return `• [${STATUS_TR[t.status]}] ${t.id} “${t.title}” (öncelik ${t.priority}, isteyen ${company.nameOf(t.requester)})${done}`;
+  const review = t.reviewer ? `, inceleyen ${company.nameOf(t.reviewer)}${t.round ? `, tur ${t.round}` : ''}` : '';
+  return `• [${STATUS_TR[t.status]}] ${t.id} “${t.title}” (öncelik ${t.priority}, isteyen ${company.nameOf(t.requester)}${review})${done}`;
 }
 
 const s = (description: string) => ({ type: 'string', description });
@@ -68,6 +70,21 @@ const difficulty = {
   description: 'How hard the task is; it starts on the model the constitution gives that difficulty. None: the assignee stays on their model.',
 };
 const difficultyArg = (args: Args) => optStr(args, 'difficulty') as TaskDifficulty | undefined;
+const reviewer = s('Who checks the hand-in before it closes (id or name); never the one who does the task. Give one for any task with a quality risk.');
+const method = {
+  type: 'object',
+  description: 'How the work is done (read methodRead first): the work type, at least two stages with who does each and whether someone else checks it, and at least one quality check.',
+  properties: {
+    workType: { type: 'string', enum: [...WORK_TYPES] },
+    stages: {
+      type: 'array',
+      minItems: 2,
+      items: { type: 'object', properties: { name: s('Stage name.'), role: s('Who does it: a person or a role.'), review: { type: 'boolean', description: 'Someone other than the doer checks it.' } }, required: ['name', 'role'] },
+    },
+    checks: strings('Quality checks or acceptance evidence, one each.'),
+  },
+  required: ['workType', 'stages', 'checks'],
+};
 
 export function officeTools(o: {
   company: Company;
@@ -91,6 +108,11 @@ export function officeTools(o: {
     throw new NotFoundError(`Çalışan bulunamadı: ${who}. officeStatus ile ofistekileri görebilirsin.`);
   };
 
+  const reviewerArg = (args: Args): string | undefined => {
+    const who = optStr(args, 'reviewer');
+    return who === undefined || who === '' ? undefined : findPerson(who).id;
+  };
+
   const characterList = () => [...o.characters(), 'voxel'];
 
   return [
@@ -109,12 +131,36 @@ export function officeTools(o: {
     },
     {
       name: 'taskFinish',
-      description: 'Hand in a task you finished: a short summary of the result, the files you produced, and what you learned. Always call this when a task is done.',
-      inputSchema: object({ taskId: s('The task id from the task message.'), summary: s('What was done, in 1–5 sentences.'), outputs: strings('Files you produced (paths).'), learned: s('Anything worth remembering for later work.') }, ['taskId', 'summary']),
+      description:
+        'Hand in a task you finished: a short summary of the result, one line of evidence per definition-of-done item (same order: what you did and how you checked it), the files you produced, and what you learned. Always call this when a task is done.',
+      inputSchema: object({ taskId: s('The task id from the task message.'), summary: s('What was done, in 1–5 sentences.'), evidence: strings('One line of proof per definition-of-done item, in the same order.'), outputs: strings('Files you produced (paths).'), learned: s('Anything worth remembering for later work.') }, ['taskId', 'summary']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
-        const task = company.finish(employee.id, str(args, 'taskId'), { summary: str(args, 'summary'), outputs: list(args, 'outputs') ?? [], learned: optStr(args, 'learned') ?? '' });
+        const task = company.finish(employee.id, str(args, 'taskId'), { summary: str(args, 'summary'), evidence: list(args, 'evidence'), outputs: list(args, 'outputs') ?? [], learned: optStr(args, 'learned') ?? '' });
+        if (task.status === 'review') return `“${task.title}” teslim edildi ve incelemeye gitti; karar gelince ya kapanacak ya da bulgularla sana dönecek.`;
         return `“${task.title}” teslim edildi${task.result?.archive ? ` (arşiv: ${task.result.archive})` : ''}. İsteyen ve koordinatör haberdar edildi.`;
+      },
+    },
+    {
+      name: 'reviewDecide',
+      description:
+        'Decide a review task (its title starts with "İnceleme:"): approve closes the reviewed task; changes sends it back to whoever did it with your findings. Check every claim yourself first. Give each finding a severity (critical: wrong or harmful; important: misses the definition of done; minor: an improvement) and a concrete failure scenario. Approve only without critical or important findings. Never review your own work.',
+      inputSchema: object(
+        {
+          taskId: s('The review task id.'),
+          decision: { type: 'string', enum: ['approve', 'changes'] },
+          findings: { type: 'array', items: object({ severity: { type: 'string', enum: [...REVIEW_SEVERITIES] }, text: s('What is wrong, with a concrete scenario.') }, ['severity', 'text']), description: 'Findings, most severe first.' },
+          note: s('A short overall note.'),
+        },
+        ['taskId', 'decision'],
+      ),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        const task = company.reviewDecide(employee.id, str(args, 'taskId'), { decision: str(args, 'decision'), findings: args.findings, note: optStr(args, 'note') });
+        if (task.status === 'done') return `Onaylandı: “${task.title}” kapandı; yapan ve isteyen haberdar edildi.`;
+        const doer = roster.list({ includeArchived: true }).find((e) => e.id === task.assignee);
+        if (!doer || doer.lifecycle === 'archived') return `Değişiklik istendi, ama “${task.title}” görevini yapan ${company.nameOf(task.assignee)} işten çıkarıldı: görevi taskAssign ile başkasına ver (bulgular onunla gider).`;
+        return `Değişiklik istendi: “${task.title}” bulgularınla ${company.nameOf(task.assignee)} adlı çalışana döndü (tur ${task.round ?? 1}).`;
       },
     },
     {
@@ -130,13 +176,13 @@ export function officeTools(o: {
     {
       name: 'taskPass',
       description: 'Pass a piece of work to a colleague (by id or name). It goes to the end of their queue; they are not interrupted. Say what, why and when it counts as done.',
-      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` } }, ['to', 'title']),
+      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer }, ['to', 'title']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         // Arguments first: a malformed call should say what is malformed, not that a person was not found.
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args) };
         const to = findPerson(str(args, 'to'));
-        const task = company.createTask(employee.id, { assignee: to.id, ...input });
+        const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         const lowered = input.difficulty === 'critical' && task.difficulty === 'hard' ? ' Zorluk “kritik” yerine “zor” sayıldı: kritik işi koordinatör ya da ekip lideri açar.' : '';
         return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).${lowered}`;
       },
@@ -196,6 +242,14 @@ export function officeTools(o: {
         const entry = memory.playbookTopic(topic);
         return `# ${entry.topic} (sürüm ${entry.version}, ${company.nameOf(entry.by)}, ${day(entry.ts)})\n\n${entry.text}`;
       },
+    },
+    {
+      name: 'methodRead',
+      description:
+        'Read how a kind of work is done well (the office’s coordination craft, the same in every company): without a type, the list of work types; with one, its stages, roles, quality checks, evidence, common mistakes and model advice. Read it before planning work; the company’s own rules are in playbookRead.',
+      inputSchema: object({ type: { type: 'string', enum: [...WORK_TYPES], description: 'Work type; omit for the list.' } }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => methodText(optStr(args, 'type')),
     },
     {
       name: 'decisionsRead',
@@ -367,7 +421,7 @@ export function officeTools(o: {
       name: 'taskCreate',
       description:
         'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done". Give a difficulty: when difficulty models are on in the constitution, the task starts on its model (by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
-      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
+      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
       kinds: LEADS,
       run: ({ employee }, args) => {
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn') };
@@ -375,18 +429,18 @@ export function officeTools(o: {
         if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
           throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
         }
-        const task = company.createTask(employee.id, { assignee: to.id, ...input });
+        const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}.`;
       },
     },
     {
       name: 'taskAssign',
       description: 'Give a waiting or blocked task to someone else (coordinator); with difficulty, also say anew how hard it is.',
-      inputSchema: object({ taskId: s('The task id.'), assignee: s('Employee id or name.'), difficulty }, ['taskId', 'assignee']),
+      inputSchema: object({ taskId: s('The task id.'), assignee: s('Employee id or name.'), difficulty, reviewer }, ['taskId', 'assignee']),
       kinds: LEADS,
       run: ({ employee }, args) => {
         const to = findPerson(str(args, 'assignee'));
-        const task = company.assign(employee.id, str(args, 'taskId'), to.id, { difficulty: difficultyArg(args) });
+        const task = company.assign(employee.id, str(args, 'taskId'), to.id, { difficulty: difficultyArg(args), reviewer: reviewerArg(args) });
         return `“${task.title}” artık ${to.name} adlı çalışanda.`;
       },
     },
@@ -404,22 +458,34 @@ export function officeTools(o: {
     },
     {
       name: 'planPropose',
-      description: 'Propose a plan card to the owner before starting any work they asked for: goal, approach, who works on it (existing people and roles to hire), draft tasks, estimates (share of weekly quota %, money in USD, days) and risks. The owner approves it on screen.',
-      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach']),
+      description:
+        'Propose a plan card to the owner before starting any work they asked for: goal, approach, the method (work type, stages with who does and who checks each, quality checks — read methodRead first), who works on it (existing people and roles to hire), draft tasks, estimates (share of weekly quota %, money in USD, days) and risks. The owner approves it on screen.',
+      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), method, people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach', 'method']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
+        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), method: args.method, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
         return `Plan kartı açıldı (${plan.id}). Sahibinin onayını bekle; onay gelince sana haber verilecek.`;
       },
     },
     {
       name: 'planRevise',
       description: 'Revise a plan card (only the fields you pass change). Revising an approved plan sends it back to the owner for approval.',
-      inputSchema: object({ planId: s('The plan id.'), title: s('Plan title.'), goal: s('Goal.'), approach: s('Approach.'), people: s('Who.'), steps: strings('Draft tasks.'), quotaPct: number('Quota share, %.'), usd: number('Money, USD.'), days: number('Days.'), risks: s('Risks.') }, ['planId']),
+      inputSchema: object({ planId: s('The plan id.'), title: s('Plan title.'), goal: s('Goal.'), approach: s('Approach.'), method, people: s('Who.'), steps: strings('Draft tasks.'), quotaPct: number('Quota share, %.'), usd: number('Money, USD.'), days: number('Days.'), risks: s('Risks.') }, ['planId']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
+        const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), method: args.method, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
         return `Plan güncellendi: sürüm ${plan.version}, sahibinin onayını bekliyor.`;
+      },
+    },
+    {
+      name: 'planRetro',
+      description:
+        'Assess a plan when it ends (coordinator): what went well, what got stuck, what to change next time, and — if it would help every company — a method suggestion for the office’s craft. Then write company-specific lessons with playbookUpdate and report to the owner.',
+      inputSchema: object({ planId: s('The plan id.'), wentWell: s('What went well.'), stuck: s('What got stuck or went wrong.'), change: s('What to do differently next time.'), methodSuggestion: s('A change to the work-type method that would help any company (optional).') }, ['planId', 'wentWell', 'stuck', 'change']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const { suggestion } = company.retro(employee.id, str(args, 'planId'), { wentWell: str(args, 'wentWell'), stuck: str(args, 'stuck'), change: str(args, 'change'), methodSuggestion: optStr(args, 'methodSuggestion') });
+        return `Değerlendirme şirket notlarına yazıldı${suggestion ? ' (yöntem önerisi ayrıca)' : ''}. Şirkete özgü dersleri playbookUpdate ile el kitabına işle, sonra reportToOwner ile sahibine kısaca raporla.`;
       },
     },
     {

@@ -36,3 +36,13 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     },
   };
 }
+
+/** A valid plan method for tests that are not about methods (planPropose requires one, spec §5.1). */
+export const METHOD = {
+  workType: 'general',
+  stages: [
+    { name: 'Yap', role: 'çalışan', review: false },
+    { name: 'Kontrol', role: 'koordinatör', review: true },
+  ],
+  checks: ['Bitti tanımı karşılandı'],
+} as const satisfies import('@cc/shared').PlanMethod;

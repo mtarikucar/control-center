@@ -1,11 +1,38 @@
-export const TASK_STATUSES = ['waiting', 'in_progress', 'blocked', 'done', 'cancelled'] as const;
+export const TASK_STATUSES = ['waiting', 'in_progress', 'review', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const REVIEW_SEVERITIES = ['critical', 'important', 'minor'] as const;
+export type ReviewSeverity = (typeof REVIEW_SEVERITIES)[number];
+export const REVIEW_SEVERITY_LABELS: Record<ReviewSeverity, string> = { critical: 'kritik', important: 'önemli', minor: 'küçük' };
+export const REVIEW_DECISIONS = ['approve', 'changes'] as const;
+export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+export interface ReviewFinding {
+  severity: ReviewSeverity;
+  text: string;
+}
+export interface ReviewOutcome {
+  decision: ReviewDecision;
+  /** Most severe first. */
+  findings: ReviewFinding[];
+}
+
+/** "2 önemli, 1 küçük" — the findings counted by severity, most severe first ('' for none). */
+export function reviewTally(findings: readonly ReviewFinding[]): string {
+  return REVIEW_SEVERITIES.map((s) => [s, findings.filter((f) => f.severity === s).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([s, n]) => `${n} ${REVIEW_SEVERITY_LABELS[s]}`)
+    .join(', ');
+}
 
 export interface TaskResult {
   summary: string;
   /** Paths of the files the work produced (relative to the employee's desk or absolute). */
   outputs: string[];
   learned: string;
+  /** One line of proof per definition-of-done item, in the same order (spec §5.3). */
+  evidence?: string[];
+  /** A review task's decision (reviewDecide). */
+  review?: ReviewOutcome;
   /** Where the office archived the hand-in, relative to the data folder (set by the office). */
   archive?: string;
 }
@@ -13,8 +40,9 @@ export interface TaskResult {
 /** The id the office uses for the owner wherever a task or plan names who asked. */
 export const OWNER = 'owner';
 
-/** `handover`: the task "İşten çıkar" gives — write down what you know before you leave. */
-export const TASK_KINDS = ['work', 'handover'] as const;
+/** `handover`: the task "İşten çıkar" gives — write down what you know before you leave. `review`: the task the office
+ * opens for a reviewer when a task with a reviewer is handed in; closed only by reviewDecide. */
+export const TASK_KINDS = ['work', 'handover', 'review'] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 /** How hard a task is: the constitution maps each to the model the task starts on (difficultyModels). */
@@ -37,6 +65,12 @@ export interface Task {
   priority: number;
   /** Absent or null: none given; the assignee stays on their current model. */
   difficulty?: TaskDifficulty | null;
+  /** Who approves the hand-in before the task closes (an employee id); absent or null: no review. */
+  reviewer?: string | null;
+  /** A review task: the id of the task it reviews. */
+  reviewOf?: string | null;
+  /** How many times the task was handed in for review (0: never). */
+  round?: number;
   dependsOn: string[];
   status: TaskStatus;
   /** How many passes deep this task is (a task passed while working on a passed task is one deeper). */
@@ -48,6 +82,31 @@ export interface Task {
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+}
+
+/** The kinds of work the coordination craft has a method for (spec §4.2); methodRead reads each. */
+export const WORK_TYPES = ['software', 'content', 'research', 'customer', 'operations', 'general'] as const;
+export type WorkType = (typeof WORK_TYPES)[number];
+export const WORK_TYPE_LABELS: Record<WorkType, string> = {
+  software: 'Yazılım',
+  content: 'İçerik ve pazarlama',
+  research: 'Araştırma ve analiz',
+  customer: 'Müşteri ve satış',
+  operations: 'Operasyon ve satın alma',
+  general: 'Genel',
+};
+export interface PlanStage {
+  name: string;
+  /** Who does it: a person or a role. */
+  role: string;
+  /** Someone other than the doer checks it. */
+  review: boolean;
+}
+/** How a plan's work is done (spec §5.1). */
+export interface PlanMethod {
+  workType: WorkType;
+  stages: PlanStage[];
+  checks: string[];
 }
 
 export const PLAN_STATUSES = ['draft', 'approved', 'done', 'declined'] as const;
@@ -67,6 +126,8 @@ export interface Plan {
   usd: number | null;
   days: number | null;
   risks: string;
+  /** How the work is done (spec §5.1); null for plans from before methods. */
+  method?: PlanMethod | null;
   status: PlanStatus;
   version: number;
   proposedBy: string;
@@ -75,6 +136,7 @@ export interface Plan {
   approvedAt: number | null;
 }
 
-export type TaskChange = 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized';
+/** `in_review`: handed in, waiting for its reviewer. `reviewed`: a review task was decided. */
+export type TaskChange = 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized' | 'in_review' | 'reviewed';
 /** `reopened`: a done plan got a new task. `kept`: the owner declined a revision; the plan goes on as approved. */
 export type PlanChange = 'proposed' | 'revised' | 'approved' | 'declined' | 'done' | 'reopened' | 'kept';

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { QuotaTracker } from '../src/quota.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, until } from './helpers.ts';
 
@@ -102,8 +102,8 @@ describe('company API', () => {
   it('lets the owner approve or decline plan cards, and shows plans and tasks in the snapshot', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();
-    const a = t.company.propose(c.id, { title: 'A', goal: 'g', approach: 'x' });
-    const b = t.company.propose(c.id, { title: 'B', goal: 'g', approach: 'x' });
+    const a = t.company.propose(c.id, { method: METHOD, title: 'A', goal: 'g', approach: 'x' });
+    const b = t.company.propose(c.id, { method: METHOD, title: 'B', goal: 'g', approach: 'x' });
     expect((await call(t.port, 'POST', `/api/plans/${a.id}/approve`)).body).toMatchObject({ id: a.id, status: 'approved' });
     expect((await call(t.port, 'POST', `/api/plans/${a.id}/approve`)).status).toBe(409);
     expect((await call(t.port, 'POST', `/api/plans/${b.id}/decline`)).body.status).toBe('declined');
@@ -112,6 +112,17 @@ describe('company API', () => {
     const office = await call(t.port, 'GET', '/api/office');
     expect(office.body.plans.map((p: { title: string }) => p.title).sort()).toEqual(['A', 'B']);
     expect(office.body.tasks.map((x: { title: string }) => x.title)).toEqual(['iş']);
+  });
+
+  it('review focus: a task waiting for its review stays on the board after a reload (the snapshot has it)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'incelenecek', reviewer: c.id });
+    t.company.finish(ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    const office = await call(t.port, 'GET', '/api/office');
+    const shown = office.body.tasks.map((x: { title: string; status: string }) => `${x.status} ${x.title}`).sort();
+    expect(shown).toEqual(['review incelenecek', 'waiting İnceleme: incelenecek (tur 1)']);
   });
 
   it('final review: firing someone mid-task puts their tasks back in the queue', async () => {

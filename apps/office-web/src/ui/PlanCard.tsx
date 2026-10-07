@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Plan } from '@cc/shared';
+import { WORK_TYPE_LABELS, type Plan } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { PLAN_STATUS_LABELS } from './labels.ts';
@@ -59,6 +59,29 @@ export function PlanCard({ plan }: { plan: Plan }) {
           </>
         )}
       </dl>
+      {live.method && (
+        <section className="plan-method" aria-label="Nasıl yapılacak">
+          <h4>Nasıl yapılacak · {WORK_TYPE_LABELS[live.method.workType]}</h4>
+          <ol>
+            {live.method.stages.map((st, i) => (
+              <li key={i}>
+                {st.name} — {st.role}
+                {st.review ? ' · incelemeli' : ''}
+              </li>
+            ))}
+          </ol>
+          {live.method.checks.length > 0 && (
+            <>
+              <strong>Kalite kontrolleri</strong>
+              <ul>
+                {live.method.checks.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
       {live.steps.length > 0 && (
         <ol>
           {live.steps.map((step, i) => (

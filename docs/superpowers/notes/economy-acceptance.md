@@ -30,7 +30,7 @@ Testler `apps/office-server/test/` altında (web: `apps/office-web/src/ui/`). "B
 
 | No | Kanıt (dosya › test) | Seviye | Durum |
 |----|----------------------|--------|-------|
-| R1 | `economy.scenario.test.ts` › the economy on… (koordinatör turu ≤ 5; main tabanı 15) | K2 | ✓ |
+| R1 | `economy.scenario.test.ts` › the economy on… (koordinatör turu ≤ 5; main tabanı 15 — koordinatörlük yetisinden sonra ≤ 6: plan sonu değerlendirmesi bir karar turu) | K2 | ✓ |
 | R1 | `economy-report.test.ts` › counts turns, money, tokens… (ölçüm aracı, sahibi hariç metrik) | K1 | ✓ |
 | R1 | Canlı pencere ≥30 teslim, anahtarlar açık ve kapalı | K4 | **BOŞ — yayın sonrası** |
 | R2 | `economy.scenario.test.ts` › koordinatör modellenmiş maliyeti ≤ %30 × 225 | K2 | ✓ (18,2) |

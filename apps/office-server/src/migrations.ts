@@ -263,4 +263,21 @@ export const MIGRATIONS: Migration[] = [
     up: `ALTER TABLE tasks ADD COLUMN difficulty TEXT;`,
     down: `ALTER TABLE tasks DROP COLUMN difficulty;`,
   },
+  {
+    version: 8,
+    name: 'coordination craft: plan method, task review',
+    // Tasks and plans from before stay as they were: no reviewer, round 0, no method.
+    up: `
+      ALTER TABLE plans ADD COLUMN method TEXT;
+      ALTER TABLE tasks ADD COLUMN reviewer TEXT;
+      ALTER TABLE tasks ADD COLUMN review_of TEXT;
+      ALTER TABLE tasks ADD COLUMN round INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS tasks_review_of ON tasks (review_of);`,
+    down: `
+      DROP INDEX IF EXISTS tasks_review_of;
+      ALTER TABLE tasks DROP COLUMN round;
+      ALTER TABLE tasks DROP COLUMN review_of;
+      ALTER TABLE tasks DROP COLUMN reviewer;
+      ALTER TABLE plans DROP COLUMN method;`,
+  },
 ];

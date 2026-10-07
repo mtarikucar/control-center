@@ -53,4 +53,20 @@ describe('PlanCard', () => {
     render(<PlanCard plan={plan({ status: 'approved' })} />);
     expect(screen.getByText('Harcanan: $30 / $25 · Claude ~$1.5').className).toContain('over');
   });
+
+  it('shows how the work will be done', () => {
+    const method = { workType: 'content' as const, stages: [{ name: 'Taslak', role: 'yazar', review: false }, { name: 'Editör', role: 'editör', review: true }], checks: ['marka dili'] };
+    useOffice.setState({ plans: { p1: plan({ method }) } });
+    render(<PlanCard plan={plan({ method })} />);
+    const section = screen.getByRole('region', { name: 'Nasıl yapılacak' });
+    expect(section.textContent).toContain('İçerik ve pazarlama');
+    expect(section.textContent).toContain('Taslak — yazar');
+    expect(section.textContent).toContain('Editör — editör · incelemeli');
+    expect(section.textContent).toContain('marka dili');
+  });
+
+  it('a plan without a method shows no method section', () => {
+    render(<PlanCard plan={plan({ method: null })} />);
+    expect(screen.queryByRole('region', { name: 'Nasıl yapılacak' })).toBeNull();
+  });
 });

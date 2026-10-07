@@ -1,4 +1,4 @@
-import type { PlanChange, StoredEvent } from '@cc/shared';
+import { reviewTally, type PlanChange, type StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, summarizeToolInput } from './format.ts';
 import { lifecycleLabel } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
@@ -99,13 +99,24 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
           {time}
         </div>
       );
-    case 'task.changed':
+    case 'task.changed': {
+      if (e.change === 'in_review') return <div className="note">Görev incelemede: {e.task.title}</div>;
+      if (e.change === 'reviewed') {
+        const r = e.task.result?.review;
+        const tally = r ? reviewTally(r.findings) : '';
+        return (
+          <div className="note">
+            {`${e.task.title} — ${r?.decision === 'approve' ? 'onaylandı' : 'değişiklik istendi'}${tally ? ` (${tally})` : ''}`}
+          </div>
+        );
+      }
       if (e.change !== 'created' && e.change !== 'finished' && e.change !== 'started') return null;
       return (
         <div className="note">
           Görev {e.change === 'created' ? 'açıldı' : e.change === 'started' ? 'başladı' : 'bitti'}: {e.task.title}
         </div>
       );
+    }
     case 'brief.updated':
       return <div className="note">Şirket özeti güncellendi</div>;
     case 'role.changed':

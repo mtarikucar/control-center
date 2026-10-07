@@ -28,6 +28,14 @@ function copyable(path: string): boolean {
   }
 }
 
+/** Each definition-of-done item with its evidence, then any evidence beyond the items (spec §5.3). */
+function evidenceSection(done: string[], evidence: string[]): string[] {
+  if (done.length === 0 && evidence.length === 0) return [];
+  const rows = done.map((d, i) => `- ${d}\n  Kanıt: ${evidence[i] ?? '—'}`);
+  for (const extra of evidence.slice(done.length)) rows.push(`- Kanıt: ${extra}`);
+  return ['## Bitti tanımı ve kanıt', '', ...rows, ''];
+}
+
 /**
  * Copies a hand-in's outputs to company/archive/<plan or "plansiz">/<date>-<task id>-<title>/ and writes teslim.md:
  * what was done, what was learned, and what happened to each output. Never throws for an output it cannot copy.
@@ -86,6 +94,7 @@ export function archiveTask(o: { dataDir: string; desk: string; task: Task; resu
     '',
     o.result.summary,
     '',
+    ...evidenceSection(o.task.done, o.result.evidence ?? []),
     ...(o.result.learned ? ['## Öğrenilenler', '', o.result.learned, ''] : []),
     '## Çıktılar',
     '',

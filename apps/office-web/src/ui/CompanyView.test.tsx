@@ -101,4 +101,21 @@ describe('CompanyView', () => {
     expect(within(owner).getByText('Telefon')).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Ekipte karar bekleyenler' })).getByText('Blog')).toBeTruthy();
   });
+
+  it('has an İncelemede column with the reviewer and the round on the card', () => {
+    office(
+      [person('ada', { name: 'Ada' }), person('can', { name: 'Can' })],
+      [
+        task('Tanıtım metni', { status: 'review', assignee: 'ada', reviewer: 'can', round: 2 }),
+        task('İnceleme: Tanıtım metni (tur 2)', { kind: 'review', assignee: 'can', reviewOf: 'Tanıtım metni' }),
+      ],
+    );
+    render(<CompanyView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Görevler' }));
+    const column = screen.getByRole('region', { name: 'İncelemede' });
+    expect(within(column).getByText('Tanıtım metni')).toBeTruthy();
+    expect(column.textContent).toContain('İnceleyen: Can');
+    expect(column.textContent).toContain('tur 2');
+    expect(within(screen.getByRole('region', { name: 'Bekliyor' })).getByText('İnceleme').className).toContain('review');
+  });
 });

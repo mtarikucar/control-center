@@ -5,7 +5,7 @@ import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, tempDir, until, waitFor } from './helpers.ts';
 
@@ -41,6 +41,7 @@ describe('Dispatcher', () => {
     expect(text).toContain(task.id);
     expect(text).toContain('README.md var');
     expect(text).toContain('taskFinish');
+    expect(text).toContain('evidence');
     expect(t.tasks.get(task.id).status).toBe('in_progress');
   });
 
@@ -72,7 +73,7 @@ describe('Dispatcher', () => {
   it('brings notices to an idle coordinator: the owner approved the plan', async () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = t.company.propose(c.id, { title: 'Video', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Video', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     const msg = await waitFor(t.events, (e) => e.employeeId === c.id && e.event.type === 'message.user' && e.event.text.startsWith(NOTICES_PREFIX));
     expect((msg.event as { text: string }).text).toContain('Plan onaylandı');
@@ -232,7 +233,7 @@ describe('Dispatcher — reserve and sleep', () => {
     await t.engine.sleep(ada.id);
     // As on main (only the topic is new); a decision, so not even a decision wakes a member.
     t.notices.add(ada.id, 'proposal.decided', 'Bilgi: toplantı yok.');
-    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(coord.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Plan onaylandı')), 8000);
     await sleep(300);
@@ -317,7 +318,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     t.notices.add(coord.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
     await sleep(400);
     expect(t.turns(coord.id)).toEqual([]);
-    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(coord.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => t.turns(coord.id).length === 1, 8000);
     await sleep(300);
@@ -447,7 +448,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
     await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
-    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(coord.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => t.turns(coord.id).length === 1 && t.engine.ready(coord.id), 8000);
     t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
@@ -599,3 +600,32 @@ describe('Dispatcher — notice kinds and the digest', () => {
   });
 });
 
+describe('Dispatcher — reviews', () => {
+  it('delivers a review task with reviewDecide instructions; a sent-back task comes back with the findings', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Metin', done: ['iki cümle'], reviewer: can.id });
+    await waitFor(t.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('İnceleyen: Can'));
+    t.company.finish(ada.id, task.id, { summary: 'yazdım', outputs: [], learned: '', evidence: ['metin.md'] });
+    const reviewMsg = await waitFor(t.events, (e) => e.employeeId === can.id && e.event.type === 'message.user' && e.event.text.includes('İnceleme: Metin'));
+    const text = (reviewMsg.event as { text: string }).text;
+    expect(text).toContain('reviewDecide');
+    expect(text).not.toContain('`taskFinish` ile teslim et');
+    const review = t.tasks.list({ assignee: can.id }).find((x) => x.kind === 'review')!;
+    t.company.reviewDecide(can.id, review.id, { decision: 'changes', findings: [{ severity: 'important', text: 'üç cümle olmuş' }] });
+    const back = await waitFor(t.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('değişiklik istendi'));
+    expect((back.event as { text: string }).text).toContain('[önemli] üç cümle olmuş');
+  });
+
+  it('reminds a reviewer to decide with reviewDecide', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Metin', reviewer: can.id });
+    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
+    t.company.finish(ada.id, task.id, { summary: 'yazdım', outputs: [], learned: '' });
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), can.id).some((m) => m.startsWith(NUDGE_PREFIX)), 8000);
+    expect(systemMessages(t.events.list({ limit: 5000 }), can.id).find((m) => m.startsWith(NUDGE_PREFIX))).toContain('reviewDecide');
+  });
+});

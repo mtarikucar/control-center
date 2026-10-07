@@ -23,7 +23,7 @@ const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version)
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(7);
+    expect(migrateUp(db)).toBe(8);
     expect(tables(db)).toEqual(V5_TABLES);
   });
 
@@ -33,14 +33,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(7);
+    expect(migrateUp(db)).toBe(8);
     expect(tables(db)).toEqual(V5_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(7);
+    expect(migrateUp(db)).toBe(8);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -157,6 +157,30 @@ describe('migrations', () => {
     expect(migrateDown(db, 6)).toBe(6);
     expect(columns(db, 'tasks')).not.toContain('difficulty');
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(7);
+    expect(migrateUp(db, upTo(7))).toBe(7);
+  });
+
+  it('v8 gives plans a method and tasks a reviewer, a reviewed task and a round; v8 down restores v7 and keeps them', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(7));
+    db.prepare(
+      `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
+       VALUES ('t1', NULL, 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'waiting', 0, 1)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO plans (id, title, goal, approach, people, steps, risks, status, version, proposed_by, created_at, updated_at)
+       VALUES ('p1', 'eski plan', 'g', 'a', '', '[]', '', 'draft', 1, 'c', 1, 1)`,
+    ).run();
+    migrateUp(db);
+    expect({ ...(db.prepare('SELECT reviewer, review_of, round FROM tasks').get() as object) }).toEqual({ reviewer: null, review_of: null, round: 0 });
+    expect({ ...(db.prepare('SELECT method FROM plans').get() as object) }).toEqual({ method: null });
+    expect(migrateDown(db, 7)).toBe(7);
+    expect(columns(db, 'tasks')).not.toContain('reviewer');
+    expect(columns(db, 'tasks')).not.toContain('round');
+    expect(columns(db, 'plans')).not.toContain('method');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM plans').get()).toMatchObject({ n: 1 });
+    expect(migrateDown(db, 7)).toBe(7);
+    expect(migrateUp(db)).toBe(8);
   });
 });

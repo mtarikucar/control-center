@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER } from '@cc/shared';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
 
@@ -105,7 +105,7 @@ describe('Team leads', () => {
 describe('Rule B — revisions', () => {
   it('review focus: declining a revision keeps the plan on its approved version with its tasks', () => {
     const t = make();
-    const plan = t.company.propose(t.coord.id, { title: 'Video', goal: 'g', approach: 'a', usd: 20 });
+    const plan = t.company.propose(t.coord.id, { method: METHOD, title: 'Video', goal: 'g', approach: 'a', usd: 20 });
     t.company.approve(plan.id);
     const task = t.company.createTask(t.coord.id, { assignee: t.ada.id, title: 'senaryo', planId: plan.id });
     const revision = t.company.revise(t.coord.id, plan.id, { title: 'Video ve blog', usd: 60 });
@@ -120,13 +120,13 @@ describe('Rule B — revisions', () => {
 
   it('approving a revision forgets the old version; declining a plan never approved still declines it', () => {
     const t = make();
-    const plan = t.company.propose(t.coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(t.coord.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     t.company.revise(t.coord.id, plan.id, { days: 9 });
     t.company.revise(t.coord.id, plan.id, { days: 10 });
     t.company.approve(plan.id);
     expect(t.plans.approvedSnapshot(plan.id)).toBeNull();
-    const fresh = t.company.propose(t.coord.id, { title: 'Q', goal: 'g', approach: 'a' });
+    const fresh = t.company.propose(t.coord.id, { method: METHOD, title: 'Q', goal: 'g', approach: 'a' });
     expect(t.company.decline(fresh.id).status).toBe('declined');
   });
 });

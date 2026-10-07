@@ -60,3 +60,19 @@ happen: `#onExit` empties `unread` before `close()` resolves, so `#halt` finds n
 - `budgetStatus` text changed format even with the switches off (not listed among the deliberate differences).
 - `economy-live-baseline.md` holds real office data (names, per-employee USD): fine while the repo is private.
 - The coordinator's own tasks use `coordinatorModels.decision`, never the task's difficulty.
+
+## Coordinator craft, stage 1 (final review, 2026-10-07)
+The one Important finding (a let-go doer's task sent back by the coordinator was orphaned silently) was fixed with
+tests before the merge. Deferred minors:
+- A second review round on the same day overwrites round 1's archive folder (`<day>-<id>-<title>`); the database and
+  the round-1 review brief keep it.
+- `review.stuck` never reaches a coordinator who is itself the reviewer; the `reviewDecide` reply does not repeat the
+  "change the approach or take it to the owner" guidance at round 3.
+- A lead doing their own task can swap its reviewer for one of their reports via `taskAssign`; `Company.assign`
+  accepts `reviewer: null` (MCP cannot send it).
+- The coordinator as doer whose only reviewer leaves after hand-in resolves it only by assigning the review to someone
+  else or hiring.
+- The digest-off daily report reminder's open-work check does not count tasks in review.
+- The digest still has a "Plan durumu" group for `plan.done`, which nothing emits any more.
+- A reviewer whose review the coordinator decides over their head is not told.
+- `taskAssign` on a review task ignores an explicit `reviewer` argument silently.
