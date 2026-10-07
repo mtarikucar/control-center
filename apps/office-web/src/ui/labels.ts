@@ -36,6 +36,7 @@ export const KIND_LABELS: Record<EmployeeKind, string> = { coordinator: 'Koordin
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   waiting: 'Bekliyor',
   in_progress: 'Sürüyor',
+  review: 'İncelemede',
   blocked: 'Takıldı',
   done: 'Bitti',
   cancelled: 'İptal',

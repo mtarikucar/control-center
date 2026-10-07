@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Plan, PlanStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
+import type { Plan, PlanMethod, PlanStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 import { NOTICE_TOPICS, type Notice, type NoticeTopic } from './notices.ts';
@@ -24,6 +24,9 @@ interface TaskRow {
   finished_at: number | null;
   kind: string;
   difficulty: string | null;
+  reviewer: string | null;
+  review_of: string | null;
+  round: number | null;
 }
 
 function taskFromRow(r: TaskRow): Task {
@@ -38,6 +41,9 @@ function taskFromRow(r: TaskRow): Task {
     assignee: r.assignee,
     priority: r.priority,
     difficulty: (r.difficulty as TaskDifficulty | null) ?? null,
+    reviewer: r.reviewer ?? null,
+    reviewOf: r.review_of ?? null,
+    round: r.round ?? 0,
     dependsOn: JSON.parse(r.depends_on) as string[],
     status: r.status as TaskStatus,
     chainDepth: r.chain_depth,
@@ -61,13 +67,17 @@ export interface NewTask {
   assignee: string;
   priority: number;
   difficulty?: TaskDifficulty | null;
+  /** Who approves the hand-in (an employee id). */
+  reviewer?: string | null;
+  /** A review task: the task it reviews. */
+  reviewOf?: string | null;
   dependsOn: string[];
   chainDepth: number;
 }
 
-export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt'>>;
+export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'reviewer' | 'round' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt'>>;
 
-const OPEN = "('waiting', 'in_progress', 'blocked')";
+const OPEN = "('waiting', 'in_progress', 'review', 'blocked')";
 
 export class TaskStore {
   readonly #db: Db;
@@ -79,14 +89,17 @@ export class TaskStore {
   }
 
   create(t: NewTask): Task {
-    const task: Task = { ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null };
+    const task: Task = {
+      ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, reviewer: t.reviewer ?? null, reviewOf: t.reviewOf ?? null, round: 0,
+      id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null,
+    };
     this.#db
       .prepare(
         `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth,
-           note, result, nudged, created_at, started_at, finished_at, kind, difficulty)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?)`,
+           note, result, nudged, created_at, started_at, finished_at, kind, difficulty, reviewer, review_of, round)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?, ?, ?, 0)`,
       )
-      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null);
+      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null, task.reviewer ?? null, task.reviewOf ?? null);
     return task;
   }
 
@@ -119,8 +132,8 @@ export class TaskStore {
   update(id: string, patch: TaskPatch): Task {
     const next = { ...this.get(id), ...patch };
     this.#db
-      .prepare('UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ? WHERE id = ?')
-      .run(next.assignee, next.priority, next.difficulty ?? null, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt, id);
+      .prepare('UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, reviewer = ?, round = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ? WHERE id = ?')
+      .run(next.assignee, next.priority, next.difficulty ?? null, next.reviewer ?? null, next.round ?? 0, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt, id);
     return next;
   }
 
@@ -190,6 +203,14 @@ export class TaskStore {
     const row = this.#db.prepare(`SELECT COUNT(*) AS n FROM tasks WHERE plan_id = ? AND status IN ${OPEN}`).get(planId) as unknown as { n: number };
     return row.n;
   }
+
+  /** The last decided review of a task (its findings go with the task when it comes back). */
+  latestReview(taskId: string): Task | null {
+    const row = this.#db
+      .prepare("SELECT * FROM tasks WHERE review_of = ? AND kind = 'review' AND status = 'done' ORDER BY finished_at DESC, rowid DESC LIMIT 1")
+      .get(taskId) as unknown as TaskRow | undefined;
+    return row ? taskFromRow(row) : null;
+  }
 }
 
 interface PlanRow {
@@ -209,6 +230,7 @@ interface PlanRow {
   created_at: number;
   updated_at: number;
   approved_at: number | null;
+  method: string | null;
 }
 
 function planFromRow(r: PlanRow): Plan {
@@ -229,6 +251,7 @@ function planFromRow(r: PlanRow): Plan {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     approvedAt: r.approved_at,
+    method: r.method ? (JSON.parse(r.method) as PlanMethod) : null,
   };
 }
 
@@ -243,6 +266,7 @@ export interface NewPlan {
   days: number | null;
   risks: string;
   proposedBy: string;
+  method?: PlanMethod | null;
 }
 
 export type PlanPatch = Partial<Omit<Plan, 'id' | 'createdAt' | 'proposedBy'>>;
@@ -258,7 +282,7 @@ export class PlanStore {
 
   create(p: NewPlan): Plan {
     const at = this.#now();
-    const plan: Plan = { ...p, id: randomUUID(), status: 'draft', version: 1, createdAt: at, updatedAt: at, approvedAt: null };
+    const plan: Plan = { ...p, method: p.method ?? null, id: randomUUID(), status: 'draft', version: 1, createdAt: at, updatedAt: at, approvedAt: null };
     this.#write(plan, true);
     return plan;
   }
@@ -305,19 +329,19 @@ export class PlanStore {
   }
 
   #write(p: Plan, insert: boolean): void {
-    const values = [p.title, p.goal, p.approach, p.people, JSON.stringify(p.steps), p.quotaPct, p.usd, p.days, p.risks, p.status, p.version, p.updatedAt, p.approvedAt];
+    const values = [p.title, p.goal, p.approach, p.people, JSON.stringify(p.steps), p.quotaPct, p.usd, p.days, p.risks, p.status, p.version, p.updatedAt, p.approvedAt, p.method ? JSON.stringify(p.method) : null];
     if (insert) {
       this.#db
         .prepare(
-          `INSERT INTO plans (title, goal, approach, people, steps, quota_pct, usd, days, risks, status, version, updated_at, approved_at, id, proposed_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO plans (title, goal, approach, people, steps, quota_pct, usd, days, risks, status, version, updated_at, approved_at, method, id, proposed_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(...values, p.id, p.proposedBy, p.createdAt);
     } else {
       this.#db
         .prepare(
           `UPDATE plans SET title = ?, goal = ?, approach = ?, people = ?, steps = ?, quota_pct = ?, usd = ?, days = ?, risks = ?, status = ?,
-             version = ?, updated_at = ?, approved_at = ? WHERE id = ?`,
+             version = ?, updated_at = ?, approved_at = ?, method = ? WHERE id = ?`,
         )
         .run(...values, p.id);
     }

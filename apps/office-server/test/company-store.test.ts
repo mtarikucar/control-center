@@ -102,3 +102,45 @@ describe('NoticeStore', () => {
     expect(notices.pending('e2')).toHaveLength(1);
   });
 });
+
+describe('TaskStore — review fields (v8)', () => {
+  it('keeps a reviewer, the reviewed task and the round; a new task has round 0', () => {
+    const { tasks } = stores();
+    const work = tasks.create(task({ done: ['a'], reviewer: 'e2' }));
+    expect(work).toMatchObject({ reviewer: 'e2', reviewOf: null, round: 0 });
+    expect(tasks.get(work.id)).toMatchObject({ reviewer: 'e2', reviewOf: null, round: 0 });
+    const next = tasks.update(work.id, { status: 'review', round: 1, reviewer: 'e3' });
+    expect(tasks.get(work.id)).toMatchObject({ status: 'review', round: 1, reviewer: 'e3' });
+    expect(next.round).toBe(1);
+    const review = tasks.create(task({ kind: 'review', title: 'İnceleme: Yaz (tur 1)', done: [], assignee: 'e3', reviewOf: work.id }));
+    expect(tasks.get(review.id)).toMatchObject({ kind: 'review', reviewOf: work.id, reviewer: null });
+  });
+
+  it('counts a task in review as open, and finds the latest finished review of a task', () => {
+    const { tasks } = stores();
+    const work = tasks.create(task({ planId: 'p1', done: [], reviewer: 'e2' }));
+    tasks.update(work.id, { status: 'review' });
+    expect(tasks.openInPlan('p1')).toBe(1);
+    expect(tasks.latestReview(work.id)).toBeNull();
+    const first = tasks.create(task({ kind: 'review', planId: 'p1', title: 'İnceleme 1', done: [], assignee: 'e2', reviewOf: work.id }));
+    tasks.update(first.id, { status: 'done', finishedAt: 5000, result: { summary: 'Değişiklik istendi', outputs: [], learned: '', review: { decision: 'changes', findings: [{ severity: 'important', text: 'eksik' }] } } });
+    const second = tasks.create(task({ kind: 'review', planId: 'p1', title: 'İnceleme 2', done: [], assignee: 'e2', reviewOf: work.id }));
+    expect(tasks.latestReview(work.id)?.id).toBe(first.id);
+    tasks.update(second.id, { status: 'done', finishedAt: 6000, result: { summary: 'Onaylandı', outputs: [], learned: '', review: { decision: 'approve', findings: [] } } });
+    expect(tasks.latestReview(work.id)?.id).toBe(second.id);
+    expect(tasks.latestReview(work.id)?.result?.review?.decision).toBe('approve');
+  });
+});
+
+describe('PlanStore — method (v8)', () => {
+  it('stores a plan’s method and reads an old plan’s as null', () => {
+    const { plans } = stores();
+    const method = { workType: 'content' as const, stages: [{ name: 'Taslak', role: 'yazar', review: false }, { name: 'Editör', role: 'editör', review: true }], checks: ['marka diline uygun'] };
+    const p = plans.create({ title: 'Metin', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '', proposedBy: 'c', method });
+    expect(plans.get(p.id).method).toEqual(method);
+    const old = plans.create({ title: 'Eski', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '', proposedBy: 'c' });
+    expect(plans.get(old.id).method).toBeNull();
+    plans.update(old.id, { method });
+    expect(plans.get(old.id).method).toEqual(method);
+  });
+});
