@@ -89,3 +89,49 @@ Deferred minors:
 - `goalsRead` lists only the newest 100 plans.
 - No test yet for a sleeping coordinator staying asleep through a pause and waking once on resume (the code path is right).
 - The `restUntil` reply says the owner's request ends the rest; only a new goal does.
+
+## Ofis zamanlayıcısı (2026-10-07) — ertelenenler
+The final whole-branch review's findings were fixed with tests before the merge: `taskUpdate blocked` no longer
+un-parks a parked task into limbo; parks and start times past the 7-day horizon stay on the agenda; a task leaving
+`parked` by finish, assign or a plan stop forgets its park; the reviewer note no longer guesses a Turkish suffix; a
+firing resets `skipCount`; resume touches the clock; the server agenda says "Ertelendi"; the feed formats a park from
+the event's own time; shutdown stops the clock and the dispatcher. Deferred minors (controller ruling R17):
+- Task 1 (store): `returnParked` is followed by a second write for `parked_reason` (fold into one statement);
+  `ScheduleStore.update` binds optional fields without `?? null`; `overdue_notified` is not reset if a future path
+  changes `dueAt`; the ScheduleStore test does not read back until/planId/difficulty/reviewer/done.
+- Task 2 (time): `cronLabel` says "her N dakikada" also for a non-uniform minute list; the `nextCron` same-minute guard
+  is unreachable in V8; cron range errors say "5 alan olmalı"; `*/n` in a day field counts as restricted (Vixie treats
+  it as `*`); `\s*` accepts `+2 h`; the parseUntil error test's regex matches every category.
+- Task 3 (park, due dates): the overdue one-shot is spent when there is no coordinator; `ownerPrioritize` accepts any
+  open status; `#remindReport` also counts `review`; duplicated priority validation messages; parking past the task's
+  own `dueAt` is allowed; coverage gaps (lead parking, parking a blocked task, dueAt < startAfter, startAfter > 365 d,
+  overdue while parked); a dispatcher test title overclaims.
+- Task 4 (clock): the dispatcher's clock-path cleanup leaves its job and listener on the clock; `stop()` does not reset
+  `#armedFor` and there is no double-start guard; `every(ms <= 0)` is unvalidated; `runNow()` before `start()` runs
+  every job; `status()` recomputes nextDueAt in the label and scans tasks; an overdue soonest routine hides later ones
+  from nextDueAt until the safety tick.
+- Task 5 (tools, routes): the `taskPass` reply does not echo the resolved times; the release/prioritize routes read an
+  unused JSON body; the module-level `until` schema is shadowed in `restUntil`; tool replies format with `Date.now()`;
+  tool-level permission coverage gaps.
+- Task 6 (routines): events appended inside `BEGIN IMMEDIATE` reach WS subscribers before COMMIT; a non-pausing fire
+  failure emits no `schedule.changed`; `ownerSchedule('stop')` on a stopped routine is a 409 with resume wording; the
+  paused event is attributed to the archived leaver; instances inherit the creator's chainDepth + 1 and a lead
+  creator's tasksPerDay; with autonomy `plans` a plan revision to draft makes firings fail; a 29-February stop plus a
+  third failure can send two `schedule.failed`; the reviewer-case notice says "duraklatıldı" when already paused;
+  `REPARK_LIMIT` doubles as the skip/fail threshold and `rules()` is unused; a test-only `expect(OWNER).toBe('owner')`;
+  no positive lead-creates-in-own-team test.
+- Task 7 (agenda): `lowConfidence` is also set on own already-placed dependencies; `text()` prints a running task's
+  estimate as the bare basis; a waiting hand-over is shown in its priority slot; the agenda test writes `depends_on`
+  straight to SQLite; `api.ts` re-spells the empty ClockStatus.
+- Task 8 (web sheet): timeline bar labels degrade to fragments on short bars; the Durdur (confirm) path is untested; no
+  test of the ~1 s re-read, its coalescing or the stale discard; two hardcoded colours; the Rutinler row runs the next
+  run into the cron text; ~1 s of stale buttons after an owner action; ClockLine leaves a dangling dash when
+  nextDueLabel is null; Park et… a11y (aria-controls, focus, form name); CSS keyed on `aria-label='Gerekçe'`;
+  `AgendaTab.tsx` size; the phone tab row wraps to five rows; the sheet refreshes only on events; `clock.*` events are
+  in no feed; datetime-local follows the browser's zone.
+- Task 9 (lockdown, smoke, guides): the lockdown probe runs without `--mcp-config`; the smoke test does not assert the
+  return was not early; the lockdown probe ignores stderr and 'error'; real tests leave `~/.claude/projects/-tmp-cc-*`
+  directories; child sessions inherit the parent env (`CLAUDECODE`/`CLAUDE_CODE_*`); pm.md has `(taskPark)` without
+  backticks; coordination.md attributes startAfter/dueAt to taskCreate only.
+- Final review: the clock-path boot runs `checkReserve`/`#remindReport` immediately, while the economy golden covers
+  only the no-clock path.
