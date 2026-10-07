@@ -5,6 +5,7 @@ import { createApi } from './api.ts';
 import { Budget } from './company/budget.ts';
 import { ConstitutionStore, SpendStore } from './company/budget-store.ts';
 import { manifestCharacters } from './company/characters.ts';
+import { Clock } from './company/clock.ts';
 import { Company } from './company/company.ts';
 import { Memory } from './company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
@@ -12,7 +13,8 @@ import { Dispatcher } from './company/dispatcher.ts';
 import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
-import { NoticeStore, PlanStore, TaskStore } from './company/store.ts';
+import { dueLabel, Scheduling } from './company/scheduling.ts';
+import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
 import { loadConfig } from './config.ts';
 import { migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
@@ -48,6 +50,7 @@ const engine = new Engine({
 const tasks = new TaskStore(db);
 const plans = new PlanStore(db);
 const notices = new NoticeStore(db);
+const schedules = new ScheduleStore(db);
 const proposals = new ProposalStore(db);
 const goals = new GoalStore(db);
 const state = new CompanyStateStore(db);
@@ -59,12 +62,16 @@ const budget = new Budget({
   constitution: new ConstitutionStore(db), spend: new SpendStore(db), tasks, plans, roster, events, notices, quota, deskCount: config.deskCount,
 });
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules });
 const pulse = new Pulse({ company, goals, state, plans, tasks, notices, budget });
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse });
+// The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
+const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });
+const clock = new Clock({ scheduling, state, events, label: (now) => dueLabel(tasks, schedules, company, now) });
+company.attachClock(clock);
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock });
 
 const api = createApi(
-  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list() }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
+  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list() }) }, company: { service: company, tasks, plans, memory, budget, proposals, clock } },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {
@@ -82,6 +89,7 @@ api.server.listen(config.port, config.host, () => {
   mcpUrl = `http://${config.host}:${port}/mcp`;
   engine.recover();
   dispatcher.start();
+  clock.start();
   budget.watch();
   console.log(`office-server hazır: http://${config.host}:${port}  (veri: ${config.dataDir})`);
 });

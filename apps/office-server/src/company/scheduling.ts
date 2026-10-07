@@ -26,6 +26,19 @@ export interface SchedulingDeps {
   now?: () => number;
 }
 
+/** "Adım 1 penceresi · Koordinatör" — what the nearest due time is about (for the status line and the sheet). */
+export function dueLabel(tasks: TaskStore, schedules: ScheduleStore, company: Company, now: number): string | null {
+  const at = [tasks.nextDueAt(now), schedules.nextRunAt()].filter((t): t is number => t !== null && t > now);
+  if (at.length === 0) return null;
+  const when = Math.min(...at);
+  const task =
+    tasks.list({ statuses: ['parked', 'waiting'], limit: 10_000 }).find((t) => t.notBefore === when) ??
+    tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked', 'parked'], limit: 10_000 }).find((t) => t.dueAt === when);
+  if (task) return `${task.title} · ${company.nameOf(task.assignee)}`;
+  const schedule = schedules.list({ statuses: ['active'] }).find((s) => s.nextRunAt === when);
+  return schedule ? `${schedule.title} · ${company.nameOf(schedule.assignee)} (rutin)` : null;
+}
+
 /** What one run of the due-processor did. */
 export interface DueReport {
   /** Tasks that came back from park. */

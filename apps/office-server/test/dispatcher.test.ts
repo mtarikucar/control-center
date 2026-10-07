@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
+import { Clock } from '../src/company/clock.ts';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
 import { Pulse } from '../src/company/pulse.ts';
@@ -700,5 +701,40 @@ describe('Dispatcher — time', () => {
     c.company.createTask(OWNER, { assignee: ada.id, title: 'Tarihli', dueAt: '+2d' });
     const msg = await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('Tarihli'));
     expect((msg.event as { text: string }).text).toMatch(/Son tarih: .*\d\d:\d\d/);
+  });
+
+  it('with a clock, the dispatcher’s tick is a clock job and a park return sweeps: a sleeping employee is woken when their task comes back', async () => {
+    let now = Date.now();
+    const s = setup(8, () => now);
+    const f = fakeEngine(s, { engine: { now: () => now } });
+    const c = companyFor(s, f, undefined, () => now);
+    // Typed by assertion: a plain annotation would narrow it to null here (the timer sets it inside a closure).
+    let pending = null as (() => void) | null;
+    const timers = { set: (fn: () => void) => ((pending = fn), 1), clear: () => void (pending = null) };
+    const clock = new Clock({ scheduling: c.scheduling, state: c.state, events: s.events, now: () => now, timers });
+    // The tick's first step is the reserve check: counting it shows when the clock ran the tick.
+    let ticks = 0;
+    const checkReserve = c.budget.checkReserve.bind(c.budget);
+    c.budget.checkReserve = () => {
+      ticks += 1;
+      checkReserve();
+    };
+    const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget, clock, now: () => now });
+    cleanups.push(dispatcher.start(), clock.start(), f.cleanup, s.cleanup);
+    expect(ticks).toBe(1);
+    const ada = c.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => f.engine.ready(ada.id), 8000);
+    const task = c.company.createTask(OWNER, { assignee: ada.id, title: 'Parklı' });
+    await until(() => c.tasks.get(task.id).status === 'in_progress', 8000);
+    c.company.parkTask(ada.id, task.id, '+1h', 'bekle');
+    // The engine puts only an idle employee to sleep: the delivery's turn ends first.
+    await until(() => f.engine.ready(ada.id), 8000);
+    await f.engine.sleep(ada.id);
+    expect(s.roster.get(ada.id).lifecycle).toBe('sleeping');
+    now += 61 * 60_000;
+    pending?.(); // the clock's timer fires
+    expect(ticks).toBe(2);
+    await until(() => s.roster.get(ada.id).lifecycle !== 'sleeping', 8000);
+    await until(() => c.tasks.get(task.id).status === 'in_progress', 8000);
   });
 });

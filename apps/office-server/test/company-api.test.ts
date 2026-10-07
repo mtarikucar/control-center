@@ -1,7 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { OWNER } from '@cc/shared';
+import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
@@ -13,13 +13,13 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
-async function start(o: { cacheTtlMinutes?: () => number } = {}) {
+async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): ClockStatus } } = {}) {
   const s = setup();
   // Wired like main.ts: the engine reads the model policy switch from the constitution.
   const f = fakeEngine(s, { engine: { modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled, ...(o.cacheTtlMinutes ? { cacheTtlMinutes: o.cacheTtlMinutes } : {}) } });
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals } }, { allowedOrigins: [] });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
@@ -133,6 +133,14 @@ describe('company API', () => {
     t.company.parkTask(ada.id, task.id, '+6h', 'pencere dolsun');
     const office = await call(t.port, 'GET', '/api/office');
     expect(office.body.tasks.map((x: { title: string; status: string }) => `${x.status} ${x.title}`)).toEqual(['parked ertelenen']);
+  });
+
+  it('shows the office clock in the snapshot when there is one (spec §5), and no clock field without it', async () => {
+    const status: ClockStatus = { nextDueAt: 1, nextDueLabel: 'Parklı · Ada', lastRunAt: 2, lastJumpAt: null };
+    const withClock = await start({ clock: { status: () => status } });
+    expect((await call(withClock.port, 'GET', '/api/office')).body.clock).toEqual(status);
+    const without = await start();
+    expect('clock' in (await call(without.port, 'GET', '/api/office')).body).toBe(false);
   });
 
   it('final review: firing someone mid-task puts their tasks back in the queue', async () => {

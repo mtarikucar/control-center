@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { dueLabel } from '../src/company/scheduling.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
@@ -72,5 +73,22 @@ describe('Scheduling.runDue — tasks (spec §5)', () => {
     expect(report.returned).toEqual([b.id]);
     expect(report.errors).toHaveLength(1);
     expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'clock.error' && e.event.job.includes(a.id))).toBe(true);
+  });
+});
+
+describe('dueLabel (spec §5, the status line)', () => {
+  it('names what the nearest due time is about: a park return, a start time, a due date, a routine', () => {
+    const t = make();
+    const label = () => dueLabel(t.tasks, t.schedules, t.company, T0);
+    expect(label()).toBeNull();
+    t.schedules.create({ title: 'Haftalık rapor', description: '', done: [], assignee: t.coordinator.id, reviewer: null, planId: null, priority: 3, difficulty: null, cron: '0 9 * * 1', until: null, createdBy: t.coordinator.id, nextRunAt: T0 + 5 * HOUR });
+    expect(label()).toBe(`Haftalık rapor · ${t.coordinator.name} (rutin)`);
+    t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Tarihli', dueAt: '+4h' });
+    expect(label()).toBe('Tarihli · Ada');
+    t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Saatli', startAfter: '+3h' });
+    expect(label()).toBe('Saatli · Ada');
+    const parked = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Parklı' });
+    t.company.parkTask(t.ada.id, parked.id, '+2h', 'pencere');
+    expect(label()).toBe('Parklı · Ada');
   });
 });

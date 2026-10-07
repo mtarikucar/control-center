@@ -32,6 +32,8 @@ export interface DispatcherDeps {
   tickMs?: number;
   /** The project's pulse (spec §6.3), run on each tick. */
   pulse?: { check(): unknown };
+  /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
+  clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: () => void): void };
 }
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
@@ -77,14 +79,15 @@ export class Dispatcher {
         if (ev.to === 'idle') this.#idleSince.set(stored.employeeId, this.#now());
         else this.#idleSince.delete(stored.employeeId);
         if (ev.to === 'idle') this.#schedule(stored.employeeId);
-      } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed', 'company.paused'].includes(ev.type)) this.#scheduleSweep();
+      } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed', 'company.paused', 'schedule.changed'].includes(ev.type)) this.#scheduleSweep();
     });
-    const timer = setInterval(() => {
-      this.#d.budget?.checkReserve();
-      if (!this.#rules().digestEnabled) this.#remindReport();
-      this.#pulse();
-      this.#scheduleSweep();
-    }, this.#d.tickMs ?? 60_000);
+    if (this.#d.clock) {
+      // The clock runs the tick at its start and on its interval, and sweeps after every due run (a park came back).
+      this.#d.clock.every('dispatcher.tick', this.#d.tickMs ?? 60_000, () => this.tick());
+      this.#d.clock.onRan(() => this.#scheduleSweep());
+      return off;
+    }
+    const timer = setInterval(() => this.tick(), this.#d.tickMs ?? 60_000);
     timer.unref();
     this.#pulse();
     this.#scheduleSweep();
@@ -92,6 +95,14 @@ export class Dispatcher {
       off();
       clearInterval(timer);
     };
+  }
+
+  /** One office tick: the reserve, the report reminder (digest off), the pulse, a sweep. */
+  tick(): void {
+    this.#d.budget?.checkReserve();
+    if (!this.#rules().digestEnabled) this.#remindReport();
+    this.#pulse();
+    this.#scheduleSweep();
   }
 
   /** The office looks at the project; a failing pulse never stops the office (the next tick looks again). */

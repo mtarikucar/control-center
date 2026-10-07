@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { OWNER, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
+import { OWNER, type ClockStatus, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { MODEL_RANK } from './model-policy.ts';
 import type { Company } from './company/company.ts';
@@ -24,8 +24,8 @@ export interface ApiDeps {
   quota: QuotaTracker;
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
-  /** The company layer: plans, tasks and the coordinator (absent: v1 office). */
-  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore };
+  /** The company layer: plans, tasks and the coordinator (absent: v1 office); `clock` is the office clock (spec §5). */
+  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus } };
 }
 
 export interface ApiOptions {
@@ -65,7 +65,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
   return {
     ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
-    goals: d.company.service.goals(), paused: d.company.service.paused(),
+    goals: d.company.service.goals(), paused: d.company.service.paused(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),
   };
 }
 
