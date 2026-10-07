@@ -89,3 +89,18 @@ sınırı, sahibinin plan ve öneri kararları, işten çıkarılanın devri.
   reportToOwner) aldığı nota göre test tarafından oynanır.
 - Sayım olay günlüğünden: tur = `turn.finished`; model = turun oturumunun `session.started`'da bildirdiği model, yoksa kadrodaki;
   oturum = `session.started` sayısı. Test ayrıca her sistem mesajının tam bir tur açtığını doğrular.
+
+## Sonra: not türleri ve sunucu özeti (office-economy)
+
+Aynı senaryo, bilgi notları ayrı tur açmadan (karar turuna biner ya da özet saatinde tek tur; rapor hatırlatması 17:00
+özetinde). Önce/sonra aynı test kodu, aynı simüle saatle ölçüldü (önce = `e9cfd86`, geçici worktree):
+
+| | Koordinatör turu | Koordinatör oturumu | Üye turları | Modellenmiş maliyet |
+|---|---:|---:|---:|---:|
+| Önce (taban) | 14 | 8 | 6 + 5 | 221 |
+| Sonra | **4** | 4 | 6 + 5 | **71** (−%68) |
+
+Koordinatör turları: 09:00 plan onayı · 10:07 takılma (+ özet: 2 teslim) · 11:00 öneri (+ özet: 2 teslim) · 17:00 özet
+(6 teslim, plan bitti) + rapor hatırlatması. Senaryo testinin eşiği: koordinatör turu ≤ 5. Güncel tablo:
+[economy-measure.md](economy-measure.md).
+

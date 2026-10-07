@@ -2,7 +2,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Employee, StoredEvent } from '@cc/shared';
-import { Dispatcher } from '../src/company/dispatcher.ts';
+import { Dispatcher, NOTICES_PREFIX } from '../src/company/dispatcher.ts';
+import { DIGEST_HEADING } from '../src/company/notices.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup, tempDir, until, type TestSetup } from './helpers.ts';
@@ -14,7 +15,8 @@ import { setup, tempDir, until, type TestSetup } from './helpers.ts';
  * Deterministic by construction: the dispatcher's clock and its deferred work belong to the test. Time jumps from one
  * event to the next (a discrete-event simulation) and after each event the office runs until it rests. A member's
  * task is one long turn: the fake claude holds it open (HOLD) until the test hands the task in at its simulated time,
- * so the member is really working meanwhile and idle-sleep times are the real ones.
+ * so the member is really working meanwhile and idle-sleep times are the real ones. Digest hours are local wall-clock
+ * hours, so every store runs on the simulated clock, from 09:00 on a fixed day.
  *
  * ECONOMY_MEASURE_OUT=<file> also writes the tables there as Markdown.
  */
@@ -26,6 +28,8 @@ const MODEL_WEIGHTS = { fable: 15, opus: 5, sonnet: 1, haiku: 0.2 } as const;
 type Family = keyof typeof MODEL_WEIGHTS;
 const familyOf = (model: string): Family | null => (Object.keys(MODEL_WEIGHTS) as Family[]).find((f) => model.toLowerCase().includes(f)) ?? null;
 
+/** The plan "Ofis ekonomisi" target: the coordinator's turns for this day (the baseline on main was 14). */
+const MAX_COORDINATOR_TURNS = 5;
 const TASKS = 10;
 const TASK_MINUTES = { Ada: 50, Can: 47 } as const;
 /** Can is stuck this far into their second task; Ada opens a proposal this far into her third. */
@@ -49,13 +53,13 @@ function allEvents(s: TestSetup): StoredEvent[] {
 }
 
 async function simulateDay() {
-  const s = setup();
+  const start = new Date(2026, 9, 7, 9, 0).getTime();
+  let clock = start;
+  const now = () => clock;
+  const s = setup(8, now);
   const holdDir = tempDir('fake-claude-hold-');
   const f = fakeEngine(s, { env: { FAKE_CLAUDE_HOLD_DIR: holdDir } });
-  const c = companyFor(s, f);
-  // The roster and the event log keep real time; the simulated day starts with them.
-  const start = Date.now();
-  let clock = start;
+  const c = companyFor(s, f, undefined, now);
   const deferred: Array<() => void> = [];
   const dispatcher = new Dispatcher({
     events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget,
@@ -91,7 +95,7 @@ async function simulateDay() {
     }
     if (text.includes('görevinde takıldı')) for (const t of c.tasks.list({ statuses: ['blocked'] })) c.company.assign(coord.id, t.id, ada.id);
     if (text.includes('proposalDecide') && proposalId) c.company.decideProposal(coord.id, proposalId, { decision: 'accept', note: 'Olur.' });
-    if (text.includes('Günlük özet zamanı')) c.company.report(coord.id, 'On iş bitti; biri takıldı ve Ada’ya geçti; bir fikir kabul edildi.');
+    if (text.includes('Günlük rapor zamanı')) c.company.report(coord.id, 'On iş bitti; biri takıldı ve Ada’ya geçti; bir fikir kabul edildi.');
   };
   const memberTurn = (e: Employee, text: string) => {
     const taskId = /Görev no: (\S+)/.exec(text)?.[1];
@@ -161,9 +165,9 @@ async function simulateDay() {
     next.run();
     await sweepAt(next.at);
   }
-  // The next morning the dispatcher's daily tick reminds the coordinator to report.
+  // The next morning's digest hour: nothing is waiting, so nobody gets a turn. (The dispatcher's own tick runs too.)
   clock = start + DAY + MIN;
-  await until(() => c.notices.pending(coord.id).some((n) => n.text.includes('Günlük özet')), 5000);
+  await pause(100);
   await sweepAt(clock);
 
   return { s, c, start, coordinatorTurns, people: [coord, ada, can] };
@@ -203,6 +207,7 @@ function measure(s: TestSetup, people: Employee[]): Row[] {
   );
 }
 
+/** Decision notices that open a coordinator turn (on main every notice did, hand-ins and the plan's end too). */
 const CAUSES: Array<[string, string]> = [
   ['Plan onaylandı', 'plan onayı'],
   ['Görev bitti', 'teslim'],
@@ -213,10 +218,18 @@ const CAUSES: Array<[string, string]> = [
   ['teslim etmedi', 'hatırlatmaya rağmen açık iş'],
 ];
 
+/** Why a coordinator turn came: its decision notices, and what its digest carried (groups and the report reminder). */
 function causesOf(text: string): string {
-  const found = text
-    .split('\n')
-    .flatMap((line) => CAUSES.filter(([needle]) => line.includes(needle)).map(([, cause]) => cause));
+  const blockEnd = text.indexOf('\n\n');
+  const decisions = text.startsWith(NOTICES_PREFIX) ? text.slice(0, blockEnd < 0 ? undefined : blockEnd).split('\n') : [];
+  const found = decisions.flatMap((line) => CAUSES.filter(([needle]) => line.includes(needle)).map(([, cause]) => cause));
+  const digest = text.indexOf(DIGEST_HEADING);
+  if (digest >= 0) {
+    const part = text.slice(digest);
+    const groups = [...part.matchAll(/^(.+) \((\d+)\):$/gm)].map((m) => `${m[1]} ${m[2]}`);
+    found.push(`özet${groups.length ? ` (${groups.join(', ')})` : ''}`);
+    if (part.includes('Günlük rapor zamanı')) found.push('rapor hatırlatması');
+  }
   return found.length ? found.join(' + ') : 'diğer';
 }
 
@@ -232,7 +245,8 @@ const HEADER = `# Ekonomi ölçümü — senaryo testi
 
 \`apps/office-server/test/economy.scenario.test.ts\` üretir: sahte claude ile bir simüle iş günü — 1 koordinatör (fable) + 2 üye
 (sonnet), 1 onaylı plan, 10 görev; bir üye bir görevde takılır (koordinatör işi diğerine verir), biri bir fikir açar (koordinatör
-kabul eder), ertesi sabah günlük rapor hatırlatması gelir. Yeniden üretmek için (repo kökünden):
+kabul eder), günlük rapor hatırlatması gelir (anayasa varsayılanı: özet saatleri 9 ve 17; hatırlatma 17:00 özetiyle), ertesi sabahın
+özet saati de geçer. Eşik: koordinatör turu ≤ 5 (main tabanı 14). Yeniden üretmek için (repo kökünden):
 
     ECONOMY_MEASURE_OUT=$PWD/docs/superpowers/notes/economy-measure.md pnpm --filter @cc/office-server exec vitest run test/economy.scenario.test.ts
 
@@ -277,6 +291,8 @@ describe('economy scenario', () => {
 
     const rows = measure(s, people);
     expect(rows.map((r) => r.name)).toEqual(['Koordinatör', 'Ada', 'Can']);
+    // Members take one turn per task they get (Ada 5 + the one taken from Can, Can 5): notices ride along.
+    expect(rows.map((r) => r.turns).slice(1)).toEqual([6, 5]);
     const table = report(rows, coordinatorTurns, start);
     console.log(`\nEkonomi senaryosu — bir simüle gün\n\n${table}\n`);
     const out = process.env.ECONOMY_MEASURE_OUT;
@@ -284,5 +300,6 @@ describe('economy scenario', () => {
       mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, `${HEADER}\n${table}\n`);
     }
+    expect(rows[0]!.turns).toBeLessThanOrEqual(MAX_COORDINATOR_TURNS);
   }, 60_000);
 });
