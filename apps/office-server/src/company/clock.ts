@@ -32,6 +32,15 @@ interface Job {
 // Unref'd like the dispatcher's old interval: the server keeps the process alive, the clock never does on its own.
 const REAL_TIMERS: ClockTimers = { set: (fn, ms) => setTimeout(fn, ms).unref(), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
 
+/** A read for the status line: null when it fails. */
+function orNull<T>(fn: () => T | null): T | null {
+  try {
+    return fn();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The office's one timer (spec §5). It holds no due times of its own: on every arm it asks the scheduling service
  * for the nearest one, sleeps until then (at most `safetyMs`), runs what is due and re-arms. Any change to a time
@@ -77,10 +86,14 @@ export class Clock {
     };
   }
 
-  /** A time changed: look again now and re-arm. */
+  /** A time changed: look again now and re-arm. Never throws: a park must not fail because the clock hiccupped. */
   touch(): void {
     if (!this.#started) return;
-    this.#arm();
+    try {
+      this.#arm();
+    } catch (err) {
+      this.#error('touch', err);
+    }
   }
 
   /** Runs what is due right now (the API's and the tests' hand on the clock). */
@@ -88,30 +101,34 @@ export class Clock {
     return this.#run();
   }
 
+  /** For the snapshot: a read that fails answers null, so the snapshot never goes down with it. */
   status(now: number = this.#now()): ClockStatus {
-    const nextDue = this.#d.scheduling.nextDueAt(now);
+    const nextDue = orNull(() => this.#d.scheduling.nextDueAt(now));
     return {
       nextDueAt: nextDue,
-      nextDueLabel: nextDue === null ? null : (this.#d.label?.(now) ?? null),
-      lastRunAt: Number(this.#d.state.get('clock.lastRunAt') ?? '0') || null,
-      lastJumpAt: Number(this.#d.state.get('clock.lastJumpAt') ?? '0') || null,
+      nextDueLabel: nextDue === null ? null : orNull(() => this.#d.label?.(now) ?? null),
+      lastRunAt: orNull(() => Number(this.#d.state.get('clock.lastRunAt') ?? '0') || null),
+      lastJumpAt: orNull(() => Number(this.#d.state.get('clock.lastJumpAt') ?? '0') || null),
     };
   }
 
   #run(): DueReport {
     const now = this.#now();
     if (this.#armedFor !== null && now - this.#armedFor > this.#jumpMs) {
-      this.#d.state.set('clock.lastJumpAt', String(now));
-      this.#d.events.append(null, { type: 'clock.jumped', expectedAt: this.#armedFor, actualAt: now });
+      try {
+        this.#d.state.set('clock.lastJumpAt', String(now));
+        this.#d.events.append(null, { type: 'clock.jumped', expectedAt: this.#armedFor, actualAt: now });
+      } catch (err) {
+        // Only a note: what is due still runs.
+        this.#error('clock.jumped', err);
+      }
     }
     this.#armedFor = null;
     let report: DueReport;
     try {
       report = this.#d.scheduling.runDue(now);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.#d.events.append(null, { type: 'clock.error', job: 'runDue', message: message.slice(0, 500) });
-      report = { returned: [], fired: [], skipped: [], overdue: [], errors: [message] };
+      report = { returned: [], fired: [], skipped: [], overdue: [], errors: [this.#error('runDue', err)] };
     }
     for (const job of this.#jobs) {
       if (job.nextAt > now) continue;
@@ -119,8 +136,7 @@ export class Clock {
       try {
         job.fn();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.#d.events.append(null, { type: 'clock.error', job: job.name, message: message.slice(0, 500) });
+        this.#error(job.name, err);
       }
     }
     for (const fn of this.#listeners) {
@@ -134,14 +150,31 @@ export class Clock {
     return report;
   }
 
+  /** Logs a failure as `clock.error` and returns its message; never throws (the log may be what is failing). */
+  #error(job: string, err: unknown): string {
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      this.#d.events.append(null, { type: 'clock.error', job, message: message.slice(0, 500) });
+    } catch {
+      // The database is in trouble: the failure is dropped, the clock goes on.
+    }
+    return message;
+  }
+
   #arm(): void {
     if (!this.#started) return;
-    if (this.#handle !== null) this.#timers.clear(this.#handle);
     const now = this.#now();
-    const due = this.#d.scheduling.nextDueAt(now);
+    let due: number | null = null;
+    try {
+      due = this.#d.scheduling.nextDueAt(now);
+    } catch (err) {
+      // The due times could not be read: the safety tick (or a job's time, kept in memory) looks again.
+      this.#error('arm', err);
+    }
     const jobAt = this.#jobs.length ? Math.min(...this.#jobs.map((j) => j.nextAt)) : Number.POSITIVE_INFINITY;
     // Never armed for the past (a job added after start is due at 0): what is overdue runs now, and that is no jump.
     const at = Math.max(now, Math.min(due ?? Number.POSITIVE_INFINITY, jobAt, now + this.#safetyMs));
+    if (this.#handle !== null) this.#timers.clear(this.#handle);
     this.#armedFor = at;
     this.#handle = this.#timers.set(() => this.#run(), at - now);
   }

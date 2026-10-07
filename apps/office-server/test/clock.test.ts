@@ -135,3 +135,97 @@ describe('Clock (spec §5)', () => {
     expect(clock.status()).toMatchObject({ nextDueAt: T0 + 2 * HOUR, nextDueLabel: 'bir şey' });
   });
 });
+
+describe('Clock — its own storage failing never stops it (spec §5)', () => {
+  /** The database in trouble (SQLITE_BUSY, IOERR…): `nextDueAt` throws the next `times` calls. */
+  const breakNextDueAt = (t: ReturnType<typeof make>, times = 1) => {
+    const real = t.scheduling.nextDueAt.bind(t.scheduling);
+    let left = times;
+    t.scheduling.nextDueAt = (at?: number) => {
+      if (left > 0) {
+        left -= 1;
+        throw new Error('disk I/O error');
+      }
+      return real(at);
+    };
+  };
+
+  it('a failed read while re-arming from the timer arms the safety interval, and the next wake runs normally', () => {
+    const t = make();
+    const first = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'A' });
+    const second = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'B' });
+    t.company.parkTask(t.ada.id, first.id, '+5m', 'x');
+    t.company.parkTask(t.ada.id, second.id, '+10m', 'y');
+    const clock = t.newClock();
+    cleanups.push(clock.start());
+    expect(t.armedAt()).toBe(T0 + 5 * MIN);
+    breakNextDueAt(t);
+    t.advance(5 * MIN);
+    expect(t.tasks.get(first.id).status).toBe('waiting');
+    expect(t.armedAt()).toBe(T0 + 5 * MIN + 60 * MIN);
+    expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'clock.error' && e.event.job === 'arm')).toBe(true);
+    t.advance(60 * MIN);
+    expect(t.tasks.get(second.id).status).toBe('waiting');
+    expect(clock.status().lastJumpAt).toBeNull();
+    expect(t.armedAt()).toBe(T0 + 65 * MIN + 60 * MIN);
+  });
+
+  it('touch() never throws to its caller and always leaves a timer armed', () => {
+    const t = make();
+    const clock = t.newClock();
+    cleanups.push(clock.start());
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'A' });
+    t.company.parkTask(t.ada.id, task.id, '+5m', 'x');
+    breakNextDueAt(t);
+    expect(() => clock.touch()).not.toThrow();
+    expect(t.armedAt()).toBe(T0 + 60 * MIN);
+    clock.touch();
+    expect(t.armedAt()).toBe(T0 + 5 * MIN);
+  });
+
+  it('a failing job whose error cannot be logged either is dropped: the other jobs run and the clock stays armed', () => {
+    const t = make();
+    const append = t.events.append.bind(t.events);
+    t.events.append = (id, event) => {
+      if (event.type === 'clock.error') throw new Error('SQLITE_BUSY');
+      return append(id, event);
+    };
+    const clock = t.newClock();
+    const log: string[] = [];
+    clock.every('boom', 10 * MIN, () => {
+      throw new Error('kötü iş');
+    });
+    clock.every('after', 10 * MIN, () => void log.push('after'));
+    expect(() => cleanups.push(clock.start())).not.toThrow();
+    expect(log).toEqual(['after']);
+    expect(t.armedAt()).toBe(T0 + 10 * MIN);
+  });
+
+  it('a jump that cannot be noted is dropped: what became due is still processed and the clock re-armed', () => {
+    const t = make();
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'A' });
+    t.company.parkTask(t.ada.id, task.id, '+30m', 'x');
+    const set = t.state.set.bind(t.state);
+    t.state.set = (key, value) => {
+      if (key === 'clock.lastJumpAt') throw new Error('SQLITE_READONLY');
+      set(key, value);
+    };
+    const clock = t.newClock();
+    cleanups.push(clock.start());
+    t.jump(3 * HOUR);
+    expect(() => t.advance(0)).not.toThrow();
+    expect(t.tasks.get(task.id).status).toBe('waiting');
+    expect(t.armedAt()).toBe(T0 + 3 * HOUR + 60 * MIN);
+  });
+
+  it('status() answers with nulls when a read fails, so the snapshot never goes down with it', () => {
+    const t = make();
+    const clock = t.newClock();
+    cleanups.push(clock.start());
+    breakNextDueAt(t);
+    t.state.get = () => {
+      throw new Error('disk I/O error');
+    };
+    expect(clock.status()).toEqual({ nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null });
+  });
+});
