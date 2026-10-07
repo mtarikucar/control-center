@@ -33,6 +33,8 @@ export interface DispatcherDeps {
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
 export const NOTICES_PREFIX = 'Ofisten notlar:';
+export const WORK_CLOSING =
+  'İş bitince `taskFinish` ile teslim et: görev no, kısa özet, bitti tanımının her maddesi için bir kanıt (evidence, aynı sırayla), ürettiğin dosyalar, öğrendiklerin. Takılırsan `taskUpdate` ile "blocked" yap ve nedenini yaz; başka birinin yapması gereken bir parça çıkarsa `taskPass` kullan.';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -322,7 +324,7 @@ Görev no: ${task.id}${plan}
 
 ${task.description || '(açıklama yok)'}${done}
 
-İş bitince \`taskFinish\` ile teslim et (görev no, kısa özet, ürettiğin dosyalar, öğrendiklerin). Takılırsan \`taskUpdate\` ile "blocked" yap ve nedenini yaz; başka birinin yapması gereken bir parça çıkarsa \`taskPass\` kullan.`;
+${WORK_CLOSING}`;
   }
 
   /** Still open after the reminder: the queue behind it is stuck, so the coordinator decides (ask, or taskAssign). */

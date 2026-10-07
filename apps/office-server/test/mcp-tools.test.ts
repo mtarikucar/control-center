@@ -53,7 +53,7 @@ describe('office tools', () => {
     expect(passed).toContain('Can');
     expect(t.tasks.list({ assignee: can.id })[0]).toMatchObject({ title: 'Grafikleri çiz', requester: ada.id, priority: 2 });
     t.company.start(task.id);
-    const handed = await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'Rapor hazır.', outputs: ['rapor.md'], learned: 'Veriler eksikti.' });
+    const handed = await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'Rapor hazır.', evidence: ['rapor.md yazıldı'], outputs: ['rapor.md'], learned: 'Veriler eksikti.' });
     expect(handed).toContain('teslim');
     expect(t.tasks.get(task.id)).toMatchObject({ status: 'done', result: { summary: 'Rapor hazır.', outputs: ['rapor.md'] } });
   });
@@ -248,5 +248,14 @@ describe('office tools — task difficulty', () => {
     expect(t.plans.list()[0]!.method).toEqual(METHOD);
     const schema = t.tools.find((x) => x.name === 'planPropose')!.inputSchema as { required: string[] };
     expect(schema.required).toContain('method');
+  });
+
+  it('taskFinish takes evidence and says how many lines a hand-in needs', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(OWNER, { assignee: ada.id, title: 'Rapor', done: ['rapor.md var', 'sayılar kaynaklı'] });
+    await expect(Promise.resolve().then(() => t.call(ada, 'taskFinish', { taskId: task.id, summary: 'bitti' }))).rejects.toThrow(/2 madde var/);
+    await t.call(ada, 'taskFinish', { taskId: task.id, summary: 'bitti', evidence: ['rapor.md yazıldı', 'her sayının yanında kaynak'] });
+    expect(t.tasks.get(task.id).result?.evidence).toHaveLength(2);
   });
 });

@@ -41,6 +41,7 @@ describe('Dispatcher', () => {
     expect(text).toContain(task.id);
     expect(text).toContain('README.md var');
     expect(text).toContain('taskFinish');
+    expect(text).toContain('evidence');
     expect(t.tasks.get(task.id).status).toBe('in_progress');
   });
 

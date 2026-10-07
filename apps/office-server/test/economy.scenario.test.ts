@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Employee, StoredEvent } from '@cc/shared';
-import { Dispatcher, NOTICES_PREFIX } from '../src/company/dispatcher.ts';
+import { Dispatcher, NOTICES_PREFIX, WORK_CLOSING } from '../src/company/dispatcher.ts';
 import { DIGEST_HEADING } from '../src/company/notices.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
@@ -37,6 +37,17 @@ const NOTES = fileURLToPath(new URL('../../../docs/superpowers/notes/', import.m
 /** The baseline measured on main (e2889e8): its tables, and the messages and events of the same day recorded on main. */
 const BASELINE_NOTE = join(NOTES, '2026-10-07-economy-baseline.md');
 const BASELINE_LOG = join(NOTES, '2026-10-07-economy-baseline.log.json');
+/**
+ * Deliberate changes to main's day since the golden was recorded, applied to the golden before comparing (everything
+ * else must still match it message by message): the coordinator craft asks for evidence in every task's closing line.
+ */
+const SINCE_GOLDEN: Array<[string, string]> = [
+  [
+    'İş bitince `taskFinish` ile teslim et (görev no, kısa özet, ürettiğin dosyalar, öğrendiklerin). Takılırsan `taskUpdate` ile "blocked" yap ve nedenini yaz; başka birinin yapması gereken bir parça çıkarsa `taskPass` kullan.',
+    WORK_CLOSING,
+  ],
+];
+const sinceGolden = (message: string) => SINCE_GOLDEN.reduce((m, [was, now]) => m.replaceAll(was, now), message);
 
 /** The plan "Ofis ekonomisi" targets: the coordinator's turns for this day, and its modelled cost at most 30 % of main's (measured on e2889e8). */
 const MAX_COORDINATOR_TURNS = 5;
@@ -143,7 +154,7 @@ async function simulateDay(cfg: { economy: boolean }) {
       });
     }
     at(clock + TASK_MINUTES[e.name as keyof typeof TASK_MINUTES] * MIN, () => {
-      c.company.finish(e.id, taskId, { summary: 'Bitti, testler yeşil.', outputs: [], learned: '' });
+      c.company.finish(e.id, taskId, { summary: 'Bitti, testler yeşil.', outputs: [], learned: '', evidence: c.tasks.get(taskId).done.map((d) => `${d}: tamam`) });
       release(e.id);
     });
   };
@@ -374,7 +385,7 @@ describe('economy scenario', () => {
     expect(table.slice(2)).toEqual(tableAfter(baseline, '## Taban (main, 2026-10-07)'));
     expect(timeline.slice(2)).toEqual(tableAfter(baseline, 'Zaman çizelgesi'));
     const golden = JSON.parse(readFileSync(BASELINE_LOG, 'utf8')) as ReturnType<typeof logOf>;
-    expect(log.messages).toEqual(golden.messages);
+    expect(log.messages).toEqual(golden.messages.map(sinceGolden));
     expect(log.events).toEqual(golden.events);
   }, 60_000);
 

@@ -367,12 +367,18 @@ export class Company {
     const coordinator = this.coordinator();
     if (task.assignee !== by && coordinator?.id !== by) throw new ForbiddenError('Yalnız görevi üstlenen ya da koordinatör teslim edebilir.');
     if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev zaten kapandı.');
+    const evidence = lines(result.evidence, 'Kanıt', 20, 1000);
     const handed: TaskResult = {
       summary: (result.summary ?? '').trim().slice(0, 4000),
       outputs: (result.outputs ?? []).map((o) => String(o).trim()).filter(Boolean).slice(0, 30),
       learned: (result.learned ?? '').trim().slice(0, 4000),
+      ...(evidence.length ? { evidence } : {}),
     };
     if (!handed.summary) throw new ValidationError('Teslim özeti boş olamaz.');
+    // A hand-over's items are instructions for leaving, not claims to prove.
+    if (task.kind === 'work' && evidence.length < task.done.length) {
+      throw new ValidationError(`Bitti tanımında ${task.done.length} madde var; her biri için bir kanıt yaz (evidence, aynı sırayla): ne yaptın ve nasıl doğruladın.`);
+    }
     const finishedAt = this.#now();
     let archived: TaskResult = handed;
     try {

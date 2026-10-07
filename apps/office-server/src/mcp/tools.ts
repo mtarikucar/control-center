@@ -124,11 +124,12 @@ export function officeTools(o: {
     },
     {
       name: 'taskFinish',
-      description: 'Hand in a task you finished: a short summary of the result, the files you produced, and what you learned. Always call this when a task is done.',
-      inputSchema: object({ taskId: s('The task id from the task message.'), summary: s('What was done, in 1–5 sentences.'), outputs: strings('Files you produced (paths).'), learned: s('Anything worth remembering for later work.') }, ['taskId', 'summary']),
+      description:
+        'Hand in a task you finished: a short summary of the result, one line of evidence per definition-of-done item (same order: what you did and how you checked it), the files you produced, and what you learned. Always call this when a task is done.',
+      inputSchema: object({ taskId: s('The task id from the task message.'), summary: s('What was done, in 1–5 sentences.'), evidence: strings('One line of proof per definition-of-done item, in the same order.'), outputs: strings('Files you produced (paths).'), learned: s('Anything worth remembering for later work.') }, ['taskId', 'summary']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
-        const task = company.finish(employee.id, str(args, 'taskId'), { summary: str(args, 'summary'), outputs: list(args, 'outputs') ?? [], learned: optStr(args, 'learned') ?? '' });
+        const task = company.finish(employee.id, str(args, 'taskId'), { summary: str(args, 'summary'), evidence: list(args, 'evidence'), outputs: list(args, 'outputs') ?? [], learned: optStr(args, 'learned') ?? '' });
         return `“${task.title}” teslim edildi${task.result?.archive ? ` (arşiv: ${task.result.archive})` : ''}. İsteyen ve koordinatör haberdar edildi.`;
       },
     },
