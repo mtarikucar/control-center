@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { OWNER, type ClockStatus, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
+import { OWNER, type AgendaReport, type ClockStatus, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { MODEL_RANK } from './model-policy.ts';
 import type { Company } from './company/company.ts';
@@ -24,8 +24,8 @@ export interface ApiDeps {
   quota: QuotaTracker;
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
-  /** The company layer: plans, tasks and the coordinator (absent: v1 office); `clock` is the office clock (spec §5). */
-  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus } };
+  /** The company layer: plans, tasks and the coordinator (absent: v1 office); `clock` is the office clock (spec §5), `agenda` the per-employee sheet (§6.1). */
+  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport } };
 }
 
 export interface ApiOptions {
@@ -160,6 +160,10 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       if (taskAction[2] === 'release') return sendJson(res, 200, company.unparkTask(OWNER, id, { priority: 1 }));
       // "Öne al" always means priority 1: a `priority` in the body is accepted and ignored.
       return sendJson(res, 200, company.ownerPrioritize(id));
+    }
+    // Who does what when (spec §6.1): derived on every read, never published as an event.
+    if (method === 'GET' && url.pathname === '/api/agenda') {
+      return sendJson(res, 200, d.company.agenda?.report() ?? { generatedAt: Date.now(), horizonMs: 0, clock: { nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null }, employees: [] });
     }
     // The owner's routine buttons (spec §6.3): Duraklat / Sürdür / Durdur.
     const scheduleAction = SCHEDULE_ROUTE.exec(url.pathname);

@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
+import { Agenda } from '../src/company/agenda.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
@@ -19,7 +20,8 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   const f = fakeEngine(s, { engine: { modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled, ...(o.cacheTtlMinutes ? { cacheTtlMinutes: o.cacheTtlMinutes } : {}) } });
   const c = companyFor(s, f, ['coder', 'manager']);
   const quota = new QuotaTracker(s.db, s.events);
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
+  const agenda = new Agenda({ roster: s.roster, tasks: c.tasks, schedules: c.schedules, company: c.company, budget: c.budget });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
@@ -263,5 +265,15 @@ describe('company API', () => {
     const office = await call(t.port, 'GET', '/api/office');
     expect(office.body.schedules.map((x: { title: string }) => x.title)).toEqual(['Günlük']);
     expect(office.body.clock).toMatchObject({ nextDueAt: null });
+  });
+
+  it('serves the agenda', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    t.company.createTask(c.id, { assignee: ada.id, title: 'İş' });
+    const agenda = await call(t.port, 'GET', '/api/agenda');
+    expect(agenda.status).toBe(200);
+    expect(agenda.body.employees.find((e: { name: string }) => e.name === 'Ada').entries[0]).toMatchObject({ kind: 'queued', title: 'İş' });
   });
 });

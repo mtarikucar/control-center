@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type Employee } from '@cc/shared';
+import { Agenda } from '../src/company/agenda.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
@@ -16,7 +17,8 @@ function make() {
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
   const c = companyFor(s, f, ['coder', 'designer']);
-  const tools = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder', 'designer'], memory: c.memory, budget: c.budget, engine: f.engine, plans: () => c.plans.list() });
+  const agenda = new Agenda({ roster: s.roster, tasks: c.tasks, schedules: c.schedules, company: c.company, budget: c.budget });
+  const tools = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder', 'designer'], memory: c.memory, budget: c.budget, engine: f.engine, plans: () => c.plans.list(), agenda });
   const call = async (employee: Employee, name: string, args: Record<string, unknown> = {}) => {
     const tool = tools.find((t: McpTool) => t.name === name);
     if (!tool) throw new Error(`no tool ${name}`);
@@ -37,7 +39,7 @@ describe('office tools', () => {
       'taskFinish', 'taskPark', 'taskPass', 'taskUpdate',
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual([
-      'decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
+      'agendaRead', 'decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
     ]);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
       'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
@@ -368,5 +370,15 @@ describe('office tools — task difficulty', () => {
     expect(await t.call(c, 'scheduleUpdate', { scheduleId: id, status: 'paused' })).toMatch(/duraklatıldı/);
     expect(t.schedules.get(id).status).toBe('paused');
     await expect(Promise.resolve().then(() => t.call(ada, 'scheduleCreate', { title: 'X', assignee: 'Ada', cron: '0 9 * * *' }))).rejects.toThrow(/kapalı/);
+  });
+
+  it('agendaRead tells the coordinator who does what when', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    t.company.createTask(c.id, { assignee: ada.id, title: 'İş' });
+    expect(await t.call(c, 'agendaRead', { employee: 'Ada' })).toMatch(/Sırada: İş/);
+    expect(await t.call(c, 'agendaRead')).toContain('Ada');
+    await expect(Promise.resolve().then(() => t.call(ada, 'agendaRead'))).rejects.toThrow(/kapalı/);
   });
 });

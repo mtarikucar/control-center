@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { createApi } from './api.ts';
+import { Agenda } from './company/agenda.ts';
 import { Budget } from './company/budget.ts';
 import { ConstitutionStore, SpendStore } from './company/budget-store.ts';
 import { manifestCharacters } from './company/characters.ts';
@@ -69,9 +70,11 @@ const scheduling = new Scheduling({ db, tasks, schedules, notices, company, stat
 const clock = new Clock({ scheduling, state, events, label: (now) => dueLabel(tasks, schedules, company, now) });
 company.attachClock(clock);
 const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock });
+// Who does what when (spec §6.1): reads only, for the sheet and agendaRead.
+const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 
 const api = createApi(
-  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list() }) }, company: { service: company, tasks, plans, memory, budget, proposals, clock } },
+  { engine, roster, events, quota, mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda }) }, company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda } },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );
 api.server.on('error', (err: NodeJS.ErrnoException) => {

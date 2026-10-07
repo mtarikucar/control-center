@@ -2,11 +2,12 @@ import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { type Goal, type Plan } from '@cc/shared';
 import { createApi } from '../src/api.ts';
+import { Agenda } from '../src/company/agenda.ts';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher } from '../src/company/dispatcher.ts';
 import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
 import { Pulse } from '../src/company/pulse.ts';
-import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
+import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from '../src/company/store.ts';
 import { Engine } from '../src/engine.ts';
 import { TokenRegistry } from '../src/mcp/tokens.ts';
 import { officeTools } from '../src/mcp/tools.ts';
@@ -41,7 +42,7 @@ describe.skipIf(!enabled)('the coordinator as project manager with the real clau
     const state = new CompanyStateStore(s.db);
     const company = new Company({ roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id), constitution: () => budget.constitution(), proposals, goals, state });
     const api = createApi(
-      { engine, roster: s.roster, events: s.events, quota, mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine, plans: () => plans.list() }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
+      { engine, roster: s.roster, events: s.events, quota, mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda: new Agenda({ roster: s.roster, tasks, schedules: new ScheduleStore(s.db), company, budget }) }) }, company: { service: company, tasks, plans, memory, budget, proposals } },
       { allowedOrigins: [] },
     );
     await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));

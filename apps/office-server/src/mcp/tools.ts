@@ -101,8 +101,10 @@ export function officeTools(o: {
   engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown; sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }> };
   /** Every plan, newest first (goalsRead lists each goal's plans). */
   plans: () => Plan[];
+  /** Who does what when, as Turkish text (agendaRead). */
+  agenda: { text(employeeId?: string): string };
 }): McpTool[] {
-  const { company, roster, tasks, memory, budget, engine, plans } = o;
+  const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
   /** A colleague by id or by name (case and Turkish dotted/dotless i insensitive). */
   const findPerson = (who: string): Employee => {
@@ -218,6 +220,17 @@ export function officeTools(o: {
           priority: num(args, 'priority'), difficulty: args.difficulty === undefined ? undefined : difficultyArg(args), until: optStr(args, 'until'), title: optStr(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'),
         });
         return `“${changed.title}” rutini güncellendi: ${SCHEDULE_TR[changed.status]}, ${cronLabel(parseCron(changed.cron))}${changed.nextRunAt && changed.status === 'active' ? `, sıradaki ${formatWhen(changed.nextRunAt, Date.now())}` : ''}.`;
+      },
+    },
+    {
+      name: 'agendaRead',
+      description:
+        'Read the agenda (coordinator, lead): for each employee what runs now, what is queued with estimated times, what waits for review, what is parked and until when, which routines are coming. Use it to see who is free when before handing out work.',
+      inputSchema: object({ employee: s('One employee (id or name); omit for everyone.') }),
+      kinds: LEADS,
+      run: (_ctx, args) => {
+        const who = optStr(args, 'employee');
+        return agenda.text(who ? findPerson(who).id : undefined);
       },
     },
     {
