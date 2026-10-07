@@ -59,6 +59,8 @@ function office(file: string, version = Math.max(...MIGRATIONS.map((m) => m.vers
   events.append(ada.id, { type: 'task.changed', change: 'updated', task: { ...ciz, status: 'blocked' } });
   events.append(ada.id, { type: 'task.changed', change: 'assigned', task: { ...ciz, status: 'waiting' } });
   events.append(ada.id, { type: 'side.answer', text: 'x', ok: true, usage: usage(1), costUsd: 0.01 });
+  events.append(ada.id, { type: 'error', message: 'Oturum opus modelinde açılamadı; sonnet ile sürüyor.' });
+  events.append(ada.id, { type: 'error', message: 'Okunmamış 1 mesaj teslim edilemedi.' });
   return { db, coord, ada, clock: () => clock, setClock: (t: number) => (clock = t), notices: new NoticeStore(db, now), now };
 }
 
@@ -73,9 +75,11 @@ describe('economy report', () => {
     expect(r.employees.find((e) => e.name === 'Ada')!.usage).toMatchObject({ turns: 2, sideAnswers: 1 });
     expect(r.coordinator).toMatchObject({ turns: 3, causes: { 'sahibinin mesajı': 1, 'karar notu': 1, özet: 1 }, noticeLines: { teslim: 1, takılma: 1 } });
     expect(r.handIns).toBe(1);
-    expect(r.perHandIn).toMatchObject({ turns: 5, coordinatorTurns: 3 });
+    expect(r.perHandIn).toMatchObject({ turns: 5, coordinatorTurns: 3, coordinatorTurnsNotOwner: 2 });
+    expect(r.perHandIn.coordinatorUsd).toBeCloseTo(1.62);
     expect(r.perHandIn.usd).toBeCloseTo(2.13);
     expect(r.quality).toMatchObject({ started: 2, blocked: 1, blockedRate: 0.5, requeued: 1 });
+    expect(r.incidents).toEqual({ lostMessages: 1, failedSwitches: 1 });
     const text = formatReport(r);
     expect(text).toContain('Örneklem: 1 teslim, 5 tur, 2 çalışan.');
     expect(text).toContain('Turu açan: sahibinin mesajı 1 · karar notu 1 · özet 1');
@@ -91,8 +95,16 @@ describe('economy report', () => {
     t.notices.markDelivered(ids(t.coord.id));
     t.setClock(T0 + 10 * MIN);
     t.notices.add(t.coord.id, 'task.blocked', 'c');
+    // One more decision written while the coordinator was in a turn: it waits for the turn, not counted as "while free".
+    const events = new EventStore(t.db, t.now);
+    events.append(t.coord.id, { type: 'lifecycle.changed', from: 'idle', to: 'working', reason: 'r' });
+    t.setClock(T0 + 11 * MIN);
+    t.notices.add(t.coord.id, 'plan.approved', 'd');
+    t.setClock(T0 + 19 * MIN);
+    events.append(t.coord.id, { type: 'lifecycle.changed', from: 'working', to: 'idle', reason: 'r' });
+    t.notices.markDelivered(ids(t.coord.id).slice(-1));
     const r = economyReport(t.db, { since: T0, until: T0 + 30 * MIN });
-    expect(r.latency.decision).toMatchObject({ count: 1, p50: 2, p95: 2 });
+    expect(r.latency.decision).toMatchObject({ count: 2, p95: 8, whileFree: { count: 1, p95: 2 } });
     expect(r.latency.info).toMatchObject({ count: 1, p50: 2 });
     expect(r.pending.decision).toEqual({ count: 1, oldestMinutes: 20 });
     expect(r.pending.info.count).toBe(0);

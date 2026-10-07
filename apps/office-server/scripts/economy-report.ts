@@ -8,7 +8,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { parseArgs } from 'node:util';
 import { economyReport, formatReport, parseWhen } from '../src/economy-report.ts';
 
-const { values } = parseArgs({ options: { db: { type: 'string' }, since: { type: 'string' }, until: { type: 'string' } } });
+// `pnpm economy-report -- …` passes the "--" on: ignore it.
+const { values } = parseArgs({ args: process.argv.slice(2).filter((a) => a !== '--'), options: { db: { type: 'string' }, since: { type: 'string' }, until: { type: 'string' } } });
 const file = values.db ?? join(process.env.OFFICE_DATA_DIR ?? join(homedir(), '.control-center'), 'office.db');
 const until = values.until ? parseWhen(values.until) : Date.now();
 const since = values.since ? parseWhen(values.since) : until - 7 * 24 * 60 * 60 * 1000;
