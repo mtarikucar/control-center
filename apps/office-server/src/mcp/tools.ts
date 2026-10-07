@@ -69,6 +69,20 @@ const difficulty = {
   description: 'How hard the task is; it starts on the model the constitution gives that difficulty. None: the assignee stays on their model.',
 };
 const difficultyArg = (args: Args) => optStr(args, 'difficulty') as TaskDifficulty | undefined;
+const method = {
+  type: 'object',
+  description: 'How the work is done (read methodRead first): the work type, at least two stages with who does each and whether someone else checks it, and at least one quality check.',
+  properties: {
+    workType: { type: 'string', enum: [...WORK_TYPES] },
+    stages: {
+      type: 'array',
+      minItems: 2,
+      items: { type: 'object', properties: { name: s('Stage name.'), role: s('Who does it: a person or a role.'), review: { type: 'boolean', description: 'Someone other than the doer checks it.' } }, required: ['name', 'role'] },
+    },
+    checks: strings('Quality checks or acceptance evidence, one each.'),
+  },
+  required: ['workType', 'stages', 'checks'],
+};
 
 export function officeTools(o: {
   company: Company;
@@ -413,21 +427,22 @@ export function officeTools(o: {
     },
     {
       name: 'planPropose',
-      description: 'Propose a plan card to the owner before starting any work they asked for: goal, approach, who works on it (existing people and roles to hire), draft tasks, estimates (share of weekly quota %, money in USD, days) and risks. The owner approves it on screen.',
-      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach']),
+      description:
+        'Propose a plan card to the owner before starting any work they asked for: goal, approach, the method (work type, stages with who does and who checks each, quality checks — read methodRead first), who works on it (existing people and roles to hire), draft tasks, estimates (share of weekly quota %, money in USD, days) and risks. The owner approves it on screen.',
+      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), method, people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach', 'method']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
+        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), method: args.method, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
         return `Plan kartı açıldı (${plan.id}). Sahibinin onayını bekle; onay gelince sana haber verilecek.`;
       },
     },
     {
       name: 'planRevise',
       description: 'Revise a plan card (only the fields you pass change). Revising an approved plan sends it back to the owner for approval.',
-      inputSchema: object({ planId: s('The plan id.'), title: s('Plan title.'), goal: s('Goal.'), approach: s('Approach.'), people: s('Who.'), steps: strings('Draft tasks.'), quotaPct: number('Quota share, %.'), usd: number('Money, USD.'), days: number('Days.'), risks: s('Risks.') }, ['planId']),
+      inputSchema: object({ planId: s('The plan id.'), title: s('Plan title.'), goal: s('Goal.'), approach: s('Approach.'), method, people: s('Who.'), steps: strings('Draft tasks.'), quotaPct: number('Quota share, %.'), usd: number('Money, USD.'), days: number('Days.'), risks: s('Risks.') }, ['planId']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
+        const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), method: args.method, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
         return `Plan güncellendi: sürüm ${plan.version}, sahibinin onayını bekliyor.`;
       },
     },

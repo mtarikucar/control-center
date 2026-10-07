@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { METHOD } from './company-helpers.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
@@ -152,7 +153,7 @@ describe('Company — plans', () => {
   it('proposes a draft, revises it to a new version, and the owner approves it; the coordinator hears', () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = t.company.propose(c.id, { title: 'Tanıtım videosu', goal: 'g', approach: 'a', steps: ['senaryo', 'çekim'], usd: 20 });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Tanıtım videosu', goal: 'g', approach: 'a', steps: ['senaryo', 'çekim'], usd: 20 });
     expect(plan).toMatchObject({ status: 'draft', version: 1, steps: ['senaryo', 'çekim'], usd: 20, proposedBy: c.id });
     const revised = t.company.revise(c.id, plan.id, { usd: 35, risks: 'kota' });
     expect(revised).toMatchObject({ version: 2, usd: 35, risks: 'kota', status: 'draft' });
@@ -166,7 +167,7 @@ describe('Company — plans', () => {
   it('review focus: a second approval, declining an approved plan and tasks for a draft plan fail clearly', () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     expect(() => t.company.createTask(c.id, { assignee: c.id, title: 'x', planId: plan.id })).toThrow(/onaylanmadı/);
     t.company.approve(plan.id);
     expect(() => t.company.approve(plan.id)).toThrow(/taslak/);
@@ -176,7 +177,7 @@ describe('Company — plans', () => {
   it('a revision of an approved plan goes back to draft and needs approval again', () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     expect(t.company.revise(c.id, plan.id, { days: 9 })).toMatchObject({ status: 'draft', version: 2 });
   });
@@ -185,7 +186,7 @@ describe('Company — plans', () => {
     const t = make();
     const c = t.company.hireCoordinator();
     const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
-    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     const task = t.company.createTask(c.id, { assignee: ada.id, title: 'tek iş', planId: plan.id });
     t.company.start(task.id);
@@ -198,7 +199,7 @@ describe('Company — plans', () => {
     const t = make();
     t.company.hireCoordinator();
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
-    expect(() => t.company.propose(ada.id, { title: 'P', goal: 'g', approach: 'a' })).toThrow(/Yalnız koordinatör/);
+    expect(() => t.company.propose(ada.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' })).toThrow(/Yalnız koordinatör/);
     expect(() => t.company.report(ada.id, 'rapor')).toThrow(/Yalnız koordinatör/);
   });
 });
@@ -231,7 +232,7 @@ describe('Company — final review', () => {
   it('the current coordinator hears about a plan its predecessor proposed', () => {
     const t = make();
     const old = t.company.hireCoordinator();
-    const plan = t.company.propose(old.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(old.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
     t.company.appointCoordinator(ada.id);
     t.company.approve(plan.id);
@@ -271,7 +272,7 @@ describe('Company — final review', () => {
     const t = make();
     const c = t.company.hireCoordinator();
     const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
-    const plan = t.company.propose(c.id, { title: 'Lansman', goal: 'g', approach: 'a', steps: ['metin', 'görsel'] });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Lansman', goal: 'g', approach: 'a', steps: ['metin', 'görsel'] });
     t.company.approve(plan.id);
     const first = t.company.createTask(c.id, { assignee: ada.id, title: 'metin', planId: plan.id });
     t.company.start(first.id);
@@ -280,9 +281,9 @@ describe('Company — final review', () => {
     t.company.createTask(c.id, { assignee: ada.id, title: 'görsel', planId: plan.id });
     expect(t.plans.get(plan.id).status).toBe('approved');
     expect(ofType(t.events.list({ limit: 500 }), 'plan.changed').map((e) => (e.event as { change: string }).change)).toContain('reopened');
-    const draft = t.company.propose(c.id, { title: 'Taslak', goal: 'g', approach: 'a' });
+    const draft = t.company.propose(c.id, { method: METHOD, title: 'Taslak', goal: 'g', approach: 'a' });
     expect(() => t.company.createTask(c.id, { assignee: ada.id, title: 'x', planId: draft.id })).toThrow(/henüz onaylanmadı/);
-    const declined = t.company.propose(c.id, { title: 'Red', goal: 'g', approach: 'a' });
+    const declined = t.company.propose(c.id, { method: METHOD, title: 'Red', goal: 'g', approach: 'a' });
     t.company.decline(declined.id);
     expect(() => t.company.createTask(c.id, { assignee: ada.id, title: 'x', planId: declined.id })).toThrow(/vazgeçildi/);
   });
@@ -405,7 +406,7 @@ describe('Company — notice kinds', () => {
       const n = t.notices.pending(id).at(-1);
       return n && `${n.kind} ${n.topic}`;
     };
-    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     expect(last(c.id)).toBe('decision plan.approved');
 

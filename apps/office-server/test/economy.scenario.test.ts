@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Employee, StoredEvent } from '@cc/shared';
 import { Dispatcher, NOTICES_PREFIX } from '../src/company/dispatcher.ts';
 import { DIGEST_HEADING } from '../src/company/notices.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup, tempDir, until, type TestSetup } from './helpers.ts';
 
@@ -89,7 +89,7 @@ async function simulateDay(cfg: { economy: boolean }) {
   const coord = c.company.hireCoordinator();
   const ada = c.company.hire(coord.id, { name: 'Ada', role: 'Geliştirici' });
   const can = c.company.hire(coord.id, { name: 'Can', role: 'Geliştirici' });
-  const propose = () => c.company.propose(coord.id, { title: 'Sürüm 1', goal: 'On işlik bir sürüm', approach: 'İki geliştirici, beşer iş' }).id;
+  const propose = () => c.company.propose(coord.id, { method: METHOD, title: 'Sürüm 1', goal: 'On işlik bir sürüm', approach: 'İki geliştirici, beşer iş' }).id;
   let planId = cfg.economy ? '' : propose();
 
   let order = 0;

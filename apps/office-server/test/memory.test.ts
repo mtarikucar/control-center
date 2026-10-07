@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { METHOD } from './company-helpers.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type StoredEvent } from '@cc/shared';
@@ -36,7 +37,7 @@ const ofType = (events: StoredEvent[], type: string) => events.filter((e) => e.e
 describe('Memory — decisions', () => {
   it('records the coordinator’s and leads’ decisions, refuses members, and filters by words and plan', () => {
     const t = make();
-    const plan = t.company.propose(t.c.id, { title: 'Video', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(t.c.id, { method: METHOD, title: 'Video', goal: 'g', approach: 'a' });
     const d = t.memory.recordDecision(t.c.id, { title: 'Ses aracı', chosen: 'ElevenLabs', reason: 'Türkçe sesleri iyi', alternatives: ['Polly'], planId: plan.id });
     expect(d).toMatchObject({ by: t.c.id, alternatives: ['Polly'], planId: plan.id, reverts: null });
     expect(ofType(t.events.list({ limit: 500 }), 'decision.recorded')).toHaveLength(1);

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { QuotaTracker } from '../src/quota.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, until } from './helpers.ts';
 
@@ -102,8 +102,8 @@ describe('company API', () => {
   it('lets the owner approve or decline plan cards, and shows plans and tasks in the snapshot', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();
-    const a = t.company.propose(c.id, { title: 'A', goal: 'g', approach: 'x' });
-    const b = t.company.propose(c.id, { title: 'B', goal: 'g', approach: 'x' });
+    const a = t.company.propose(c.id, { method: METHOD, title: 'A', goal: 'g', approach: 'x' });
+    const b = t.company.propose(c.id, { method: METHOD, title: 'B', goal: 'g', approach: 'x' });
     expect((await call(t.port, 'POST', `/api/plans/${a.id}/approve`)).body).toMatchObject({ id: a.id, status: 'approved' });
     expect((await call(t.port, 'POST', `/api/plans/${a.id}/approve`)).status).toBe(409);
     expect((await call(t.port, 'POST', `/api/plans/${b.id}/decline`)).body.status).toBe('declined');

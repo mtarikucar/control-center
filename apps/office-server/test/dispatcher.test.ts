@@ -5,7 +5,7 @@ import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, tempDir, until, waitFor } from './helpers.ts';
 
@@ -72,7 +72,7 @@ describe('Dispatcher', () => {
   it('brings notices to an idle coordinator: the owner approved the plan', async () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = t.company.propose(c.id, { title: 'Video', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Video', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     const msg = await waitFor(t.events, (e) => e.employeeId === c.id && e.event.type === 'message.user' && e.event.text.startsWith(NOTICES_PREFIX));
     expect((msg.event as { text: string }).text).toContain('Plan onaylandı');
@@ -232,7 +232,7 @@ describe('Dispatcher — reserve and sleep', () => {
     await t.engine.sleep(ada.id);
     // As on main (only the topic is new); a decision, so not even a decision wakes a member.
     t.notices.add(ada.id, 'proposal.decided', 'Bilgi: toplantı yok.');
-    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(coord.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Plan onaylandı')), 8000);
     await sleep(300);
@@ -317,7 +317,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     t.notices.add(coord.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
     await sleep(400);
     expect(t.turns(coord.id)).toEqual([]);
-    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(coord.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => t.turns(coord.id).length === 1, 8000);
     await sleep(300);
@@ -447,7 +447,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
     await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
-    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(coord.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => t.turns(coord.id).length === 1 && t.engine.ready(coord.id), 8000);
     t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');

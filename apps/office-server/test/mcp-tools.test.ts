@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type Employee } from '@cc/shared';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup, until } from './helpers.ts';
 
@@ -79,7 +79,7 @@ describe('office tools', () => {
   it('lets the coordinator propose a plan, hire with a model and character, open and hand out tasks', async () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = await t.call(c, 'planPropose', { title: 'Lansman', goal: 'g', approach: 'a', people: 'bir yazar', steps: ['metin', 'görsel'], quotaPct: 10, usd: 25, days: 3, risks: 'kota' });
+    const plan = await t.call(c, 'planPropose', { method: METHOD, title: 'Lansman', goal: 'g', approach: 'a', people: 'bir yazar', steps: ['metin', 'görsel'], quotaPct: 10, usd: 25, days: 3, risks: 'kota' });
     expect(plan).toContain('onay');
     const draft = t.plans.list()[0]!;
     expect(draft).toMatchObject({ title: 'Lansman', steps: ['metin', 'görsel'], usd: 25 });
@@ -238,5 +238,15 @@ describe('office tools — task difficulty', () => {
     expect(await t.call(ada, 'methodRead')).toContain('content');
     expect(await t.call(ada, 'methodRead', { type: 'research' })).toContain('## Kanıt');
     await expect(Promise.resolve().then(() => t.call(ada, 'methodRead', { type: 'x' }))).rejects.toThrow(/Bilinmeyen iş türü/);
+  });
+
+  it('planPropose takes the method and refuses a plan without one', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    await expect(Promise.resolve().then(() => t.call(c, 'planPropose', { title: 'P', goal: 'g', approach: 'a' }))).rejects.toThrow(/methodRead/);
+    expect(await t.call(c, 'planPropose', { title: 'P', goal: 'g', approach: 'a', method: METHOD })).toMatch(/Plan kartı açıldı/);
+    expect(t.plans.list()[0]!.method).toEqual(METHOD);
+    const schema = t.tools.find((x) => x.name === 'planPropose')!.inputSchema as { required: string[] };
+    expect(schema.required).toContain('method');
   });
 });

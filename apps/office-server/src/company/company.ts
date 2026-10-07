@@ -11,6 +11,7 @@ import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
+import { planMethod } from './review.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
@@ -78,6 +79,8 @@ export interface PlanDraft {
   usd?: number | null;
   days?: number | null;
   risks?: string;
+  /** How the work is done (spec §5.1): required on a proposal, kept on a revision unless given. */
+  method?: unknown;
 }
 
 export interface StatusLine {
@@ -398,7 +401,8 @@ export class Company {
 
   propose(by: string, draft: PlanDraft): Plan {
     this.#assertCoordinator(by);
-    const plan = this.#d.plans.create({ ...this.#draft(draft), proposedBy: by });
+    const fields = this.#draft(draft);
+    const plan = this.#d.plans.create({ ...fields, method: planMethod(draft.method), proposedBy: by });
     this.#emit(by, { type: 'plan.changed', change: 'proposed', plan });
     return plan;
   }
@@ -418,10 +422,11 @@ export class Company {
       days: draft.days === undefined ? current.days : draft.days,
       risks: draft.risks ?? current.risks,
     });
+    const method = draft.method === undefined ? (current.method ?? null) : planMethod(draft.method);
     // A revision of an approved (or finished) plan is a new proposal: it waits for the owner again (rule B, big change).
     // Rule B: the approved version is kept until the owner decides on the revision (only the first revision saves it).
     if (current.status === 'approved' || current.status === 'done') this.#d.plans.saveApproved(planId);
-    const plan = this.#d.plans.update(planId, { ...merged, version: current.version + 1, status: 'draft', approvedAt: null });
+    const plan = this.#d.plans.update(planId, { ...merged, method, version: current.version + 1, status: 'draft', approvedAt: null });
     this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
     return plan;
   }

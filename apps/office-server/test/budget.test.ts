@@ -3,7 +3,7 @@ import { DEFAULT_CONSTITUTION, OWNER, type QuotaState, type Usage } from '@cc/sh
 import { Budget } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { QuotaTracker } from '../src/quota.ts';
-import { companyFor } from './company-helpers.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
 
@@ -108,7 +108,7 @@ describe('Budget — money', () => {
     const t = make();
     const c = t.company.hireCoordinator();
     const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
-    const plan = t.company.propose(c.id, { title: 'Video', goal: 'g', approach: 'a', usd: 20 });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Video', goal: 'g', approach: 'a', usd: 20 });
     t.company.approve(plan.id);
     t.budget.setConstitution({ monthlyUsdCap: 30 });
     expect(t.budget.recordSpend(ada.id, { service: 'ElevenLabs', usd: 15, purpose: 'ses', planId: plan.id }).warnings).toEqual([]);
@@ -131,7 +131,7 @@ describe('Budget — Claude usage per plan', () => {
     const c = t.company.hireCoordinator();
     const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
     t.budget.chargeTurn(ada.id, 1, 100);
-    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     const task = t.company.createTask(c.id, { assignee: ada.id, title: 'iş', planId: plan.id });
     t.company.start(task.id);
@@ -147,7 +147,7 @@ describe('Budget — Claude usage per plan', () => {
     const stop = t.budget.watch();
     cleanups.push(stop);
     const c = t.company.hireCoordinator();
-    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     const task = t.company.createTask(c.id, { assignee: c.id, title: 'iş', planId: plan.id });
     t.company.start(task.id);
@@ -160,7 +160,7 @@ describe('Budget — status for the coordinator', () => {
   it('says the quota, the reserve, the month and every running plan in Turkish', () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const plan = t.company.propose(c.id, { title: 'Video', goal: 'g', approach: 'a', usd: 20, quotaPct: 10 });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Video', goal: 'g', approach: 'a', usd: 20, quotaPct: 10 });
     t.company.approve(plan.id);
     t.setQuota(quota(0.3));
     const text = t.budget.status();
