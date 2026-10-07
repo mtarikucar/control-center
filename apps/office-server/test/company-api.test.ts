@@ -114,6 +114,17 @@ describe('company API', () => {
     expect(office.body.tasks.map((x: { title: string }) => x.title)).toEqual(['iş']);
   });
 
+  it('review focus: a task waiting for its review stays on the board after a reload (the snapshot has it)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'incelenecek', reviewer: c.id });
+    t.company.finish(ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    const office = await call(t.port, 'GET', '/api/office');
+    const shown = office.body.tasks.map((x: { title: string; status: string }) => `${x.status} ${x.title}`).sort();
+    expect(shown).toEqual(['review incelenecek', 'waiting İnceleme: incelenecek (tur 1)']);
+  });
+
   it('final review: firing someone mid-task puts their tasks back in the queue', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();

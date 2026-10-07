@@ -156,4 +156,11 @@ describe('the review gate (spec §5.2)', () => {
     const plain = t.company.createTask(OWNER, { assignee: t.ada.id, title: 'Düz iş' });
     expect(t.company.finish(t.ada.id, plain.id, { summary: 'bitti', outputs: [], learned: '' }).status).toBe('done');
   });
+
+  it('the doer cannot mark a task in review blocked or unblocked: only the reviewer’s decision moves it', () => {
+    const t = make();
+    t.handIn();
+    expect(() => t.company.update(t.ada.id, t.task.id, { blocked: true, note: 'bekliyorum' })).toThrow(/incelemede/);
+    expect(t.tasks.get(t.task.id).status).toBe('review');
+  });
 });

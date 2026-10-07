@@ -364,6 +364,7 @@ export class Company {
   update(by: string, taskId: string, u: { note?: string; blocked?: boolean }): Task {
     const task = this.#d.tasks.get(taskId);
     if (task.assignee !== by) throw new ForbiddenError('Yalnız görevi üstlenen durumunu güncelleyebilir.');
+    if (task.status === 'review') throw new ConflictError('Bu görev incelemede; inceleyicinin kararını bekle.');
     const note = u.note === undefined ? task.note : clean(u.note, 'Not', 2000, false) || null;
     let status = task.status;
     if (u.blocked === true) status = 'blocked';
