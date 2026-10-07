@@ -5,6 +5,7 @@ import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
 import { digestText, lastDigestSlot } from './notices.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
+import { formatWhen } from './time.ts';
 
 export interface DispatchEngine {
   ready(id: string): boolean;
@@ -199,7 +200,7 @@ export class Dispatcher {
     const last = Math.max(this.#d.events.latest(c.id, 'company.report')?.ts ?? 0, c.createdAt, this.#reminded.get(c.id) ?? 0);
     if (now - last < DAY_MS) return;
     const finished = this.#d.tasks.list({ statuses: ['done'], limit: 100_000 }).some((t) => (t.finishedAt ?? 0) > last);
-    const open = this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'], limit: 1 }).length > 0;
+    const open = this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked', 'parked'], limit: 1 }).length > 0;
     if (!finished && !open) return;
     this.#reminded.set(c.id, now);
     this.#d.notices.add(c.id, 'report.reminder', 'Günlük özet zamanı: bugün ne bitti, ne sürüyor, ne takıldı, ne harcandı — reportToOwner ile sahibine kısaca raporla.');
@@ -337,9 +338,10 @@ export class Dispatcher {
     const reviewer = task.kind === 'work' && task.reviewer ? `\nİnceleyen: ${this.#d.company.nameOf(task.reviewer)} — teslimin onun onayıyla kapanır.` : '';
     const returned = task.kind === 'work' && (task.round ?? 0) > 0 ? this.#returned(task) : '';
     const level = task.difficulty && this.#rules().difficultyModelsEnabled ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
+    const due = task.dueAt ? `\nSon tarih: ${formatWhen(task.dueAt, this.#now())}` : '';
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
-İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${reviewer}${deps}${brief}
+İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${due}${reviewer}${deps}${brief}
 
 ${task.description || '(açıklama yok)'}${done}${returned}
 

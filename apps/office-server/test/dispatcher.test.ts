@@ -667,3 +667,38 @@ describe('Dispatcher — a paused company', () => {
     expect((msg.event as { text: string }).text).toContain('goalSet');
   });
 });
+
+describe('Dispatcher — time', () => {
+  it('does not hand out a task before its start time; a parked task frees the slot and the next task is delivered', async () => {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget });
+    const stop = dispatcher.start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    const ada = c.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const timed = c.company.createTask(OWNER, { assignee: ada.id, title: 'Saatli iş', startAfter: '+1d' });
+    const first = c.company.createTask(OWNER, { assignee: ada.id, title: 'İlk iş' });
+    await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('İlk iş'));
+    expect(c.tasks.get(timed.id).status).toBe('waiting');
+    const second = c.company.createTask(OWNER, { assignee: ada.id, title: 'İkinci iş' });
+    c.company.parkTask(ada.id, first.id, '+2h', 'pencere');
+    await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('İkinci iş'));
+    expect(c.tasks.get(second.id).status).toBe('in_progress');
+    expect(c.tasks.get(first.id).status).toBe('parked');
+    const text = (s.events.list({ limit: 5000 }).findLast((e) => e.employeeId === ada.id && e.event.type === 'message.user')!.event as { text: string }).text;
+    expect(text).not.toContain('Son tarih');
+  });
+
+  it('names the due date and the start time in the delivery when they are set', async () => {
+    const s = setup();
+    const f = fakeEngine(s);
+    const c = companyFor(s, f);
+    const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget }).start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    const ada = c.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    c.company.createTask(OWNER, { assignee: ada.id, title: 'Tarihli', dueAt: '+2d' });
+    const msg = await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('Tarihli'));
+    expect((msg.event as { text: string }).text).toMatch(/Son tarih: .*\d\d:\d\d/);
+  });
+});

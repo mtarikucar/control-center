@@ -125,6 +125,16 @@ describe('company API', () => {
     expect(shown).toEqual(['review incelenecek', 'waiting İnceleme: incelenecek (tur 1)']);
   });
 
+  it('a parked task is still open work: the snapshot shows it on the board', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'ertelenen' });
+    t.company.parkTask(ada.id, task.id, '+6h', 'pencere dolsun');
+    const office = await call(t.port, 'GET', '/api/office');
+    expect(office.body.tasks.map((x: { title: string; status: string }) => `${x.status} ${x.title}`)).toEqual(['parked ertelenen']);
+  });
+
   it('final review: firing someone mid-task puts their tasks back in the queue', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();

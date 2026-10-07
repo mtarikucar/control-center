@@ -60,6 +60,14 @@ export const NOTICE_TOPICS = {
   'pulse.goal_idle': 'decision',
   /** The pulse: no goal and no work — set a goal from the mission or rest. */
   'pulse.no_goal': 'decision',
+  /** Someone else parked the task you were working on: stop until it comes back. */
+  'task.parked': 'decision',
+  /** The same task was parked a third time: is it real work? */
+  'task.reparked': 'decision',
+  /** A task passed its due date (the coordinator hears once). */
+  'task.overdue': 'info',
+  /** The owner changed the agenda from the sheet (released, parked, prioritized, a routine paused…). */
+  'agenda.owner_changed': 'info',
   /** Digest off: the daily report reminder as a notice of its own (with the digest on it is a line of the digest). */
   'report.reminder': 'decision',
 } as const satisfies Record<string, NoticeKind>;
@@ -100,6 +108,7 @@ const LINE_CHARS = 160;
 const GROUPS: Array<{ title: string; topics: readonly string[] }> = [
   { title: 'Teslimler', topics: ['task.finished', 'task.awaited'] },
   { title: 'İncelemeler', topics: ['review.approved', 'review.changes'] },
+  { title: 'Ajanda', topics: ['task.overdue', 'agenda.owner_changed'] },
   { title: 'Plan durumu', topics: ['plan.done'] },
   { title: 'Görevler', topics: ['task.moved'] },
   { title: 'Öneriler', topics: ['proposal.to_owner'] },

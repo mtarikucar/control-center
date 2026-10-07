@@ -63,7 +63,7 @@ export class Pulse {
       add('pulse.goal_idle', `“${goal.title}” hedefinin süren planı yok${why}. Sıradaki planı planPropose ile goalId vererek başlat ya da hedefe ulaşıldıysa / vazgeçtiysen goalSet ile kapat (status: done ya da dropped).`);
     }
     if (active.length > 0 || plans.some(running)) return left;
-    if (this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked'], limit: 1 }).length > 0) return left;
+    if (this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked', 'parked'], limit: 1 }).length > 0) return left;
     const hours = (this.#d.budget?.constitution() ?? DEFAULT_CONSTITUTION).pulseHours;
     if (hours <= 0) return left;
     if (now < this.#d.state.restUntil()) return left;

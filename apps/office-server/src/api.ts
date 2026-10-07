@@ -61,7 +61,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   const employees = d.roster.list();
   const base: OfficeSnapshot = { employees, quota: d.quota.state(), usage: d.quota.usageAll(employees.map((e) => e.id)), lastSeq: d.events.lastSeq() };
   if (!d.company) return base;
-  const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked'] });
+  const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked', 'parked'] });
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
   return {
     ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),

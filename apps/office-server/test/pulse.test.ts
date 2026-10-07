@@ -81,6 +81,15 @@ describe('the pulse (spec §6.3)', () => {
     expect(t.pulse().check()).toEqual([]);
   });
 
+  it('a parked task is open work too: no "no goal" notice while it waits for its time', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const task = t.company.createTask(c.id, { assignee: c.id, title: 'yarın tekrar ölç' });
+    t.company.parkTask(c.id, task.id, '+1d', 'ölçüm penceresi');
+    expect(t.pulse().check()).toEqual([]);
+    expect(t.notices.pending(c.id).some((n) => n.topic === 'pulse.no_goal')).toBe(false);
+  });
+
   it('a new goal ends the rest', () => {
     const t = make();
     const c = t.company.hireCoordinator('sonnet');

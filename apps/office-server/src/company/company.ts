@@ -14,8 +14,10 @@ import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
-import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
+import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
+import type { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
+import { formatWhen, parseUntil } from './time.ts';
 
 /** The constitution's loop guards by default (spec §4.6); the owner changes them in the constitution. */
 export const LIMITS = {
@@ -59,6 +61,10 @@ export interface CompanyDeps {
   /** Goals and the company's own state (stage 2; absent in tests that do not care). */
   goals?: GoalStore;
   state?: CompanyStateStore;
+  /** Routines (stage: scheduler; absent in tests that do not care). */
+  schedules?: ScheduleStore;
+  /** The office clock: told when a time changed, so it re-arms (absent in tests that do not care). */
+  clock?: { touch(): void };
   now?: () => number;
 }
 
@@ -74,6 +80,10 @@ export interface TaskInput {
   difficulty?: TaskDifficulty | null;
   /** Who approves the hand-in before the task closes (spec §5.2): an employee id; never the assignee. */
   reviewer?: string | null;
+  /** Not handed out before this time (spec §4.1): `+6h`, `+1d` or a local `2026-10-08T14:55`. */
+  startAfter?: string | null;
+  /** Should be done by this time (spec §4.3); same forms. */
+  dueAt?: string | null;
 }
 
 export interface PlanDraft {
@@ -126,6 +136,8 @@ function difficultyOf(value: unknown): TaskDifficulty | null {
 export class Company {
   readonly #d: CompanyDeps;
   readonly #now: () => number;
+  /** The clock attached after construction (attachClock); else the one in the deps. */
+  #clock: { touch(): void } | null = null;
 
   constructor(d: CompanyDeps) {
     this.#d = d;
@@ -268,11 +280,17 @@ export class Company {
       this.#tellCoordinator(by, 'limit.tasks_per_day', `${this.nameOf(by)} bugün ${rules.tasksPerDay} görev açtı ve sınıra geldi.`);
       throw new ConflictError(`Bir çalışan günde en fazla ${rules.tasksPerDay} görev açabilir.`);
     }
+    const now = this.#now();
+    const notBefore = input.startAfter ? parseUntil(input.startAfter, now, { maxDays: DUE_MAX_DAYS, label: 'Başlangıç saati' }) : null;
+    const dueAt = input.dueAt ? parseUntil(input.dueAt, now, { maxDays: DUE_MAX_DAYS, label: 'Son tarih' }) : null;
+    if (notBefore !== null && dueAt !== null && dueAt < notBefore) throw new ValidationError('Son tarih başlangıç saatinden önce olamaz.');
     const reviewer = this.#reviewerOf(input.reviewer, assignee.id);
     const task = this.#d.tasks.create({
       planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), reviewer, dependsOn, chainDepth: Math.max(0, chainDepth),
+      notBefore, dueAt,
     });
     this.#taskEvent('created', task);
+    if (notBefore !== null || dueAt !== null) this.#touchClock();
     if (planId !== null) this.#reopenPlan(planId);
     return task;
   }
@@ -320,13 +338,14 @@ export class Company {
     this.#rerouteProposals(id);
     for (const m of this.#d.roster.list()) if (m.reportsTo === id) this.#d.roster.update(m.id, { reportsTo: null });
     const work: Task[] = [];
-    for (const task of this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] })) {
+    for (const task of this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked', 'parked'] })) {
       if (task.kind === 'handover') {
         this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'cancelled', finishedAt: this.#now() }));
         continue;
       }
       work.push(task);
-      if (task.status !== 'waiting') this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null, nudged: false }));
+      // A parked task keeps its return time as its start time (spec §4.5).
+      if (task.status !== 'waiting') this.#taskEvent('updated', this.#d.tasks.update(task.id, { status: 'waiting', startedAt: null, nudged: false, parkedReason: null }));
     }
     // A task waiting for its review stays in review; if it comes back with changes it needs a new assignee.
     const inReview = this.#d.tasks.list({ assignee: id, statuses: ['review'] });
@@ -376,6 +395,88 @@ export class Company {
     const next = this.#d.tasks.update(taskId, { priority });
     this.#taskEvent('reprioritized', next);
     return next;
+  }
+
+  // ── time (spec §4) ────────────────────────────────────────────────────────
+
+  /**
+   * Sets a task aside until a time (spec §4.2): by the one doing it, the coordinator, a lead for their team, or the
+   * owner. The task stays open but holds no one's slot; the clock brings it back.
+   */
+  parkTask(by: string, taskId: string, until: string, reason: string): Task {
+    const task = this.#d.tasks.get(taskId);
+    if (by !== OWNER && task.assignee !== by) this.#assertManages(by, task.assignee);
+    if (task.kind === 'handover') throw new ConflictError('Devir görevi park edilemez.');
+    if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev kapandı; park edilemez.');
+    if (task.status === 'review') throw new ConflictError('Bu görev incelemede; kararı inceleyici verir, park edilemez.');
+    const now = this.#now();
+    const notBefore = parseUntil(until, now, { maxDays: PARK_MAX_DAYS, label: 'Dönüş saati' });
+    const why = clean(reason, 'Gerekçe', 500, true);
+    const wasStarted = task.status === 'in_progress' || task.status === 'blocked';
+    const parkCount = (task.parkCount ?? 0) + 1;
+    const next = this.#d.tasks.update(taskId, { status: 'parked', notBefore, parkedReason: why, parkCount, startedAt: null, nudged: false });
+    this.#taskEvent('parked', next);
+    const when = formatWhen(notBefore, now);
+    if (wasStarted && by !== task.assignee) {
+      this.#d.notices.add(task.assignee, 'task.parked', `“${task.title}” görevi (no ${task.id}) ${by === OWNER ? 'sahibi' : this.nameOf(by)} tarafından ${when} saatine ertelendi (${why}). Üzerinde çalışmayı bırak; saatinde geri gelecek.`);
+    }
+    if (by === OWNER) this.#tellOwnerChanged(`Sahibi “${task.title}” görevini ${when} saatine erteledi: ${why}.`);
+    if (parkCount >= REPARK_LIMIT) {
+      // An empty `about`: the brake is heard even when the coordinator is the one parking.
+      this.#tellCoordinator('', 'task.reparked', `“${task.title}” görevi (no ${task.id}) ${parkCount}. kez ertelendi (son gerekçe: ${why}). Gerçek bir iş mi, bölünmeli mi, iptal mi — karar ver.`);
+    }
+    this.#touchClock();
+    return next;
+  }
+
+  /** The time came (the clock): the parked task waits in its queue again — once, and only if still parked and due. */
+  returnFromPark(taskId: string, now: number): Task | null {
+    if (!this.#d.tasks.returnParked(taskId, now)) return null;
+    const next = this.#d.tasks.update(taskId, { parkedReason: null });
+    this.#taskEvent('returned', next);
+    return next;
+  }
+
+  /** Brings a parked or start-timed task back now (coordinator, lead, owner); the owner's release also puts it first. */
+  unparkTask(by: string, taskId: string, o: { priority?: number } = {}): Task {
+    const task = this.#d.tasks.get(taskId);
+    if (by !== OWNER) this.#assertManages(by, task.assignee);
+    if (task.status === 'in_progress' || task.status === 'blocked') throw new ConflictError('Bu görev zaten sürüyor; park edilmiş değil.');
+    if (task.status !== 'parked' && !(task.status === 'waiting' && task.notBefore !== null && task.notBefore !== undefined)) {
+      throw new ConflictError('Bu görev park edilmiş ya da başlangıç saatli değil.');
+    }
+    if (o.priority !== undefined && (!Number.isInteger(o.priority) || o.priority < 1 || o.priority > 5)) throw new ValidationError('Öncelik 1 ile 5 arasında bir tam sayı olmalı.');
+    const next = this.#d.tasks.update(taskId, { status: 'waiting', notBefore: null, parkedReason: null, startedAt: null, nudged: false, ...(o.priority !== undefined ? { priority: o.priority } : {}) });
+    this.#taskEvent('returned', next);
+    if (by === OWNER) this.#tellOwnerChanged(`Sahibi “${task.title}” görevini şimdi başlattı${o.priority === 1 ? ' (öncelik 1)' : ''}.`);
+    this.#touchClock();
+    return next;
+  }
+
+  /** The owner's "Öne al": priority 1, the time untouched. */
+  ownerPrioritize(taskId: string): Task {
+    const task = this.#d.tasks.get(taskId);
+    if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev kapandı.');
+    const next = this.#d.tasks.update(taskId, { priority: 1 });
+    this.#taskEvent('reprioritized', next);
+    this.#tellOwnerChanged(`Sahibi “${task.title}” görevini öne aldı (öncelik 1).`);
+    return next;
+  }
+
+  /** The clock is built after the company (it needs the scheduling service, which needs the company): attached here. */
+  attachClock(clock: { touch(): void }): void {
+    this.#clock = clock;
+  }
+
+  /** A time changed: the clock re-arms for the nearest one. */
+  #touchClock(): void {
+    (this.#clock ?? this.#d.clock)?.touch();
+  }
+
+  /** What the owner changed from the sheet: the coordinator hears, for the record. */
+  #tellOwnerChanged(text: string): void {
+    const c = this.coordinator();
+    if (c) this.#d.notices.add(c.id, 'agenda.owner_changed', text);
   }
 
   /** The office hands the task to its assignee (Dispatcher). */
@@ -705,7 +806,7 @@ export class Company {
     if (plan.status === 'stopped') throw new ConflictError('Bu plan zaten durduruldu.');
     if (plan.status !== 'approved' && plan.status !== 'draft') throw new ConflictError('Yalnız süren ya da onay bekleyen bir plan durdurulabilir.');
     const at = this.#now();
-    for (const task of this.#d.tasks.list({ planId, statuses: ['waiting', 'in_progress', 'review', 'blocked'] })) {
+    for (const task of this.#d.tasks.list({ planId, statuses: ['waiting', 'in_progress', 'review', 'blocked', 'parked'] })) {
       const holder = this.#person(task.assignee);
       if (holder && holder.lifecycle !== 'archived' && (task.status === 'in_progress' || task.status === 'blocked')) {
         this.#d.notices.add(holder.id, 'task.cancelled', `“${task.title}” görevi (no ${task.id}) iptal edildi: sahibi “${plan.title}” planını durdurdu. Üzerinde çalışmayı bırak.`);

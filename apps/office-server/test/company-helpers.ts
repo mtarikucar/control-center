@@ -6,7 +6,8 @@ import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
 import { Memory } from '../src/company/memory.ts';
 import { ProposalStore } from '../src/company/proposal-store.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
-import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
+import { Scheduling } from '../src/company/scheduling.ts';
+import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from '../src/company/store.ts';
 import type { FakeEngine } from './engine-helpers.ts';
 import type { TestSetup } from './helpers.ts';
 
@@ -15,6 +16,7 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const tasks = new TaskStore(s.db, now);
   const plans = new PlanStore(s.db, now);
   const notices = new NoticeStore(s.db, now);
+  const schedules = new ScheduleStore(s.db, now);
   const proposals = new ProposalStore(s.db, now);
   const goals = new GoalStore(s.db, now);
   const state = new CompanyStateStore(s.db);
@@ -32,12 +34,28 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     quota: { state: () => quotaState }, deskCount: 8, now,
   });
   const reloaded: string[] = [];
+  // A fake office clock: counts how often a time change asked it to re-arm.
+  let touched = 0;
+  const clock = { touch: () => void (touched += 1) };
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
-    reload: (id) => void reloaded.push(id), now,
+    reload: (id) => void reloaded.push(id), schedules, clock, now,
   });
+  const scheduling = new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
+  /** A restarted office's due-processor on the same database. */
+  const freshScheduling = () => new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
+  /** Makes the return of one task throw (a failing due item for the clock tests). */
+  const breakReturnOf = (taskId: string) => {
+    const real = company.returnFromPark.bind(company);
+    company.returnFromPark = (id: string, at: number) => {
+      if (id === taskId) throw new Error('bozuk dönüş');
+      return real(id, at);
+    };
+  };
   return {
-    tasks, plans, notices, memory, company, reloaded, budget, proposals, goals, state,
+    tasks, plans, notices, memory, company, reloaded, budget, proposals, goals, state, schedules, scheduling, freshScheduling, breakReturnOf,
+    /** How often the fake clock was touched so far (a function: the tests spread this object, which would freeze a getter). */
+    clockTouches: () => touched,
     setQuota: (q: QuotaState | null) => {
       quotaState = q;
     },
