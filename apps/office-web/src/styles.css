@@ -214,3 +214,9 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .dot.sleeping { background: #b8bcc6; }
 .proposal-card header { justify-content: flex-start; gap: 8px; }
 .proposal-card header strong { margin-right: auto; }
+
+.plan-method { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
+.plan-method h4 { margin: 0 0 4px; font-size: 13px; }
+.plan-method ol, .plan-method ul { margin: 4px 0 6px 18px; padding: 0; }
+.board-col .badge.review { color: var(--info); }
+.task-card.review { border-left: 3px solid var(--info); }

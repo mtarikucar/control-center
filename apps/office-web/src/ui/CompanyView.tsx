@@ -19,7 +19,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
-const COLUMNS: TaskStatus[] = ['waiting', 'in_progress', 'blocked', 'done'];
+const COLUMNS: TaskStatus[] = ['waiting', 'in_progress', 'review', 'blocked', 'done'];
 
 function NoCoordinator({ people }: { people: Employee[] }) {
   const [pick, setPick] = useState('');
@@ -211,10 +211,17 @@ export function CompanyView() {
                       <article key={t.id} className={`task-card ${t.status}`}>
                         <strong>{t.title}</strong>
                         {t.difficulty && <span className={`badge difficulty ${t.difficulty}`}>{TASK_DIFFICULTY_LABELS[t.difficulty]}</span>}
+                        {t.kind === 'review' && <span className="badge review">İnceleme</span>}
                         <span className="muted">
                           {nameOf(t.assignee)} · P{t.priority}
                           {t.planId && plans[t.planId] ? ` · ${plans[t.planId]!.title}` : ''}
                         </span>
+                        {t.reviewer && (
+                          <span className="muted">
+                            İnceleyen: {nameOf(t.reviewer)}
+                            {(t.round ?? 0) > 0 ? ` · tur ${t.round}` : ''}
+                          </span>
+                        )}
                         {t.note && <span className="task-note">{t.note}</span>}
                       </article>
                     ))}
