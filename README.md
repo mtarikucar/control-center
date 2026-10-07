@@ -51,7 +51,8 @@ koordinatöre döner. Beklemek istemezseniz **Hemen çıkar**.
 ## Bütçe ve anayasa
 
 Şirket görünümünün **Anayasa** sekmesinde sınırları siz koyarsınız: en çok kaç çalışan, Claude kotasından size ayrılan
-pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, boştakilerin kaç dakika sonra uyuyacağı.
+pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, boştakilerin kaç dakika sonra uyuyacağı, özet
+saatleri ve hangi işin hangi modelde koşacağı.
 
 - **Sahibinin payı:** 5 saatlik ya da haftalık kullanım `100 − pay` sınırına gelince ofis yalnız öncelik 1 işleri
   başlatır, boştakileri uyutur ve koordinatöre haber verir; süren işler kesilmez, pencere açılınca kendiliğinden döner.
@@ -60,7 +61,17 @@ pay (varsayılan %25), aylık para sınırı, paslama ve görev sınırları, bo
   çıkar ve koordinatör sahibine getirir. **Bütçe** sekmesi her planın harcadığını, Claude kullanımını ve onaylanan parayı
   yan yana gösterir.
 - **Uyku:** işi olmayan çalışan bir süre sonra uyur (oturumu korunur); görevi gelince ya da siz yazınca uyanır.
-- Koordinatör `budgetStatus` ile bütçeyi görür, `setModel` ile birinin modelini değiştirir, `sleep`/`wake` kullanır.
+- **Notlar ve özet:** karar gerektiren notlar (plan onayı, takılma, öneri…) hemen bir tur açar; yalnız bilgi olanlar
+  (teslimler, rol değişikliği…) bir sonraki tura biner ya da **özet saatlerinde** (`digestHours`, varsayılan 9 ve 17)
+  tek turda gelir. Günlük rapor hatırlatması son özetle gelir.
+- **Model seçimi:** koordinatörün modeli turun ne için olduğuna göre seçilir (`coordinatorModels`: sizin mesajınız
+  fable, karar notu sonnet, yalnız özet haiku). Görevlerin bir **zorluğu** olabilir (`taskCreate`/`taskPass`/
+  `taskAssign` → `difficulty`: kolay, orta, zor, kritik); görev başlarken çalışan o zorluğun modeline geçer
+  (`difficultyModels`: haiku, sonnet, opus, fable), görev ortasında asla. Model değişimi oturumu yeniden açar ve önbelleği
+  soğutur: daha güçlü modele hemen geçilir, daha zayıfa yalnız son turdan `cacheTtlMinutes` (varsayılan 5) sonra —
+  sohbet modeller arasında gidip gelmez; görev başı istisnadır. Elle `setModel` bir sonraki seçime dek geçerlidir.
+- Koordinatör `budgetStatus` ile bütçeyi ve bugün kimin kaç tur kullandığını görür, `setModel` ile birinin modelini
+  değiştirir, `sleep`/`wake` kullanır. Ölçüm: `docs/superpowers/notes/2026-10-07-economy-results.md`.
 
 ## Öneriler ve ekip liderleri
 

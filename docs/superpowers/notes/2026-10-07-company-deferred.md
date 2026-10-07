@@ -23,8 +23,8 @@ small. Grouped by area, roughly most useful first.
 ## Budget
 - "Kota payı devrede" repeats after every office restart (`#wasActive` starts false).
 - `wake` tool says "uyandı" for someone not asleep; `setModel` reply says "yeniden açılıyor" even when deferred.
-- Notices still cost an awake member a turn during the reserve. *(office-economy: closed for information notices, which
-  wait during the reserve; a decision notice still opens a turn, by design.)*
+- ~~Notices still cost an awake member a turn during the reserve.~~ **Closed (office-economy):** information notices
+  wait during the reserve and open no turn; only a decision notice does, by design.
 - A sleeper whose hand-over is done is not let go (practically unreachable).
 - `chargeTurn` ignores blocked tasks.
 - "1,000" parses as 1 in the Anayasa form; no colour for `.badge.sleeping`.

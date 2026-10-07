@@ -180,6 +180,11 @@ görev sayısı ≤ 60. Aşınca araç reddeder ve koordinatöre not düşer.
   koordinatör sahibine getirir. (Ofis harcamayı **engelleyemez** — çalışanlar serbest; sınır görünürlük ve
   koordinatörün görevi içindir.)
 - **Görünürlük:** karakter başına token/maliyet (v1) + plan ve ekip başına toplam kota, para, kalan bütçe.
+- **Model seçimi (anayasa):** her gönderim bir model ipucu taşıyabilir. Koordinatöre sahibinin mesajı
+  `coordinatorModels.owner` (fable), karar notu/görev/hatırlatma `decision` (sonnet), yalnız özet `digest` (haiku);
+  görev başında çalışana `difficultyModels[zorluk]` (kolay haiku, orta sonnet, zor opus, kritik fable; zorluk yoksa ipucu
+  yok). Model değişimi oturumu yeniden açar (hafıza sürer, önbellek soğur): daha güçlü modele hemen, daha zayıfa yalnız
+  son turdan `cacheTtlMinutes` (5) sonra geçilir; görev başı her iki yöne geçer; görev ya da tur ortasında asla.
 - Plan başına Claude kullanımı: her bitmiş turun maliyeti çalışanın o an sürdüğü göreve, görevler de planlarına yazılır; plan başına kota payı tahmin olarak kalır (kota ortak).
 
 ## 7. Ofis araç seti (MCP)
@@ -229,7 +234,9 @@ Yeni göç sürümleri (her biri `up` + `down`, `down` yalnız kendi eklediğini
 - `decisions` (id, zaman, veren, başlık, seçilen, gerekçe, alternatifler, plan, `reverts`).
 - `playbook` (konu, sürüm, metin, yazan, gerekçe, zaman). `notes` (+ FTS5 dizini). `spend`. `proposals`.
   `employee_notes`. `constitution` (anahtar → değer: `maxEmployees`, `ownerReservePct`, `monthlyUsdCap`, `chainDepth`, `tasksPerDay`, `openTasksPerPlan`, `idleSleepMinutes`, `digestHours`); `tasks.cost_usd`, `tasks.tokens`.
-- `notices.kind` (`decision` \| `info`), `notices.topic` (göç 6; eski notlar `decision`).
+- `notices.kind` (`decision` \| `info`), `notices.topic` (göç 6; eski notlar `decision`). `tasks.difficulty` (göç 7;
+  `easy` \| `medium` \| `hard` \| `critical`, boş olabilir). Anayasaya `digestHours`, `coordinatorModels`,
+  `cacheTtlMinutes`, `difficultyModels`.
 - Olaylar (`OfficeEvent`): `plan.*`, `task.*`, `proposal.changed`, `decision.recorded`, `spend.recorded`, `brief.updated`,
   `lifecycle.changed` (`sleeping`), `role.changed` — v1 olay kaydına ve canlı akışa girer (ekran bunlardan beslenir).
 
