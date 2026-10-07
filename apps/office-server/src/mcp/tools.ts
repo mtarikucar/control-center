@@ -155,7 +155,10 @@ export function officeTools(o: {
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         const task = company.parkTask(employee.id, str(args, 'taskId'), str(args, 'until'), str(args, 'reason'));
-        return `“${task.title}” ertelendi: ${formatWhen(task.notBefore ?? Date.now(), Date.now())} saatinde sırana geri gelecek. Sıran boş; ofis sıradaki işini verir.`;
+        const when = formatWhen(task.notBefore ?? Date.now(), Date.now());
+        // Someone else's task: the caller's own slot was never held (the assignee hears separately).
+        if (task.assignee !== employee.id) return `“${task.title}” ${company.nameOf(task.assignee)} için ${when} saatine ertelendi; saatinde onun sırasına geri gelecek.`;
+        return `“${task.title}” ertelendi: ${when} saatinde sırana geri gelecek. Sıran boş; ofis sıradaki işini verir.`;
       },
     },
     {

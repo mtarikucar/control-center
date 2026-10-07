@@ -329,6 +329,18 @@ describe('office tools — task difficulty', () => {
     expect(t.tasks.get(task.id).status).toBe('waiting');
   });
 
+  it('taskPark by someone other than the assignee names whose task it was, not the caller’s own queue', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const own = t.company.createTask(c.id, { assignee: ada.id, title: 'Kendi' });
+    const other = t.company.createTask(c.id, { assignee: ada.id, title: 'Başkası' });
+    expect(await t.call(ada, 'taskPark', { taskId: own.id, until: '+6h', reason: 'bekliyor' })).toMatch(/Sıran boş/);
+    const reply = await t.call(c, 'taskPark', { taskId: other.id, until: '+6h', reason: 'bekliyor' });
+    expect(reply).toMatch(/^“Başkası” Ada için .*\d\d:\d\d saatine ertelendi; saatinde onun sırasına geri gelecek\.$/);
+    expect(reply).not.toMatch(/Sıran boş/);
+  });
+
   it('taskCreate and taskPass take a start time and a due date', async () => {
     const t = make();
     const c = t.company.hireCoordinator('sonnet');
