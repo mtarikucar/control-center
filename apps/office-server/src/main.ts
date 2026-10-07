@@ -38,7 +38,10 @@ const roster = new Roster(db, config.deskCount, Date.now, (slug) => existsSync(d
 const quota = new QuotaTracker(db, events);
 const tokens = new TokenRegistry();
 let mcpUrl = '';
-const engine = new Engine({ roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens } });
+const engine = new Engine({
+  roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens },
+  cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
+});
 const tasks = new TaskStore(db);
 const plans = new PlanStore(db);
 const notices = new NoticeStore(db);

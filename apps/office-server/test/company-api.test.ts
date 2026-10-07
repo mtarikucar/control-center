@@ -5,8 +5,8 @@ import { OWNER } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor } from './company-helpers.ts';
-import { fakeEngine } from './engine-helpers.ts';
-import { setup } from './helpers.ts';
+import { fakeEngine, readArgv } from './engine-helpers.ts';
+import { setup, until } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
@@ -22,7 +22,7 @@ async function start() {
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, argvLog: f.argvLog, events: s.events };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -39,6 +39,17 @@ function call(port: number, method: string, path: string, body?: unknown): Promi
 }
 
 describe('company API', () => {
+  it('important: the owner’s message to the coordinator goes on the constitution’s owner model; to a member, on theirs', async () => {
+    const t = await start();
+    const coord = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', model: 'haiku' });
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Bir plan öner.' })).status).toBe(202);
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Merhaba.' })).status).toBe(202);
+    const models = async (n: number) => (await readArgv(t.argvLog, n)).map((a) => `${a.cwd.includes('koordinator') ? 'K' : 'A'}:${a.args[a.args.indexOf('--model') + 1]}`);
+    await until(() => t.events.list({ limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length === 2, 8000);
+    expect((await models(3)).sort()).toEqual(['A:haiku', 'K:fable', 'K:sonnet']);
+  });
+
   it('hires the coordinator once from the Company view, on Fable, with the manager look', async () => {
     const t = await start();
     const hired = await call(t.port, 'POST', '/api/company/coordinator/hire');

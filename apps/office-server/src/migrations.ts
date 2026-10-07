@@ -257,4 +257,10 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE notices DROP COLUMN topic;
       ALTER TABLE notices DROP COLUMN kind;`,
   },
+  {
+    version: 7,
+    name: 'task difficulty',
+    up: `ALTER TABLE tasks ADD COLUMN difficulty TEXT;`,
+    down: `ALTER TABLE tasks DROP COLUMN difficulty;`,
+  },
 ];

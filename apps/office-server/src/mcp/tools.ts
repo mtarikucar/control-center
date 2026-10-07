@@ -1,4 +1,4 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task } from '@cc/shared';
+import { MODEL_ALIASES, PROPOSAL_KINDS, TASK_DIFFICULTIES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { Memory } from '../company/memory.ts';
@@ -62,6 +62,12 @@ const strings = (description: string) => ({ type: 'array', items: { type: 'strin
 const integer = (description: string, minimum: number, maximum: number) => ({ type: 'integer', minimum, maximum, description });
 const number = (description: string) => ({ type: 'number', minimum: 0, description });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
+const difficulty = {
+  type: 'string',
+  enum: [...TASK_DIFFICULTIES],
+  description: 'How hard the task is; it starts on the model the constitution gives that difficulty. None: the assignee stays on their model.',
+};
+const difficultyArg = (args: Args) => optStr(args, 'difficulty') as TaskDifficulty | undefined;
 
 export function officeTools(o: {
   company: Company;
@@ -124,11 +130,11 @@ export function officeTools(o: {
     {
       name: 'taskPass',
       description: 'Pass a piece of work to a colleague (by id or name). It goes to the end of their queue; they are not interrupted. Say what, why and when it counts as done.',
-      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5) }, ['to', 'title']),
+      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty }, ['to', 'title']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         // Arguments first: a malformed call should say what is malformed, not that a person was not found.
-        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority') };
+        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args) };
         const to = findPerson(str(args, 'to'));
         const task = company.createTask(employee.id, { assignee: to.id, ...input });
         return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).`;
@@ -358,11 +364,12 @@ export function officeTools(o: {
     },
     {
       name: 'taskCreate',
-      description: 'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done".',
-      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
+      description:
+        'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done". Give a difficulty: the task starts on its model (constitution, by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
+      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.') }, ['assignee', 'title']),
       kinds: LEADS,
       run: ({ employee }, args) => {
-        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn') };
+        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn') };
         const to = findPerson(str(args, 'assignee'));
         if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
           throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
@@ -373,12 +380,12 @@ export function officeTools(o: {
     },
     {
       name: 'taskAssign',
-      description: 'Give a waiting or blocked task to someone else (coordinator).',
-      inputSchema: object({ taskId: s('The task id.'), assignee: s('Employee id or name.') }, ['taskId', 'assignee']),
+      description: 'Give a waiting or blocked task to someone else (coordinator); with difficulty, also say anew how hard it is.',
+      inputSchema: object({ taskId: s('The task id.'), assignee: s('Employee id or name.'), difficulty }, ['taskId', 'assignee']),
       kinds: LEADS,
       run: ({ employee }, args) => {
         const to = findPerson(str(args, 'assignee'));
-        const task = company.assign(employee.id, str(args, 'taskId'), to.id);
+        const task = company.assign(employee.id, str(args, 'taskId'), to.id, { difficulty: difficultyArg(args) });
         return `“${task.title}” artık ${to.name} adlı çalışanda.`;
       },
     },

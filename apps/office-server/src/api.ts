@@ -177,7 +177,10 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     }
     if (method === 'GET' && action === 'file' && d.company) return sendJson(res, 200, d.company.memory.employeeFile(id));
     if (method === 'POST' && action === 'messages') {
-      d.engine.send(id, textOf(await readJson(req)));
+      const text = textOf(await readJson(req));
+      // The owner talking to the coordinator is planning and judgement: the constitution's owner model (spec §6).
+      const coordinator = d.company && d.roster.get(id).kind === 'coordinator';
+      d.engine.send(id, text, 'owner', coordinator ? { model: d.company!.budget.constitution().coordinatorModels.owner } : {});
       return sendJson(res, 202, { ok: true });
     }
     if (method === 'POST' && action === 'side-questions') return sendJson(res, 200, await d.engine.sideQuestion(id, textOf(await readJson(req))));

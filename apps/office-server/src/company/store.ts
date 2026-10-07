@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Plan, PlanStatus, Task, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
+import type { Plan, PlanStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 import { NOTICE_TOPICS, type Notice, type NoticeTopic } from './notices.ts';
@@ -23,6 +23,7 @@ interface TaskRow {
   started_at: number | null;
   finished_at: number | null;
   kind: string;
+  difficulty: string | null;
 }
 
 function taskFromRow(r: TaskRow): Task {
@@ -36,6 +37,7 @@ function taskFromRow(r: TaskRow): Task {
     requester: r.requester,
     assignee: r.assignee,
     priority: r.priority,
+    difficulty: (r.difficulty as TaskDifficulty | null) ?? null,
     dependsOn: JSON.parse(r.depends_on) as string[],
     status: r.status as TaskStatus,
     chainDepth: r.chain_depth,
@@ -58,11 +60,12 @@ export interface NewTask {
   requester: string;
   assignee: string;
   priority: number;
+  difficulty?: TaskDifficulty | null;
   dependsOn: string[];
   chainDepth: number;
 }
 
-export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt'>>;
+export type TaskPatch = Partial<Pick<Task, 'assignee' | 'priority' | 'difficulty' | 'status' | 'note' | 'result' | 'nudged' | 'startedAt' | 'finishedAt'>>;
 
 const OPEN = "('waiting', 'in_progress', 'blocked')";
 
@@ -76,14 +79,14 @@ export class TaskStore {
   }
 
   create(t: NewTask): Task {
-    const task: Task = { ...t, kind: t.kind ?? 'work', id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null };
+    const task: Task = { ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, createdAt: this.#now(), startedAt: null, finishedAt: null };
     this.#db
       .prepare(
         `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth,
-           note, result, nudged, created_at, started_at, finished_at, kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?)`,
+           note, result, nudged, created_at, started_at, finished_at, kind, difficulty)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?)`,
       )
-      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind);
+      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null);
     return task;
   }
 
@@ -116,8 +119,8 @@ export class TaskStore {
   update(id: string, patch: TaskPatch): Task {
     const next = { ...this.get(id), ...patch };
     this.#db
-      .prepare('UPDATE tasks SET assignee = ?, priority = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ? WHERE id = ?')
-      .run(next.assignee, next.priority, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt, id);
+      .prepare('UPDATE tasks SET assignee = ?, priority = ?, difficulty = ?, status = ?, note = ?, result = ?, nudged = ?, started_at = ?, finished_at = ? WHERE id = ?')
+      .run(next.assignee, next.priority, next.difficulty ?? null, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.startedAt, next.finishedAt, id);
     return next;
   }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Employee, HireInput, Lifecycle, OfficeEvent, QuotaWindow, Usage } from '@cc/shared';
+import type { Employee, HireInput, Lifecycle, ModelAlias, OfficeEvent, QuotaWindow, Usage } from '@cc/shared';
 import { sessionArgs, sideQuestionArgs, terminalCommand } from './claude/args.ts';
 import { normalize, replayedUuid, usageSince } from './claude/normalize.ts';
 import { runOnce } from './claude/once.ts';
@@ -8,6 +8,7 @@ import { deskDir, prepareDesk } from './desk.ts';
 import { ConflictError, ValidationError } from './errors.ts';
 import type { EventStore } from './event-store.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
+import { modelPolicy } from './model-policy.ts';
 import type { Roster } from './roster.ts';
 
 export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam et.';
@@ -56,6 +57,15 @@ export interface EngineOptions {
   sideQuestionTimeoutMs?: number;
   /** The office tools (MCP over HTTP): `url` is read at every session start, a fresh token is issued each time. */
   mcp?: { url: () => string; tokens: TokenRegistry };
+  /** How long a session's prompt cache stays warm (the constitution's cacheTtlMinutes; default 5). */
+  cacheTtlMinutes?: () => number;
+}
+
+/** What a message would best run on; the session moves there only as modelPolicy allows, never in the middle of a turn. */
+export interface ModelHint {
+  model?: ModelAlias;
+  /** The message starts a task: the task's model applies either way. */
+  taskStart?: boolean;
 }
 
 interface Runtime {
@@ -78,6 +88,10 @@ interface Runtime {
   consumedInTurn: boolean;
   /** claude's running totals at the last result; null until loaded from the event log. */
   totals: Totals | null;
+  /** When the last turn ended (engine clock); null until one ends in this run (then the event log says). */
+  lastTurnAt: number | null;
+  /** The session is restarting on another model: messages that arrive meanwhile, written right after. */
+  switching: Array<{ text: string; source: 'owner' | 'system' }> | null;
   /** Reset of the window that rejected the last request, when claude named it. */
   limitAt: number | null;
 }
@@ -95,6 +109,7 @@ export class Engine {
   readonly #stopTimeoutMs: number;
   readonly #sideQuestionTimeoutMs: number;
   readonly #mcp: EngineOptions['mcp'];
+  readonly #cacheTtlMinutes: () => number;
   readonly #runtimes = new Map<string, Runtime>();
   readonly #sideRuns = new Set<AbortController>();
 
@@ -111,6 +126,7 @@ export class Engine {
     this.#stopTimeoutMs = o.stopTimeoutMs ?? 10_000;
     this.#sideQuestionTimeoutMs = o.sideQuestionTimeoutMs ?? 120_000;
     this.#mcp = o.mcp;
+    this.#cacheTtlMinutes = o.cacheTtlMinutes ?? (() => 5);
   }
 
   hire(input: HireInput): Employee {
@@ -119,16 +135,65 @@ export class Engine {
     return this.#start(employee, 'işe alındı');
   }
 
-  send(id: string, text: string, source: 'owner' | 'system' = 'owner'): void {
+  send(id: string, text: string, source: 'owner' | 'system' = 'owner', hint: ModelHint = {}): void {
     const message = text.trim();
     if (!message) throw new ValidationError('Mesaj boş olamaz.');
-    const employee = this.#roster.get(id);
+    let employee = this.#roster.get(id);
     this.#assertReachable(employee);
     const rt = this.#runtime(id);
+    if (rt.switching) {
+      // The session is restarting on another model: this message goes in right after the one that asked for it.
+      rt.switching.push({ text: message, source });
+      this.#emit(id, { type: 'message.user', text: message, source });
+      return;
+    }
     this.#assertNotBusy(rt);
-    if (employee.lastError !== null || employee.limitResetsAt !== null) this.#roster.update(id, { lastError: null, limitResetsAt: null });
-    if (!rt.proc || rt.proc.exited) this.#start(employee, 'mesaj geldi');
+    if (employee.lastError !== null || employee.limitResetsAt !== null) employee = this.#roster.update(id, { lastError: null, limitResetsAt: null });
     this.#clearLimitTimer(rt);
+    const model = this.#switchTo(employee, rt, hint);
+    if (model) {
+      employee = this.#roster.update(id, { model });
+      this.#emit(id, { type: 'model.changed', model });
+      if (rt.proc && !rt.proc.exited) {
+        this.#restartAndWrite(id, model, message, source);
+        return;
+      }
+    }
+    if (!rt.proc || rt.proc.exited) this.#start(employee, 'mesaj geldi');
+    this.#write(id, message, source);
+  }
+
+  /** The model a hint moves the session to now, or null to keep it. */
+  #switchTo(employee: Employee, rt: Runtime, hint: ModelHint): ModelAlias | null {
+    if (!hint.model || rt.turnActive) return null;
+    const lastTurnFinishedAt = rt.lastTurnAt ?? this.#events.latest(employee.id, 'turn.finished')?.ts ?? null;
+    const choice = modelPolicy.decide({
+      current: employee.model, wanted: hint.model, lastTurnFinishedAt, now: this.#now(), ttlMinutes: this.#cacheTtlMinutes(), taskStart: hint.taskStart,
+    });
+    return choice === 'switch' ? hint.model : null;
+  }
+
+  /** Starts the idle session again on its new model (memory resumes), then writes the message and any that came meanwhile. */
+  #restartAndWrite(id: string, model: ModelAlias, message: string, source: 'owner' | 'system'): void {
+    const rt = this.#runtime(id);
+    rt.switching = [];
+    rt.reloadPending = false;
+    this.#emit(id, { type: 'message.user', text: message, source });
+    void this.#exclusive(id, async () => {
+      await this.#halt(id);
+      const queued = [{ text: message, source }, ...(rt.switching ?? [])];
+      rt.switching = null;
+      this.#start(this.#roster.get(id), `${model} modeline geçti`);
+      for (const m of queued) this.#write(id, m.text, m.source, true);
+    }).catch((err: unknown) => {
+      rt.switching = null;
+      this.#emit(id, { type: 'error', message: `Model değişirken mesaj teslim edilemedi: ${err instanceof Error ? err.message : String(err)}` });
+    });
+  }
+
+  /** Writes a message to the running session and opens a turn if none is open. */
+  #write(id: string, message: string, source: 'owner' | 'system', logged = false): void {
+    const rt = this.#runtime(id);
     const proc = rt.proc;
     if (!proc) throw new ConflictError('Çalışanın oturumu açılamadı.');
     const uuid = randomUUID();
@@ -138,7 +203,7 @@ export class Engine {
       throw new ConflictError('Çalışanın oturumu kapanıyor; birazdan tekrar dene.');
     }
     rt.unread.push({ uuid, text: message });
-    this.#emit(id, { type: 'message.user', text: message, source });
+    if (!logged) this.#emit(id, { type: 'message.user', text: message, source });
     if (!rt.turnActive) {
       rt.turnActive = true;
       this.#emit(id, { type: 'turn.started' });
@@ -407,6 +472,7 @@ export class Engine {
     // claude still holds queued user turns: the work goes on and a later result closes it.
     if (queuedTurns > 0 && !rejected && !rt.expectingExit) return;
     rt.turnActive = false;
+    rt.lastTurnAt = this.#now();
     rt.consumedInTurn = false;
     for (const resolve of rt.turnWaiters.splice(0)) resolve();
     if (rt.expectingExit) return;
@@ -582,6 +648,8 @@ export class Engine {
         consumedInTurn: false,
         totals: null,
         limitAt: null,
+        lastTurnAt: null,
+        switching: null,
       };
       this.#runtimes.set(id, rt);
     }

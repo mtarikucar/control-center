@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Employee, OfficeEvent, OfficeSnapshot, Plan, Proposal, StoredEvent, Task } from '@cc/shared';
+import type { BudgetSummary, Employee, OfficeEvent, OfficeSnapshot, Plan, Proposal, StoredEvent, Task } from '@cc/shared';
 import { EMPTY_DATA, MAX_EVENTS, addEmployee, applyEvent, applySnapshot, mergeEvents, needsRefresh, openToolSince } from './reducers.ts';
 
 const employee = (over: Partial<Employee> = {}): Employee => ({
@@ -232,8 +232,8 @@ describe('company memory', () => {
 });
 
 describe('budget', () => {
-  const summary = (pct: number) => ({
-    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17] },
+  const summary = (pct: number): BudgetSummary => ({
+    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'fable', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' } },
     reserve: { active: false, limitPct: 100 - pct, fiveHourPct: null, sevenDayPct: null },
     month: { key: '2026-10', usd: 0 },
     plans: {},

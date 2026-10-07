@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -20,7 +20,9 @@ export interface BudgetDeps {
   now?: () => number;
 }
 
-const RULES: Record<Exclude<keyof Constitution, 'digestHours'>, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
+type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels'>;
+
+const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
   ownerReservePct: { label: 'Sahibinin kota payı (%)', min: 0, max: () => 90, integer: true },
   monthlyUsdCap: { label: 'Aylık para sınırı (USD)', min: 0, max: () => 1_000_000, integer: false, nullable: true },
@@ -28,7 +30,23 @@ const RULES: Record<Exclude<keyof Constitution, 'digestHours'>, { label: string;
   tasksPerDay: { label: 'Günlük görev sınırı', min: 1, max: () => 500, integer: true },
   openTasksPerPlan: { label: 'Plan başına açık görev', min: 1, max: () => 500, integer: true },
   idleSleepMinutes: { label: 'Boşta uyuma süresi (dk)', min: 0, max: () => 1440, integer: true },
+  cacheTtlMinutes: { label: 'Önbellek süresi (dk)', min: 0, max: () => 60, integer: true },
 };
+
+const MODEL_MAPS = {
+  coordinatorModels: { label: 'Koordinatör modelleri', keys: ['owner', 'decision', 'digest'] },
+  difficultyModels: { label: 'Zorluk modelleri', keys: ['easy', 'medium', 'hard', 'critical'] },
+} as const;
+
+/** A change to one of the model maps: known keys, known models; the keys not given stay as they are. */
+function modelMap<T extends Record<string, string>>(key: keyof typeof MODEL_MAPS, value: unknown, current: T): T {
+  const { label, keys } = MODEL_MAPS[key];
+  const ok =
+    typeof value === 'object' && value !== null && !Array.isArray(value) &&
+    Object.entries(value).every(([k, v]) => (keys as readonly string[]).includes(k) && (MODEL_ALIASES as readonly unknown[]).includes(v));
+  if (!ok) throw new ValidationError(`Anayasa: ${label} ${keys.join(', ')} için ${MODEL_ALIASES.join(', ')} modellerinden biri olmalı.`);
+  return { ...current, ...(value as Partial<T>) };
+}
 
 /** One to six whole local hours, kept sorted and without repeats. */
 function digestHours(value: unknown): number[] {
@@ -70,7 +88,11 @@ export class Budget {
         checked.digestHours = digestHours(value);
         continue;
       }
-      const rule = RULES[key as keyof typeof RULES];
+      if (key === 'coordinatorModels' || key === 'difficultyModels') {
+        (checked as Record<string, unknown>)[key] = modelMap(key, value, this.constitution()[key]);
+        continue;
+      }
+      const rule = RULES[key as NumberKey];
       if (value === null && rule.nullable) {
         (checked as Record<string, unknown>)[key] = null;
         continue;

@@ -4,7 +4,7 @@ import { Company } from '../src/company/company.ts';
 import { Dispatcher, NOTICES_PREFIX, NUDGE_PREFIX } from '../src/company/dispatcher.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { companyFor } from './company-helpers.ts';
-import { fakeEngine } from './engine-helpers.ts';
+import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, until, waitFor } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
@@ -266,7 +266,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     let clock = at(7, 10);
     const now = () => clock;
     const s = setup(8, now);
-    const f = fakeEngine(s);
+    const f = fakeEngine(s, { engine: { now } });
     const c = companyFor(s, f, undefined, now);
     c.budget.setConstitution({ idleSleepMinutes: 0 });
     const stop = new Dispatcher({
@@ -274,7 +274,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
       budget: c.budget, now, tickMs: 50,
     }).start();
     cleanups.push(stop, f.cleanup, s.cleanup);
-    return { ...s, ...c, engine: f.engine, setClock: (t: number) => (clock = t), turns: (id: string) => systemMessages(s.events.list({ limit: 5000 }), id) };
+    return { ...s, ...c, engine: f.engine, argvLog: f.argvLog, setClock: (t: number) => (clock = t), turns: (id: string) => systemMessages(s.events.list({ limit: 5000 }), id) };
   }
 
   it('important: information alone opens no turn; a decision does, and the information rides on it as the digest', async () => {
@@ -401,5 +401,30 @@ describe('Dispatcher — notice kinds and the digest', () => {
     await until(() => t.turns(coord.id).length === 2, 8000);
     expect(t.turns(coord.id)[1]).toContain('serbest kaldı');
     expect(t.turns(coord.id)[1]).toContain('Teslimler (1)');
+  });
+
+  it('important: the coordinator’s decisions go on its decision model, a digest alone on its digest model; a task starts on its difficulty’s', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    await until(() => t.turns(coord.id).length === 1 && t.engine.ready(coord.id), 8000);
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
+    t.setClock(at(7, 17));
+    await until(() => t.turns(coord.id).length === 2 && t.engine.ready(coord.id), 8000);
+    t.company.createTask(coord.id, { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
+    await until(() => t.turns(ada.id).some((m) => m.includes('## Görev: Mimari')), 8000);
+    expect(t.turns(ada.id).find((m) => m.includes('## Görev: Mimari'))).toContain('Zorluk: zor · Model: opus');
+    const argv = await readArgv(t.argvLog, 5);
+    const models = (who: string) => argv.filter((a) => a.cwd.includes(who)).map((a) => a.args[a.args.indexOf('--model') + 1]);
+    expect(models('koordinator')).toEqual(['fable', 'sonnet', 'haiku']);
+    expect(models('ada')).toEqual(['sonnet', 'opus']);
+    // In the middle of the task (the office's reminder about it) the model stays.
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    await until(() => t.turns(ada.id).some((m) => m.startsWith(NUDGE_PREFIX) || m.includes('Altyazı')), 8000);
+    await until(() => t.engine.ready(ada.id), 8000);
+    expect((await readArgv(t.argvLog, 5)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1])).toEqual(['sonnet', 'opus']);
   });
 });

@@ -110,7 +110,7 @@ export function BudgetTab() {
   );
 }
 
-const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean }> = [
+const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean; models?: readonly string[] }> = [
   { key: 'maxEmployees', label: 'Çalışan sınırı', hint: 'Koordinatör dahil; masa sayısını aşamaz.' },
   { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
   { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
@@ -119,9 +119,13 @@ const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; null
   { key: 'openTasksPerPlan', label: 'Plan başına açık görev', hint: 'Bir planda aynı anda açık en çok görev.' },
   { key: 'idleSleepMinutes', label: 'Boşta uyuma (dk)', hint: 'İşi olmayan çalışan bu kadar sonra uyur; 0 = hiç.' },
   { key: 'digestHours', label: 'Özet saatleri', hint: 'Karar gerektirmeyen notlar bu saatlerde tek turda gelir; sonuncusu günlük raporu getirir (ör. 9, 17).', hours: true },
+  { key: 'coordinatorModels', label: 'Koordinatör modelleri', hint: 'Sahibinin mesajı / karar / özet turu (ör. fable / sonnet / haiku).', models: ['owner', 'decision', 'digest'] },
+  { key: 'difficultyModels', label: 'Zorluk modelleri', hint: 'Kolay / orta / zor / kritik görev (ör. haiku / sonnet / opus / fable).', models: ['easy', 'medium', 'hard', 'critical'] },
+  { key: 'cacheTtlMinutes', label: 'Önbellek süresi (dk)', hint: 'Bir oturum son turundan bu kadar sonra daha ucuz modele geçebilir; daha önce geçmez.' },
 ];
 
-const shown = (v: Constitution[keyof Constitution]) => (v === null ? '' : Array.isArray(v) ? v.join(', ') : String(v));
+const shown = (v: Constitution[keyof Constitution]): string =>
+  v === null ? '' : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? Object.values(v).join(' / ') : String(v);
 
 /** The owner's fixed limits; the server checks every value and says what is wrong. */
 export function ConstitutionTab() {
@@ -141,8 +145,18 @@ export function ConstitutionTab() {
     setBusy(true);
     setSaved(false);
     setError(null);
-    const patch: Record<string, number | number[] | null> = {};
+    const patch: Record<string, unknown> = {};
     for (const f of FIELDS) {
+      if (f.models) {
+        const names = (draft[f.key] ?? '').split('/').map((x) => x.trim()).filter(Boolean);
+        if (names.length !== f.models.length) {
+          setError(`${f.label}: “/” ile ayrılmış ${f.models.length} model girin.`);
+          setBusy(false);
+          return;
+        }
+        patch[f.key] = Object.fromEntries(f.models.map((k, i) => [k, names[i]]));
+        continue;
+      }
       if (f.hours) {
         const hours = (draft[f.key] ?? '').split(/[\s,;]+/).filter(Boolean).map(Number);
         if (hours.length === 0 || hours.some((h) => !Number.isInteger(h))) {

@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
 import type { Constitution, Employee, EmployeeKind, HireInput, Lifecycle, ModelAlias, OfficeEvent, Plan, Proposal, ProposalKind, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, PROPOSAL_KINDS } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, PROPOSAL_KINDS, TASK_DIFFICULTIES, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -64,6 +64,8 @@ export interface TaskInput {
   priority?: number;
   planId?: string | null;
   dependsOn?: string[];
+  /** Sets the model the task starts on (the constitution's difficultyModels); none: the assignee's current model. */
+  difficulty?: TaskDifficulty | null;
 }
 
 export interface PlanDraft {
@@ -92,6 +94,12 @@ function amount(value: number | null | undefined, label: string): number | null 
   if (value === null || value === undefined) return null;
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new ValidationError(`${label} sıfır ya da pozitif bir sayı olmalı.`);
   return value;
+}
+
+function difficultyOf(value: unknown): TaskDifficulty | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (!(TASK_DIFFICULTIES as readonly unknown[]).includes(value)) throw new ValidationError(`Zorluk ${TASK_DIFFICULTIES.join(', ')} değerlerinden biri olmalı.`);
+  return value as TaskDifficulty;
 }
 
 export class Company {
@@ -234,13 +242,16 @@ export class Company {
       this.#tellCoordinator(by, 'limit.tasks_per_day', `${this.nameOf(by)} bugün ${rules.tasksPerDay} görev açtı ve sınıra geldi.`);
       throw new ConflictError(`Bir çalışan günde en fazla ${rules.tasksPerDay} görev açabilir.`);
     }
-    const task = this.#d.tasks.create({ planId, title, description, done, requester: by, assignee: assignee.id, priority, dependsOn, chainDepth: Math.max(0, chainDepth) });
+    const task = this.#d.tasks.create({
+      planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: difficultyOf(input.difficulty), dependsOn, chainDepth: Math.max(0, chainDepth),
+    });
     this.#taskEvent('created', task);
     if (planId !== null) this.#reopenPlan(planId);
     return task;
   }
 
-  assign(by: string, taskId: string, assignee: string): Task {
+  /** Gives a task to someone (and, with `difficulty`, says anew how hard it is). */
+  assign(by: string, taskId: string, assignee: string, o: { difficulty?: TaskDifficulty | null } = {}): Task {
     this.#assertManages(by, this.#d.tasks.get(taskId).assignee, assignee);
     const task = this.#d.tasks.get(taskId);
     // Finishing a hand-over lets its holder go: moving it would fire someone the owner never chose.
@@ -253,7 +264,8 @@ export class Company {
     if (task.status === 'done' || task.status === 'cancelled') throw new ConflictError('Bu görev kapandı.');
     const target = this.#d.roster.get(assignee);
     if (target.lifecycle === 'archived') throw new ConflictError(`${target.name} işten çıkarıldı.`);
-    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false });
+    const difficulty = o.difficulty === undefined ? task.difficulty : difficultyOf(o.difficulty);
+    const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false, difficulty });
     if (holder && holder.id !== target.id && holder.lifecycle !== 'archived') {
       const started = task.status === 'in_progress' || task.status === 'blocked';
       this.#d.notices.add(

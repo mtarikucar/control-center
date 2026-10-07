@@ -1,4 +1,5 @@
-import { DEFAULT_CONSTITUTION, type Constitution, type Employee, type Task } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, TASK_DIFFICULTY_LABELS, type Constitution, type Employee, type ModelAlias, type Task } from '@cc/shared';
+import type { ModelHint } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
@@ -7,7 +8,7 @@ import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 
 export interface DispatchEngine {
   ready(id: string): boolean;
-  send(id: string, text: string, source: 'system'): void;
+  send(id: string, text: string, source: 'system', hint?: ModelHint): void;
   fire(id: string): Promise<void>;
   sleep(id: string): Promise<unknown>;
   wake(id: string): unknown;
@@ -134,7 +135,8 @@ export class Dispatcher {
       const next = this.#d.tasks.nextFor(id);
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
-    if (started) body = this.#delivery(started);
+    const hint = this.#hint(employee, started, Boolean(body) || started !== null || decisions.length > 0);
+    if (started) body = this.#delivery(started, hint.model);
     const report = employee.kind === 'coordinator' ? this.#reportDue(employee) : null;
     // Information alone waits for a digest hour it has lived through (never during the owner's reserve); it rides on any turn that goes anyway.
     const digestNow = !this.#reserve() && (report !== null || infos.some((n) => n.createdAt <= lastDigestSlot(this.#now(), this.#digestHours())));
@@ -145,7 +147,7 @@ export class Dispatcher {
     const digest = infos.length > 0 || report !== null ? digestText(infos, { coordinator: employee.kind === 'coordinator', report: report !== null }) : '';
     const text = [decisions.length ? `${NOTICES_PREFIX}\n${decisions.map((n) => `- ${n.text}`).join('\n')}` : '', body, digest].filter(Boolean).join('\n\n');
     try {
-      this.#d.engine.send(id, text, 'system');
+      this.#d.engine.send(id, text, 'system', hint);
     } catch {
       // The session went away between ready() and send(): put the task back; the next idle moment delivers it.
       if (started) this.#d.tasks.update(started.id, { status: 'waiting', startedAt: null });
@@ -156,8 +158,23 @@ export class Dispatcher {
     if (report !== null) this.#reminded.set(id, report);
   }
 
+  #rules(): Constitution {
+    return this.#d.budget?.constitution() ?? DEFAULT_CONSTITUTION;
+  }
+
   #digestHours(): number[] {
-    return this.#d.budget?.constitution().digestHours ?? DEFAULT_CONSTITUTION.digestHours;
+    return this.#rules().digestHours;
+  }
+
+  /**
+   * The model a turn should run on (spec §6; the engine switches only as its model policy allows): the coordinator's by
+   * what the turn is for — a decision (notices, a task, a reminder) or only a digest; anyone else's by the difficulty of
+   * the task it starts, so a model changes only at a task's start.
+   */
+  #hint(e: Employee, started: Task | null, decision: boolean): ModelHint {
+    const rules = this.#rules();
+    if (e.kind === 'coordinator') return { model: decision ? rules.coordinatorModels.decision : rules.coordinatorModels.digest };
+    return started?.difficulty ? { model: rules.difficultyModels[started.difficulty], taskStart: true } : {};
   }
 
   /**
@@ -243,7 +260,7 @@ export class Dispatcher {
     return changed >= since;
   }
 
-  #delivery(task: Task): string {
+  #delivery(task: Task, model?: ModelAlias): string {
     let plan = '';
     if (task.planId) {
       try {
@@ -255,9 +272,10 @@ export class Dispatcher {
     const done = task.done.length ? `\n\nBitti tanımı:\n${task.done.map((d) => `- ${d}`).join('\n')}` : '';
     const deps = task.dependsOn.length ? `\nÖnce bitenler: ${task.dependsOn.join(', ')}` : '';
     const brief = this.#briefChanged(task) ? '\nŞirket özeti değişti; güncelini briefRead ile oku.' : '';
+    const level = task.difficulty ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
-İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${deps}${brief}
+İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${deps}${brief}
 
 ${task.description || '(açıklama yok)'}${done}
 
