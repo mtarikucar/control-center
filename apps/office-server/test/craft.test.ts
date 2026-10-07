@@ -71,6 +71,8 @@ describe('the coordination craft (ships with the office)', () => {
       '**Yön ve vizyon gelince keşfe çık.** Sahibi bir yön ya da ürün vizyonu verirse onu hemen işe çevir: `reportToOwner` ile sahibine en önemli bir-iki netleştirici soruyu sor ama cevabı beklemeden çalış; bir keşif planı aç — kimin için (kullanıcılar, pazar, rakipler), ne gerekiyor (roller; gerekirse işe al), hangi bağlantılar ve araçlar (entegrasyonlar, sosyal medya, ödeme, veri), hangi mimari (bellek, RAG, ajanlar, değerlendirme), nasıl para kazanır; bulduklarını hedeflere ve planlara dök, sahibine kısa raporla.',
     );
     expect(pm).not.toContain('iş icat etme');
+    expect(pm).not.toContain('az hedef tut');
+    expect(pm).toContain('Hedef sayısını işin gerektirdiği kadar tut; ulaşılanı `status: done`, vazgeçileni `dropped` ile kapat.');
     expect(pm).toMatch(/misyonda gerçekten yapılacak iş kalmadıysa.*`restUntil` ile ne zamana kadar ve neden/i);
     const core = flat(coordinationText());
     expect(core).not.toContain('En küçük yeterli ekip');
