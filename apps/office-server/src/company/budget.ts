@@ -84,7 +84,8 @@ const handedIn = (change: TaskChange, task: Task): boolean =>
 /**
  * The task each employee's turn is charged to, followed from the event log (the budget live, the cost backfill from
  * the past): the one in progress when the turn started, for every result of that turn, even once it is handed in,
- * decided, parked or blocked; for a turn that started on none, the first task the employee hands in during it.
+ * decided, parked or blocked; for a turn that started on none, the first task the employee hands in during it; else
+ * (none handed in, or the turn's start not seen) the one in progress when the result comes, e.g. unblocked during it.
  */
 export class TurnLedger {
   /** Each employee's turn under way and its task (null: none yet). */
@@ -98,9 +99,9 @@ export class TurnLedger {
     if (this.#turns.get(employeeId) === null && handedIn(change, task)) this.#turns.set(employeeId, task.id);
   }
 
-  /** The task a result is charged to; `running` (the task in progress now) when its turn's start was not seen. */
+  /** The task a result is charged to; `running` (the task in progress now) when the turn has none of its own. */
   taskOf(employeeId: string, running: () => string | null): string | null {
-    return this.#turns.has(employeeId) ? (this.#turns.get(employeeId) ?? null) : running();
+    return this.#turns.get(employeeId) ?? running();
   }
 
   /** A result was charged: with no queued replies left in claude, the turn is over. */
@@ -234,8 +235,8 @@ export class Budget {
 
   /**
    * A finished turn's Claude usage goes to the task the turn was about (TurnLedger): the one in progress when the turn
-   * started, even if handed in before it ended; else the first one handed in during it; else — no turn start seen — the
-   * one in progress now. Nothing when there is none.
+   * started, even if handed in before it ended; else the first one handed in during it; else the one in progress now
+   * (also when the turn's start was not seen). Nothing when there is none.
    */
   chargeTurn(employeeId: string, usd: number, tokens: number): void {
     const taskId = this.#turns.taskOf(employeeId, () => this.#d.tasks.inProgressOf(employeeId)?.id ?? null);

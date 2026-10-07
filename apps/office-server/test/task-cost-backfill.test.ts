@@ -25,7 +25,10 @@ const costs = (t: ReturnType<typeof make>) =>
     (t.db.prepare('SELECT id, cost_usd AS usd, tokens FROM tasks').all() as unknown as Array<{ id: string; usd: number; tokens: number }>).map((r) => [r.id, { usd: r.usd, tokens: r.tokens }]),
   );
 
-/** A day of the office as the log keeps it: hand-ins, a decided review, a parked task, queued replies, a turn about no task, a result whose start was not seen. */
+/**
+ * A day of the office as the log keeps it: hand-ins, a decided review, a parked task, queued replies, a turn about no
+ * task, a result whose start was not seen, a turn that unblocks a task and does not finish it.
+ */
 function day(t: ReturnType<typeof make>) {
   const start = (id: string) => t.events.append(id, { type: 'turn.started' });
   const finish = (id: string, costUsd: number, u: Usage, queuedTurns = 0) =>
@@ -54,7 +57,13 @@ function day(t: ReturnType<typeof make>) {
   const unseen = t.company.createTask(c.id, { assignee: can.id, title: 'görülmeyen başlangıç' });
   t.company.start(unseen.id);
   finish(can.id, 0.5, usage(8));
-  return { reviewed, review, parked, unseen };
+  const unblocked = t.company.createTask(c.id, { assignee: ada.id, title: 'açılan' });
+  t.company.start(unblocked.id);
+  t.company.update(ada.id, unblocked.id, { blocked: true, note: 'cevap bekliyorum' });
+  start(ada.id);
+  t.company.update(ada.id, unblocked.id, { blocked: false });
+  finish(ada.id, 0.25, usage(15));
+  return { reviewed, review, parked, unseen, unblocked };
 }
 
 describe('Task cost backfill', () => {
@@ -64,19 +73,20 @@ describe('Task cost backfill', () => {
     const d = day(t);
     const live = costs(t);
     expect(live[d.reviewed.id]).toEqual({ usd: 0.75, tokens: 360 });
+    expect(live[d.unblocked.id]).toEqual({ usd: 0.25, tokens: 180 });
     // The database as the old rule left it: nothing on any task.
     t.db.exec('UPDATE tasks SET cost_usd = 0, tokens = 0');
     const dry = backfillTaskCosts(t.db, { apply: false });
     expect(Object.values(costs(t)).every((c) => c.usd === 0 && c.tokens === 0)).toBe(true);
-    expect(dry.changes.map((c) => [c.id, c.after])).toEqual(expect.arrayContaining([[d.reviewed.id, live[d.reviewed.id]], [d.unseen.id, live[d.unseen.id]]]));
+    expect(dry.changes.map((c) => [c.id, c.after])).toEqual(expect.arrayContaining([[d.reviewed.id, live[d.reviewed.id]], [d.unseen.id, live[d.unseen.id]], [d.unblocked.id, live[d.unblocked.id]]]));
     expect(dry).toMatchObject({
-      turns: { count: 6, usd: 3.125, unassigned: { count: 1, usd: 1 } },
+      turns: { count: 7, usd: 3.375, unassigned: { count: 1, usd: 1 } },
       before: { usd: 0, tokens: 0, tasks: 0 },
-      after: { usd: 2.125, tasks: 4 },
+      after: { usd: 2.375, tasks: 5 },
       kept: [],
     });
     const applied = backfillTaskCosts(t.db, { apply: true });
-    expect(applied.changes).toHaveLength(4);
+    expect(applied.changes).toHaveLength(5);
     expect(costs(t)).toEqual(live);
     // Run again: nothing left to change.
     expect(backfillTaskCosts(t.db, { apply: true }).changes).toEqual([]);

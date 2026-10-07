@@ -253,6 +253,33 @@ describe('Budget — Claude usage per plan', () => {
     turn.finish(ada.id, 0.3, usage);
     expect(costOf(t, later.id)).toEqual({ usd: 0.3, tokens: 15 });
   });
+
+  it('review focus: a turn that started on no task and hands none in goes to the task running at its end (unblocked during it)', () => {
+    const t = make();
+    cleanups.push(t.budget.watch());
+    const turn = turnOf(t);
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    // Blocked while waiting for an answer; the answer opens a turn about no task, Ada goes on and does not finish yet.
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'takılan' });
+    t.company.start(task.id);
+    t.company.update(ada.id, task.id, { blocked: true, note: 'cevap bekliyorum' });
+    const usage: Usage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    turn.start(ada.id);
+    t.company.update(ada.id, task.id, { blocked: false });
+    turn.finish(ada.id, 0.25, usage);
+    expect(t.tasks.get(task.id).status).toBe('in_progress');
+    expect(costOf(t, task.id)).toEqual({ usd: 0.25, tokens: 15 });
+    // Handed in in the next turn, which is then over: a result whose start was not seen goes to the task running now.
+    turn.start(ada.id);
+    t.company.finish(ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    turn.finish(ada.id, 0.5, usage);
+    const next = t.company.createTask(c.id, { assignee: ada.id, title: 'sonraki' });
+    t.company.start(next.id);
+    turn.finish(ada.id, 0.125, usage);
+    expect(costOf(t, task.id)).toEqual({ usd: 0.75, tokens: 30 });
+    expect(costOf(t, next.id)).toEqual({ usd: 0.125, tokens: 15 });
+  });
 });
 
 describe('Budget — status for the coordinator', () => {
