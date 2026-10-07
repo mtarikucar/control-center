@@ -70,19 +70,27 @@ pnpm install
 
 `PRE` ve `MERGE` değerlerini not et. (`assets/` izlenmeyen klasör olarak kalabilir; birleştirmeyi etkilemez.)
 
-## 5. Anahtarları kapalı başlat (adım adım yayın)
+## 5. Anahtarlar: varsayılan kapalı, yazacak bir şey yok
 
-Ofis durmuşken üç anahtarı kapalı yaz. Yeni kod ilk açılışta bunları okur; eski kod zaten bu anahtarları tanımaz:
+Üç anahtar (`digestEnabled`, `modelPolicyEnabled`, `difficultyModelsEnabled`) varsayılan **kapalı**. Veritabanında kaydı
+olmayan anahtar da kapalı sayılır (R9, `budget.test.ts`). Birleştirip başlatınca ofis eskisi gibi çalışır.
 
-```bash
-node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(process.env.HOME+'/.control-center/office.db'); const s=db.prepare('INSERT INTO constitution (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'); for (const k of ['digestEnabled','modelPolicyEnabled','difficultyModelsEnabled']) s.run(k, 'false'); console.log(db.prepare('SELECT key, value FROM constitution').all()); db.close()"
-```
+**"Kapalı = eski davranış" kanıtı (R10):** `economy.scenario.test.ts` › "R10: with every switch off the day is main's"
+aynı simüle günü dal kodunda anahtarlar kapalıyken koşar ve main'de kaydedilmiş sonuçla karşılaştırır:
+- koordinatör 14 tur / 210, toplam 25 tur / 221;
+- 25 mesajın metni birebir;
+- her çalışanın olay dizisi birebir (237 olay).
 
-Hepsini birden açmak istersen bu adımı atla (varsayılan: üçü de açık).
+Golden: `docs/superpowers/notes/2026-10-07-economy-baseline.md` ve `…-baseline.log.json`.
 
-Kapalıyken bile şunlar yeni davranıştır: not türleri ve konuları kaydedilir; günlük rapor hatırlatması günün son özet
-saatinde (17:00) gelir; görev kartı zorluk taşır; inceleme düzeltmeleri (kayıpsız teslim, kritik → zor, uyanma kuralları)
-açıktır.
+Kapalıyken bile şunlar dal kodudur:
+- not türleri ve konuları kaydedilir (davranışı değiştirmez);
+- görev araçları isteğe bağlı `difficulty` alır (saklanır, etkisiz);
+- koordinatörün rol kartında "özet açıksa" diye başlayan bir cümle vardır;
+- inceleme 1'in hata düzeltmeleri açıktır: başlatılamayan oturumda kaybolan mesajın görevi ve notları geri konur;
+  üyenin kritik pası zor sayılır.
+
+Tek tek açma §7'de.
 
 ## 6. Başlat ve doğrula
 
@@ -100,7 +108,7 @@ curl -s "$API/api/budget" | node -e 'let s="";process.stdin.on("data",d=>s+=d).o
 tail -5 "$DATA/office.log"
 ```
 
-Beklenen: `sürüm: 7`; anahtarlar adım 5'e göre; çalışanlar boşta, hata yok. `YAYIN=$(date +%Y-%m-%dT%H:%M)` ile başlangıç
+Beklenen: `sürüm: 7`; üç anahtar `false`, `coordinatorModels.owner: 'sonnet'`; çalışanlar boşta, hata yok. `YAYIN=$(date +%Y-%m-%dT%H:%M)` ile başlangıç
 anını not et.
 
 ## 7. Adım adım açma
@@ -111,13 +119,20 @@ sekmesindeki kutucuk ya da:
 ```bash
 # Adım 1: özet
 curl -s -X POST "$API/api/constitution" -H 'content-type: application/json' -d '{"digestEnabled":true}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).digestEnabled))'
-# Adım 2: model politikası (koordinatör sahibine fable, karara sonnet, özete haiku)
+# Adım 2: model politikası (koordinatör: sahibinin mesajına sonnet — kendi modelinden aşağı değil —, karara sonnet, özete haiku; cacheTtlMinutes 5)
 curl -s -X POST "$API/api/constitution" -H 'content-type: application/json' -d '{"modelPolicyEnabled":true}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).modelPolicyEnabled))'
 # Adım 3: zorluk modelleri (koordinatöre görevlere zorluk vermesini söyle)
 curl -s -X POST "$API/api/constitution" -H 'content-type: application/json' -d '{"difficultyModelsEnabled":true}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).difficultyModelsEnabled))'
 ```
 
 Her adımın başlangıç anını not et (`ADIM1=$(date +%Y-%m-%dT%H:%M)` …).
+
+Planlama oturumlarında koordinatör Fable isterse kendini `setModel` ile yükseltir; sahibinin mesajı onu aşağı çekmez.
+Sahibi koordinatörün kendisiyle hep Fable'da konuşmasını isterse:
+`curl -s -X POST "$API/api/constitution" -H 'content-type: application/json' -d '{"coordinatorModels":{"owner":"fable"}}'`.
+
+Model politikası açıkken hesabın kullanamadığı bir model istenirse oturum eski modelle sürer ve mesaj yeniden gönderilir.
+Bu `model.switch.failed` olayı olarak görünür; `economy-report`'ta "başarısız model geçişi" satırında sayılır.
 
 ## 8. İzleme (her gün)
 

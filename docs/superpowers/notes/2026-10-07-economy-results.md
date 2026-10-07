@@ -59,7 +59,8 @@ Hiçbir görev zorluğunun modelinden güçlü bir modelde koşmaz (test eşiği
   orantılı, önbellek yazma 1,25×, okuma 0,1×): opus → haiku geçişi ilk çağrıda bile kazandırır; opus → sonnet birkaç
   API çağrısında amorti olur.
 - Sahte claude anında ve sabit tokenla cevap verir; bir tur, gerçekte içindeki tüm API çağrılarıyla tek sayılır.
-- Senaryoda sahibiyle sohbet tek mesaj. Uzun bir sohbette koordinatör TTL içinde fable'da kalır (titreme yok); sohbet
+- Senaryoda sahibiyle sohbet tek mesaj. Koordinatör fable'da işe alınmış; sahibinin mesajı kendi modelinin altına
+  inmediği için o tur fable. Sonnet'teki bir koordinatörde (canlı ofis) aynı tur sonnet olurdu. Sohbet
   bitip 5 dk geçince sıradaki rutin not sonnet'te işlenir.
 - askColleague (yan cevaplar), teslim etmeyen üyeler (hatırlatma ve tırmandırma turları) ve sahibinin payı senaryoda
   yok. Kota ortaktır; tabloda yalnız ofisin payı var.
@@ -68,11 +69,25 @@ Hiçbir görev zorluğunun modelinden güçlü bir modelde koşmaz (test eşiği
 
 Bağımsız incelemenin 8 bulgusu kapatıldı (sınır notları ve beklenen teslim karar notu; özetin kapanış satırı yalnız tek
 başına gelen özette; görev modeli yalnız oturumu taşır, kadrodaki model kalır; model geçişi başarısız olursa eski modelle
-sürer, mesaj kaybolmaz; payda karar notu yalnız koordinatörü uyandırır; rapor hatırlatması günlükte; çalışanın kritik
+sürer, mesaj kaybolmaz; rapor hatırlatması günlükte; çalışanın kritik
 pası zor sayılır). Senaryo yeniden çalıştırıldı: **sayılar değişmedi** (koordinatör 5 tur, 18,2; toplam 16 tur, 28,4;
 oturumlar 5 + 11). Beklenen: senaryodaki her görevin zorluğu var (kadro modeli devreye girmez), sınırlara ve payda
 uyandırmaya değmez, paslanan iş ve takılı isteyen yok. Düzeltmeler senaryonun dışındaki yolları kapatır; her biri kendi
 testinde.
+
+## İnceleme 2 (R9-R13)
+
+- **Anahtarlar varsayılan kapalı (R9).** Kapalıyken dal, senaryoda main'in gününü birebir yeniden üretiyor (R10):
+  koordinatör 14 tur / 210, toplam 25 tur / 221, 25 mesaj ve çalışan başına olay dizisi (237 olay) main'de bu testle
+  kaydedilenle aynı. Önceki tasarım iki noktada sapıyordu, ikisi düzeldi:
+  - rapor hatırlatması özet kapalıyken de yeni kuralla geliyordu;
+  - iki notun metni değişmişti.
+- **Uyandırma main'in kuralına döndü (R10b):** üyeyi not uyandırmaz; koordinatörü ve lideri uyandırır.
+- **Sahibinin mesajı Fable'a çıkarmaz (R11):** owner varsayılanı sonnet, koordinatörün kendi modelinden aşağı da değil.
+  Ekonomi açık koşusunun sayıları değişmedi (16 tur, 28,4), çünkü senaryodaki koordinatör fable'da işe alınıyor.
+- **Kullanılamayan model (R13):** gerçek CLI'de üretildi; görev kaybolmuyor, `model.switch.failed` yazılıyor.
+- Kabul belgesi R9-R13, matris: [economy-acceptance.md](economy-acceptance.md); değişen testler:
+  [economy-test-changes.md](economy-test-changes.md).
 
 ## Doğrulama fazı (K3, K4 tabanı)
 
