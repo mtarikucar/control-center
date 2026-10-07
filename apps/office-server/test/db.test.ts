@@ -23,7 +23,7 @@ const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version)
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(5);
+    expect(migrateUp(db)).toBe(6);
     expect(tables(db)).toEqual(V5_TABLES);
   });
 
@@ -33,14 +33,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(5);
+    expect(migrateUp(db)).toBe(6);
     expect(tables(db)).toEqual(V5_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(5);
+    expect(migrateUp(db)).toBe(6);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -123,13 +123,25 @@ describe('migrations', () => {
       `INSERT INTO plans (id, title, goal, approach, people, steps, risks, status, version, proposed_by, created_at, updated_at)
        VALUES ('p1', 'P', 'g', 'a', '', '[]', '', 'approved', 1, 'c', 1, 1)`,
     ).run();
-    migrateUp(db);
+    migrateUp(db, upTo(5));
     expect(tables(db)).toEqual(V5_TABLES);
     expect({ ...(db.prepare('SELECT approved_snapshot FROM plans').get() as object) }).toEqual({ approved_snapshot: null });
     expect(migrateDown(db, 4)).toBe(4);
     expect(tables(db)).toEqual(V4_TABLES);
     expect(columns(db, 'plans')).not.toContain('approved_snapshot');
     expect(db.prepare('SELECT COUNT(*) AS n FROM plans').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(5);
+    expect(migrateUp(db, upTo(5))).toBe(5);
+  });
+
+  it('v6 gives notices a kind and a topic, older ones staying decisions; v6 down restores v5 and keeps them', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(5));
+    db.prepare("INSERT INTO notices (employee_id, text, created_at, delivered_at) VALUES ('c', 'eski not', 1, NULL)").run();
+    migrateUp(db);
+    expect({ ...(db.prepare('SELECT kind, topic, text FROM notices').get() as object) }).toEqual({ kind: 'decision', topic: '', text: 'eski not' });
+    expect(migrateDown(db, 5)).toBe(5);
+    expect(columns(db, 'notices')).toEqual(['id', 'employee_id', 'text', 'created_at', 'delivered_at']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM notices').get()).toMatchObject({ n: 1 });
+    expect(migrateUp(db)).toBe(6);
   });
 });

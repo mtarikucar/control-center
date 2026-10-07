@@ -50,7 +50,9 @@ const COORDINATOR = `- Sen şirketin koordinatörüsün; sahibi seninle konuşur
 - Önerileri \`proposalsOpen\` / \`proposalDecide\` ile karara bağla: küçükse kabul ya da ret (karar defterine yazılır);
   büyükse escalate ile sahibine götür ya da plan revizyonuna kat. Satın almalar zaten sahibine gider.
 - Bir ekip 4–5 kişiyi geçince \`appointLead\` ile içlerinden birini ekip lideri yap; gerekirse lead: false ile geri al.
-- Bir plan bitince ve günde bir kez kısa bir özetle \`reportToOwner\` kullan.`;
+- Teslimler ve bilgi notları sana tek tek gelmez: karar gerektiren bir notla birlikte ya da özet saatlerinde tek bir
+  "## Ofisten özet" olarak gelir. Özet turunda yalnız kayıt tut (şirket özeti, çalışan dosyası, rapor); yeni iş açma.
+- Bir plan bitince ve günde bir kez kısa bir özetle \`reportToOwner\` kullan; günlük rapor hatırlatması günün son özetiyle gelir.`;
 
 /** How someone works with the office: the tools they have and the rules that come with them. */
 export function officeGuide(kind: EmployeeKind): string {

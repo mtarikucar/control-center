@@ -44,7 +44,7 @@ export const api = {
   employeeFile: (id: string) => request<EmployeeFile>('GET', `${employee(id)}/file`),
   budget: () => request<BudgetSummary>('GET', '/api/budget'),
   spending: (planId?: string) => request<Spend[]>('GET', `/api/budget/spend${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`),
-  setConstitution: (patch: Record<string, number | null>) => request<Constitution>('POST', '/api/constitution', patch),
+  setConstitution: (patch: Record<string, number | number[] | null>) => request<Constitution>('POST', '/api/constitution', patch),
   proposals: () => request<Proposal[]>('GET', '/api/proposals'),
   approveProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/approve`, note ? { note } : {}),
   rejectProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/reject`, note ? { note } : {}),

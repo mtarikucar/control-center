@@ -392,3 +392,43 @@ describe('Company — within the constitution', () => {
     expect(() => t.company.setModel(ada.id, c.id, 'haiku')).toThrow(/Yalnız koordinatör/);
   });
 });
+
+describe('Company — notice kinds', () => {
+  it('important: what needs the reader now is a decision, what is only for the record is information', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, can] = [t.company.hire(c.id, { name: 'Ada', role: 'r', team: 'İçerik' }), t.company.hire(c.id, { name: 'Can', role: 'r', team: 'İçerik' })];
+    const last = (id: string) => {
+      const n = t.notices.pending(id).at(-1);
+      return n && `${n.kind} ${n.topic}`;
+    };
+    const plan = t.company.propose(c.id, { title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    expect(last(c.id)).toBe('decision plan.approved');
+
+    const passed = t.company.createTask(ada.id, { assignee: can.id, title: 'çevir', planId: plan.id });
+    t.company.start(passed.id);
+    t.company.update(can.id, passed.id, { blocked: true, note: 'dosya yok' });
+    expect(last(c.id)).toBe('decision task.blocked');
+    t.company.update(can.id, passed.id, { blocked: false });
+    t.company.finish(can.id, passed.id, { summary: 'çevrildi', outputs: [], learned: '' });
+    expect(last(ada.id)).toBe('info task.finished');
+    expect(t.notices.pending(c.id).slice(-2).map((n) => `${n.kind} ${n.topic}`)).toEqual(['info task.finished', 'info plan.done']);
+
+    const waiting = t.company.createTask(c.id, { assignee: ada.id, title: 'bekleyen' });
+    t.company.assign(c.id, waiting.id, can.id);
+    expect(last(ada.id)).toBe('info task.moved');
+    const stuck = t.company.createTask(c.id, { assignee: ada.id, title: 'takılan' });
+    t.company.start(stuck.id);
+    t.company.update(ada.id, stuck.id, { blocked: true });
+    t.company.assign(c.id, stuck.id, can.id);
+    expect(last(ada.id)).toBe('decision task.taken');
+
+    t.company.appointLead(c.id, ada.id);
+    expect(last(ada.id)).toBe('info role.changed');
+    expect(last(can.id)).toBe('info role.changed');
+    t.company.appointCoordinator(can.id);
+    expect(last(can.id)).toBe('decision role.coordinator');
+    expect(last(c.id)).toBe('info role.changed');
+  });
+});

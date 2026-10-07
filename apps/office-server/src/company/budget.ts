@@ -20,7 +20,7 @@ export interface BudgetDeps {
   now?: () => number;
 }
 
-const RULES: Record<keyof Constitution, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
+const RULES: Record<Exclude<keyof Constitution, 'digestHours'>, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
   ownerReservePct: { label: 'Sahibinin kota payı (%)', min: 0, max: () => 90, integer: true },
   monthlyUsdCap: { label: 'Aylık para sınırı (USD)', min: 0, max: () => 1_000_000, integer: false, nullable: true },
@@ -29,6 +29,14 @@ const RULES: Record<keyof Constitution, { label: string; min: number; max: (desk
   openTasksPerPlan: { label: 'Plan başına açık görev', min: 1, max: () => 500, integer: true },
   idleSleepMinutes: { label: 'Boşta uyuma süresi (dk)', min: 0, max: () => 1440, integer: true },
 };
+
+/** One to six whole local hours, kept sorted and without repeats. */
+function digestHours(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 6 || value.some((h) => typeof h !== 'number' || !Number.isInteger(h) || h < 0 || h > 23)) {
+    throw new ValidationError('Anayasa: Özet saatleri 0 ile 23 arasında 1–6 tam saat olmalı (ör. 9, 17).');
+  }
+  return [...new Set(value as number[])].sort((a, b) => a - b);
+}
 
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toString()}`;
 
@@ -58,7 +66,11 @@ export class Budget {
     const checked: Partial<Constitution> = {};
     for (const [key, value] of Object.entries(patch)) {
       if (!Object.hasOwn(DEFAULT_CONSTITUTION, key)) throw new ValidationError(`Bilinmeyen anayasa maddesi: ${key}`);
-      const rule = RULES[key as keyof Constitution];
+      if (key === 'digestHours') {
+        checked.digestHours = digestHours(value);
+        continue;
+      }
+      const rule = RULES[key as keyof typeof RULES];
       if (value === null && rule.nullable) {
         (checked as Record<string, unknown>)[key] = null;
         continue;
@@ -100,6 +112,7 @@ export class Budget {
       const used = Math.max(r.fiveHourPct ?? 0, r.sevenDayPct ?? 0);
       this.#d.notices.add(
         coordinator.id,
+        'reserve.changed',
         r.active
           ? `Sahibinin kota payı devrede: kullanım %${used}, sınır %${r.limitPct}. Ofis yalnız öncelik 1 görevleri başlatıyor, boştakiler uyuyor; pencere açılınca kendiliğinden döner. Gerekirse öncelikleri yeniden sırala.`
           : 'Sahibinin kota payı serbest kaldı: ofis normal çalışmaya döndü.',
@@ -132,7 +145,7 @@ export class Budget {
       if (spent > plan.usd) warnings.push(`“${plan.title}” planının harcaması ${money(spent)} ile onaylanan ${money(plan.usd)} bütçeyi aştı: bu büyük bir değişiklik, planRevise ile sahibine getirilmeli.`);
     }
     const coordinator = this.#d.roster.list().find((e) => e.kind === 'coordinator');
-    if (warnings.length && coordinator && coordinator.id !== by) this.#d.notices.add(coordinator.id, warnings.join(' '));
+    if (warnings.length && coordinator && coordinator.id !== by) this.#d.notices.add(coordinator.id, 'spend.over', warnings.join(' '));
     this.#announce();
     return { spend, warnings };
   }

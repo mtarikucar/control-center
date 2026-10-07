@@ -110,7 +110,7 @@ export function BudgetTab() {
   );
 }
 
-const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean }> = [
+const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; nullable?: boolean; hours?: boolean }> = [
   { key: 'maxEmployees', label: 'Çalışan sınırı', hint: 'Koordinatör dahil; masa sayısını aşamaz.' },
   { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
   { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
@@ -118,7 +118,10 @@ const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; null
   { key: 'tasksPerDay', label: 'Günlük görev sınırı', hint: 'Bir çalışanın günde açabileceği görev (koordinatör hariç).' },
   { key: 'openTasksPerPlan', label: 'Plan başına açık görev', hint: 'Bir planda aynı anda açık en çok görev.' },
   { key: 'idleSleepMinutes', label: 'Boşta uyuma (dk)', hint: 'İşi olmayan çalışan bu kadar sonra uyur; 0 = hiç.' },
+  { key: 'digestHours', label: 'Özet saatleri', hint: 'Karar gerektirmeyen notlar bu saatlerde tek turda gelir; sonuncusu günlük raporu getirir (ör. 9, 17).', hours: true },
 ];
+
+const shown = (v: Constitution[keyof Constitution]) => (v === null ? '' : Array.isArray(v) ? v.join(', ') : String(v));
 
 /** The owner's fixed limits; the server checks every value and says what is wrong. */
 export function ConstitutionTab() {
@@ -130,7 +133,7 @@ export function ConstitutionTab() {
   // While the owner is typing, a budget update (someone's spending) must not reset the form.
   const dirty = useRef(false);
   useEffect(() => {
-    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, current[f.key] === null ? '' : String(current[f.key])])));
+    if (current && !dirty.current) setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, shown(current[f.key])])));
   }, [current]);
   if (!current) return <p className="muted">Yükleniyor…</p>;
   const save = async (e: FormEvent) => {
@@ -138,8 +141,18 @@ export function ConstitutionTab() {
     setBusy(true);
     setSaved(false);
     setError(null);
-    const patch: Record<string, number | null> = {};
+    const patch: Record<string, number | number[] | null> = {};
     for (const f of FIELDS) {
+      if (f.hours) {
+        const hours = (draft[f.key] ?? '').split(/[\s,;]+/).filter(Boolean).map(Number);
+        if (hours.length === 0 || hours.some((h) => !Number.isInteger(h))) {
+          setError(`${f.label}: virgülle ayrılmış tam saatler girin (ör. 9, 17).`);
+          setBusy(false);
+          return;
+        }
+        patch[f.key] = hours;
+        continue;
+      }
       const raw = (draft[f.key] ?? '').trim().replace(',', '.');
       if (raw === '' && f.nullable) {
         patch[f.key] = null;

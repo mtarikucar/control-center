@@ -1,7 +1,8 @@
-import type { Constitution, Employee, Task } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, type Constitution, type Employee, type Task } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
+import { digestText, lastDigestSlot } from './notices.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 
 export interface DispatchEngine {
@@ -31,12 +32,13 @@ export interface DispatcherDeps {
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
 export const NOTICES_PREFIX = 'Ofisten notlar:';
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Hands work to employees when they are free: the next task in their queue, the notices waiting for them (a plan
- * was approved, a colleague handed in), or one reminder about a task they left open. Never interrupts: it waits for
- * the employee to be idle (v1 rule: only the owner interrupts).
+ * Hands work to employees when they are free: the next task in their queue, the notices that need them (a plan was
+ * approved, someone is stuck), or one reminder about a task they left open. Notices for the record (a colleague
+ * handed in) ride along on those turns, or come together in one digest at the constitution's digest hours; the
+ * coordinator's daily report reminder comes with the day's last digest. Never interrupts: it waits for the employee
+ * to be idle (v1 rule: only the owner interrupts).
  */
 export class Dispatcher {
   readonly #d: DispatcherDeps;
@@ -49,7 +51,7 @@ export class Dispatcher {
   readonly #now: () => number;
   /** When each employee last became idle (for idle sleep). */
   readonly #idleSince = new Map<string, number>();
-  /** When each coordinator was last reminded to report. */
+  /** The digest hour at which each coordinator was last reminded to report. */
   readonly #reminded = new Map<string, number>();
   #sweepQueued = false;
 
@@ -70,7 +72,6 @@ export class Dispatcher {
     });
     const timer = setInterval(() => {
       this.#d.budget?.checkReserve();
-      this.#remindReport();
       this.#scheduleSweep();
     }, this.#d.tickMs ?? 60_000);
     timer.unref();
@@ -116,6 +117,8 @@ export class Dispatcher {
       return;
     }
     const pending = this.#d.notices.pending(id);
+    const decisions = pending.filter((n) => n.kind === 'decision');
+    const infos = pending.filter((n) => n.kind === 'info');
     // Someone the owner is letting go gets nothing but their hand-over, even while it is blocked.
     const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
     const focus = handover && handover.status !== 'waiting' ? handover : this.#d.tasks.inProgressOf(id);
@@ -132,11 +135,15 @@ export class Dispatcher {
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
     if (started) body = this.#delivery(started);
-    if (!body && pending.length === 0) {
+    const report = employee.kind === 'coordinator' ? this.#reportDue(employee) : null;
+    // Information alone waits for a digest hour it has lived through (never during the owner's reserve); it rides on any turn that goes anyway.
+    const digestNow = !this.#reserve() && (report !== null || infos.some((n) => n.createdAt <= lastDigestSlot(this.#now(), this.#digestHours())));
+    if (!body && decisions.length === 0 && !digestNow) {
       this.#maybeSleep(employee, focus ?? null);
       return;
     }
-    const text = [pending.length ? `${NOTICES_PREFIX}\n${pending.map((n) => `- ${n.text}`).join('\n')}` : '', body].filter(Boolean).join('\n\n');
+    const digest = infos.length > 0 || report !== null ? digestText(infos, { coordinator: employee.kind === 'coordinator', report: report !== null }) : '';
+    const text = [decisions.length ? `${NOTICES_PREFIX}\n${decisions.map((n) => `- ${n.text}`).join('\n')}` : '', body, digest].filter(Boolean).join('\n\n');
     try {
       this.#d.engine.send(id, text, 'system');
     } catch {
@@ -146,21 +153,24 @@ export class Dispatcher {
     }
     if (!started && focus && !focus.nudged) this.#d.tasks.update(focus.id, { nudged: true });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
+    if (report !== null) this.#reminded.set(id, report);
   }
 
-  /** Spec §4.5: a short report a day — remind the coordinator when something happened since the last one. */
-  #remindReport(): void {
-    const c = this.#d.company.coordinator();
-    if (!c) return;
-    const now = this.#now();
-    const last = Math.max(this.#d.events.latest(c.id, 'company.report')?.ts ?? 0, c.createdAt, this.#reminded.get(c.id) ?? 0);
-    if (now - last < DAY_MS) return;
-    const finished = this.#d.tasks.list({ statuses: ['done'], limit: 100_000 }).some((t) => (t.finishedAt ?? 0) > last);
-    const open = this.#d.tasks.list({ statuses: ['waiting', 'in_progress', 'blocked'], limit: 1 }).length > 0;
-    if (!finished && !open) return;
-    this.#reminded.set(c.id, now);
-    this.#d.notices.add(c.id, 'Günlük özet zamanı: bugün ne bitti, ne sürüyor, ne takıldı, ne harcandı — reportToOwner ile sahibine kısaca raporla.');
-    this.#schedule(c.id);
+  #digestHours(): number[] {
+    return this.#d.budget?.constitution().digestHours ?? DEFAULT_CONSTITUTION.digestHours;
+  }
+
+  /**
+   * Spec §4.5: a short report a day. Due at the day's last digest hour (that hour, or null) when a task was opened,
+   * started or finished between the last report and it; once per digest hour.
+   */
+  #reportDue(c: Employee): number | null {
+    const hours = this.#digestHours();
+    if (hours.length === 0) return null;
+    const slot = lastDigestSlot(this.#now(), [Math.max(...hours)]);
+    if ((this.#reminded.get(c.id) ?? 0) >= slot) return null;
+    const last = this.#d.events.latest(c.id, 'company.report')?.ts ?? 0;
+    return this.#d.tasks.changedBetween(last, slot) ? slot : null;
   }
 
   #person(id: string): Employee | null {
@@ -180,13 +190,14 @@ export class Dispatcher {
     return !this.#reserve() || task.priority === 1 || task.kind === 'handover';
   }
 
-  /** A sleeper wakes for a task that may start now; the coordinator also for its notices (they are its work). */
+  /** A sleeper wakes for a task that may start now, a notice that needs them, or (the coordinator) the daily report. */
   #hasWorkFor(e: Employee): boolean {
     if (this.#d.tasks.list({ assignee: e.id, statuses: ['waiting'] }).some((t) => t.kind === 'handover')) return true;
     const next = this.#d.tasks.nextFor(e.id);
     if (next && this.#mayStart(next)) return true;
-    // Notices are the coordinator's and a lead's work (decisions waiting); a member's wait for their next task.
-    return (e.kind === 'coordinator' || e.kind === 'lead') && this.#d.notices.pending(e.id).length > 0;
+    // Information never wakes anyone: it waits for their next turn or a digest they are awake for.
+    if (this.#d.notices.pending(e.id).some((n) => n.kind === 'decision')) return true;
+    return e.kind === 'coordinator' && !this.#reserve() && this.#reportDue(e) !== null;
   }
 
   #wake(id: string): void {
@@ -262,6 +273,7 @@ ${task.description || '(açıklama yok)'}${done}
     const name = this.#d.company.nameOf(id);
     this.#d.notices.add(
       coordinator.id,
+      'task.stalled',
       task.kind === 'handover'
         ? `${name} devir görevini hatırlatmaya rağmen teslim etmedi. Devir başkasına verilemez: ona sor, gerekirse reportToOwner ile sahibine bildir (sahibi Hemen çıkar ile devri atlayabilir).`
         : `${name} “${task.title}” görevini (no ${task.id}) hatırlatmaya rağmen teslim etmedi; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Plan, PlanStatus, Task, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
+import { NOTICE_TOPICS, type Notice, type NoticeTopic } from './notices.ts';
 
 interface TaskRow {
   id: string;
@@ -173,6 +174,15 @@ export class TaskStore {
     return row.n;
   }
 
+  /** A task was opened, started or finished in (after, until]: something to report. */
+  changedBetween(after: number, until: number): boolean {
+    return (
+      this.#db
+        .prepare('SELECT 1 FROM tasks WHERE (created_at > ? AND created_at <= ?) OR (started_at > ? AND started_at <= ?) OR (finished_at > ? AND finished_at <= ?) LIMIT 1')
+        .get(after, until, after, until, after, until) !== undefined
+    );
+  }
+
   openInPlan(planId: string): number {
     const row = this.#db.prepare(`SELECT COUNT(*) AS n FROM tasks WHERE plan_id = ? AND status IN ${OPEN}`).get(planId) as unknown as { n: number };
     return row.n;
@@ -320,12 +330,17 @@ export class NoticeStore {
     this.#now = now;
   }
 
-  add(employeeId: string, text: string): void {
-    this.#db.prepare('INSERT INTO notices (employee_id, text, created_at, delivered_at) VALUES (?, ?, ?, NULL)').run(employeeId, text, this.#now());
+  /** The topic says whether the reader must act now (decision) or it is for the record (info): see NOTICE_TOPICS. */
+  add(employeeId: string, topic: NoticeTopic, text: string): void {
+    this.#db
+      .prepare('INSERT INTO notices (employee_id, kind, topic, text, created_at, delivered_at) VALUES (?, ?, ?, ?, ?, NULL)')
+      .run(employeeId, NOTICE_TOPICS[topic], topic, text, this.#now());
   }
 
-  pending(employeeId: string): Array<{ id: number; text: string }> {
-    return this.#db.prepare('SELECT id, text FROM notices WHERE employee_id = ? AND delivered_at IS NULL ORDER BY id').all(employeeId) as unknown as Array<{ id: number; text: string }>;
+  pending(employeeId: string): Notice[] {
+    return this.#db
+      .prepare('SELECT id, kind, topic, text, created_at AS createdAt FROM notices WHERE employee_id = ? AND delivered_at IS NULL ORDER BY id')
+      .all(employeeId) as unknown as Notice[];
   }
 
   markDelivered(ids: number[]): void {

@@ -11,6 +11,8 @@ export interface Constitution {
   openTasksPerPlan: number;
   /** Someone with nothing to do sleeps after this many idle minutes (0 = never). */
   idleSleepMinutes: number;
+  /** Local hours when notices that need no decision come together in one digest turn; the last one brings the daily report. */
+  digestHours: number[];
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
@@ -21,6 +23,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   tasksPerDay: 30,
   openTasksPerPlan: 60,
   idleSleepMinutes: 30,
+  digestHours: [9, 17],
 };
 
 /** Money an employee spent on an outside service (the office cannot see it; they record it). */

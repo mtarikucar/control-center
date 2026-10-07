@@ -246,4 +246,15 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS proposals_status;
       DROP TABLE IF EXISTS proposals;`,
   },
+  {
+    version: 6,
+    name: 'notice kinds and topics',
+    // Notices written before kinds existed stay decisions: they keep opening a turn, as they did.
+    up: `
+      ALTER TABLE notices ADD COLUMN kind TEXT NOT NULL DEFAULT 'decision';
+      ALTER TABLE notices ADD COLUMN topic TEXT NOT NULL DEFAULT '';`,
+    down: `
+      ALTER TABLE notices DROP COLUMN topic;
+      ALTER TABLE notices DROP COLUMN kind;`,
+  },
 ];

@@ -5,7 +5,7 @@ import { useOffice } from '../store/office.ts';
 import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 
 const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
-  constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30 },
+  constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17] },
   reserve: { active: true, limitPct: 75, fiveHourPct: 82, sevenDayPct: 40 },
   month: { key: '2026-10', usd: 31.5 },
   plans: { p1: { spentUsd: 25, claudeUsd: 3.2 } },
@@ -57,8 +57,10 @@ describe('ConstitutionTab', () => {
     render(<ConstitutionTab />);
     fireEvent.change(screen.getByLabelText('Sahibinin kota payı (%)'), { target: { value: '40' } });
     fireEvent.change(screen.getByLabelText('Aylık para sınırı (USD)'), { target: { value: '' } });
+    expect((screen.getByLabelText('Özet saatleri') as HTMLInputElement).value).toBe('9, 17');
+    fireEvent.change(screen.getByLabelText('Özet saatleri'), { target: { value: '8, 13 18' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
-    expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ ownerReservePct: 40, monthlyUsdCap: null, maxEmployees: 8 }));
+    expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ ownerReservePct: 40, monthlyUsdCap: null, maxEmployees: 8, digestHours: [8, 13, 18] }));
     expect(screen.getByText('Kaydedildi.')).toBeTruthy();
   });
 
@@ -80,6 +82,10 @@ describe('ConstitutionTab', () => {
     fireEvent.change(screen.getByLabelText('Sahibinin kota payı (%)'), { target: { value: '' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
     expect(screen.getByRole('alert').textContent).toMatch(/Sahibinin kota payı \(%\): bir sayı girin/);
+    fireEvent.change(screen.getByLabelText('Sahibinin kota payı (%)'), { target: { value: '25' } });
+    fireEvent.change(screen.getByLabelText('Özet saatleri'), { target: { value: '9, akşam' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(screen.getByRole('alert').textContent).toMatch(/Özet saatleri: virgülle ayrılmış tam saatler/);
     expect(api.setConstitution).not.toHaveBeenCalled();
   });
 

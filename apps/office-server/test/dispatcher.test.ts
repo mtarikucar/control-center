@@ -228,7 +228,7 @@ describe('Dispatcher — reserve and sleep', () => {
     await until(() => t.engine.ready(ada.id) && t.engine.ready(coord.id));
     await t.engine.sleep(coord.id);
     await t.engine.sleep(ada.id);
-    t.notices.add(ada.id, 'Bilgi: toplantı yok.');
+    t.notices.add(ada.id, 'role.changed', 'Bilgi: Can artık ekip lideri.');
     const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
     t.company.approve(plan.id);
     await until(() => systemMessages(t.events.list({ limit: 5000 }), coord.id).some((m) => m.includes('Plan onaylandı')), 8000);
@@ -245,22 +245,6 @@ describe('Dispatcher — reserve and sleep', () => {
     expect(t.roster.get(ada.id).lifecycle).toBe('stopped');
     expect(t.tasks.get(task.id).status).toBe('waiting');
   });
-  it('reminds the coordinator once a day to report when something happened', async () => {
-    const t = makeBudgeted();
-    const coord = t.company.hireCoordinator();
-    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
-    const reminders = () => systemMessages(t.events.list({ limit: 5000 }), coord.id).filter((m) => m.includes('Günlük özet zamanı'));
-    t.advance(25 * 3_600_000);
-    await sleep(300);
-    expect(reminders()).toHaveLength(0);
-    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'iş' });
-    await until(() => t.tasks.get(task.id).status === 'in_progress', 8000);
-    await until(() => reminders().length === 1, 8000);
-    await sleep(300);
-    expect(reminders()).toHaveLength(1);
-    t.advance(25 * 3_600_000);
-    await until(() => reminders().length === 2, 8000);
-  });
 
   it('important: a sleeping lead wakes for a proposal to decide', async () => {
     const t = makeBudgeted();
@@ -272,5 +256,150 @@ describe('Dispatcher — reserve and sleep', () => {
     await t.engine.sleep(ada.id);
     t.company.openProposal(can.id, { kind: 'idea', title: 'Altyazı', text: 't' });
     await until(() => systemMessages(t.events.list({ limit: 5000 }), ada.id).some((m) => m.includes('Altyazı')), 8000);
+  });
+});
+
+describe('Dispatcher — notice kinds and the digest', () => {
+  const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).getTime();
+  /** Everything on one simulated clock: digest hours are local wall-clock hours. */
+  function makeDigest() {
+    let clock = at(7, 10);
+    const now = () => clock;
+    const s = setup(8, now);
+    const f = fakeEngine(s);
+    const c = companyFor(s, f, undefined, now);
+    c.budget.setConstitution({ idleSleepMinutes: 0 });
+    const stop = new Dispatcher({
+      events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine,
+      budget: c.budget, now, tickMs: 50,
+    }).start();
+    cleanups.push(stop, f.cleanup, s.cleanup);
+    return { ...s, ...c, engine: f.engine, setClock: (t: number) => (clock = t), turns: (id: string) => systemMessages(s.events.list({ limit: 5000 }), id) };
+  }
+
+  it('important: information alone opens no turn; a decision does, and the information rides on it as the digest', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    await until(() => t.engine.ready(coord.id));
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.\nAyrıntı ikinci satırda.');
+    t.notices.add(coord.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    await sleep(400);
+    expect(t.turns(coord.id)).toEqual([]);
+    const plan = t.company.propose(coord.id, { title: 'P', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    await sleep(300);
+    const turns = t.turns(coord.id);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatch(/^Ofisten notlar:\n- Plan onaylandı/);
+    expect(turns[0]).toContain('## Ofisten özet — 2 not, 10:00');
+    expect(turns[0]).toContain('Teslimler (1):\n- “Yaz” (Ada): Yazıldı. Ayrıntı ikinci satırda.');
+    expect(turns[0]).toContain('Rol/lider değişiklikleri (1):\n- Can artık İçerik ekibinin lideri.');
+    expect(turns[0]).toContain('Özet turunda beklenen yalnız kayıt');
+    expect(t.notices.pending(coord.id)).toEqual([]);
+  });
+
+  it('important: information comes alone only at a digest hour it lived through, in one turn; an empty digest is skipped', async () => {
+    const t = makeDigest();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(ada.id));
+    t.notices.add(ada.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    t.setClock(at(7, 12, 30));
+    t.notices.add(ada.id, 'task.moved', '“Çeviri” görevi (no x) Can adlı çalışana verildi.');
+    t.setClock(at(7, 16, 59));
+    await sleep(300);
+    expect(t.turns(ada.id)).toEqual([]);
+    t.setClock(at(7, 17));
+    await until(() => t.turns(ada.id).length === 1, 8000);
+    t.setClock(at(7, 17, 30));
+    t.notices.add(ada.id, 'role.changed', 'Ece işe alındı.');
+    t.setClock(at(7, 23));
+    await sleep(300);
+    expect(t.turns(ada.id)).toHaveLength(1);
+    expect(t.turns(ada.id)[0]).toMatch(/^## Ofisten özet — 2 not, 10:00–12:30\n/);
+    expect(t.turns(ada.id)[0]).toContain('Görevler (1):');
+    expect(t.turns(ada.id)[0]).toContain('Bu özet bilgi içindir');
+    t.setClock(at(8, 9));
+    await until(() => t.turns(ada.id).length === 2, 8000);
+    expect(t.turns(ada.id)[1]).toMatch(/^## Ofisten özet — 1 not, 17:30\n/);
+    t.setClock(at(8, 17));
+    await sleep(300);
+    t.setClock(at(9, 9));
+    await sleep(300);
+    expect(t.turns(ada.id)).toHaveLength(2);
+  });
+
+  it('review focus: the daily report reminder comes with the last digest hour, only when tasks moved since the last report', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.stop(ada.id);
+    const task = t.company.createTask(coord.id, { assignee: ada.id, title: 'Yaz' });
+    t.company.start(task.id);
+    t.setClock(at(7, 11));
+    t.company.finish(ada.id, task.id, { summary: 'Yazıldı.', outputs: [], learned: '' });
+    t.setClock(at(7, 16, 59));
+    await sleep(300);
+    expect(t.turns(coord.id)).toEqual([]);
+    t.setClock(at(7, 17));
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toContain('Teslimler (1):\n- “Yaz” (Ada): Yazıldı.');
+    expect(t.turns(coord.id)[0]).toContain('Günlük rapor zamanı');
+    t.company.report(coord.id, 'Yaz bitti.');
+    t.setClock(at(8, 9));
+    await sleep(300);
+    t.setClock(at(8, 17));
+    await sleep(300);
+    expect(t.turns(coord.id)).toHaveLength(1);
+    t.setClock(at(8, 18));
+    t.company.createTask(coord.id, { assignee: ada.id, title: 'Düzelt' });
+    t.setClock(at(9, 9));
+    await sleep(300);
+    expect(t.turns(coord.id)).toHaveLength(1);
+    t.setClock(at(9, 17));
+    await until(() => t.turns(coord.id).length === 2, 8000);
+    expect(t.turns(coord.id)[1]).toMatch(/^## Ofisten özet — yeni not yok\n/);
+    expect(t.turns(coord.id)[1]).toContain('Günlük rapor zamanı');
+    await sleep(300);
+    expect(t.turns(coord.id)).toHaveLength(2);
+  });
+
+  it('important: information never wakes a sleeper, even at a digest hour; a decision wakes anyone, a member too', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
+    await until(() => t.engine.ready(coord.id) && t.engine.ready(ada.id));
+    await t.engine.sleep(coord.id);
+    await t.engine.sleep(ada.id);
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
+    t.notices.add(ada.id, 'role.changed', 'Can artık İçerik ekibinin lideri.');
+    t.setClock(at(7, 17));
+    await sleep(400);
+    expect([t.roster.get(coord.id).lifecycle, t.roster.get(ada.id).lifecycle]).toEqual(['sleeping', 'sleeping']);
+    t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
+    await until(() => t.turns(ada.id).length === 1, 8000);
+    expect(t.turns(ada.id)[0]).toMatch(/^Ofisten notlar:\n- “Altyazı” önerin kabul edildi\./);
+    expect(t.turns(ada.id)[0]).toContain('Can artık İçerik ekibinin lideri.');
+    expect(t.roster.get(coord.id).lifecycle).toBe('sleeping');
+  });
+
+  it('review focus: in the owner’s reserve information opens no turn, even at a digest hour; it waits for the next turn', async () => {
+    const t = makeDigest();
+    const coord = t.company.hireCoordinator();
+    await until(() => t.engine.ready(coord.id));
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.9, resetsAt: at(7, 20) }, sevenDay: null, updatedAt: at(7, 10) });
+    t.budget.checkReserve();
+    await until(() => t.turns(coord.id).length === 1, 8000);
+    expect(t.turns(coord.id)[0]).toContain('kota payı devrede');
+    t.notices.add(coord.id, 'task.finished', '“Yaz” (Ada): Yazıldı.');
+    t.setClock(at(7, 17));
+    await sleep(400);
+    expect(t.turns(coord.id)).toHaveLength(1);
+    t.setQuota(null);
+    t.budget.checkReserve();
+    await until(() => t.turns(coord.id).length === 2, 8000);
+    expect(t.turns(coord.id)[1]).toContain('serbest kaldı');
+    expect(t.turns(coord.id)[1]).toContain('Teslimler (1)');
   });
 });

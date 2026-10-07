@@ -79,6 +79,7 @@ export class Memory {
     if (coordinator) {
       this.#d.notices.add(
         coordinator.id,
+        'decision.reverted',
         `Sahibi şu kararı geri aldı: “${target.title}” (seçilen: ${target.chosen}). Gereğini yap; büyük bir değişiklikse planRevise ile sahibine getir.`,
       );
     }

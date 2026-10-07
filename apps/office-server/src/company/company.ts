@@ -9,6 +9,7 @@ import type { Roster } from '../roster.ts';
 import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
+import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
@@ -158,7 +159,7 @@ export class Company {
       const demoted = this.#d.roster.update(previous.id, { kind: 'member' });
       writeRoleCard(this.#d.dataDir, demoted);
       this.#emit(demoted.id, { type: 'role.changed', kind: demoted.kind, title: demoted.title, team: demoted.team });
-      this.#d.notices.add(demoted.id, `Koordinatörlük ${target.name} adlı çalışana geçti; artık ekipte çalışansın. Rol kartın yenilendi.`);
+      this.#d.notices.add(demoted.id, 'role.changed', `Koordinatörlük ${target.name} adlı çalışana geçti; artık ekipte çalışansın. Rol kartın yenilendi.`);
       this.#d.reload?.(demoted.id);
     }
     const next = this.#d.roster.update(id, { kind: 'coordinator', reportsTo: null });
@@ -168,6 +169,7 @@ export class Company {
     if (previous?.id !== id) {
       this.#d.notices.add(
         id,
+        'role.coordinator',
         'Artık şirketin koordinatörüsün. Rol kartın ve araçların yenilendi (planPropose, hire, taskCreate, taskAssign…); durumu officeStatus, myTasks ve briefRead ile öğren.',
       );
       // A session reads its card and tool list only at start: without this the new coordinator has no coordinator tools.
@@ -224,12 +226,12 @@ export class Company {
     for (const dep of dependsOn) this.#d.tasks.get(dep);
     const chainDepth = by === OWNER ? 0 : (this.#d.tasks.inProgressOf(by)?.chainDepth ?? -1) + 1;
     if (chainDepth > rules.chainDepth) {
-      this.#tellCoordinator(by, `${this.nameOf(by)} “${title}” görevini paslayamadı: görev zinciri ${rules.chainDepth} halkayı geçti. Zinciri sen çöz.`);
+      this.#tellCoordinator(by, 'limit.chain', `${this.nameOf(by)} “${title}” görevini paslayamadı: görev zinciri ${rules.chainDepth} halkayı geçti. Zinciri sen çöz.`);
       throw new ConflictError(`Görev zinciri en fazla ${rules.chainDepth} halka olabilir; bu işi koordinatöre bırak.`);
     }
     const isCoordinator = by !== OWNER && this.#d.roster.get(by).kind === 'coordinator';
     if (by !== OWNER && !isCoordinator && this.#d.tasks.createdSince(by, this.#now() - DAY_MS) >= rules.tasksPerDay) {
-      this.#tellCoordinator(by, `${this.nameOf(by)} bugün ${rules.tasksPerDay} görev açtı ve sınıra geldi.`);
+      this.#tellCoordinator(by, 'limit.tasks_per_day', `${this.nameOf(by)} bugün ${rules.tasksPerDay} görev açtı ve sınıra geldi.`);
       throw new ConflictError(`Bir çalışan günde en fazla ${rules.tasksPerDay} görev açabilir.`);
     }
     const task = this.#d.tasks.create({ planId, title, description, done, requester: by, assignee: assignee.id, priority, dependsOn, chainDepth: Math.max(0, chainDepth) });
@@ -253,7 +255,12 @@ export class Company {
     if (target.lifecycle === 'archived') throw new ConflictError(`${target.name} işten çıkarıldı.`);
     const next = this.#d.tasks.update(taskId, { assignee: target.id, status: 'waiting', startedAt: null, nudged: false });
     if (holder && holder.id !== target.id && holder.lifecycle !== 'archived') {
-      this.#d.notices.add(holder.id, `“${task.title}” görevi (no ${task.id}) ${target.name} adlı çalışana verildi; üzerinde çalışmayı bırak.`);
+      const started = task.status === 'in_progress' || task.status === 'blocked';
+      this.#d.notices.add(
+        holder.id,
+        started ? 'task.taken' : 'task.moved',
+        `“${task.title}” görevi (no ${task.id}) ${target.name} adlı çalışana verildi${started ? '; üzerinde çalışmayı bırak.' : '.'}`,
+      );
     }
     this.#taskEvent('assigned', next);
     return next;
@@ -274,7 +281,7 @@ export class Company {
     }
     if (work.length === 0) return;
     const list = work.map((t) => `“${t.title}” (no ${t.id})`).join(', ');
-    this.#tellCoordinator(id, `${this.nameOf(id)} işten çıkarıldı; açık görevleri sahipsiz bekliyor: ${list}. taskAssign ile yeniden dağıt.`);
+    this.#tellCoordinator(id, 'task.orphaned', `${this.nameOf(id)} işten çıkarıldı; açık görevleri sahipsiz bekliyor: ${list}. taskAssign ile yeniden dağıt.`);
   }
 
   /**
@@ -291,7 +298,7 @@ export class Company {
       requester: OWNER, assignee: id, priority: 1, dependsOn: [], chainDepth: 0,
     });
     this.#taskEvent('created', task);
-    this.#tellCoordinator(id, `${employee.name} işten çıkarılıyor; önce devir notlarını yazıyor. Açık görevleri sonra sana dönecek.`);
+    this.#tellCoordinator(id, 'employee.leaving', `${employee.name} işten çıkarılıyor; önce devir notlarını yazıyor. Açık görevleri sonra sana dönecek.`);
     return task;
   }
 
@@ -334,7 +341,7 @@ export class Company {
     if (u.blocked === false && task.status === 'blocked') status = 'in_progress';
     const next = this.#d.tasks.update(taskId, { note, status });
     if (status === 'blocked' && task.status !== 'blocked') {
-      this.#tellCoordinator(by, `${this.nameOf(by)} “${task.title}” görevinde takıldı${note ? `: ${note}` : '.'}`);
+      this.#tellCoordinator(by, 'task.blocked', `${this.nameOf(by)} “${task.title}” görevinde takıldı${note ? `: ${note}` : '.'}`);
     }
     this.#taskEvent('updated', next);
     return next;
@@ -362,9 +369,9 @@ export class Company {
       // The archive never blocks a hand-in: the result is kept in the database either way.
     }
     const next = this.#d.tasks.update(taskId, { status: 'done', result: archived, finishedAt });
-    const line = `Görev bitti: “${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
-    if (task.requester !== OWNER && task.requester !== by) this.#d.notices.add(task.requester, line);
-    if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, line);
+    const line = `“${task.title}” (${this.nameOf(task.assignee)}): ${handed.summary}`;
+    if (task.requester !== OWNER && task.requester !== by) this.#d.notices.add(task.requester, 'task.finished', line);
+    if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, 'task.finished', line);
     this.#taskEvent('finished', next);
     this.#d.memory?.learnedFrom(next, handed);
     if (task.planId) this.#maybeFinishPlan(task.planId);
@@ -409,7 +416,7 @@ export class Company {
     const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now() });
     this.#d.plans.clearApproved(planId);
     const desk = this.#planDesk(plan);
-    this.#d.notices.add(desk, `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
+    this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
     return plan;
   }
@@ -420,13 +427,13 @@ export class Company {
     if (this.#d.plans.approvedSnapshot(planId)) {
       const kept = this.#d.plans.restoreApproved(planId);
       const desk = this.#planDesk(kept);
-      this.#d.notices.add(desk, `Sahibi “${current.title}” revizyonunu onaylamadı; plan onaylı sürümüyle (sürüm ${kept.version}) sürüyor.`);
+      this.#d.notices.add(desk, 'plan.revision_declined', `Sahibi “${current.title}” revizyonunu onaylamadı; plan onaylı sürümüyle (sürüm ${kept.version}) sürüyor.`);
       this.#emit(desk, { type: 'plan.changed', change: 'kept', plan: kept });
       return kept;
     }
     const plan = this.#d.plans.update(planId, { status: 'declined' });
     const desk = this.#planDesk(plan);
-    this.#d.notices.add(desk, `Sahibi planı onaylamadı: “${plan.title}”. Ne istediğini sor, gerekirse yeni bir plan öner.`);
+    this.#d.notices.add(desk, 'plan.declined', `Sahibi planı onaylamadı: “${plan.title}”. Ne istediğini sor, gerekirse yeni bir plan öner.`);
     this.#emit(desk, { type: 'plan.changed', change: 'declined', plan });
     return plan;
   }
@@ -461,10 +468,10 @@ export class Company {
     const label = PROPOSAL_TR[kind];
     if (toOwner) {
       if (coordinator && coordinator.id !== by) {
-        this.#d.notices.add(coordinator.id, `${who.name} sahibine bir ${label} talebi açtı: “${proposal.title}”${proposal.usd !== null ? ` ($${proposal.usd})` : ''}. Sahibi karar verince haber gelecek.`);
+        this.#d.notices.add(coordinator.id, 'proposal.to_owner', `${who.name} sahibine bir ${label} talebi açtı: “${proposal.title}”${proposal.usd !== null ? ` ($${proposal.usd})` : ''}. Sahibi karar verince haber gelecek.`);
       }
     } else {
-      this.#d.notices.add(decider!.id, `${who.name} bir ${label} açtı: “${proposal.title}” (no ${proposal.id}). proposalDecide ile karara bağla: accept, decline ya da büyükse escalate.`);
+      this.#d.notices.add(decider!.id, 'proposal.opened', `${who.name} bir ${label} açtı: “${proposal.title}” (no ${proposal.id}). proposalDecide ile karara bağla: accept, decline ya da büyükse escalate.`);
     }
     this.#emit(toOwner ? (coordinator?.id ?? by) : decider!.id, { type: 'proposal.changed', change: toOwner ? 'escalated' : 'opened', proposal });
     return proposal;
@@ -482,7 +489,7 @@ export class Company {
       const coordinator = this.coordinator();
       const toOwner = me.kind === 'coordinator' || !coordinator;
       const next = this.#store().update(id, toOwner ? { status: 'owner', routedTo: null, note } : { routedTo: coordinator!.id, note });
-      if (!toOwner) this.#d.notices.add(coordinator!.id, `${me.name} bir öneriyi sana getirdi: “${p.title}” (no ${id})${note ? `: ${note}` : '.'} proposalDecide ile karara bağla.`);
+      if (!toOwner) this.#d.notices.add(coordinator!.id, 'proposal.escalated', `${me.name} bir öneriyi sana getirdi: “${p.title}” (no ${id})${note ? `: ${note}` : '.'} proposalDecide ile karara bağla.`);
       this.#emit(toOwner ? by : coordinator!.id, { type: 'proposal.changed', change: 'escalated', proposal: next });
       return next;
     }
@@ -494,7 +501,7 @@ export class Company {
       reason: note ?? (accepted ? 'Kabul edildi.' : 'Reddedildi.'),
       planId: p.planId,
     });
-    if (p.by !== by) this.#d.notices.add(p.by, `“${p.title}” önerin ${accepted ? 'kabul edildi' : 'reddedildi'}${note ? `: ${note}` : '.'}`);
+    if (p.by !== by) this.#d.notices.add(p.by, 'proposal.decided', `“${p.title}” önerin ${accepted ? 'kabul edildi' : 'reddedildi'}${note ? `: ${note}` : '.'}`);
     this.#emit(by, { type: 'proposal.changed', change: accepted ? 'accepted' : 'declined', proposal: next });
     return next;
   }
@@ -518,8 +525,8 @@ export class Company {
         : `Sahibi “${p.title}” önerisini onayladı${why ? `: ${why}` : '.'}`
       : `Sahibi “${p.title}” ${label} talebini onaylamadı${why ? `: ${why}` : '.'}`;
     const coordinator = this.coordinator();
-    this.#d.notices.add(p.by, line);
-    if (coordinator && coordinator.id !== p.by) this.#d.notices.add(coordinator.id, line);
+    this.#d.notices.add(p.by, 'proposal.owner_decided', line);
+    if (coordinator && coordinator.id !== p.by) this.#d.notices.add(coordinator.id, 'proposal.owner_decided', line);
     this.#emit(coordinator?.id ?? p.by, { type: 'proposal.changed', change: approve ? 'accepted' : 'declined', proposal: next });
     return next;
   }
@@ -544,7 +551,7 @@ export class Company {
       this.#emit(to ?? p.by, { type: 'proposal.changed', change: 'escalated', proposal: next });
     }
     if (to) {
-      this.#d.notices.add(to, `${this.nameOf(fromId)} artık karar vermiyor; açık önerileri sana geçti: ${open.map((p) => `“${p.title}” (no ${p.id})`).join(', ')}. proposalDecide ile karara bağla.`);
+      this.#d.notices.add(to, 'proposal.rerouted', `${this.nameOf(fromId)} artık karar vermiyor; açık önerileri sana geçti: ${open.map((p) => `“${p.title}” (no ${p.id})`).join(', ')}. proposalDecide ile karara bağla.`);
     }
   }
 
@@ -569,7 +576,7 @@ export class Company {
       if (m.id === id || m.kind !== 'member') continue;
       if (makeLead && m.team === team && m.reportsTo !== id) {
         this.#d.roster.update(m.id, { reportsTo: id });
-        this.#d.notices.add(m.id, `${next.name} artık ${team} ekibinin lideri; önerilerin önce ona gider.`);
+        this.#d.notices.add(m.id, 'role.changed', `${next.name} artık ${team} ekibinin lideri; önerilerin önce ona gider.`);
       } else if (!makeLead && m.reportsTo === id) this.#d.roster.update(m.id, { reportsTo: null });
     }
     if (!makeLead) this.#rerouteProposals(id);
@@ -577,6 +584,7 @@ export class Company {
     this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
     this.#d.notices.add(
       id,
+      'role.changed',
       makeLead
         ? `Artık ${team} ekibinin liderisin: ekibine taskCreate ile iş açar, taskAssign ve taskReprioritize ile dağıtır, önerilerini proposalDecide ile karara bağlarsın. Rol kartın ve araçların yenilendi.`
         : 'Ekip liderliğin bitti; ekipte çalışansın.',
@@ -627,6 +635,7 @@ export class Company {
     const desk = this.#planDesk(done);
     this.#d.notices.add(
       desk,
+      'plan.done',
       `“${plan.title}” planının açık görevi kalmadı. İş bittiyse sonucu reportToOwner ile sahibine raporla; sürüyorsa bu plana yeni görev açabilirsin (plan yeniden açılır).`,
     );
     this.#emit(desk, { type: 'plan.changed', change: 'done', plan: done });
@@ -681,9 +690,9 @@ export class Company {
     if (this.#d.roster.get(by).kind !== 'coordinator') throw new ForbiddenError('Yalnız koordinatör bunu yapabilir.');
   }
 
-  #tellCoordinator(about: string, text: string): void {
+  #tellCoordinator(about: string, topic: NoticeTopic, text: string): void {
     const c = this.coordinator();
-    if (c && c.id !== about) this.#d.notices.add(c.id, text);
+    if (c && c.id !== about) this.#d.notices.add(c.id, topic, text);
   }
 
   #taskEvent(change: 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized', task: Task): void {
