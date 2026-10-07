@@ -39,7 +39,7 @@ describe('office tools', () => {
       'taskFinish', 'taskPark', 'taskPass', 'taskUpdate',
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual([
-      'agendaRead', 'decisionRecord', 'goalsRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
+      'agendaRead', 'decisionRecord', 'goalsRead', 'performanceRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
     ]);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
       'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'planPropose', 'planRetro', 'planRevise', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',

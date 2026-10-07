@@ -1,12 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { OfficeEvent, Task } from '@cc/shared';
-import { TurnLedger, turnTokens } from './company/budget.ts';
+import { replayTurns } from './turn-log.ts';
 
 /**
  * Per-task Claude cost (tasks.cost_usd, tasks.tokens) recomputed from the event log with the rule the budget charges
- * by (TurnLedger). Before that rule, a turn whose task was handed in before the turn ended was charged to nothing.
- * Which task was in progress when a turn started comes from the task.changed events, each carrying the task as it
- * became.
+ * by (TurnLedger, replayed by turn-log.ts). Before that rule, a turn whose task was handed in before the turn ended
+ * was charged to nothing.
  */
 
 export interface Cost {
@@ -32,44 +30,17 @@ export interface TaskCostBackfill {
   kept: TaskCostChange[];
 }
 
-interface Row {
-  employee_id: string | null;
-  payload: string;
-}
-
 const cents = (n: number) => Math.round(n * 100) / 100;
 
 /** What the log says each task cost. */
 export function costsFromLog(db: DatabaseSync): { costs: Map<string, Cost>; turns: TaskCostBackfill['turns'] } {
-  const ledger = new TurnLedger();
-  const tasks = new Map<string, Task>();
-  // TaskStore.inProgressOf as it stood then: the assignee's task in progress, started last.
-  const running = (employeeId: string): string | null => {
-    let best: Task | null = null;
-    for (const t of tasks.values()) {
-      if (t.assignee === employeeId && t.status === 'in_progress' && (best === null || (t.startedAt ?? 0) >= (best.startedAt ?? 0))) best = t;
-    }
-    return best?.id ?? null;
-  };
   const costs = new Map<string, Cost>();
   const turns: TaskCostBackfill['turns'] = { count: 0, usd: 0, tokens: 0, unassigned: { count: 0, usd: 0, tokens: 0 } };
-  const rows = db
-    .prepare("SELECT employee_id, payload FROM events WHERE type IN ('turn.started', 'task.changed', 'turn.finished') ORDER BY seq")
-    .iterate() as Iterable<Row>;
-  for (const row of rows) {
-    const ev = JSON.parse(row.payload) as OfficeEvent;
-    const id = row.employee_id;
-    if (ev.type === 'task.changed') {
-      tasks.set(ev.task.id, ev.task);
-      if (id) ledger.changed(id, ev.change, ev.task);
-    } else if (ev.type === 'turn.started' && id) ledger.started(id, running(id));
-    else if (ev.type === 'turn.finished' && id) {
-      const usd = ev.costUsd;
-      const tokens = turnTokens(ev.usage);
+  replayTurns(db, {
+    turn: ({ taskId, usd, tokens }) => {
       turns.count += 1;
       turns.usd += usd;
       turns.tokens += tokens;
-      const taskId = ledger.taskOf(id, () => running(id));
       if (taskId && (usd > 0 || tokens > 0)) {
         const c = costs.get(taskId) ?? { usd: 0, tokens: 0 };
         costs.set(taskId, { usd: c.usd + usd, tokens: c.tokens + tokens });
@@ -78,9 +49,8 @@ export function costsFromLog(db: DatabaseSync): { costs: Map<string, Cost>; turn
         turns.unassigned.usd += usd;
         turns.unassigned.tokens += tokens;
       }
-      ledger.finished(id, ev.queuedTurns);
-    }
-  }
+    },
+  });
   return { costs, turns };
 }
 

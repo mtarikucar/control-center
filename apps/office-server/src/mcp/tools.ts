@@ -4,6 +4,7 @@ import type { Company } from '../company/company.ts';
 import { methodText } from '../company/craft.ts';
 import type { Memory } from '../company/memory.ts';
 import type { TaskStore } from '../company/store.ts';
+import { formatPerformance, type PerformanceReport } from '../performance.ts';
 import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
@@ -103,6 +104,8 @@ export function officeTools(o: {
   plans: () => Plan[];
   /** Who does what when, as Turkish text (agendaRead). */
   agenda: { text(employeeId?: string): string };
+  /** How the work went, from the log (performanceRead); absent in tests that do not care. */
+  performance?: { report(o: { days?: number }): PerformanceReport };
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -598,6 +601,22 @@ export function officeTools(o: {
         const goal = company.goalSet(employee.id, { goalId: optStr(args, 'goalId'), title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, status: optStr(args, 'status'), note: optStr(args, 'note') });
         if (!optStr(args, 'goalId')) return `Hedef açıldı (${goal.id}): “${goal.title}”. Planlarını planPropose ile goalId vererek başlat.`;
         return `Hedef güncellendi: “${goal.title}” (${goal.status}).`;
+      },
+    },
+    {
+      name: 'performanceRead',
+      description:
+        'Read how the work went, from the office’s own log (coordinator or team lead): per person and per plan the work tasks done and open, the first-pass approval rate, the average review rounds to approval, the average cost and time per task, blocks, parks and overdue; and the Claude usage reconciled to every turn. With employee or plan: that one and its tasks. days: only the last days.',
+      inputSchema: object({ employee: s('Employee id or name.'), plan: s('Plan id.'), days: integer('Only the last days.', 1, 365) }),
+      kinds: LEADS,
+      run: (_ctx, args) => {
+        if (!o.performance) throw new ConflictError('Bu ofiste performans okuması yok.');
+        const days = num(args, 'days');
+        if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new ValidationError('days 1 ile 365 arasında bir tam sayı olmalı.');
+        const who = optStr(args, 'employee');
+        const planId = optStr(args, 'plan');
+        if (planId !== undefined && !plans().some((p) => p.id === planId)) throw new NotFoundError(`Plan bulunamadı: ${planId}`);
+        return formatPerformance(o.performance.report({ days }), { employee: who === undefined ? undefined : findPerson(who).id, plan: planId, days });
       },
     },
     {
