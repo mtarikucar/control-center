@@ -42,7 +42,11 @@ describe('the pulse (spec §6.3)', () => {
     expect(t.pulse().check()).toEqual(['pulse.no_goal']);
     const notice = t.notices.pending(c.id).find((n) => n.topic === 'pulse.no_goal')!;
     expect(notice.kind).toBe('decision');
-    expect(notice.text).toContain('restUntil');
+    // B3: no self-braking — the next goal comes from the mission and the brief's vision, and it starts.
+    expect(notice.text).toBe(
+      'Aktif hedef yok ve açık iş yok. Şirket özetindeki misyona ve vizyona bakarak sıradaki hedefi çıkar (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını hemen başlat (planPropose, goalId ile).',
+    );
+    expect(notice.text).not.toContain('icat etme');
     expect(t.pulse().check()).toEqual([]);
     t.advance(6 * HOUR);
     expect(t.pulse().check()).toEqual(['pulse.no_goal']);

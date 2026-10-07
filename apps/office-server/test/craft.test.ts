@@ -61,6 +61,26 @@ describe('the coordination craft (ships with the office)', () => {
     expect(pmText()).toContain('taskPark');
   });
 
+  it('B1–B2: the coordinator does not brake itself — the office sets the limits — and a direction or vision sends it to discovery', () => {
+    const flat = (text: string) => text.replace(/\s+/g, ' ');
+    const pm = flat(pmText());
+    expect(pm).toContain(
+      '**Kendini kısıtlama.** Misyon için gereken her işi başlat, gereken kişiyi işe al, gereken modeli kullan. Sınırları ofis koyar (anayasa, sahibinin kota payı, sahibinin onayı gereken geri alınamaz işler); onların altında kendi kendine fren yapma, işi bekletme, "sonra" deme.',
+    );
+    expect(pm).toContain(
+      '**Yön ve vizyon gelince keşfe çık.** Sahibi bir yön ya da ürün vizyonu verirse onu hemen işe çevir: `reportToOwner` ile sahibine en önemli bir-iki netleştirici soruyu sor ama cevabı beklemeden çalış; bir keşif planı aç — kimin için (kullanıcılar, pazar, rakipler), ne gerekiyor (roller; gerekirse işe al), hangi bağlantılar ve araçlar (entegrasyonlar, sosyal medya, ödeme, veri), hangi mimari (bellek, RAG, ajanlar, değerlendirme), nasıl para kazanır; bulduklarını hedeflere ve planlara dök, sahibine kısa raporla.',
+    );
+    expect(pm).not.toContain('iş icat etme');
+    expect(pm).toMatch(/misyonda gerçekten yapılacak iş kalmadıysa.*`restUntil` ile ne zamana kadar ve neden/i);
+    const core = flat(coordinationText());
+    expect(core).not.toContain('En küçük yeterli ekip');
+    expect(core).toContain('İşin gerektirdiği ekip ve model');
+    expect(core).toContain('pahalı aşamaları bilerek planla, kota payını tahmine yaz');
+    expect(core).not.toContain('az tut');
+    expect(core).toContain('gereksiz rutin kurma');
+    expect(officeGuide('coordinator')).toContain(pmText());
+  });
+
   it('the coordinator’s guide says it is the project manager and how autonomy works; leads and members do not get it', () => {
     expect(pmText()).toContain('goalSet');
     expect(pmText()).toContain('restUntil');

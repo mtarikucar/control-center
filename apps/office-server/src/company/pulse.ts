@@ -72,7 +72,7 @@ export class Pulse {
     this.#d.state.set('pulse.noGoalAt', String(now));
     add(
       'pulse.no_goal',
-      'Aktif hedef yok ve açık iş yok. Şirket özetindeki misyona göre yeni bir hedef koy (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını başlat; şimdilik değerli iş yoksa iş icat etme — restUntil ile ne zamana kadar ve neden dinlendiğini yaz.',
+      'Aktif hedef yok ve açık iş yok. Şirket özetindeki misyona ve vizyona bakarak sıradaki hedefi çıkar (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını hemen başlat (planPropose, goalId ile).',
     );
     return left;
   }

@@ -81,7 +81,9 @@ describe('Budget — constitution', () => {
 
   it('the PM keys: autonomy free by default, the active-goal limit and the pulse interval, validated in Turkish', () => {
     const t = make();
-    expect(DEFAULT_CONSTITUTION).toMatchObject({ autonomy: 'free', activeGoals: 3, pulseHours: 6 });
+    // B4: the default is the rule's own maximum — the office sets the limit, the coordinator does not brake itself.
+    expect(DEFAULT_CONSTITUTION).toMatchObject({ autonomy: 'free', activeGoals: 10, pulseHours: 6 });
+    expect(() => t.budget.setConstitution({ activeGoals: 11 })).toThrow(/aktif hedef/);
     expect(t.budget.setConstitution({ autonomy: 'plans', activeGoals: 5, pulseHours: 0 })).toMatchObject({ autonomy: 'plans', activeGoals: 5, pulseHours: 0 });
     expect(() => t.budget.setConstitution({ autonomy: 'yarım' })).toThrow(/Serbestlik/);
     expect(() => t.budget.setConstitution({ activeGoals: 0 })).toThrow(/aktif hedef/);

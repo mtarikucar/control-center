@@ -41,6 +41,7 @@ describe('goals (spec §6.1)', () => {
 
   it('keeps at most the constitution’s number of active goals; closing one makes room; reopening counts again', () => {
     const t = make();
+    t.budget.setConstitution({ activeGoals: 3 });
     const ids = [1, 2, 3].map((n) => t.company.goalSet(t.coordinator.id, { ...GOAL, title: `Hedef ${n}` }).id);
     expect(() => t.company.goalSet(t.coordinator.id, { ...GOAL, title: 'Hedef 4' })).toThrow(/En fazla 3 aktif hedef/);
     const closed = t.company.goalSet(t.coordinator.id, { goalId: ids[0], status: 'done', note: 'ulaşıldı' });

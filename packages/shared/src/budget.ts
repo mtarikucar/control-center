@@ -67,7 +67,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   modelPolicyEnabled: false,
   difficultyModelsEnabled: false,
   autonomy: 'free',
-  activeGoals: 3,
+  activeGoals: 10,
   pulseHours: 6,
   defaultTaskMinutes: 45,
   minScheduleMinutes: 60,
