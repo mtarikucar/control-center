@@ -13,7 +13,7 @@ export const CLIENTS = [
   { slug: 'pastane-ada', name: 'Pastane Ada' },
   { slug: 'dis-klinigi-mavi', name: 'Diş Kliniği Mavi' },
   { slug: 'yoga-studyosu-nefes', name: 'Yoga Stüdyosu Nefes' },
-  { slug: 'kahve-duragi-kivilcim', name: 'Kahve Durağı Kıvılcım' },
+  { slug: 'kahve-tezgahi-kivilcim', name: 'Kahve Tezgâhı Kıvılcım' },
   { slug: 'butik-otel-kiyi', name: 'Butik Otel Kıyı' },
   { slug: 'cicekci-zeytin', name: 'Çiçekçi Zeytin' },
 ] as const;
