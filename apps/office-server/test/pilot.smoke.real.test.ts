@@ -146,6 +146,9 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         expect(servers).toEqual(['office connected', ...PILOT_STUBS.map((s) => `${s} connected`)].sort());
         for (const t of [...LOCKED_TOOLS, ...DISALLOWED_TOOLS]) expect(tools).not.toContain(t);
         checks.push(`kilitli açılış: claude ${String(init.claude_code_version)}; sunucular ${servers.join(', ')}; ${tools.length} araç, LOCKED_TOOLS ve DISALLOWED_TOOLS yok`);
+        // The probe's token took the coordinator's (one token per employee): start the session again, with a fresh one.
+        o.engine.reload(coordinator.id);
+        await wait('koordinatörün oturumu yeni jetonla açıldı', () => o.engine.ready(coordinator.id));
       });
 
       // 2 — the founder's sentence; the coordinator runs the onboarding; the scripted founder answers each round on the page.
