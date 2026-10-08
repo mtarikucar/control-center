@@ -70,6 +70,10 @@ Ayrım öneri başlığıyla yapılır, ek tablo yok. Yeniden başlatmadan sonra
 `tool.started` adı `toolClass`'tan geçer:
 - **Sınıflandırılmışsa** (bir yeteneğe aitse) aynı kuralla o yetenek için `need` önerisi açılır. Metin aracı ve hata
   metninin başını taşır.
+- **Ama** masa o yeteneği hâlâ başka yoldan sağlıyorsa öneri açılmaz: yerleşik araçlar ya da o masada açık başka bir
+  bağlayıcı. O zaman bu bağlayıcının hatası eksik yetenek değildir. Bu kural K4'ten geldi: canlı kopyadaki tek
+  bağlayıcı hatası Deniz'in Playwright `browser_navigate`'iydi ("browser has been closed"). Daraltılmamış kural bunu
+  `web.fetch` için "Yetki gerekiyor" önerisine çevirirdi; oysa `WebFetch` her masada açık.
 - Sınıflandırılmamış araçta öneri açılmaz: hangi yeteneğe ait olduğu bilinmez, B7 okuması onları zaten gösterir.
 - Ofisin kendi araçlarında ve yerleşik araçlarda da öneri açılmaz.
 

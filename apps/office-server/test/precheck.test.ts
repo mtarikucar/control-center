@@ -152,6 +152,29 @@ describe('Capability precheck — a connector tool’s error', () => {
   });
 });
 
+describe('Capability precheck — a tool error the capability survives (K4: the live copy\'s one connector error)', () => {
+  const toolRun = (t: ReturnType<typeof make>, who: Employee, id: string, name: string, output: string) => {
+    t.events.append(who.id, { type: 'tool.started', toolUseId: id, name, input: {} });
+    t.events.append(who.id, { type: 'tool.finished', toolUseId: id, isError: true, output });
+  };
+
+  it('review focus: no need when the desk still has the capability through something else — built-in tools, or another open connector', async () => {
+    const t = make();
+    // The live office's case: a browser tool failed (the page closed); web.fetch is still there through WebFetch.
+    t.session(t.can, [['office', 'connected', 1, ['myTasks']], ['plugin:playwright:playwright', 'connected', 1, ['browser_navigate']], ['claude.ai Gmail', 'connected', 1, ['send_message']], ['claude.ai jeeta', 'connected', 1, ['jeeta_send_email']]]);
+    toolRun(t, t.can, 'p1', 'mcp__plugin_playwright_playwright__browser_navigate', 'Error: Target page, context or browser has been closed');
+    // Gmail's send failed, but jeeta also sends e-mail on this desk.
+    toolRun(t, t.can, 'g1', 'mcp__claude_ai_Gmail__send_message', 'Error: token expired');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(t.needs()).toEqual([]);
+    // Without jeeta, Gmail is the only way: the need is raised.
+    t.session(t.can, [['office', 'connected', 1, ['myTasks']], ['claude.ai Gmail', 'connected', 1, ['send_message']]]);
+    toolRun(t, t.can, 'g2', 'mcp__claude_ai_Gmail__send_message', 'Error: token expired');
+    await until(() => t.needs().length === 1);
+    expect(t.need('email.send').text).toContain('Can masasında send_message aracı hata verdi');
+  });
+});
+
 describe('Capability precheck — the dispatcher, and the switch', () => {
   const systemMessages = (events: StoredEvent[], id: string) =>
     events.filter((e) => e.employeeId === id && e.event.type === 'message.user' && e.event.source === 'system').map((e) => (e.event as { text: string }).text);

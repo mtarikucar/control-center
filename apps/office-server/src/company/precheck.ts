@@ -1,4 +1,5 @@
 import { INTEGRATION_STATUS_LABELS, type CapabilityCoverage, type CapabilityProvider, type StoredEvent, type Task } from '@cc/shared';
+import { mcpToolPrefix } from '../claude/normalize.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import { capabilityVocabulary, coverage, toolClass } from './capabilities.ts';
@@ -127,9 +128,13 @@ export class CapabilityPrecheck {
     if (kind.kind !== 'classified') return;
     const employeeId = e.employeeId;
     const output = ev.output.replace(/\s+/g, ' ').trim().slice(0, 200);
+    const failing = name.slice(0, name.lastIndexOf('__') + 2);
     (this.#d.defer ?? setImmediate)(() => {
       const who = this.#d.roster.get(employeeId);
       const [c] = coverage(this.#d.integrations.list(), [kind.capability], employeeId);
+      // The desk still has the capability through something else — built-in tools, or another connector open there:
+      // this connector's error is not a missing capability (K4: a closed browser page while WebFetch works).
+      if (c!.builtin.length > 0 || c!.providers.some((p) => p.desk?.open && mcpToolPrefix(p.name) !== failing)) return;
       this.#need(c!, employeeId, `${who.name} masasında ${name.slice(name.lastIndexOf('__') + 2)} aracı hata verdi: “${output}”. Araç ${this.#named(kind.capability)} yeteneğine ait.`);
     });
   }
