@@ -6,6 +6,7 @@ import { Clock } from '../src/company/clock.ts';
 import { CYCLE_WINDOW_MS, HEARTBEAT_MS, ManagementCycle } from '../src/company/cycle.ts';
 import { Dispatcher, NOTICES_PREFIX, RENUDGE_MS, type DispatchEngine } from '../src/company/dispatcher.ts';
 import { Pulse } from '../src/company/pulse.ts';
+import { CLOCK_LAST_RUN } from '../src/company/scheduling.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -142,6 +143,8 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
       settle();
     }
   };
+  /** Time passes with the office down: nothing runs (inside `restart`). */
+  const pass = (ms: number) => void (clock += ms);
   /** Someone calls an office tool, as through MCP. */
   const call = async (who: { id: string }, name: string, args: { [key: string]: unknown } = {}) => {
     const tool = office!.tools.find((t) => t.name === name);
@@ -171,7 +174,7 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
   const goal = () => c.company.goalSet(coord!.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
 
   return {
-    ...s, ...c, coord: coord!, person, settle, result, endTurn, setLifecycle, inTurn, sent, runsOn, woken, boot, restart, advance, call, log, started, records, kinds, toCoordinator, boards, closeCycle, task, finish, goal,
+    ...s, ...c, coord: coord!, person, settle, result, endTurn, setLifecycle, inTurn, sent, runsOn, woken, boot, restart, advance, pass, call, log, started, records, kinds, toCoordinator, boards, closeCycle, task, finish, goal,
     now, cycle: () => office!.cycle,
   };
 }
@@ -928,6 +931,37 @@ describe('management cycle — the idle heartbeat: no goal and no work', () => {
     t.advance(5 * MIN);
     expect(t.started()).toHaveLength(2);
     expect(t.kinds(1)).toEqual(['heartbeat']);
+  });
+
+  it('a rest that ended while an office was running is no news at the start (an older office kept no marker of it): no cycle for it; the idle heartbeat counts from the start', () => {
+    for (const lastRun of [String(T0 - 30 * MIN), null]) {
+      const t = make();
+      // An older office: the coordinator's rest ended an hour ago; that office's clock ran after it (or kept no last run).
+      t.state.setRest(T0 - HOUR, 'Sahibinin cevabı bekleniyor');
+      t.state.set(CLOCK_LAST_RUN, lastRun);
+      t.boot();
+      t.advance(6 * HOUR - MIN);
+      expect(t.started()).toHaveLength(0);
+      t.advance(MIN + 30 * SEC);
+      expect(t.kinds(0)).toEqual(['heartbeat']);
+      expect(t.started()).toHaveLength(1);
+    }
+  });
+
+  it('a rest that ended while the office was down gives its one cycle at the start', async () => {
+    const t = make();
+    t.boot();
+    await t.call(t.coord, 'restUntil', { hours: 2, reason: 'Sahibinin cevabı bekleniyor' });
+    t.advance(HOUR);
+    t.restart(() => t.pass(3 * HOUR));
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.started()).toHaveLength(1);
+    expect(t.kinds(0)).toEqual(['rest']);
+    await t.closeCycle();
+    // Once: another restart does not bring it again.
+    t.restart();
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.started()).toHaveLength(1);
   });
 
   it('the rules hold: paused, nothing (the rest’s end waits for the resume); in the owner’s reserve, no idle heartbeat', async () => {

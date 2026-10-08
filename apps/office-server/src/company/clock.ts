@@ -1,7 +1,7 @@
 import type { ClockStatus } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { CompanyStateStore } from './goal-store.ts';
-import type { DueReport, Scheduling } from './scheduling.ts';
+import { CLOCK_LAST_RUN, type DueReport, type Scheduling } from './scheduling.ts';
 
 export interface ClockTimers {
   set(fn: () => void, ms: number): unknown;
@@ -107,7 +107,7 @@ export class Clock {
     return {
       nextDueAt: nextDue,
       nextDueLabel: nextDue === null ? null : orNull(() => this.#d.label?.(now) ?? null),
-      lastRunAt: orNull(() => Number(this.#d.state.get('clock.lastRunAt') ?? '0') || null),
+      lastRunAt: orNull(() => Number(this.#d.state.get(CLOCK_LAST_RUN) ?? '0') || null),
       lastJumpAt: orNull(() => Number(this.#d.state.get('clock.lastJumpAt') ?? '0') || null),
     };
   }

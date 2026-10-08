@@ -6,7 +6,7 @@ import type { Board, BoardOptions } from './board.ts';
 import { constitutionChanges } from './budget.ts';
 import type { Company } from './company.ts';
 import type { CompanyStateStore } from './goal-store.ts';
-import type { DueReport } from './scheduling.ts';
+import { CLOCK_LAST_RUN, type DueReport } from './scheduling.ts';
 import { OPEN_STATUSES, type TaskStore } from './store.ts';
 import { clean, fold, lines } from './text.ts';
 
@@ -159,6 +159,7 @@ export class ManagementCycle {
     for (const t of this.#d.tasks.list({ statuses: OPEN_STATUSES, limit: 100_000 })) this.#holders.set(t.id, { assignee: t.assignee, status: t.status });
     this.#constitution = normalizeConstitution(this.#d.budget?.constitution());
     this.#reserve = this.#d.budget?.reserveActive() ?? false;
+    this.#seedRestEnd(now);
     // A cycle the stopped office left open: its turn ended with that run, at the coordinator's last work in it (not now).
     const left = this.#open();
     if (left) {
@@ -478,6 +479,18 @@ export class ManagementCycle {
     const rest = this.#d.state.restUntil();
     if (hours <= 0 || now < rest) return false;
     return now - Math.max(this.#lastStart(), this.#workAt, rest) >= hours * HOUR;
+  }
+
+  /**
+   * A rest that ended while an office was running — its clock ran after the end (a run before this one, read before
+   * this office's clock first runs), or kept no last run — is no news now: an older office kept no marker of it. Marked,
+   * so the first tick opens no stale cycle for it. A rest that ended while the office was down still gives its cycle.
+   */
+  #seedRestEnd(now: number): void {
+    const until = this.#d.state.restUntil();
+    if (until <= 0 || now < until || this.#d.state.get(KEY.restEnded) === String(until)) return;
+    const lastRun = Number(this.#d.state.get(CLOCK_LAST_RUN) ?? '0') || 0;
+    if (lastRun === 0 || until <= lastRun) this.#d.state.set(KEY.restEnded, String(until));
   }
 
   /** The coordinator's rest ran out (a new goal ends it without one): one cycle, once per rest, across restarts too. */

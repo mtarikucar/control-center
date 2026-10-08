@@ -13,6 +13,8 @@ export const PARK_MAX_DAYS = 30;
 export const DUE_MAX_DAYS = 365;
 /** From this many parks on, the coordinator decides whether the task is real work (spec §4.2). */
 export const REPARK_LIMIT = 3;
+/** company_state: when the office clock last ran what was due (kept across restarts: the last run before one). */
+export const CLOCK_LAST_RUN = 'clock.lastRunAt';
 
 export interface SchedulingDeps {
   db: Db;
@@ -111,7 +113,7 @@ export class Scheduling {
       });
     }
     this.runSchedules(now, report, guard);
-    this.#d.state.set('clock.lastRunAt', String(now));
+    this.#d.state.set(CLOCK_LAST_RUN, String(now));
     return report;
   }
 
