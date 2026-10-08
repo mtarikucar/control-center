@@ -23,7 +23,9 @@ import { ProfileStore } from './company/profile-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
+import { SearchIndex } from './company/search.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
+import { KpiReadings } from './company/kpi-readings.ts';
 import { loadConfig } from './config.ts';
 import { aheadOfCode, migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
@@ -70,7 +72,11 @@ const engine = new Engine({
   cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
   modelPolicyEnabled: () => budget.constitution().modelPolicyEnabled,
 });
-const tasks = new TaskStore(db);
+// The memory search's one index (B11): every store that writes what it holds is given it; filled from those tables on
+// the first start after v21 and whenever it is behind them.
+const searchIndex = new SearchIndex(db);
+searchIndex.rebuildIfStale();
+const tasks = new TaskStore(db, Date.now, searchIndex);
 const plans = new PlanStore(db);
 const notices = new NoticeStore(db);
 const schedules = new ScheduleStore(db);
@@ -78,26 +84,30 @@ const proposals = new ProposalStore(db);
 const goals = new GoalStore(db);
 const state = new CompanyStateStore(db);
 const memory = new Memory({
-  roster, events, notices, tasks, plans, dataDir: config.dataDir,
-  decisions: new DecisionStore(db), playbook: new PlaybookStore(db), notes: new NoteStore(db), employeeNotes: new EmployeeNoteStore(db),
+  roster, events, notices, tasks, plans, dataDir: config.dataDir, index: searchIndex,
+  decisions: new DecisionStore(db, Date.now, searchIndex), playbook: new PlaybookStore(db, Date.now, searchIndex), notes: new NoteStore(db, Date.now, searchIndex),
+  employeeNotes: new EmployeeNoteStore(db),
 });
 const budget = new Budget({
   constitution: new ConstitutionStore(db), spend: new SpendStore(db), tasks, plans, roster, events, notices, quota, deskCount: config.deskCount,
 });
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db), onboarding: new OnboardingStore(db) });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db, Date.now, searchIndex), onboarding: new OnboardingStore(db) });
 // The project's pulse (spec §6.3): the dispatcher runs it only without the management cycle; here its facts are the board's (§3.6).
 const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, budget });
 // The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
 const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });
 const clock = new Clock({ scheduling, state, events, label: (now) => dueLabel(tasks, schedules, company, now) });
 company.attachClock(clock);
+// KPI measurement (B26): the office reads its own KPIs from the metrics (B4) and asks the coordinator for the rest.
+const kpis = new KpiReadings({ db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(db, o) });
+company.attachKpis(kpis);
 // Who does what when (spec §6.1): reads only, for the sheet, agendaRead and the management board.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 // The coordinator's management cycle (management cycle §3.1): when the board is due, built from the office's services.
 const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota };
 const cycle = new ManagementCycle({ events, state, company, roster, tasks, budget, clock, board: (o) => buildBoard(boardDeps, o) });
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, cycle });
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, cycle });
 
 // How the work went (B4): read from the log on demand, the last `days` or all time.
 const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };
@@ -110,7 +120,7 @@ const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, me
 const api = createApi(
   {
     engine, roster, events, quota,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, cycle }) },
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis, cycle }) },
     company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints, management: cycle },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },

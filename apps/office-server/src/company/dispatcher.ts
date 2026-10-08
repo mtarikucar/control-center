@@ -39,6 +39,8 @@ export interface DispatcherDeps {
    * with no running plan, idle capacity, no goal) are sections of the board (management cycle §3.6).
    */
   pulse?: { check(): unknown };
+  /** KPI measurement (B26), run on each tick after the pulse. */
+  kpis?: { measure(): unknown };
   /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
   clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: () => void): void };
   /**
@@ -135,7 +137,17 @@ export class Dispatcher {
     this.#d.budget?.checkReserve();
     if (!this.#rules().digestEnabled) this.#remindReport();
     this.#pulse();
+    this.#measureKpis();
     this.#scheduleSweep();
+  }
+
+  /** The KPIs that are due are read or asked for; a failure never stops the office (the next tick tries again). */
+  #measureKpis(): void {
+    try {
+      this.#d.kpis?.measure();
+    } catch {
+      // As the pulse: the next tick tries again.
+    }
   }
 
   /**

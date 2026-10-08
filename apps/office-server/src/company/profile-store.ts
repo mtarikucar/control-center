@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { CompanyProfile, ProfileEntry, ProfileFields, ProfileSection } from '@cc/shared';
 import type { Db } from '../db.ts';
+import type { SearchIndex } from './search.ts';
 
 interface ProfileRow {
   id: string;
@@ -22,10 +23,13 @@ const entryFromRow = (r: ProfileRow): ProfileEntry => ({
 export class ProfileStore {
   readonly #db: Db;
   readonly #now: () => number;
+  readonly #index: SearchIndex | undefined;
 
-  constructor(db: Db, now: () => number = Date.now) {
+  /** `index`: the memory search's index, given each section's newest state (B11); none in tests that do not search. */
+  constructor(db: Db, now: () => number = Date.now, index?: SearchIndex) {
     this.#db = db;
     this.#now = now;
+    this.#index = index;
   }
 
   /** A section's new state, under the next company-wide version. */
@@ -36,7 +40,9 @@ export class ProfileStore {
         'INSERT INTO company_profile (id, version, section, json, assumed, assumed_fields, by, ts) SELECT ?, COALESCE(MAX(version), 0) + 1, ?, ?, ?, ?, ?, ? FROM company_profile',
       )
       .run(id, section, JSON.stringify(fields), assumedFields.length > 0 ? 1 : 0, JSON.stringify(assumedFields), by, this.#now());
-    return entryFromRow(this.#db.prepare('SELECT * FROM company_profile WHERE id = ?').get(id) as unknown as ProfileRow);
+    const entry = entryFromRow(this.#db.prepare('SELECT * FROM company_profile WHERE id = ?').get(id) as unknown as ProfileRow);
+    this.#index?.profile(entry);
+    return entry;
   }
 
   /** Each section's latest entry. */

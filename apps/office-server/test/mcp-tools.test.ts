@@ -42,7 +42,7 @@ describe('office tools', () => {
       'agendaRead', 'blueprintRead', 'decisionRecord', 'goalsRead', 'performanceRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'roleTemplates', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
     ]);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'appointLead', 'blueprintApply', 'blueprintPropose', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'integrationRegister', 'onboardingFinish', 'onboardingNext', 'onboardingRead', 'onboardingStart', 'planPropose', 'planRetro', 'planRevise', 'profileUpdate', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
+      'appointLead', 'blueprintApply', 'blueprintPropose', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'integrationRegister', 'kpiRecord', 'onboardingFinish', 'onboardingNext', 'onboardingRead', 'onboardingStart', 'planPropose', 'planRetro', 'planRevise', 'profileUpdate', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });
@@ -136,6 +136,26 @@ describe('office tools', () => {
     await expect(t.call(ada, 'decisionRecord', { title: 'x', chosen: 'y', reason: 'z' })).rejects.toThrow(/kapalı/);
     t.roster.update(ada.id, { kind: 'lead' });
     expect(await t.call(ada, 'playbookUpdate', { topic: 'Video üretimi', text: 'Senaryo, ses, kurgu.' })).toContain('sürüm 2');
+  });
+
+  it('memorySearch: the same lines as before for records with every word, partial ones marked with how many words matched, kinds and since to narrow (B11)', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const note = t.memory.writeNote(ada.id, { title: 'Seslendirme', text: 'ElevenLabs Türkçe iyi.' });
+    t.memory.updatePlaybook(c.id, { topic: 'Video üretimi', text: 'Önce senaryo, sonra ses (ElevenLabs).' });
+    const day = new Date(note.ts).toISOString().slice(0, 10);
+    expect(await t.call(ada, 'memorySearch', { query: 'elevenlabs türkçe' })).toBe(
+      [`• [not] Seslendirme (${day}, ${note.id}): ElevenLabs Türkçe iyi.`, `• [el kitabı, kısmi 1/2] Video üretimi (${day}, playbookRead konu: Video üretimi): Önce senaryo, sonra ses (ElevenLabs).`].join('\n'),
+    );
+    expect(await t.call(ada, 'memorySearch', { query: 'elevenlabs', kinds: ['playbook'] })).toMatch(/^• \[el kitabı\] Video üretimi/);
+    t.company.profileUpdate(c.id, { section: 'identity', fields: { name: 'Tatlı Fırın' }, assumed: false });
+    expect(await t.call(ada, 'memorySearch', { query: 'tatlı', kinds: ['profile'] })).toMatch(/^• \[profil\] Kimlik \(\d{4}-\d{2}-\d{2}, profileRead bölüm: identity\): /);
+    expect(await t.call(ada, 'memorySearch', { query: 'elevenlabs', since: '1d' })).toContain('Seslendirme');
+    expect(await t.call(ada, 'memorySearch', { query: 'elevenlabs', since: '2999-01-01' })).toContain('bir şey yok');
+    await expect(t.call(ada, 'memorySearch', { query: 'elevenlabs', kinds: ['video'] })).rejects.toThrow(/kinds/);
+    await expect(t.call(ada, 'memorySearch', { query: 'elevenlabs', since: 'dün' })).rejects.toThrow(/since/);
+    await expect(t.call(ada, 'memorySearch', { query: 'elevenlabs', limit: 31 })).rejects.toThrow(/limit/);
   });
 
   it('lets the coordinator keep an employee file and read it back', async () => {

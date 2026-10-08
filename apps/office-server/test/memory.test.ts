@@ -6,6 +6,7 @@ import { OWNER, type StoredEvent } from '@cc/shared';
 import { Company } from '../src/company/company.ts';
 import { Memory } from '../src/company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
+import { SearchIndex } from '../src/company/search.ts';
 import { NoticeStore, PlanStore, TaskStore } from '../src/company/store.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
@@ -19,12 +20,13 @@ function make() {
   const s = setup();
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
-  const tasks = new TaskStore(s.db);
+  const index = new SearchIndex(s.db);
+  const tasks = new TaskStore(s.db, Date.now, index);
   const plans = new PlanStore(s.db);
   const notices = new NoticeStore(s.db);
   const memory = new Memory({
-    roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir,
-    decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes: new NoteStore(s.db), employeeNotes: new EmployeeNoteStore(s.db),
+    roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, index,
+    decisions: new DecisionStore(s.db, Date.now, index), playbook: new PlaybookStore(s.db, Date.now, index), notes: new NoteStore(s.db, Date.now, index), employeeNotes: new EmployeeNoteStore(s.db),
   });
   const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
   const c = company.hireCoordinator();
@@ -81,7 +83,7 @@ describe('Memory — playbook', () => {
 });
 
 describe('Memory — notes and search', () => {
-  it('anyone writes notes; search finds notes, decisions, playbook topics and finished work, newest first', () => {
+  it('anyone writes notes; search finds notes, decisions, playbook topics and finished work', () => {
     const t = make();
     t.memory.writeNote(t.ada.id, { title: 'Seslendirme', text: 'ElevenLabs Türkçe sesleri iyi.', tags: ['Video', 'ses'] });
     t.memory.recordDecision(t.c.id, { title: 'Ses aracı seçimi', chosen: 'ElevenLabs', reason: 'Türkçe' });
@@ -90,8 +92,8 @@ describe('Memory — notes and search', () => {
     t.company.start(task.id);
     t.company.finish(t.ada.id, task.id, { summary: 'ElevenLabs ile 3 ses denendi.', outputs: [], learned: '' });
     const hits = t.memory.search('elevenlabs');
+    // Best match first, no longer newest first (B11): the order is tested in search.test.ts.
     expect(hits.map((h) => h.kind).sort()).toEqual(['decision', 'note', 'playbook', 'task']);
-    expect([...hits].sort((a, b) => b.ts - a.ts)).toEqual(hits);
     expect(t.memory.notes('türkçe')[0]?.note.tags).toEqual(['video', 'ses']);
     expect(t.memory.notes()).toHaveLength(1);
     expect(() => t.memory.search(' "*" ')).toThrow(/en az bir kelime/);

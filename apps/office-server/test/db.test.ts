@@ -23,14 +23,17 @@ const V13_TABLES = [...V10_TABLES, 'company_profile'].sort();
 const V14_TABLES = [...V13_TABLES, 'onboarding', 'onboarding_rounds'].sort();
 const V15_TABLES = [...V14_TABLES, 'integrations'].sort();
 const V19_TABLES = [...V15_TABLES, 'blueprints', 'blueprint_steps'].sort();
+// B26 (feat/kpi-readings): 16 on its own branch, 19 on core 4, 20 on the main that has the management cycle's 16 (decision 18591573).
+const V20_TABLES = [...V19_TABLES, 'kpi_readings'].sort();
+const V21_TABLES = [...V20_TABLES, 'search_fts', 'search_fts_config', 'search_fts_data', 'search_fts_docsize', 'search_fts_idx', 'search_index'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(19);
-    expect(tables(db)).toEqual(V19_TABLES);
+    expect(migrateUp(db)).toBe(21);
+    expect(tables(db)).toEqual(V21_TABLES);
   });
 
   it('review (Kerem): the applied migrations keep the names the live database has (checkApplied compares them; renaming one stops the office)', () => {
@@ -64,14 +67,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(19);
-    expect(tables(db)).toEqual(V19_TABLES);
+    expect(migrateUp(db)).toBe(21);
+    expect(tables(db)).toEqual(V21_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(19);
+    expect(migrateUp(db)).toBe(21);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -419,7 +422,7 @@ describe('migrations', () => {
     const db = openDb(':memory:');
     migrateUp(db, upTo(18));
     db.prepare("INSERT INTO plans (id, title, goal, approach, people, steps, risks, status, version, proposed_by, created_at, updated_at) VALUES ('p1', 'Eski plan', 'g', 'a', '', '[]', '', 'approved', 1, 'c', 1, 1)").run();
-    expect(migrateUp(db)).toBe(19);
+    expect(migrateUp(db, upTo(19))).toBe(19);
     expect(tables(db)).toEqual(V19_TABLES);
     expect(columns(db, 'blueprints')).toEqual(['plan_id', 'json', 'profile_version', 'created_by', 'created_at', 'updated_at']);
     expect(columns(db, 'blueprint_steps')).toEqual(['plan_id', 'step', 'ref', 'outcome', 'at']);
@@ -430,6 +433,51 @@ describe('migrations', () => {
     expect(migrateDown(db, 18)).toBe(18);
     expect(tables(db)).toEqual(V15_TABLES);
     expect(db.prepare('SELECT title FROM plans').get()).toMatchObject({ title: 'Eski plan' });
-    expect(migrateUp(db)).toBe(19);
+    expect(migrateUp(db, upTo(19))).toBe(19);
+  });
+
+  it('v20 adds the KPI readings, empty; v20 down restores v19 exactly and keeps the goals and their KPIs', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(19));
+    db.prepare(`INSERT INTO goals (id, title, why, done, kpis, status, created_by, created_at) VALUES ('g1', 'h', 'n', '["d"]', '[{"name":"k"}]', 'active', 'c', 1)`).run();
+    migrateUp(db, upTo(20));
+    expect(appliedVersion(db)).toBe(20);
+    expect(tables(db)).toEqual(V20_TABLES);
+    expect(columns(db, 'kpi_readings')).toEqual(['id', 'goal_id', 'kpi', 'value', 'unit', 'target', 'direction', 'source', 'period_start', 'recorded_at', 'recorded_by', 'note']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM kpi_readings').get()).toMatchObject({ n: 0 });
+    // No value is a reading too: the office found nothing to measure in the window.
+    db.prepare("INSERT INTO kpi_readings (goal_id, kpi, value, unit, target, direction, source, recorded_at, recorded_by) VALUES ('g1', 'k', NULL, '%', 70, 'atLeast', 'office', 2, 'office')").run();
+    expect(migrateDown(db, 19)).toBe(19);
+    expect(tables(db)).toEqual(V19_TABLES);
+    expect({ ...(db.prepare('SELECT title, kpis FROM goals').get() as object) }).toEqual({ title: 'h', kpis: '[{"name":"k"}]' });
+    expect(migrateUp(db, upTo(20))).toBe(20);
+  });
+
+  it('v21 adds the search index beside the tables it reads, empty (the office fills it on start); its triggers keep the full-text table in step; v21 down drops only it', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(20));
+    db.prepare("INSERT INTO notes (ts, by_id, title, text, tags, source, ft_title, ft_text, ft_tags) VALUES (1, 'a', 'Not', 'kota', '[]', NULL, 'not', 'kota', '')").run();
+    db.prepare("INSERT INTO decisions (id, ts, by_id, title, chosen, reason, alternatives) VALUES ('d1', 1, 'c', 'Karar', 'kota', 'r', '[]')").run();
+    db.prepare("INSERT INTO playbook (topic, version, text, by_id, reason, ts) VALUES ('Test', 1, 'kota', 'c', '', 1)").run();
+    db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p1', 1, 'identity', '{}', 0, 'c', 1)").run();
+    const sources = () => ['notes', 'decisions', 'playbook', 'company_profile'].map((x) => (db.prepare(`SELECT COUNT(*) AS n FROM ${x}`).get() as { n: number }).n);
+    expect(migrateUp(db)).toBe(21);
+    expect(tables(db)).toEqual(V21_TABLES);
+    expect(columns(db, 'search_index')).toEqual(['id', 'kind', 'ref', 'title', 'body', 'tags', 'ft_title', 'ft_body', 'ft_tags', 'ts']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM search_index').get()).toMatchObject({ n: 0 });
+    expect(sources()).toEqual([1, 1, 1, 1]);
+    const found = (word: string) => (db.prepare('SELECT rowid FROM search_fts WHERE search_fts MATCH ?').all(word) as unknown[]).length;
+    const add = db.prepare("INSERT INTO search_index (kind, ref, title, body, tags, ft_title, ft_body, ft_tags, ts) VALUES ('note', '1', 'Not', 'kota', '', 'not', 'kota', '', 1)");
+    add.run();
+    expect(found('kota')).toBe(1);
+    expect(() => add.run()).toThrow(/UNIQUE/);
+    db.prepare("UPDATE search_index SET body = 'arama', ft_body = 'arama' WHERE ref = '1'").run();
+    expect([found('kota'), found('arama')]).toEqual([0, 1]);
+    db.prepare("DELETE FROM search_index WHERE ref = '1'").run();
+    expect(found('arama')).toBe(0);
+    expect(migrateDown(db, 20)).toBe(20);
+    expect(tables(db)).toEqual(V20_TABLES);
+    expect(sources()).toEqual([1, 1, 1, 1]);
+    expect(migrateUp(db)).toBe(21);
   });
 });

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Decision, EmployeeNote, Note, PlaybookEntry } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
+import type { SearchIndex } from './search.ts';
 import { fold, snippetOf, words } from './text.ts';
 
 /**
@@ -42,10 +43,13 @@ export type NewDecision = Omit<Decision, 'id' | 'ts'>;
 export class DecisionStore {
   readonly #db: Db;
   readonly #now: () => number;
+  readonly #index: SearchIndex | undefined;
 
-  constructor(db: Db, now: () => number = Date.now) {
+  /** `index`: the memory search's index, written with every decision (B11); none in tests that do not search. */
+  constructor(db: Db, now: () => number = Date.now, index?: SearchIndex) {
     this.#db = db;
     this.#now = now;
+    this.#index = index;
   }
 
   create(d: NewDecision): Decision {
@@ -53,6 +57,7 @@ export class DecisionStore {
     this.#db
       .prepare('INSERT INTO decisions (id, ts, by_id, title, chosen, reason, alternatives, plan_id, reverts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(decision.id, decision.ts, decision.by, decision.title, decision.chosen, decision.reason, JSON.stringify(decision.alternatives), decision.planId, decision.reverts);
+    this.#index?.decision(decision);
     return decision;
   }
 
@@ -92,10 +97,13 @@ const entryFromRow = (r: PlaybookRow): PlaybookEntry => ({ topic: r.topic, versi
 export class PlaybookStore {
   readonly #db: Db;
   readonly #now: () => number;
+  readonly #index: SearchIndex | undefined;
 
-  constructor(db: Db, now: () => number = Date.now) {
+  /** `index`: the memory search's index, given each topic's newest version (B11); none in tests that do not search. */
+  constructor(db: Db, now: () => number = Date.now, index?: SearchIndex) {
     this.#db = db;
     this.#now = now;
+    this.#index = index;
   }
 
   write(e: { topic: string; text: string; by: string; reason: string }): PlaybookEntry {
@@ -104,6 +112,7 @@ export class PlaybookStore {
     this.#db
       .prepare('INSERT INTO playbook (topic, version, text, by_id, reason, ts) VALUES (?, ?, ?, ?, ?, ?)')
       .run(entry.topic, entry.version, entry.text, entry.by, entry.reason, entry.ts);
+    this.#index?.playbook(entry);
     return entry;
   }
 
@@ -144,10 +153,13 @@ const noteFromRow = (r: NoteRow): Note => ({ id: r.id, ts: r.ts, by: r.by_id, ti
 export class NoteStore {
   readonly #db: Db;
   readonly #now: () => number;
+  readonly #index: SearchIndex | undefined;
 
-  constructor(db: Db, now: () => number = Date.now) {
+  /** `index`: the memory search's index, written with every note (B11); none in tests that do not search. */
+  constructor(db: Db, now: () => number = Date.now, index?: SearchIndex) {
     this.#db = db;
     this.#now = now;
+    this.#index = index;
   }
 
   create(n: Omit<Note, 'id' | 'ts'>): Note {
@@ -155,7 +167,9 @@ export class NoteStore {
     const r = this.#db
       .prepare('INSERT INTO notes (ts, by_id, title, text, tags, source, ft_title, ft_text, ft_tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(ts, n.by, n.title, n.text, JSON.stringify(n.tags), n.source, fold(n.title), fold(n.text), fold(n.tags.join(' ')));
-    return { ...n, id: Number(r.lastInsertRowid), ts };
+    const note = { ...n, id: Number(r.lastInsertRowid), ts };
+    this.#index?.note(note);
+    return note;
   }
 
   list(limit = 100): Note[] {

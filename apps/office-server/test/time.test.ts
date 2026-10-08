@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { cronLabel, formatStamp, formatWhen, minIntervalMinutes, nextCron, parseCron, parseUntil } from '../src/company/time.ts';
+import { cronLabel, formatStamp, formatWhen, minIntervalMinutes, nextCron, parseCron, parseSince, parseUntil } from '../src/company/time.ts';
 
 const T0 = new Date(2026, 9, 7, 14, 10).getTime(); // 7 Eki 2026 14:10 local
 const PARK = { maxDays: 30, label: 'Dönüş saati' };
+
+describe('parseSince', () => {
+  it('reads N days back from now, or a local date from its midnight (memorySearch since, B11)', () => {
+    expect(parseSince('7d', T0)).toBe(T0 - 7 * 86_400_000);
+    expect(parseSince(' +1D ', T0)).toBe(T0 - 86_400_000);
+    expect(parseSince('2026-10-01', T0)).toBe(new Date(2026, 9, 1).getTime());
+    for (const bad of ['dün', '7', '0d', '-3d', '2026-13-01', '2026-02-30', '2026-10-01T10:00']) expect(() => parseSince(bad, T0), bad).toThrow(/since/);
+  });
+});
 
 describe('parseUntil', () => {
   it('reads relative minutes, hours and days from now', () => {

@@ -505,4 +505,71 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE blueprint_steps;
       DROP TABLE blueprints;`,
   },
+  {
+    // B26 (feat/kpi-readings): 16 on its own branch, 19 on core 4 after core-3's 16–18 (coordinator's decision d63e5d27;
+    // design note 2026-10-08-kpi-readings-design §7), 20 here after the management cycle's 16 (decision 18591573, note #99).
+    version: 20,
+    name: 'KPI readings',
+    // Each reading keeps the target, direction and unit it was measured against; a NULL value: no data in the window.
+    up: `
+    CREATE TABLE IF NOT EXISTS kpi_readings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      goal_id TEXT NOT NULL,
+      kpi TEXT NOT NULL,
+      value REAL,
+      unit TEXT NOT NULL,
+      target REAL NOT NULL,
+      direction TEXT NOT NULL,
+      source TEXT NOT NULL,
+      period_start INTEGER,
+      recorded_at INTEGER NOT NULL,
+      recorded_by TEXT NOT NULL,
+      note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS kpi_readings_goal ON kpi_readings (goal_id, recorded_at);`,
+    down: `DROP TABLE IF EXISTS kpi_readings;`,
+  },
+  {
+    // B11 (feat/search): after core-3's and B26's (company decision d63e5d27); 20 on core 4, 21 here (decision 18591573).
+    version: 21,
+    name: 'search: one index over notes, decisions, the playbook, finished work and the profile',
+    // Spec 2026-10-08-memory-search-design §3.2. The stores write it (the folded ft_* text comes from JS, which SQL
+    // cannot fold the Turkish way); the office fills it from the source tables on start (SearchIndex.rebuildIfStale),
+    // so it starts empty.
+    up: `
+      CREATE TABLE IF NOT EXISTS search_index (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        ref TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '',
+        ft_title TEXT NOT NULL,
+        ft_body TEXT NOT NULL,
+        ft_tags TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        UNIQUE (kind, ref)
+      );
+      CREATE INDEX IF NOT EXISTS search_index_kind_ts ON search_index (kind, ts);
+      CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+        ft_title, ft_body, ft_tags, content = 'search_index', content_rowid = 'id', tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER IF NOT EXISTS search_index_ai AFTER INSERT ON search_index BEGIN
+        INSERT INTO search_fts (rowid, ft_title, ft_body, ft_tags) VALUES (new.id, new.ft_title, new.ft_body, new.ft_tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS search_index_ad AFTER DELETE ON search_index BEGIN
+        INSERT INTO search_fts (search_fts, rowid, ft_title, ft_body, ft_tags) VALUES ('delete', old.id, old.ft_title, old.ft_body, old.ft_tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS search_index_au AFTER UPDATE ON search_index BEGIN
+        INSERT INTO search_fts (search_fts, rowid, ft_title, ft_body, ft_tags) VALUES ('delete', old.id, old.ft_title, old.ft_body, old.ft_tags);
+        INSERT INTO search_fts (rowid, ft_title, ft_body, ft_tags) VALUES (new.id, new.ft_title, new.ft_body, new.ft_tags);
+      END;`,
+    down: `
+      DROP TRIGGER IF EXISTS search_index_au;
+      DROP TRIGGER IF EXISTS search_index_ad;
+      DROP TRIGGER IF EXISTS search_index_ai;
+      DROP TABLE IF EXISTS search_fts;
+      DROP INDEX IF EXISTS search_index_kind_ts;
+      DROP TABLE IF EXISTS search_index;`,
+  },
 ];

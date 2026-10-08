@@ -368,31 +368,40 @@ function labelOf(step: string): string {
 }
 
 /**
+ * A connector rule's server prefix and, for a rule on one tool, that tool. `mcp__server` and `mcp__server__*` close the
+ * whole server — the CLI applies the wildcard as it does the bare name (Kerem's K3, claude 2.1.293; task 8d67d8ba).
+ * Null: not a connector rule.
+ */
+function ruleParts(rule: string): { prefix: string; tool: string | null } | null {
+  const m = /^mcp__([A-Za-z0-9_-]+?)(?:__(.+))?$/.exec(rule);
+  if (!m) return null;
+  return { prefix: `mcp__${m[1]}__`, tool: m[2] === undefined || m[2] === '*' ? null : rule };
+}
+
+/**
  * A connector rule names something the office has seen: a server some session reported or the vocabulary names, and
  * — for a tool rule — a tool some current desk's session listed or the vocabulary names (review round 1).
  */
 function knownRule(registry: Integration[], rule: string): boolean {
-  const m = /^mcp__([A-Za-z0-9_-]+?)(?:__(.+))?$/.exec(rule);
-  if (!m) return true;
-  const prefix = `mcp__${m[1]}__`;
+  const parts = ruleParts(rule);
+  if (!parts) return true;
   const vocabulary = capabilityVocabulary().capabilities.flatMap((c) => c.tools);
-  if (m[2] === undefined) return registry.some((i) => mcpToolPrefix(i.name) === prefix) || vocabulary.some((t) => t.startsWith(prefix));
-  return vocabulary.includes(rule) || registry.some((i) => i.desks.some((d) => d.toolNames?.includes(rule)));
+  if (parts.tool === null) return registry.some((i) => mcpToolPrefix(i.name) === parts.prefix) || vocabulary.some((t) => t.startsWith(parts.prefix));
+  return vocabulary.includes(parts.tool) || registry.some((i) => i.desks.some((d) => d.toolNames?.includes(parts.tool!)));
 }
 
 /** One deny rule on one desk, from its latest session as the registry reads it (spec §4). */
 function closedCheck(registry: Integration[], employeeId: string, rule: string): ClosedModeCheck {
-  const m = /^mcp__([A-Za-z0-9_-]+?)(?:__(.+))?$/.exec(rule);
-  if (!m) return 'unverifiable';
+  const parts = ruleParts(rule);
+  if (!parts) return 'unverifiable';
   if (!knownRule(registry, rule)) return 'unknown';
   if (!registry.some((i) => i.desks.some((d) => d.employeeId === employeeId))) return 'no_session';
-  const prefix = `mcp__${m[1]}__`;
-  const desk = registry.find((i) => mcpToolPrefix(i.name) === prefix)?.desks.find((d) => d.employeeId === employeeId);
+  const desk = registry.find((i) => mcpToolPrefix(i.name) === parts.prefix)?.desks.find((d) => d.employeeId === employeeId);
   if (!desk) return 'not_connected';
   if (desk.status === 'denied') return 'verified';
   if (desk.status !== 'connected') return 'not_connected';
-  if (m[2] === undefined) return 'open';
-  return desk.toolNames !== null && !desk.toolNames.includes(rule) ? 'verified' : 'open';
+  if (parts.tool === null) return 'open';
+  return desk.toolNames !== null && !desk.toolNames.includes(parts.tool) ? 'verified' : 'open';
 }
 
 /** The blueprint as given, checked (spec §2): every refusal says what is wrong and writes nothing. */

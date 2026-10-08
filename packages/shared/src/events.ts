@@ -84,6 +84,8 @@ export type OfficeEvent =
   | { type: 'decision.recorded'; decision: Decision }
   | { type: 'playbook.updated'; topic: string; version: number; reason: string }
   | { type: 'note.written'; id: number; title: string; tags: string[] }
+  /** A memory search (B11): `mode` and = every word matched, or = some records have only some words, none = nothing found. */
+  | { type: 'memory.searched'; query: string; hits: number; mode: 'and' | 'or' | 'none'; ms: number }
   | { type: 'spend.recorded'; spend: Spend }
   | { type: 'budget.changed'; budget: BudgetSummary }
   | { type: 'model.changed'; model: ModelAlias }

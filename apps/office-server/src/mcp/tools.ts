@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
@@ -11,9 +11,11 @@ import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
 import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
 import { MAX_STREAMS } from '../company/streams.ts';
+import { memoryKinds, queryWords } from '../company/search.ts';
 import type { TaskStore } from '../company/store.ts';
 import { formatPerformance, type PerformanceReport } from '../performance.ts';
-import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
+import { cronLabel, formatWhen, parseCron, parseSince } from '../company/time.ts';
+import type { KpiReadings } from '../company/kpi-readings.ts';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
@@ -21,7 +23,9 @@ import type { McpTool } from './protocol.ts';
 const EVERYONE: EmployeeKind[] = ['member', 'lead', 'coordinator'];
 const COORDINATOR: EmployeeKind[] = ['coordinator'];
 const LEADS: EmployeeKind[] = ['lead', 'coordinator'];
-const HIT_KIND: Record<MemoryHit['kind'], string> = { note: 'not', decision: 'karar', playbook: 'el kitabı', task: 'teslim' };
+const HIT_KIND: Record<MemoryHit['kind'], string> = { note: 'not', decision: 'karar', playbook: 'el kitabı', task: 'teslim', profile: 'profil' };
+/** Where to read the whole record: a playbook topic and a profile section have their own tools; the rest an id. */
+const hitRef = (h: MemoryHit) => (h.kind === 'playbook' ? `playbookRead konu: ${h.id}` : h.kind === 'profile' ? `profileRead bölüm: ${h.id}` : h.id);
 const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 
 type Args = Record<string, unknown>;
@@ -142,6 +146,8 @@ export function officeTools(o: {
   cycle?: Pick<ManagementCycle, 'acting' | 'close'>;
   /** The blueprints (B5: blueprintPropose, blueprintApply, blueprintRead); absent in tests that do not care. */
   blueprints?: Blueprints;
+  /** KPI measurement (B26: kpiRecord, goalsRead's last readings); absent in tests that do not care. */
+  kpis?: KpiReadings;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -411,13 +417,25 @@ export function officeTools(o: {
     },
     {
       name: 'memorySearch',
-      description: 'Search the company memory (knowledge notes, decisions, playbook topics and finished work) for every word you give. Use it before starting work and whenever you wonder whether the company already knows something.',
-      inputSchema: object({ query: s('Words to look for.'), limit: integer('How many results (default 10).', 1, 30) }, ['query']),
+      description:
+        'Search the company memory (knowledge notes, decisions, playbook topics, finished work and the company profile). Records with every word you give come first, best match first; if there are too few, records with some of the words follow, marked “kısmi n/m”. Use it before starting work and whenever you wonder whether the company already knows something.',
+      inputSchema: object(
+        {
+          query: s('Words to look for.'),
+          limit: integer('How many results (default 10).', 1, 30),
+          kinds: { type: 'array', items: { type: 'string', enum: [...MEMORY_KINDS] }, description: 'Only these kinds (task = finished work); none = all.' },
+          since: s('Only records from then on: days back (7d) or a local date (2026-10-01).'),
+        },
+        ['query'],
+      ),
       kinds: EVERYONE,
-      run: (_ctx, args) => {
-        const hits = memory.search(str(args, 'query'), num(args, 'limit') ?? 10);
+      run: ({ employee }, args) => {
+        const query = str(args, 'query');
+        const since = optStr(args, 'since');
+        const hits = memory.search(query, { limit: num(args, 'limit') ?? 10, kinds: memoryKinds(args.kinds), since: since === undefined ? undefined : parseSince(since, Date.now()), by: employee.id });
         if (hits.length === 0) return 'Şirket hafızasında bununla ilgili bir şey yok.';
-        return hits.map((h) => `• [${HIT_KIND[h.kind]}] ${h.title} (${day(h.ts)}, ${h.kind === 'playbook' ? `playbookRead konu: ${h.id}` : h.id}): ${h.snippet}`).join('\n');
+        const total = queryWords(query).length;
+        return hits.map((h) => `• [${HIT_KIND[h.kind]}${h.partial ? `, kısmi ${h.matched}/${total}` : ''}] ${h.title} (${day(h.ts)}, ${hitRef(h)}): ${h.snippet}`).join('\n');
       },
     },
     {
@@ -701,8 +719,9 @@ export function officeTools(o: {
       inputSchema: object({ planId: s('The plan id.'), wentWell: s('What went well.'), stuck: s('What got stuck or went wrong.'), change: s('What to do differently next time.'), methodSuggestion: s('A change to the work-type method that would help any company (optional).') }, ['planId', 'wentWell', 'stuck', 'change']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const { suggestion } = company.retro(employee.id, str(args, 'planId'), { wentWell: str(args, 'wentWell'), stuck: str(args, 'stuck'), change: str(args, 'change'), methodSuggestion: optStr(args, 'methodSuggestion') });
-        return `Değerlendirme şirket notlarına yazıldı${suggestion ? ' (yöntem önerisi ayrıca)' : ''}. Şirkete özgü dersleri playbookUpdate ile el kitabına işle, sonra reportToOwner ile sahibine kısaca raporla.`;
+        const { suggestion, kpiTable } = company.retro(employee.id, str(args, 'planId'), { wentWell: str(args, 'wentWell'), stuck: str(args, 'stuck'), change: str(args, 'change'), methodSuggestion: optStr(args, 'methodSuggestion') });
+        const done = `Değerlendirme şirket notlarına yazıldı${suggestion ? ' (yöntem önerisi ayrıca)' : ''}. Şirkete özgü dersleri playbookUpdate ile el kitabına işle, sonra reportToOwner ile sahibine kısaca raporla.`;
+        return kpiTable ? `${done}\n\nKPI'lar:\n${kpiTable}` : done;
       },
     },
     {
@@ -835,9 +854,22 @@ export function officeTools(o: {
           .map((g) => {
             const own = plansOf(g.id).map((p) => `   - ${p.title} [${p.status}]`).join('\n');
             const kpis = g.kpis.length ? `\n   KPI: ${g.kpis.map(kpiText).join('; ')}` : '';
-            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${kpis}${own ? `\n${own}` : ''}`;
+        const read = g.kpis.length ? o.kpis?.lastReadings(g) : '';
+        const readings = read ? `\n   son okuma: ${read}` : '';
+            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${kpis}${readings}${own ? `\n${own}` : ''}`;
           })
           .join('\n');
+      },
+    },
+    {
+      name: 'kpiRecord',
+      description:
+        "Write a reading of a goal's KPI that is read by hand or from a connection (coordinator), e.g. when the office says one is due: the goal, the KPI's name and the number you read (a % is 0–100), with a short note on where it came from. KPIs from the office's own metrics are read by the office; do not write them.",
+      inputSchema: object({ goalId: s('The goal id.'), kpi: s("The KPI's name, as goalsRead shows it."), value: { type: 'number', description: "The value read, in the KPI's unit (may be negative unless it is a %)." }, note: s('Where the number came from (optional).') }, ['goalId', 'kpi', 'value']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.kpis) throw new ConflictError('Bu ofiste KPI ölçümü yok.');
+        return o.kpis.record(employee.id, { goalId: str(args, 'goalId'), kpi: str(args, 'kpi'), value: args.value, note: optStr(args, 'note') }).text;
       },
     },
     {

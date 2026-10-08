@@ -1,13 +1,16 @@
 import type { AddressInfo } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
+import { BlueprintStore } from '../src/company/blueprint-store.ts';
+import { Blueprints } from '../src/company/blueprint.ts';
+import { unclassifiedTools } from '../src/company/capabilities.ts';
 import { Company } from '../src/company/company.ts';
 import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { OnboardingStore } from '../src/company/onboarding-store.ts';
 import { ProfileStore } from '../src/company/profile-store.ts';
-import { SearchIndex } from '../src/company/search.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from '../src/company/store.ts';
 import { Engine } from '../src/engine.ts';
 import { TokenRegistry } from '../src/mcp/tokens.ts';
@@ -17,16 +20,20 @@ import { setup, until } from './helpers.ts';
 import { LOCKED_ARGS } from './real-session.ts';
 
 const enabled = process.env.OFFICE_SMOKE === '1';
+const STUB = fileURLToPath(new URL('./fixtures/mcp-stub.mjs', import.meta.url));
 /** The only tools the session may use: the office's own, and Claude Code's loader for deferred tool schemas. */
 const allowed = (name: string) => name.startsWith('mcp__office__') || name === 'ToolSearch';
-// Closed before anything runs (review, Kerem round 1): only the office's own server, no outward built-in (real-session.ts).
+/** Besides the office's server, one stub of the test's own (one harmless tool): no connector of the owner's. */
+const STUB_CONFIG = JSON.stringify({ mcpServers: { probe_open: { command: process.execPath, args: [STUB, 'probe_open'] } } });
 
-describe.skipIf(!enabled)('core 2 with the real claude CLI (coordinator on haiku, a throwaway data dir, only the office’s server)', () => {
-  it('the coordinator calls onboardingStart, onboardingRead and integrationsList once — no connector of the owner’s is even in the session', { timeout: 600_000 }, async () => {
+describe.skipIf(!enabled)('core 3 with the real claude CLI (coordinator on haiku, a throwaway data dir, only the office’s server and a stub)', () => {
+  it('the coordinator calls roleTemplates, capabilitiesRead and blueprintRead once — B6, B7 and B5 read in a real session, nothing written outside', { timeout: 600_000 }, async () => {
     const s = setup();
     const tokens = new TokenRegistry();
     let url = '';
-    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['claude', ...LOCKED_ARGS], mcp: { url: () => url, tokens } });
+    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['claude', ...LOCKED_ARGS, '--mcp-config', STUB_CONFIG], mcp: { url: () => url, tokens } });
+    // B11: the memory search's index, given to every store that writes what it holds (as main.ts).
+    const { SearchIndex } = await import('../src/company/search.ts');
     const index = new SearchIndex(s.db);
     const tasks = new TaskStore(s.db, Date.now, index);
     const plans = new PlanStore(s.db);
@@ -48,14 +55,18 @@ describe.skipIf(!enabled)('core 2 with the real claude CLI (coordinator on haiku
       profile: new ProfileStore(s.db, Date.now, index), onboarding: new OnboardingStore(s.db),
     });
     const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
+    const blueprints = new Blueprints({ company, roster: s.roster, tasks, plans, schedules, memory, store: new BlueprintStore(s.db), integrations, constitution: () => budget.constitution() });
     const agenda = new Agenda({ roster: s.roster, tasks, schedules, company, budget });
     const api = createApi(
-      { engine, roster: s.roster, events: s.events, quota, mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, integrations }) }, company: { service: company, tasks, plans, memory, budget, proposals, agenda, integrations } },
+      {
+        engine, roster: s.roster, events: s.events, quota,
+        mcp: { tokens, tools: officeTools({ company, roster: s.roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, integrations, blueprints }) },
+        company: { service: company, tasks, plans, memory, budget, proposals, agenda, integrations, blueprints },
+      },
       { allowedOrigins: [] },
     );
     await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
     url = `http://127.0.0.1:${(api.server.address() as AddressInfo).port}/mcp`;
-    // The database lives in memory: what happened is printed before it goes, passed or not.
     const short = (text: string) => text.replace(/\s+/g, ' ').slice(0, 300);
     const journal = () =>
       s.events
@@ -72,30 +83,44 @@ describe.skipIf(!enabled)('core 2 with the real claude CLI (coordinator on haiku
         .join('\n');
     try {
       const coordinator = company.hireCoordinator('haiku');
+      // A blueprint to read (B5): the profile first, then a one-role setup; nothing is installed, no one is hired.
+      for (const [section, fields] of [['identity', { name: 'Fırın', sector: 'gıda' }], ['offer', { products: ['ekşi maya ekmek'] }], ['customers', { segments: ['mahalle'], channels: ['dükkan'] }], ['goals', { goals: ['haftalık satış'] }], ['success', { done: ['düzenli müşteri'] }], ['tools', { email: ['yok'] }], ['constraints', { budget: '0', other: ['yayın kararı sahibinde'] }]] as const) {
+        company.profileUpdate(coordinator.id, { section, fields, assumed: false });
+      }
+      const { plan } = blueprints.propose(coordinator.id, {
+        title: 'Kurulum: Fırın', summary: 'Mahallede ekşi maya ekmek ve kurabiye satan küçük bir fırın.',
+        roles: [{ key: 'satis', name: 'Ada', template: 'satis-asistani' }], playbook: [], goals: [], routines: [], tasks: [],
+        closedMode: { deny: ['mcp__probe_open'] },
+      });
       engine.send(
         coordinator.id,
-        'Bu bir araç denemesi. Şu üç ofis aracını sırayla, her birini yalnız bir kez çağır: (1) onboardingStart, description: "Mahallede ekşi maya ekmek ve kurabiye satan küçük bir fırınız." (2) onboardingRead (3) integrationsList. Başka hiçbir araç çağırma; soruları sahibine sorma. Bitince bana tek cümleyle ne gördüğünü yaz.',
+        `Bu bir araç denemesi. Şu üç ofis aracını sırayla, her birini yalnız bir kez çağır: (1) roleTemplates (argümansız) (2) capabilitiesRead (argümansız) (3) blueprintRead, planId: "${plan.id}". Başka hiçbir araç çağırma; hiçbir şey yazma ya da gönderme. Bitince bana tek cümleyle ne gördüğünü yaz.`,
         'owner',
       );
       await until(() => s.events.list({ limit: 100_000 }).some((e) => e.employeeId === coordinator.id && e.event.type === 'turn.finished'), 540_000);
-      // The session's own report, written before any tool ran: the office's server only, with its tools in the session.
-      const sessions = s.events.list({ limit: 100_000 }).flatMap((e) => (e.event.type === 'session.started' ? [e.event.mcp] : []));
+      const events = s.events.list({ limit: 100_000 });
+      const sessions = events.flatMap((e) => (e.event.type === 'session.started' ? [e.event.mcp] : []));
+      const tools = events.flatMap((e) => (e.event.type === 'tool.started' ? [e.event.name] : []));
+      const cost = events.reduce((n, e) => n + (e.event.type === 'turn.finished' ? e.event.costUsd : 0), 0);
+      console.log(`K3 KAYDI\n${journal()}\nçağrılan araçlar: ${tools.join(', ')}\ntoplam maliyet (CLI'nin bildirdiği): $${cost.toFixed(4)}\nK3 KAYDI SONU`);
+      // The session's own report: the office's server and the stub, nothing of the owner's.
       expect(sessions.length).toBeGreaterThan(0);
       for (const mcp of sessions) {
-        expect(mcp.map((m) => m.name)).toEqual(['office']);
-        expect(mcp[0]!.tools).toBeGreaterThan(0);
+        expect(mcp.map((m) => m.name).sort()).toEqual(['office', 'probe_open']);
+        expect(mcp.find((m) => m.name === 'office')!.tools).toBeGreaterThan(0);
       }
-      const tools = s.events.list({ limit: 100_000 }).flatMap((e) => (e.event.type === 'tool.started' ? [e.event.name] : []));
-      const cost = s.events.list({ limit: 100_000 }).reduce((n, e) => n + (e.event.type === 'turn.finished' ? e.event.costUsd : 0), 0);
-      console.log(`K3 KAYDI\n${journal()}\nçağrılan araçlar: ${tools.join(', ')}\ntoplam maliyet (CLI'nin bildirdiği): $${cost.toFixed(4)}\nK3 KAYDI SONU`);
       expect(tools.filter((n) => !allowed(n))).toEqual([]);
-      for (const name of ['onboardingStart', 'onboardingRead', 'integrationsList']) expect(tools, name).toContain(`mcp__office__${name}`);
-      expect(company.onboarding().onboarding).toMatchObject({ status: 'active', description: 'Mahallede ekşi maya ekmek ve kurabiye satan küçük bir fırınız.' });
-      expect(company.profile().sections.identity).toMatchObject({ assumedFields: [] });
-      // B3 read the session this very coordinator opened: every connector it reported (the office's) is in the registry, open.
-      const reported = s.events.list({ limit: 100_000 }).flatMap((e) => (e.event.type === 'session.started' ? e.event.mcp.map((m) => m.name) : []));
-      expect(integrations.list().map((i) => i.name).sort()).toEqual([...new Set(reported)].sort());
-      expect(integrations.get('office').desks).toEqual([expect.objectContaining({ status: 'connected', open: true, closedBy: null })]);
+      for (const name of ['roleTemplates', 'capabilitiesRead', 'blueprintRead']) expect(tools, name).toContain(`mcp__office__${name}`);
+      // Each of the three answered without error.
+      const finished = new Map(events.flatMap((e) => (e.event.type === 'tool.finished' ? [[e.event.toolUseId, e.event] as const] : [])));
+      for (const e of events) {
+        if (e.event.type === 'tool.started' && e.event.name.startsWith('mcp__office__')) expect(finished.get(e.event.toolUseId)?.isError, e.event.name).toBe(false);
+      }
+      // B7 read the real session: the stub's tool is unclassified; B5's blueprint was read, not installed: nobody was hired.
+      expect(unclassifiedTools(integrations.list())).toEqual([expect.objectContaining({ server: 'probe_open', unclassified: ['mcp__probe_open__ping'] })]);
+      // (The default constitution is full autonomy: the plan started on proposal. The read installs nothing.)
+      expect(blueprints.read(plan.id).steps.map((x) => [x.step, x.state])).toEqual([['role:satis', 'pending']]);
+      expect(s.roster.list().map((e) => e.name)).toEqual(['Koordinatör']);
     } catch (err) {
       console.log(`K3 KAYDI (hata)\n${journal()}\nK3 KAYDI SONU`);
       throw err;
