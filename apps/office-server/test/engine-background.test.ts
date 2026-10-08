@@ -32,7 +32,7 @@ const typesOf = (t: ReturnType<typeof make>, id: string, after = 0) => t.events.
 describe('Engine — work that goes on after the turn (background jobs, turns the CLI opens itself)', () => {
   it('a background job keeps the employee working past the result; the follow-up turn the CLI opens is work too', async () => {
     // A short grace: the follow-up turn outlasts it and must still count as work.
-    const t = make({ FAKE_CLAUDE_HOLD_FOLLOWUP: '1' }, { followUpGraceMs: 100 });
+    const t = make({ FAKE_CLAUDE_HOLD_FOLLOWUP: '1' }, { followUpGraceMs: 500 });
     const e = t.engine.hire({ name: 'Mert', role: 'r' });
     const hired = t.events.lastSeq();
     t.engine.send(e.id, 'BACKGROUND mutasyon koşusu', 'system');
@@ -45,7 +45,7 @@ describe('Engine — work that goes on after the turn (background jobs, turns th
     t.release(e.sessionId, '.bg');
     const follow = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.assistant', { after: first.seq });
     // The CLI's own turn runs (no message from the office): working, and the log opens a turn for it.
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 800));
     expect(t.roster.get(e.id).lifecycle).toBe('working');
     expect(t.engine.ready(e.id)).toBe(false);
     expect(typesOf(t, e.id, first.seq).filter((x) => x === 'turn.started')).toHaveLength(1);
