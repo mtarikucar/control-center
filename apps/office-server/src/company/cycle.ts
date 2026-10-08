@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, OWNER, type BudgetSummary, type Constitution, type CycleTrigger, type CycleTriggerKind, type OfficeEvent, type StoredEvent, type Task, type TaskStatus } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, normalizeConstitution, type BudgetSummary, type Constitution, type CycleTrigger, type CycleTriggerKind, type ModelAlias, type OfficeEvent, type StoredEvent, type Task, type TaskStatus } from '@cc/shared';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -56,6 +56,8 @@ interface OpenCycle {
   costUsd: number | null;
   /** cycleClose's words, kept until the turn ends and the cycle is recorded (null: not closed yet). */
   close: CycleClose | null;
+  /** The model the cycle runs on (§3.5): the engine's word at delivery, the old one if the switch failed (absent: kept by an older office). */
+  model?: ModelAlias | null;
 }
 
 /** What a cycle opens with: the board, and why it opened. */
@@ -139,7 +141,7 @@ export class ManagementCycle {
     this.#quietAt = now;
     this.#holders.clear();
     for (const t of this.#d.tasks.list({ statuses: OPEN_STATUSES, limit: 100_000 })) this.#holders.set(t.id, { assignee: t.assignee, status: t.status });
-    this.#constitution = this.#d.budget?.constitution() ?? DEFAULT_CONSTITUTION;
+    this.#constitution = normalizeConstitution(this.#d.budget?.constitution());
     this.#reserve = this.#d.budget?.reserveActive() ?? false;
     // A cycle the stopped office left open: its turn ended with that run.
     if (this.#open()) this.ended();
@@ -208,12 +210,15 @@ export class ManagementCycle {
     return { at: now, since, triggers, unclosedWarning, text: board.text, kickoff: board.kickoff };
   }
 
-  /** The board went to the coordinator: the cycle is open and logged; its triggers are spent, later ones wait for the next. */
-  started(o: CycleOpening): void {
+  /**
+   * The board went to the coordinator, on `model` (the model the engine runs it on): the cycle is open and logged; its
+   * triggers are spent, later ones wait for the next.
+   */
+  started(o: CycleOpening, model: ModelAlias | null = null): void {
     this.#savePending(this.#pending().filter((t) => !o.triggers.some((x) => identical(x, t))));
     this.#d.state.set(KEY.lastStart, String(o.at));
     this.#d.state.set(KEY.unclosed, null);
-    this.#saveOpen({ startedAt: o.at, since: o.since, triggers: o.triggers, costUsd: null, close: null });
+    this.#saveOpen({ startedAt: o.at, since: o.since, triggers: o.triggers, costUsd: null, close: null, model });
     this.#d.events.append(this.#d.company.coordinator()?.id ?? null, { type: 'management.cycle.started', triggers: o.triggers, since: o.since, unclosedWarning: o.unclosedWarning });
   }
 
@@ -242,7 +247,7 @@ export class ManagementCycle {
     if (!open.close) this.#d.state.set(KEY.unclosed, 'true');
     this.#d.events.append(this.#d.company.coordinator()?.id ?? null, {
       type: 'management.cycle', closed: open.close !== null, startedAt: open.startedAt, triggers: open.triggers, ...(open.close ?? { changes: [], reasoning: '', next: null }), costUsd: open.costUsd,
-      model: null,
+      model: open.model ?? null,
     });
   }
 
@@ -278,8 +283,8 @@ export class ManagementCycle {
 
   #onEvent(e: StoredEvent): void {
     const ev = e.event;
-    // The cycle turn's steps: the coordinator's results and lifecycle while a cycle is open (and whatever follows a last result).
-    const step = ev.type === 'turn.finished' || ev.type === 'lifecycle.changed';
+    // The cycle turn's steps: the coordinator's results, lifecycle and failed model switches while a cycle is open (and whatever follows a last result).
+    const step = ev.type === 'turn.finished' || ev.type === 'lifecycle.changed' || ev.type === 'model.switch.failed';
     if ((step || this.#resultIn) && e.employeeId !== null && (this.#resultIn || this.#open())) {
       if (e.employeeId === this.#d.company.coordinator()?.id) this.#turnStep(ev);
     }
@@ -296,13 +301,19 @@ export class ManagementCycle {
   /**
    * One step of the cycle's turn. It ends only as the engine ends a turn — its last result (nothing queued), then idle —
    * or in a lifecycle it does not come back from. A crash (the session starts again, idle, and the work is sent again),
-   * a quota pause (limited, then on) or a model retry (the turn runs again on the old model) go on: the cycle stays open.
+   * a quota pause (limited, then on) or a model retry (the turn runs again on the old model) go on: the cycle stays open,
+   * and a failed switch is recorded as the model the turn goes on on.
    */
   #turnStep(ev: OfficeEvent): void {
     const resultIn = this.#resultIn;
     this.#resultIn = false;
     const open = this.#open();
     if (!open) return;
+    if (ev.type === 'model.switch.failed') {
+      const from = MODEL_ALIASES.find((m) => m === ev.from);
+      if (from) this.#saveOpen({ ...open, model: from });
+      return;
+    }
     if (ev.type === 'turn.finished') {
       this.#saveOpen({ ...open, costUsd: Math.round(((open.costUsd ?? 0) + ev.costUsd) * 1e6) / 1e6 });
       this.#resultIn = ev.queuedTurns === 0;
@@ -376,11 +387,12 @@ export class ManagementCycle {
     return `“${title}”: ${review.result?.review?.decision === 'changes' ? 'değişiklik istendi' : 'onaylandı'} (${this.#d.company.nameOf(review.assignee)})`;
   }
 
-  /** What changed in a budget announcement: the constitution, the reserve; null when only the money moved. */
+  /** What changed in a budget announcement: the constitution (read as today's), the reserve; null when only the money moved. */
   #constraintOf(b: BudgetSummary): string | null {
-    const rules = constitutionChanges(this.#constitution, b.constitution);
+    const constitution = normalizeConstitution(b.constitution);
+    const rules = constitutionChanges(this.#constitution, constitution);
     const reserve = b.reserve.active === this.#reserve ? null : b.reserve.active ? 'sahibinin kota payı devreye girdi' : 'sahibinin kota payı serbest kaldı';
-    this.#constitution = b.constitution;
+    this.#constitution = constitution;
     this.#reserve = b.reserve.active;
     const parts = [rules.length ? `anayasa: ${rules.join('; ')}` : null, reserve].filter((p): p is string => p !== null);
     return parts.length ? parts.join('; ') : null;

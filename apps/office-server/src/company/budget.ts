@@ -1,4 +1,4 @@
-import { AUTONOMY_LEVELS, DEFAULT_CONSTITUTION, MODEL_ALIASES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
+import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, TASK_DIFFICULTIES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -42,8 +42,8 @@ const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number
 };
 
 const MODEL_MAPS = {
-  coordinatorModels: { label: 'Koordinatör modelleri', keys: ['owner', 'decision', 'digest'] },
-  difficultyModels: { label: 'Zorluk modelleri', keys: ['easy', 'medium', 'hard', 'critical'] },
+  coordinatorModels: { label: 'Koordinatör modelleri', keys: COORDINATOR_TURNS },
+  difficultyModels: { label: 'Zorluk modelleri', keys: TASK_DIFFICULTIES },
 } as const;
 
 /** A change to one of the model maps: known keys, known models; the keys not given stay as they are. */

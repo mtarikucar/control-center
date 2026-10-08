@@ -235,6 +235,24 @@ describe('board — 1. Ne değişti', () => {
     expect(line()).toBe('- Kısıt: sahibinin kota payı devreye girdi');
   });
 
+  it('constraints against a snapshot an older office logged (the coordinator’s models before the turn types): read as today’s, no false change', () => {
+    const t = make();
+    t.advance(MIN);
+    // What the office logged before the turn types: the same rules, the coordinator's models under their old keys.
+    const summary = t.budget.summary();
+    const old = { ...summary, constitution: { ...summary.constitution, coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' } } };
+    t.events.append(null, { type: 'budget.changed', budget: old as unknown as typeof summary });
+    t.advance(10 * MIN);
+    const since = t.now();
+    t.advance(5 * MIN);
+    t.budget.ownerSetConstitution({ maxEmployees: 6 });
+    const line = () => t.section(t.board({ since }).text, 1).split('\n').find((l) => l.startsWith('- Kısıt'));
+    expect(line()).toBe('- Kısıt: Çalışan sınırı 8 → 6');
+    // Back where it was: nothing changed on balance, so no line at all.
+    t.budget.ownerSetConstitution({ maxEmployees: 8 });
+    expect(line()).toBeUndefined();
+  });
+
   it('plans and goals that moved, and the owner’s messages to the coordinator (short)', () => {
     const t = make();
     const ada = t.person('Ada');

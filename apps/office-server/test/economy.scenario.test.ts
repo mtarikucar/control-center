@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Employee, StoredEvent } from '@cc/shared';
 import { Dispatcher, NOTICES_PREFIX, WORK_CLOSING } from '../src/company/dispatcher.ts';
+import { ConstitutionStore } from '../src/company/budget-store.ts';
 import { DIGEST_HEADING } from '../src/company/notices.ts';
+import { coordinatorHint } from '../src/model-policy.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup, tempDir, until, type TestSetup } from './helpers.ts';
@@ -31,7 +33,6 @@ const DAY = 24 * 60 * MIN;
 const MODEL_WEIGHTS = { fable: 15, opus: 5, sonnet: 1, haiku: 0.2 } as const;
 type Family = keyof typeof MODEL_WEIGHTS;
 const familyOf = (model: string): Family | null => (Object.keys(MODEL_WEIGHTS) as Family[]).find((f) => model.toLowerCase().includes(f)) ?? null;
-const RANK: Record<Family, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
 
 const NOTES = fileURLToPath(new URL('../../../docs/superpowers/notes/', import.meta.url));
 /** The baseline measured on main (e2889e8): its tables, and the messages and events of the same day recorded on main. */
@@ -84,8 +85,9 @@ function allEvents(s: TestSetup): StoredEvent[] {
 }
 
 /**
- * `economy`: the three switches on, the owner asks for the plan at 08:45 (on the owner model, as the API sends it) and
- * the tasks have a difficulty. Off: the day as the baseline on main — 09:00, the plan proposed and approved.
+ * `economy`: the three switches on, the owner asks for the plan at 08:45 (a project start, as the API sends it) and
+ * the tasks have a difficulty; the coordinator's models by turn type are the defaults. Off: the day as the baseline on
+ * main — 09:00, the plan proposed and approved, the coordinator on its own model for every turn type.
  */
 async function simulateDay(cfg: { economy: boolean }) {
   const start = new Date(2026, 9, 7, cfg.economy ? 8 : 9, cfg.economy ? 45 : 0).getTime();
@@ -96,6 +98,10 @@ async function simulateDay(cfg: { economy: boolean }) {
   const f = fakeEngine(s, { env: { FAKE_CLAUDE_HOLD_DIR: holdDir }, engine: { now, modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled } });
   const c = companyFor(s, f, undefined, now);
   if (cfg.economy) c.budget.setConstitution({ digestEnabled: true, modelPolicyEnabled: true, difficultyModelsEnabled: true });
+  // The coordinator's models by turn type are role models, applied with every switch off too (management cycle §3.5):
+  // main's day is the one where every turn type is on the coordinator's own model (fable). Written to the store
+  // directly, as companyFor writes its own, so no budget.changed joins the log.
+  else new ConstitutionStore(s.db).set({ coordinatorModels: { kickoff: 'fable', cycle: 'fable', routine: 'fable' } });
   const deferred: Array<() => void> = [];
   const dispatcher = new Dispatcher({
     events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget,
@@ -199,9 +205,8 @@ async function simulateDay(cfg: { economy: boolean }) {
 
   await until(() => [coord, ada, can].every((e) => f.engine.ready(e.id)), 10_000);
   if (cfg.economy) {
-    // 08:45: the owner asks the coordinator for a plan; the API's hint: the owner model, never below the coordinator's own.
-    const owner = c.budget.constitution().coordinatorModels.owner as Family;
-    f.engine.send(coord.id, 'Sürüm 1 için on işlik bir plan öner.', 'owner', { model: RANK[owner] > RANK[coord.model as Family] ? owner : coord.model });
+    // 08:45: the owner asks the coordinator for a plan; the API's hint: no plan runs yet, so a project start.
+    f.engine.send(coord.id, 'Sürüm 1 için on işlik bir plan öner.', 'owner', coordinatorHint(c.company.hasRunningPlan() ? 'routine' : 'kickoff', c.budget.constitution()));
   } else c.company.approve(planId);
   await sweepAt(start);
   for (let m = SWEEP_EVERY; m <= WORKDAY_MINUTES; m += SWEEP_EVERY) at(start + m * MIN, () => undefined);

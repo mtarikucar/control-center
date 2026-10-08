@@ -584,7 +584,7 @@ describe('Dispatcher — notice kinds and the digest', () => {
     expect(t.turns(coord.id)[1]).toContain('Teslimler (1)');
   });
 
-  it('important: the coordinator’s decisions go on its decision model, a digest alone on its digest model; a task starts on its difficulty’s', async () => {
+  it('important: the coordinator’s ordinary turns — a decision, a digest alone — go on its routine model (management cycle §3.5); a task starts on its difficulty’s', async () => {
     const t = makeDigest();
     const coord = t.company.hireCoordinator();
     const ada = t.company.hire(coord.id, { name: 'Ada', role: 'r' });
@@ -598,15 +598,16 @@ describe('Dispatcher — notice kinds and the digest', () => {
     t.company.createTask(coord.id, { assignee: ada.id, title: 'Mimari', difficulty: 'hard' });
     await until(() => t.turns(ada.id).some((m) => m.includes('## Görev: Mimari')), 8000);
     expect(t.turns(ada.id).find((m) => m.includes('## Görev: Mimari'))).toContain('Zorluk: zor · Model: opus');
-    const argv = await readArgv(t.argvLog, 5);
+    const argv = await readArgv(t.argvLog, 4);
     const models = (who: string) => argv.filter((a) => a.cwd.includes(who)).map((a) => a.args[a.args.indexOf('--model') + 1]);
-    expect(models('koordinator')).toEqual(['fable', 'sonnet', 'haiku']);
+    // Hired on fable; the plan's approval moves it to sonnet (no turn before it, nothing cached); the digest stays there.
+    expect(models('koordinator')).toEqual(['fable', 'sonnet']);
     expect(models('ada')).toEqual(['sonnet', 'opus']);
     // In the middle of the task (the office's reminder about it) the model stays.
     t.notices.add(ada.id, 'proposal.decided', '“Altyazı” önerin kabul edildi.');
     await until(() => t.turns(ada.id).some((m) => m.startsWith(NUDGE_PREFIX) || m.includes('Altyazı')), 8000);
     await until(() => t.engine.ready(ada.id), 8000);
-    expect((await readArgv(t.argvLog, 5)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1])).toEqual(['sonnet', 'opus']);
+    expect((await readArgv(t.argvLog, 4)).filter((a) => a.cwd.includes('ada')).map((a) => a.args[a.args.indexOf('--model') + 1])).toEqual(['sonnet', 'opus']);
   });
 
   it('review focus: the report reminder is not repeated for the same digest hour after a restart', async () => {

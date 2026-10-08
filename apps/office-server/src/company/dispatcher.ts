@@ -1,6 +1,7 @@
 import { DEFAULT_CONSTITUTION, REVIEW_SEVERITY_LABELS, TASK_DIFFICULTY_LABELS, type Constitution, type Employee, type ModelAlias, type Task } from '@cc/shared';
 import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
+import { coordinatorHint } from '../model-policy.ts';
 import type { Roster } from '../roster.ts';
 import { BOARD_COVERS } from './board.ts';
 import type { Company } from './company.ts';
@@ -11,7 +12,8 @@ import { formatWhen } from './time.ts';
 
 export interface DispatchEngine {
   ready(id: string): boolean;
-  send(id: string, text: string, source: 'system', opts?: SendOptions): void;
+  /** Returns the model the message runs on, when the engine says (the real one does). */
+  send(id: string, text: string, source: 'system', opts?: SendOptions): ModelAlias | void;
   fire(id: string): Promise<void>;
   sleep(id: string): Promise<unknown>;
   wake(id: string): unknown;
@@ -213,7 +215,7 @@ export class Dispatcher {
       const next = this.#d.tasks.nextFor(id);
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
-    const hint = this.#hint(employee, started, Boolean(body) || started !== null || decisions.length > 0);
+    const hint = this.#hint(employee, started);
     if (started) body = this.#delivery(started, hint.model);
     const report = digestOn && employee.kind === 'coordinator' ? this.#reportDue(employee) : null;
     // Information alone waits for a digest hour it has lived through (never during the owner's reserve); it rides on any turn that goes anyway.
@@ -245,9 +247,10 @@ export class Dispatcher {
 
   /**
    * A management cycle is due (management cycle §3.1): one message — the board, then as notes the coordinator's pending
-   * decisions and the information the board does not report (BOARD_COVERS), then what the turn is for — on the
-   * coordinator's current hint. Every pending notice is marked delivered: what the board reports is in it. Lost on the
-   * way: the notices and the cycle's triggers wait for the next idle moment.
+   * decisions and the information the board does not report (BOARD_COVERS), then what the turn is for — on the cycle's
+   * model (§3.5): the project-start model when the board says kickoff, else the cycle model, as a role hint. Every
+   * pending notice is marked delivered: what the board reports is in it. The cycle is recorded with the model the engine
+   * runs it on. Lost on the way: the notices and the cycle's triggers wait for the next idle moment.
    */
   #deliverCycle(e: Employee, pending: Notice[]): void {
     const cycle = this.#d.cycle!;
@@ -259,14 +262,16 @@ export class Dispatcher {
       cycle.lost(opening);
       this.#scheduleSweep();
     };
+    const hint = coordinatorHint(opening.kickoff ? 'kickoff' : 'cycle', this.#rules());
+    let runsOn: ModelAlias | void;
     try {
-      this.#d.engine.send(e.id, text, 'system', { ...this.#hint(e, null, true), onLost });
+      runsOn = this.#d.engine.send(e.id, text, 'system', { ...hint, onLost });
     } catch {
       // The session went away between ready() and send(): the cycle stays due for the next idle moment.
       return;
     }
     this.#d.notices.markDelivered(pending.map((n) => n.id));
-    cycle.started(opening);
+    cycle.started(opening, typeof runsOn === 'string' ? runsOn : (hint.model ?? null));
   }
 
   /**
@@ -302,14 +307,15 @@ export class Dispatcher {
   }
 
   /**
-   * The model a turn should run on (spec §6; the engine switches only as its model policy allows): the coordinator's by
-   * what the turn is for — a decision (notices, a task, a reminder) or only a digest; anyone else's by the task it starts:
-   * its difficulty's model, or their own (the roster's) without one. A model changes only at a task's start: a reminder
-   * in the middle of a task, or notices, keep the session's model.
+   * The model a turn should run on (spec §6; the engine switches only as its model policy allows): the coordinator's
+   * every turn here is an ordinary one (management cycle §3.5: notices, a colleague's proposal, review routing, a
+   * digest) — the routine model, as a role hint, which applies whatever the policy says; anyone else's by the task it
+   * starts: its difficulty's model, or their own (the roster's) without one. A member's model changes only at a task's
+   * start: a reminder in the middle of a task, or notices, keep the session's model.
    */
-  #hint(e: Employee, started: Task | null, decision: boolean): ModelHint {
+  #hint(e: Employee, started: Task | null): ModelHint {
     const rules = this.#rules();
-    if (e.kind === 'coordinator') return { model: decision ? rules.coordinatorModels.decision : rules.coordinatorModels.digest };
+    if (e.kind === 'coordinator') return coordinatorHint('routine', rules);
     if (!started) return {};
     return { model: started.difficulty && rules.difficultyModelsEnabled ? rules.difficultyModels[started.difficulty] : e.model, taskStart: true };
   }

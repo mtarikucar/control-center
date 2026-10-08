@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { StoredEvent } from '@cc/shared';
+import { CONTINUE_AFTER_CRASH } from '../src/engine.ts';
 import { fakeEngine, readArgv, type ArgvEntry } from './engine-helpers.ts';
 import { setup, tempDir, until } from './helpers.ts';
 
@@ -150,6 +151,53 @@ describe('Engine — model hints', () => {
     t.engine.send(e.id, 'üç', 'owner', { model: 'fable' });
     await until(() => t.turns(e.id) === 3, 8000);
     expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+  });
+
+  it('a role hint (the coordinator’s model by turn type) applies with the model policy off, by the same rule: a stronger model at once, a weaker one only after the cache pause; send says where the message runs', async () => {
+    const t = make({ policy: () => false });
+    const e = t.engine.hire({ name: 'Koordinatör', role: 'r', model: 'sonnet' });
+    expect(t.engine.send(e.id, 'proje başlıyor', 'owner', { model: 'fable', role: true })).toBe('fable');
+    await until(() => t.turns(e.id) === 1, 8000);
+    expect(sessions(await readArgv(t.argvLog, 2))).toEqual(['sonnet', 'fable']);
+    // The employee's own model stays what it was: the role hint moves the session only.
+    expect(t.roster.get(e.id).model).toBe('sonnet');
+    t.advance(4 * MIN);
+    expect(t.engine.send(e.id, 'kısa soru', 'owner', { model: 'sonnet', role: true })).toBe('fable');
+    await until(() => t.turns(e.id) === 2, 8000);
+    expect(sessions(await readArgv(t.argvLog, 2))).toEqual(['sonnet', 'fable']);
+    t.advance(5 * MIN);
+    expect(t.engine.send(e.id, 'yine kısa', 'system', { model: 'sonnet', role: true })).toBe('sonnet');
+    await until(() => t.turns(e.id) === 3, 8000);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'fable', 'sonnet']);
+    expect(t.said(e.id).filter((x) => x.startsWith('echo: '))).toEqual(['echo: proje başlıyor', 'echo: kısa soru', 'echo: yine kısa']);
+    // A hint that is not a role hint is still ignored with the policy off (R7): back to their own model, at once.
+    expect(t.engine.send(e.id, 'üye işi', 'system', { model: 'opus', taskStart: true })).toBe('sonnet');
+  });
+
+  it('a role hint holds the failed-model pause too, with the model policy off: the session goes on on the model it had', async () => {
+    const t = make({ policy: () => false, unavailable: 'opus' });
+    const e = t.engine.hire({ name: 'Koordinatör', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system', { model: 'sonnet', role: true });
+    await until(() => t.turns(e.id) === 1, 8000);
+    t.engine.send(e.id, 'yönetim turu', 'system', { model: 'opus', role: true });
+    await until(() => t.said(e.id).includes('echo: yönetim turu'), 8000);
+    await until(() => t.engine.ready(e.id), 8000);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+    expect(t.engine.send(e.id, 'yine yönetim turu', 'system', { model: 'opus', role: true })).toBe('sonnet');
+    await until(() => t.said(e.id).includes('echo: yine yönetim turu'), 8000);
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'opus', 'sonnet']);
+  });
+
+  it('with the model policy off, the office’s own “continue” after a crash keeps the model a role hint chose', async () => {
+    const t = make({ policy: () => false });
+    const e = t.engine.hire({ name: 'Koordinatör', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'proje başlıyor', 'owner', { model: 'fable', role: true });
+    await until(() => t.turns(e.id) === 1, 8000);
+    t.engine.send(e.id, 'CRASH now', 'owner', { model: 'fable', role: true });
+    await until(() => t.events.list({ employeeId: e.id, limit: 5000 }).some((x) => x.event.type === 'message.user' && x.event.text === CONTINUE_AFTER_CRASH), 8000);
+    await until(() => t.engine.ready(e.id) && t.turns(e.id) >= 2, 8000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(sessions(await readArgv(t.argvLog, 3))).toEqual(['sonnet', 'fable', 'fable']);
   });
 
   it('R13: a model the account cannot use (the CLI answers its first turn with an error and stays up): back to the old model, the message sent again, model.switch.failed', async () => {

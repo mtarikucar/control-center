@@ -1,4 +1,4 @@
-import type { BudgetSummary, ClockStatus, Employee, EmployeeUsage, OfficeSnapshot, Plan, Proposal, QuotaState, Schedule, StoredEvent, Task, Usage, UsageTotals, Goal } from '@cc/shared';
+import { normalizeConstitution, type BudgetSummary, type ClockStatus, type Employee, type EmployeeUsage, type OfficeSnapshot, type Plan, type Proposal, type QuotaState, type Schedule, type StoredEvent, type Task, type Usage, type UsageTotals, type Goal } from '@cc/shared';
 
 export const MAX_EVENTS = 500;
 
@@ -126,7 +126,8 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'task.changed') next.tasks = { ...d.tasks, [ev.task.id]: ev.task };
   if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: ev.plan };
   if (ev.type === 'decision.recorded' || ev.type === 'playbook.updated' || ev.type === 'note.written') next.memoryRev = d.memoryRev + 1;
-  if (ev.type === 'budget.changed') next.budget = ev.budget;
+  // Read as today's constitution: a replayed event may be an older office's (the coordinator's models under old keys).
+  if (ev.type === 'budget.changed') next.budget = { ...ev.budget, constitution: normalizeConstitution(ev.budget.constitution) };
   if (ev.type === 'proposal.changed') next.proposals = { ...d.proposals, [ev.proposal.id]: ev.proposal };
   if (ev.type === 'goal.changed') next.goals = { ...d.goals, [ev.goal.id]: ev.goal };
   if (ev.type === 'company.paused') next.paused = ev.paused;

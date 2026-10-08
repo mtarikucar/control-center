@@ -1,4 +1,5 @@
-import type { ModelAlias } from '@cc/shared';
+import type { Constitution, CoordinatorTurn, ModelAlias } from '@cc/shared';
+import type { ModelHint } from './engine.ts';
 
 /** Weakest (and cheapest) first. */
 export const MODEL_RANK: Record<ModelAlias, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
@@ -30,3 +31,12 @@ function decide(c: ModelChoice): 'keep' | 'switch' {
 }
 
 export const modelPolicy = { decide };
+
+/**
+ * The coordinator's hint for a turn of this type (management cycle §3.5): the constitution's model for it, as a role
+ * hint — the engine applies it whatever the model policy says, by decide's rule (a stronger model at once, a weaker one
+ * after the cache pause).
+ */
+export function coordinatorHint(turn: CoordinatorTurn, c: Constitution): ModelHint {
+  return { model: c.coordinatorModels[turn], role: true };
+}

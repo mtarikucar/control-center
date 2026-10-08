@@ -1,5 +1,14 @@
 import type { Autonomy, TaskDifficulty } from './company.ts';
-import type { ModelAlias } from './employee.ts';
+import { MODEL_ALIASES, type ModelAlias } from './employee.ts';
+
+/**
+ * What a coordinator turn is for (management cycle §3.5), each with its model in coordinatorModels: `kickoff`, a project
+ * start — the owner's message while no plan runs, a management cycle whose board finds a goal without a running plan
+ * (or none at all); `cycle`, any other management cycle; `routine`, every other turn (notices, a colleague's proposal,
+ * review routing, the owner's message while a plan runs).
+ */
+export const COORDINATOR_TURNS = ['kickoff', 'cycle', 'routine'] as const;
+export type CoordinatorTurn = (typeof COORDINATOR_TURNS)[number];
 
 /** The owner's fixed limits (spec §4.6, §6). */
 export interface Constitution {
@@ -17,10 +26,10 @@ export interface Constitution {
   /** Local hours when notices that need no decision come together in one digest turn; the last one brings the daily report. */
   digestHours: number[];
   /**
-   * The coordinator's model by what a turn is for: the owner's messages (never below the coordinator's own model, so
-   * a coordinator who moved itself up for planning stays there), decisions (notices, tasks, reminders), digests.
+   * The coordinator's model by what a turn is for (COORDINATOR_TURNS): a project start, a management cycle, any other
+   * turn. A role model: it applies whatever modelPolicyEnabled says.
    */
-  coordinatorModels: { owner: ModelAlias; decision: ModelAlias; digest: ModelAlias };
+  coordinatorModels: Record<CoordinatorTurn, ModelAlias>;
   /**
    * A session moves to a weaker model only after this long without a turn, so a conversation does not flap between
    * models. (Named for the prompt cache; the real CLI keeps it warm longer — over 6½ minutes, measured 2026-10-07.)
@@ -65,7 +74,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   openTasksPerPlan: 60,
   idleSleepMinutes: 30,
   digestHours: [9, 17],
-  coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' },
+  coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' },
   cacheTtlMinutes: 5,
   difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
   digestEnabled: false,
@@ -79,6 +88,33 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   minScheduleMinutes: 60,
   maxSchedules: 20,
 };
+
+const isModel = (v: unknown): v is ModelAlias => (MODEL_ALIASES as readonly unknown[]).includes(v);
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** A model map with every key of `fallback`, in its order: the given model where it is one, else the default. */
+function modelMapOf<T extends Record<string, ModelAlias>>(value: unknown, fallback: T): T {
+  const given = isRecord(value) ? value : {};
+  return Object.fromEntries(Object.entries(fallback).map(([k, d]) => [k, Object.hasOwn(given, k) && isModel(given[k]) ? given[k] : d])) as T;
+}
+
+/**
+ * A constitution as it was kept — the database's rows, or a snapshot in the event log (a budget.changed) written by an
+ * older office — read as today's: every key the constitution has, in its order, the default where one is missing, and
+ * nothing else. A model map keeps the keys it knows with a known model and takes the default for the rest; the
+ * coordinator's models from before the turn types (owner, decision, digest) meant other turns, so they are dropped.
+ * Everything that reads a constitution reads it through this.
+ */
+export function normalizeConstitution(raw: unknown): Constitution {
+  const stored = isRecord(raw) ? raw : {};
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>) {
+    const value = Object.hasOwn(stored, key) ? stored[key] : undefined;
+    if (key === 'coordinatorModels' || key === 'difficultyModels') out[key] = modelMapOf(value, DEFAULT_CONSTITUTION[key]);
+    else out[key] = value === undefined ? DEFAULT_CONSTITUTION[key] : value;
+  }
+  return out as unknown as Constitution;
+}
 
 /** Money an employee spent on an outside service (the office cannot see it; they record it). */
 export interface Spend {

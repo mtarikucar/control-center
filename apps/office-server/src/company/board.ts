@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { DEFAULT_CONSTITUTION, OWNER, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
+import { OWNER, normalizeConstitution, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { QuotaTracker } from '../quota.ts';
 import type { Roster } from '../roster.ts';
@@ -292,7 +292,8 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       if (log.some(({ event: e }) => e.type === 'budget.changed')) {
         const base = d.events.lastAt('budget.changed', o.since);
         const was = base?.event.type === 'budget.changed' ? base.event.budget : null;
-        items.push(...constitutionChanges({ ...DEFAULT_CONSTITUTION, ...was?.constitution }, summary.constitution));
+        // The snapshot may be an older office's: read as today's constitution, or its old keys look like a change.
+        items.push(...constitutionChanges(normalizeConstitution(was?.constitution), summary.constitution));
         if ((was?.reserve.active ?? false) !== summary.reserve.active) items.push(summary.reserve.active ? 'sahibinin kota payı devreye girdi' : 'sahibinin kota payı serbest kaldı');
       }
       if (log.some(({ event: e }) => e.type === 'company.paused')) {

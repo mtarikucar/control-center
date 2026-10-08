@@ -49,25 +49,46 @@ function call(port: number, method: string, path: string, body?: unknown): Promi
 }
 
 describe('company API', () => {
-  it('R11: the owner’s message does not move a sonnet coordinator to fable, model policy on or off; the owner can ask for fable', async () => {
-    const t = await start();
+  it('the owner’s message to the coordinator (management cycle §3.5): with no plan running a project start on fable, while one runs an ordinary turn on sonnet — after the cache pause; model policy off', async () => {
+    let ttl = 60;
+    const t = await start({ cacheTtlMinutes: () => ttl });
     const coord = t.company.hireCoordinator('sonnet');
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', model: 'haiku' });
     const turns = () => t.events.list({ limit: 5000 }).filter((e) => e.event.type === 'turn.finished').length;
     const models = async (n: number) => (await readArgv(t.argvLog, n)).map((a) => `${a.cwd.includes('koordinator') ? 'K' : 'A'}:${a.args[a.args.indexOf('--model') + 1]}`);
-    expect(t.budget.constitution()).toMatchObject({ modelPolicyEnabled: false, coordinatorModels: { owner: 'sonnet' } });
-    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Bir plan öner.' })).status).toBe(202);
-    await until(() => turns() === 1, 8000);
-    t.budget.setConstitution({ modelPolicyEnabled: true });
-    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Biraz daha düşün.' })).status).toBe(202);
-    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Merhaba.' })).status).toBe(202);
-    await until(() => turns() === 3, 8000);
+    expect(t.budget.constitution()).toMatchObject({ modelPolicyEnabled: false, coordinatorModels: { kickoff: 'fable', routine: 'sonnet' } });
     expect((await models(2)).sort()).toEqual(['A:haiku', 'K:sonnet']);
-    // The owner may want fable for the coordinator: the constitution says so, and then it does.
-    t.budget.setConstitution({ coordinatorModels: { owner: 'fable' } });
-    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Şimdi derin düşün.' })).status).toBe(202);
+    expect(t.company.hasRunningPlan()).toBe(false);
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Yeni bir proje: plan öner.' })).status).toBe(202);
+    await until(() => turns() === 1, 8000);
+    expect((await models(3)).filter((m) => m.startsWith('K'))).toEqual(['K:sonnet', 'K:fable']);
+    // A plan waits for the owner: one runs. The next message is an ordinary turn — sonnet, a weaker model, so not
+    // before the cache pause.
+    const plan = t.company.propose(coord.id, { method: METHOD, title: 'Site', goal: 'g', approach: 'a' });
+    expect(t.company.hasRunningPlan()).toBe(true);
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Kısa bir soru.' })).status).toBe(202);
+    await until(() => turns() === 2, 8000);
+    expect((await models(3)).filter((m) => m.startsWith('K'))).toEqual(['K:sonnet', 'K:fable']);
+    ttl = 0;
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Bir soru daha.' })).status).toBe(202);
+    await until(() => turns() === 3, 8000);
+    expect((await models(4)).filter((m) => m.startsWith('K'))).toEqual(['K:sonnet', 'K:fable', 'K:sonnet']);
+    // A member is not routed: the owner's message between tasks keeps them on their own model.
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'Merhaba.' })).status).toBe(202);
     await until(() => turns() === 4, 8000);
-    expect((await models(3)).sort()).toEqual(['A:haiku', 'K:fable', 'K:sonnet']);
+    expect((await models(4)).filter((m) => m.startsWith('A'))).toEqual(['A:haiku']);
+    // The plan declined, none runs: the next message is a project start again — fable, a stronger model, at once.
+    ttl = 60;
+    t.company.decline(plan.id);
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Baştan düşünelim.' })).status).toBe(202);
+    await until(() => turns() === 5, 8000);
+    expect((await models(5)).filter((m) => m.startsWith('K'))).toEqual(['K:sonnet', 'K:fable', 'K:sonnet', 'K:fable']);
+    // The owner may want another model for a project start: the constitution says so, and then it does.
+    t.budget.ownerSetConstitution({ coordinatorModels: { kickoff: 'opus' } });
+    ttl = 0;
+    expect((await call(t.port, 'POST', `/api/employees/${coord.id}/messages`, { text: 'Opus ile düşün.' })).status).toBe(202);
+    await until(() => turns() === 6, 8000);
+    expect((await models(6)).filter((m) => m.startsWith('K'))).toEqual(['K:sonnet', 'K:fable', 'K:sonnet', 'K:fable', 'K:opus']);
   });
 
   it('important: the owner’s message never moves a member’s session in the middle of a task; between tasks it returns them to their own model', async () => {

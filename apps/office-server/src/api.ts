@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OWNER, type AgendaReport, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
-import { MODEL_RANK } from './model-policy.ts';
+import { coordinatorHint } from './model-policy.ts';
 import type { Company } from './company/company.ts';
 import type { Memory } from './company/memory.ts';
 import type { ProposalStore } from './company/proposal-store.ts';
@@ -241,16 +241,17 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'GET' && action === 'file' && d.company) return sendJson(res, 200, d.company.memory.employeeFile(id));
     if (method === 'POST' && action === 'messages') {
       const text = textOf(await readJson(req));
-      // The owner talking to the coordinator: the constitution's owner model, but never below the coordinator's own (a
-      // coordinator who moved itself up for planning stays there). To anyone else in the middle of a task: no hint, the
-      // session stays on the model the task started it on (never mid-task); between tasks, their own model. The engine
-      // ignores hints while the model policy is off.
+      // The owner talking to the coordinator (management cycle §3.5): with no plan running (none waits for the owner or
+      // is under way) a project start, else an ordinary turn — the constitution's role model for it, which the engine
+      // applies whatever the model policy says. To anyone else in the middle of a task: no hint, the session stays on
+      // the model the task started it on (never mid-task); between tasks, their own model (the engine ignores these
+      // while the model policy is off).
       const employee = d.roster.get(id);
-      const owner = d.company?.budget.constitution().coordinatorModels.owner;
+      const company = d.company;
       const hint =
-        employee.kind === 'coordinator'
-          ? { model: owner && MODEL_RANK[owner] > MODEL_RANK[employee.model] ? owner : employee.model }
-          : d.company?.tasks.inProgressOf(id)
+        employee.kind === 'coordinator' && company
+          ? coordinatorHint(company.service.hasRunningPlan() ? 'routine' : 'kickoff', company.budget.constitution())
+          : company?.tasks.inProgressOf(id)
             ? {}
             : { model: employee.model };
       d.engine.send(id, text, 'owner', hint);

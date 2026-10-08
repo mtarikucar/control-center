@@ -6,7 +6,7 @@ import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 
 const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
   constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17],
-    coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
+    coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
     digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
   reserve: { active: true, limitPct: 75, fiveHourPct: 82, sevenDayPct: 40 },
   month: { key: '2026-10', usd: 31.5 },
@@ -61,8 +61,9 @@ describe('ConstitutionTab', () => {
     fireEvent.change(screen.getByLabelText('Aylık para sınırı (USD)'), { target: { value: '' } });
     expect((screen.getByLabelText('Özet saatleri') as HTMLInputElement).value).toBe('9, 17');
     fireEvent.change(screen.getByLabelText('Özet saatleri'), { target: { value: '8, 13 18' } });
-    expect((screen.getByLabelText('Koordinatör modelleri') as HTMLInputElement).value).toBe('sonnet / sonnet / haiku');
-    fireEvent.change(screen.getByLabelText('Koordinatör modelleri'), { target: { value: 'opus / sonnet/haiku' } });
+    expect(screen.getByRole('group', { name: 'Koordinatör modelleri' })).toBeTruthy();
+    expect(['Başlangıç', 'Yönetim turu', 'Sıradan'].map((l) => (screen.getByLabelText(l) as HTMLSelectElement).value)).toEqual(['fable', 'opus', 'sonnet']);
+    fireEvent.change(screen.getByLabelText('Sıradan'), { target: { value: 'haiku' } });
     // R9: the switches come off; the owner turns one on.
     expect((screen.getByLabelText('Model politikası açık') as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByLabelText('Model politikası açık'));
@@ -70,11 +71,21 @@ describe('ConstitutionTab', () => {
     expect(api.setConstitution).toHaveBeenCalledWith(
       expect.objectContaining({
         ownerReservePct: 40, monthlyUsdCap: null, maxEmployees: 8, digestHours: [8, 13, 18], cacheTtlMinutes: 5,
-        coordinatorModels: { owner: 'opus', decision: 'sonnet', digest: 'haiku' }, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
+        coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'haiku' }, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
         digestEnabled: false, modelPolicyEnabled: true, difficultyModelsEnabled: false,
       }),
     );
     expect(screen.getByText('Kaydedildi.')).toBeTruthy();
+  });
+
+  it('the coordinator’s models by turn type: three selects of the models, with what each turn is', () => {
+    render(<ConstitutionTab />);
+    const group = screen.getByRole('group', { name: 'Koordinatör modelleri' });
+    expect(within(group).getAllByRole('combobox').map((s) => s.getAttribute('aria-label'))).toEqual(['Başlangıç', 'Yönetim turu', 'Sıradan']);
+    expect(within(group).getAllByRole('option', { name: 'fable' })).toHaveLength(3);
+    expect([...(screen.getByLabelText('Başlangıç') as HTMLSelectElement).options].map((o) => o.value)).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
+    expect(group.textContent).toMatch(/Başlangıç: süren plan yokken/);
+    expect(group.textContent).toMatch(/model politikası kapalıyken de/);
   });
 
   it('shows the server’s Turkish error', async () => {

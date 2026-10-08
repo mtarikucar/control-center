@@ -233,7 +233,7 @@ describe('company memory', () => {
 
 describe('budget', () => {
   const summary = (pct: number): BudgetSummary => ({
-    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
+    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
     reserve: { active: false, limitPct: 100 - pct, fiveHourPct: null, sevenDayPct: null },
     month: { key: '2026-10', usd: 0 },
     plans: {},
@@ -247,6 +247,14 @@ describe('budget', () => {
     d = applyEvent(d, stored({ type: 'model.changed', model: 'opus' }));
     expect(d.views.e1?.employee.model).toBe('opus');
     expect(applySnapshot(EMPTY_DATA, snapshot()).budget).toBeNull();
+  });
+
+  it('a budget logged by an older office (the coordinator’s models before the turn types) is read as today’s', () => {
+    const old = summary(40);
+    const shape = { ...old, constitution: { ...old.constitution, coordinatorModels: { owner: 'opus', decision: 'sonnet', digest: 'haiku' } } };
+    const d = applyEvent(applySnapshot(EMPTY_DATA, snapshot({ budget: summary(25) })), stored({ type: 'budget.changed', budget: shape as unknown as BudgetSummary }, null));
+    expect(d.budget?.constitution.coordinatorModels).toEqual({ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' });
+    expect(d.budget?.constitution.ownerReservePct).toBe(40);
   });
 });
 

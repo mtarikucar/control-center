@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_CONSTITUTION, OWNER, type QuotaState, type Usage } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, OWNER, normalizeConstitution, type QuotaState, type Usage } from '@cc/shared';
 import { Budget, constitutionChanges } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -36,9 +36,9 @@ describe('Budget — constitution', () => {
     expect(t.budget.setConstitution({ ownerReservePct: 40, monthlyUsdCap: 100, maxEmployees: 5 })).toMatchObject({ ownerReservePct: 40, monthlyUsdCap: 100, maxEmployees: 5 });
     expect(t.events.list({ limit: 500 }).some((e) => e.event.type === 'budget.changed')).toBe(true);
     expect(t.budget.setConstitution({ digestHours: [18, 8, 18] }).digestHours).toEqual([8, 18]);
-    const models = t.budget.setConstitution({ coordinatorModels: { digest: 'sonnet' }, difficultyModels: { easy: 'sonnet' }, cacheTtlMinutes: 10 });
+    const models = t.budget.setConstitution({ coordinatorModels: { routine: 'haiku' }, difficultyModels: { easy: 'sonnet' }, cacheTtlMinutes: 10 });
     expect(models).toMatchObject({
-      coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'sonnet' },
+      coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'haiku' },
       difficultyModels: { easy: 'sonnet', medium: 'sonnet', hard: 'opus', critical: 'fable' },
       cacheTtlMinutes: 10,
     });
@@ -50,7 +50,7 @@ describe('Budget — constitution', () => {
   it('R9: the economy switches are off by default, also in a database written before they existed; the owner turns them on and off', () => {
     const t = make();
     const off = { digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false };
-    expect(DEFAULT_CONSTITUTION).toMatchObject({ ...off, cacheTtlMinutes: 5, coordinatorModels: { owner: 'sonnet' } });
+    expect(DEFAULT_CONSTITUTION).toMatchObject({ ...off, cacheTtlMinutes: 5 });
     expect(t.budget.constitution()).toMatchObject(off);
     // The live office's constitution today: one row, nothing about the switches.
     t.db.prepare("INSERT INTO constitution (key, value) VALUES ('ownerReservePct', '80')").run();
@@ -59,13 +59,31 @@ describe('Budget — constitution', () => {
     expect(t.budget.setConstitution({ digestEnabled: false })).toMatchObject(off);
   });
 
+  it('the coordinator’s models by turn type (management cycle §3.5): project start on fable, a management cycle on opus, any other turn on sonnet', () => {
+    expect(DEFAULT_CONSTITUTION.coordinatorModels).toEqual({ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' });
+    expect(make().budget.constitution().coordinatorModels).toEqual({ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' });
+  });
+
+  it('normalizeConstitution: every key the constitution has, its default where missing; a model map keeps its valid keys and nothing else', () => {
+    expect(normalizeConstitution(undefined)).toEqual(DEFAULT_CONSTITUTION);
+    expect(normalizeConstitution('kötü')).toEqual(DEFAULT_CONSTITUTION);
+    const old = normalizeConstitution({ ownerReservePct: 40, monthlyUsdCap: null, coordinatorModels: { owner: 'opus', decision: 'sonnet', digest: 'haiku' }, salary: 10 });
+    expect(old).toEqual({ ...DEFAULT_CONSTITUTION, ownerReservePct: 40, monthlyUsdCap: null });
+    expect(Object.keys(old)).toEqual(Object.keys(DEFAULT_CONSTITUTION));
+    expect(normalizeConstitution({ coordinatorModels: { cycle: 'fable', routine: 'gpt' }, difficultyModels: { easy: 'sonnet', hard: 3 } })).toMatchObject({
+      coordinatorModels: { kickoff: 'fable', cycle: 'fable', routine: 'sonnet' },
+      difficultyModels: { easy: 'sonnet', medium: 'sonnet', hard: 'opus', critical: 'fable' },
+    });
+    expect(Object.keys(normalizeConstitution({ coordinatorModels: { routine: 'haiku', cycle: 'opus', kickoff: 'fable' } }).coordinatorModels)).toEqual(['kickoff', 'cycle', 'routine']);
+  });
+
   it('review focus: refuses wrong types, out-of-range values and unknown keys, changing nothing', () => {
     const t = make();
     for (const bad of [
       { maxEmployees: 9 }, { maxEmployees: 0 }, { maxEmployees: 2.5 }, { ownerReservePct: -1 }, { ownerReservePct: 95 }, { ownerReservePct: '25' },
       { monthlyUsdCap: -5 }, { chainDepth: 0 }, { tasksPerDay: 501 }, { idleSleepMinutes: 1441 }, { salary: 10 },
       { digestHours: [] }, { digestHours: [24] }, { digestHours: [9.5] }, { digestHours: '9, 17' }, { digestHours: [1, 2, 3, 4, 5, 6, 7] },
-      { cacheTtlMinutes: 61 }, { digestEnabled: 'false' }, { modelPolicyEnabled: 0 }, { difficultyModelsEnabled: null }, { coordinatorModels: { boss: 'fable' } }, { coordinatorModels: { owner: 'gpt' } }, { difficultyModels: 'haiku' }, { difficultyModels: [] },
+      { cacheTtlMinutes: 61 }, { digestEnabled: 'false' }, { modelPolicyEnabled: 0 }, { difficultyModelsEnabled: null }, { coordinatorModels: { boss: 'fable' } }, { coordinatorModels: { kickoff: 'gpt' } }, { coordinatorModels: { owner: 'fable' } }, { coordinatorModels: 'opus' }, { difficultyModels: 'haiku' }, { difficultyModels: [] },
     ]) {
       expect(() => t.budget.setConstitution(bad), JSON.stringify(bad)).toThrow(/Anayasa|anayasa/);
     }
@@ -123,16 +141,38 @@ describe('Budget — the owner’s constitution change reaches the coordinator',
     expect(changed(t, c.id)[0]!.kind).toBe('decision');
     expect(changed(t, c.id)[0]!.text).toBe('Sahibi anayasayı değiştirdi: Çalışan sınırı 8 → 6; Ofisin kota sınırı %75 → %60. Süren planlarını yeni sınırlara göre gözden geçir.');
     t.budget.ownerSetConstitution({
-      monthlyUsdCap: 100, digestHours: [18, 8], digestEnabled: true, autonomy: 'free', coordinatorModels: { owner: 'opus' }, idleCapacityHours: 4,
+      monthlyUsdCap: 100, digestHours: [18, 8], digestEnabled: true, autonomy: 'free', coordinatorModels: { kickoff: 'opus' }, idleCapacityHours: 4,
     });
     expect(changed(t, c.id)[1]!.text).toBe(
-      'Sahibi anayasayı değiştirdi: Aylık para sınırı (USD) yok → 100; Özet saatleri 9, 17 → 8, 18; Koordinatör modelleri sonnet / sonnet / haiku → opus / sonnet / haiku; Özet kapalı → açık; Serbestlik planlar sahibine → tam serbest; Boşta kapasite uyarısı (saat) 2 → 4. Süren planlarını yeni sınırlara göre gözden geçir.',
+      'Sahibi anayasayı değiştirdi: Aylık para sınırı (USD) yok → 100; Özet saatleri 9, 17 → 8, 18; Koordinatör modelleri fable / opus / sonnet → opus / opus / sonnet; Özet kapalı → açık; Serbestlik planlar sahibine → tam serbest; Boşta kapasite uyarısı (saat) 2 → 4. Süren planlarını yeni sınırlara göre gözden geçir.',
     );
   });
 
+  it('a coordinatorModels stored before the turn types (owner / decision / digest) reads as the defaults, a partial one keeps what is valid; the owner’s notice names no false change', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const store = (value: unknown) =>
+      t.db.prepare("INSERT INTO constitution (key, value) VALUES ('coordinatorModels', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(JSON.stringify(value));
+    const stored = () => JSON.parse((t.db.prepare("SELECT value FROM constitution WHERE key = 'coordinatorModels'").get() as { value: string }).value) as unknown;
+    store({ owner: 'opus', decision: 'sonnet', digest: 'haiku' });
+    expect(t.budget.constitution().coordinatorModels).toEqual({ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' });
+    expect(t.budget.summary().constitution.coordinatorModels).toEqual({ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' });
+    store({ cycle: 'fable', routine: 'gpt', digest: 'haiku' });
+    expect(t.budget.constitution().coordinatorModels).toEqual({ kickoff: 'fable', cycle: 'fable', routine: 'sonnet' });
+    store({ owner: 'opus', decision: 'sonnet', digest: 'haiku' });
+    // The form sends every field as it shows them: nothing changed.
+    t.budget.ownerSetConstitution({ ...t.budget.constitution() });
+    expect(changed(t, c.id)).toEqual([]);
+    expect(stored()).toEqual({ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' });
+    store({ owner: 'opus', decision: 'sonnet', digest: 'haiku' });
+    t.budget.ownerSetConstitution({ coordinatorModels: { routine: 'haiku' } });
+    expect(changed(t, c.id).map((n) => n.text)).toEqual(['Sahibi anayasayı değiştirdi: Koordinatör modelleri fable / opus / sonnet → fable / opus / haiku. Süren planlarını yeni sınırlara göre gözden geçir.']);
+    expect(stored()).toEqual({ kickoff: 'fable', cycle: 'opus', routine: 'haiku' });
+  });
+
   it('constitutionChanges: what differs, old → new, in the words of the owner’s notice (the board shares it); none for the same rules', () => {
-    const after = { ...DEFAULT_CONSTITUTION, ownerReservePct: 40, autonomy: 'plans' as const, coordinatorModels: { ...DEFAULT_CONSTITUTION.coordinatorModels, owner: 'opus' as const } };
-    expect(constitutionChanges(DEFAULT_CONSTITUTION, after)).toEqual(['Ofisin kota sınırı %75 → %60', 'Koordinatör modelleri sonnet / sonnet / haiku → opus / sonnet / haiku', 'Serbestlik tam serbest → planlar sahibine']);
+    const after = { ...DEFAULT_CONSTITUTION, ownerReservePct: 40, autonomy: 'plans' as const, coordinatorModels: { ...DEFAULT_CONSTITUTION.coordinatorModels, routine: 'haiku' as const } };
+    expect(constitutionChanges(DEFAULT_CONSTITUTION, after)).toEqual(['Ofisin kota sınırı %75 → %60', 'Koordinatör modelleri fable / opus / sonnet → fable / opus / haiku', 'Serbestlik tam serbest → planlar sahibine']);
     expect(constitutionChanges(after, { ...after })).toEqual([]);
   });
 

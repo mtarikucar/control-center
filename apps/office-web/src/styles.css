@@ -212,7 +212,10 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .badge.reserve { background: #fff1d6; color: #8a5a00; }
 .constitution { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .constitution label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
-.constitution input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.constitution input, .constitution select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.constitution fieldset { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+.constitution fieldset legend { padding: 0 4px; }
+.constitution fieldset label { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
 .constitution .row, .constitution .error, .constitution > p { grid-column: 1 / -1; }
 @media (max-width: 760px) { .budget table { font-size: 12px; } }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_CONSTITUTION, type Constitution, type Spend } from '@cc/shared';
+import { normalizeConstitution, type Constitution, type Spend } from '@cc/shared';
 import type { Db } from '../db.ts';
 
 export class ConstitutionStore {
@@ -9,15 +9,12 @@ export class ConstitutionStore {
     this.#db = db;
   }
 
+  /** The stored rules read as today's constitution (normalizeConstitution): a key never written is its default. */
   get(): Constitution {
     const rows = this.#db.prepare('SELECT key, value FROM constitution').all() as unknown as Array<{ key: string; value: string }>;
     const stored: Record<string, unknown> = {};
     for (const r of rows) stored[r.key] = JSON.parse(r.value);
-    const out = { ...DEFAULT_CONSTITUTION };
-    for (const key of Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>) {
-      if (key in stored) (out as Record<string, unknown>)[key] = stored[key];
-    }
-    return out;
+    return normalizeConstitution(stored);
   }
 
   set(patch: Partial<Constitution>): Constitution {

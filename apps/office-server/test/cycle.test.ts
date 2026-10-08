@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { OWNER, type CycleTriggerKind, type EmployeeKind, type Lifecycle, type OfficeEvent } from '@cc/shared';
+import { OWNER, type CycleTriggerKind, type EmployeeKind, type Lifecycle, type ModelAlias, type OfficeEvent } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
 import { buildBoard } from '../src/company/board.ts';
 import { Clock } from '../src/company/clock.ts';
@@ -59,7 +59,9 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
 
   // The engine: a send opens a turn (logged as the real one logs it), the test ends it.
   const inTurn = new Set<string>();
-  const sent: Array<{ id: string; text: string; model?: string; onLost?: () => void }> = [];
+  const sent: Array<{ id: string; text: string; model?: string; role?: boolean; onLost?: () => void }> = [];
+  /** The model the engine says a message runs on (none: the fake says nothing, as the tests' engines do). */
+  const runsOn: { model?: ModelAlias } = {};
   const woken: string[] = [];
   const setLifecycle = (id: string, to: Lifecycle) => {
     const from = s.roster.get(id).lifecycle;
@@ -70,11 +72,12 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
   const engine: DispatchEngine = {
     ready: (id) => !inTurn.has(id) && s.roster.get(id).lifecycle === 'idle',
     send: (id, text, _source, opts) => {
-      sent.push({ id, text, model: opts?.model, onLost: opts?.onLost });
+      sent.push({ id, text, model: opts?.model, role: opts?.role, onLost: opts?.onLost });
       inTurn.add(id);
       s.events.append(id, { type: 'message.user', text, source: 'system' });
       s.events.append(id, { type: 'turn.started' });
       setLifecycle(id, 'working');
+      return runsOn.model;
     },
     fire: async () => undefined,
     sleep: async () => undefined,
@@ -164,10 +167,13 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
   const goal = () => c.company.goalSet(coord!.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
 
   return {
-    ...s, ...c, coord: coord!, person, settle, result, endTurn, setLifecycle, inTurn, sent, woken, boot, restart, advance, call, log, started, records, kinds, toCoordinator, boards, closeCycle, task, finish, goal,
+    ...s, ...c, coord: coord!, person, settle, result, endTurn, setLifecycle, inTurn, sent, runsOn, woken, boot, restart, advance, call, log, started, records, kinds, toCoordinator, boards, closeCycle, task, finish, goal,
     now, cycle: () => office!.cycle,
   };
 }
+
+/** Ends the coordinator's ordinary turn (no cycle open). */
+const endTurnQuietly = (t: ReturnType<typeof make>) => t.endTurn(t.coord.id, 0);
 
 describe('management cycle — triggers and the window', () => {
   it('a burst of ten deliveries inside a minute opens exactly one cycle, after the 2-minute window, with every delivery in it', async () => {
@@ -403,12 +409,15 @@ describe('management cycle — what opens one (§3.1)', () => {
     expect(t.started()).toHaveLength(4);
   });
 
-  it('a constraint: the owner changes the constitution (a spend recorded is not one)', async () => {
+  it('a constraint: the owner changes the constitution (a spend recorded is not one, nor the same rules in an older office’s shape)', async () => {
     const { t, ada } = await office();
     t.goal();
     t.boot();
     await t.closeCycle();
     t.budget.recordSpend(ada.id, { service: 'alan adı', usd: 12, purpose: 'site' });
+    const summary = t.budget.summary();
+    const old = { ...summary, constitution: { ...summary.constitution, coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' } } };
+    t.events.append(null, { type: 'budget.changed', budget: old as unknown as typeof summary });
     t.advance(CYCLE_WINDOW_MS + 30 * SEC);
     expect(t.started()).toHaveLength(1);
     t.budget.ownerSetConstitution({ tasksPerDay: 7 });
@@ -481,8 +490,8 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     expect(message.text).toContain('Teslim: “Yaz” — Ada → bitti');
     expect(message.text).not.toContain('Görev bitti:');
     expect(message.text).toContain('cycleClose');
-    // The coordinator's current hint (until model routing): its decision model.
-    expect(message.model).toBe(t.budget.constitution().coordinatorModels.decision);
+    // No active goal: the board says kickoff, so the cycle goes on the project-start model, as a role hint.
+    expect(message).toMatchObject({ model: 'fable', role: true });
     expect(t.notices.pending(t.coord.id)).toEqual([]);
   });
 
@@ -498,7 +507,70 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     expect(t.toCoordinator()).toHaveLength(1);
     expect(t.toCoordinator()[0]!.text).toMatch(/^Ofisten notlar:\n- Ada bir .+ açtı: “Altyazı”/);
     expect(t.toCoordinator()[0]!.text).not.toContain('Eski');
+    // An ordinary turn: the routine model, as a role hint.
+    expect(t.toCoordinator()[0]).toMatchObject({ model: 'sonnet', role: true });
     expect(t.started()).toHaveLength(0);
+  });
+
+  it('models by turn type (§3.5): a cycle whose board says kickoff runs on fable, any other cycle on opus, every other coordinator turn on sonnet — role hints; the record says the model', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    const g = t.goal();
+    // The office starts with an active goal and no plan for it: a project start.
+    t.boot();
+    expect(t.boards()).toHaveLength(1);
+    expect(t.boards()[0]).toMatchObject({ model: 'fable', role: true });
+    await t.closeCycle();
+    expect(t.records().at(-1)).toMatchObject({ closed: true, model: 'fable' });
+    // The plan runs: the next cycle re-plans on opus.
+    const plan = t.company.propose(t.coord.id, { method: METHOD, title: 'Site', goal: 'g', approach: 'a', goalId: g.id });
+    expect(t.plans.get(plan.id).status).toBe('approved');
+    const x = t.task(ada.id, 'Yaz', { planId: plan.id });
+    t.task(ada.id, 'Düzelt', { planId: plan.id });
+    t.settle();
+    t.finish(ada.id, x.id);
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.boards()).toHaveLength(2);
+    expect(t.boards()[1]).toMatchObject({ model: 'opus', role: true });
+    await t.closeCycle();
+    expect(t.records().at(-1)).toMatchObject({ closed: true, model: 'opus' });
+    // A colleague's proposal with no cycle on its way: an ordinary turn on sonnet.
+    t.company.openProposal(ada.id, { kind: 'idea', title: 'Altyazı', text: 't' });
+    t.advance(30 * SEC);
+    expect(t.toCoordinator().at(-1)).toMatchObject({ model: 'sonnet', role: true });
+    expect(t.toCoordinator().at(-1)!.text).toMatch(/^Ofisten notlar:/);
+    endTurnQuietly(t);
+    // The models are the owner's, in the constitution; the change is a constraint, so a cycle comes first — on the new cycle model.
+    t.budget.ownerSetConstitution({ coordinatorModels: { cycle: 'fable', routine: 'haiku' } });
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.boards()).toHaveLength(3);
+    expect(t.boards()[2]).toMatchObject({ model: 'fable', role: true });
+    await t.closeCycle();
+    t.company.openProposal(ada.id, { kind: 'idea', title: 'Kapak', text: 't' });
+    t.advance(30 * SEC);
+    expect(t.toCoordinator().at(-1)).toMatchObject({ model: 'haiku', role: true });
+  });
+
+  it('the record carries the model the cycle ran on: the engine’s word (a weaker model waits for the cache pause), and the one it went on on when the new model failed', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    const g = t.goal();
+    t.company.propose(t.coord.id, { method: METHOD, title: 'Site', goal: 'g', approach: 'a', goalId: g.id });
+    t.task(ada.id, 'Yaz');
+    // The session was on fable a minute ago: the engine keeps it there, though the cycle asks for opus.
+    t.runsOn.model = 'fable';
+    t.boot();
+    expect(t.boards()[0]).toMatchObject({ model: 'opus', role: true });
+    await t.closeCycle();
+    expect(t.records().at(-1)).toMatchObject({ model: 'fable' });
+    // The engine moves the session to opus for the next one, and the account cannot use it: it goes on on sonnet.
+    t.runsOn.model = 'opus';
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    t.events.append(t.coord.id, { type: 'model.switch.failed', from: 'sonnet', to: 'opus', reason: 'model yok' });
+    t.settle();
+    await t.closeCycle();
+    expect(t.records().at(-1)).toMatchObject({ closed: true, model: 'sonnet' });
   });
 
   it('cycleClose closes the cycle once, recorded when its turn ends with the turn’s cost; with no change it wants “değişiklik yok, çünkü …” and a reason', async () => {
@@ -519,7 +591,7 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     t.endTurn(t.coord.id, 0.5);
     await expect(close({ changes: [], reasoning: NO_CHANGE })).rejects.toThrow('Açık bir yönetim turu yok');
     expect(t.records()).toEqual([
-      { type: 'management.cycle', closed: true, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.7, model: null },
+      { type: 'management.cycle', closed: true, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.7, model: 'fable' },
     ]);
     expect(t.started()).toEqual([{ type: 'management.cycle.started', triggers: [{ kind: 'start', at: T0, note: '', seq: null }], since: 0, unclosedWarning: false }]);
   });
@@ -530,7 +602,7 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     const x = t.task(ada.id, 'Yaz');
     t.boot();
     t.endTurn(t.coord.id, 0.42);
-    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42, model: null }]);
+    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42, model: 'fable' }]);
     t.advance(30 * MIN);
     expect(t.started()).toHaveLength(1);
     t.finish(ada.id, x.id);

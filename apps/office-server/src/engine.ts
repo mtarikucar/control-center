@@ -59,7 +59,10 @@ export interface EngineOptions {
   mcp?: { url: () => string; tokens: TokenRegistry };
   /** How long a session's prompt cache stays warm (the constitution's cacheTtlMinutes; default 5). */
   cacheTtlMinutes?: () => number;
-  /** The constitution's modelPolicyEnabled (default off): off, hints are ignored and sessions run on the employee's own model. */
+  /**
+   * The constitution's modelPolicyEnabled (default off): off, hints are ignored and sessions run on the employee's own
+   * model — all but role hints (the coordinator's model by turn type), which apply either way.
+   */
   modelPolicyEnabled?: () => boolean;
 }
 
@@ -68,6 +71,11 @@ export interface ModelHint {
   model?: ModelAlias;
   /** The message starts a task: the task's model applies either way. */
   taskStart?: boolean;
+  /**
+   * A role hint: the coordinator's model for what the turn is for (management cycle §3.5). It applies whatever the
+   * model policy says, by the same rule as any hint (a stronger model at once, a weaker one after the cache pause).
+   */
+  role?: boolean;
 }
 
 export interface SendOptions extends ModelHint {
@@ -108,6 +116,8 @@ interface Runtime {
   lastTurnAt: number | null;
   /** The session is restarting on another model: the message that asked for it and those that came meanwhile. */
   switching: Pending[] | null;
+  /** The model it is restarting on (meaningful while `switching`). */
+  switchingTo: ModelAlias | null;
   /** The model the running session was started on when it is not the employee's own (role) model; null: their own. */
   model: ModelAlias | null;
   /**
@@ -168,7 +178,16 @@ export class Engine {
     return this.#start(employee, 'işe alındı');
   }
 
-  send(id: string, text: string, source: 'owner' | 'system' = 'owner', opts: SendOptions = {}): void {
+  /** Sends a message; returns the model it runs on (where the hint moved the session, or the one it keeps). */
+  send(id: string, text: string, source: 'owner' | 'system' = 'owner', opts: SendOptions = {}): ModelAlias {
+    return this.#deliver(id, text, source, opts, false);
+  }
+
+  /**
+   * `keep`: the office's own "continue" (after a crash, a limit, a restart) — the same work goes on on the session's
+   * model, whatever the policy says (with it off, it would otherwise take a role hint's model back).
+   */
+  #deliver(id: string, text: string, source: 'owner' | 'system', opts: SendOptions, keep: boolean): ModelAlias {
     const message = text.trim();
     if (!message) throw new ValidationError('Mesaj boş olamaz.');
     let employee = this.#roster.get(id);
@@ -178,20 +197,21 @@ export class Engine {
       // The session is restarting on another model: this message goes in right after the one that asked for it.
       rt.switching.push({ text: message, source, onLost: opts.onLost });
       this.#emit(id, { type: 'message.user', text: message, source });
-      return;
+      return rt.switchingTo ?? this.#sessionModel(employee, rt);
     }
     this.#assertNotBusy(rt);
     if (employee.lastError !== null || employee.limitResetsAt !== null) employee = this.#roster.update(id, { lastError: null, limitResetsAt: null });
     this.#clearLimitTimer(rt);
     // The hint moves only this session; the employee's own model (the roster's) stays what the owner or coordinator set.
-    const model = this.#switchTo(employee, rt, opts);
+    const model = keep ? null : this.#switchTo(employee, rt, opts);
     if (model && rt.proc && !rt.proc.exited) {
       this.#restartAndWrite(id, model, { text: message, source, onLost: opts.onLost });
-      return;
+      return model;
     }
     if (model) rt.model = model;
     if (!rt.proc || rt.proc.exited) this.#start(employee, 'mesaj geldi');
     this.#write(id, message, source, { onLost: opts.onLost });
+    return this.#sessionModel(employee, rt);
   }
 
   /** The model the session runs on (or would start on). */
@@ -199,9 +219,12 @@ export class Engine {
     return rt.model ?? employee.model;
   }
 
-  /** The model a hint moves the session to now, or null to keep it. With the policy off: back to their own model. */
+  /**
+   * The model a hint moves the session to now, or null to keep it. With the policy off: back to their own model — but a
+   * role hint applies whatever the policy says.
+   */
   #switchTo(employee: Employee, rt: Runtime, requested: ModelHint): ModelAlias | null {
-    const hint: ModelHint = this.#modelPolicyEnabled() ? requested : { model: employee.model, taskStart: true };
+    const hint: ModelHint = this.#modelPolicyEnabled() || requested.role ? requested : { model: employee.model, taskStart: true };
     if (!hint.model || rt.turnActive) return null;
     if (rt.failedModel?.model === hint.model && this.#now() - rt.failedModel.at < FAILED_MODEL_PAUSE_MS) return null;
     const lastTurnFinishedAt = rt.lastTurnAt ?? this.#events.latest(employee.id, 'turn.finished')?.ts ?? null;
@@ -219,6 +242,7 @@ export class Engine {
     const rt = this.#runtime(id);
     const from = this.#sessionModel(this.#roster.get(id), rt);
     rt.switching = [first];
+    rt.switchingTo = model;
     rt.reloadPending = false;
     this.#emit(id, { type: 'message.user', text: first.text, source: first.source });
     void this.#exclusive(id, async () => {
@@ -273,6 +297,7 @@ export class Engine {
     rt.sinceSwitch = [];
     this.#failedSwitch(id, this.#sessionModel(this.#roster.get(id), rt), from, rt.lastText || 'ilk tur hatayla bitti');
     rt.switching = messages;
+    rt.switchingTo = from;
     void this.#exclusive(id, async () => {
       await this.#halt(id);
       rt.model = from;
@@ -399,7 +424,7 @@ export class Engine {
     const wasInterrupted = employee.lifecycle === 'interrupted';
     this.#runtime(id).crashes = [];
     this.#start(this.#roster.update(id, { lastError: null }), 'sahibi devam ettirdi');
-    if (wasInterrupted) this.send(id, CONTINUE_AFTER_RESTART, 'system');
+    if (wasInterrupted) this.#deliver(id, CONTINUE_AFTER_RESTART, 'system', {}, true);
     return this.#roster.get(id);
   }
 
@@ -647,7 +672,7 @@ export class Engine {
       return;
     }
     this.#start(employee, 'çökme sonrası yeniden açıldı');
-    if (resumeWork) this.send(id, CONTINUE_AFTER_CRASH, 'system');
+    if (resumeWork) this.#deliver(id, CONTINUE_AFTER_CRASH, 'system', {}, true);
     if (unread.length > 0) this.#redeliver(id, unread);
   }
 
@@ -725,7 +750,7 @@ export class Engine {
       if (this.#roster.get(id).lifecycle !== 'limited') return;
       this.#roster.update(id, { limitResetsAt: null });
       try {
-        this.send(id, CONTINUE_AFTER_LIMIT, 'system');
+        this.#deliver(id, CONTINUE_AFTER_LIMIT, 'system', {}, true);
       } catch (err) {
         this.#emit(id, { type: 'error', message: err instanceof Error ? err.message : String(err) });
       }
@@ -793,6 +818,7 @@ export class Engine {
         limitAt: null,
         lastTurnAt: null,
         switching: null,
+        switchingTo: null,
         model: null,
         switchedFrom: null,
         sinceSwitch: [],
