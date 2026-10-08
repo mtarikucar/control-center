@@ -7,6 +7,8 @@
     `isError`'ı yeteneğe bağlanır);
   - B7 (`coverage`, `toolClass`, `tasks.requires`) ve B3 (kayıt).
 - Dal `feat/capability-precheck`, `integration/core-3` (onaylı, 8690f13) üstünde. **Göç yok** (v23 kullanılmadı, §6).
+- Sürüm 2 (inceleme turu 1, Kerem): rolün beyan etmediği dışa dönük yetenek görevi tutar (B9b ile birlikte), sahibine
+  değil koordinatöre gider (§2, §3, §8).
 
 ## 1. Bugün ve kapsam
 
@@ -28,7 +30,17 @@ Bu iş, **varsayılan kapalı** bir anayasa anahtarıyla (`capabilityPrecheckEna
 
 ## 2. Kural
 
-**Ne bloklar:** yalnız `coverage` durumu `shut` (masada var, açık değil) ya da `missing` (yok) olan yetenekler.
+**Ne bloklar, sırasıyla:**
+
+1. **Rol (inceleme turu 1):** görevin istediği yetenek dışa dönükse ve atananın beyanlı yeteneklerinde
+   (`employees.capabilities`, B7) yoksa görev tutulur, bağlayıcı ne derse desin. B9b rolün beyan etmediği dışa dönük
+   araçları oturumdan çıkarır. Sunucu düzeyindeki `coverage` ise Gmail'i yine "açık" gösterebilir (okuma aracı
+   duruyor), ve böyle bir görev gönderme aracı hiç olmayan birine gider. Araç hiç çağrılamadığı için `isError` da
+   oluşmaz. Rol kuralı B9b'den bağımsız konur: dışa dönük bir yetenek rolde beyan edilmeden görev dağıtılmaz. Bunu
+   düzeltmek koordinatörün işidir, sahibinin değil: sahibine öneri açılmaz. Koordinatöre "editRoleCard ile rolüne
+   ekle ya da görevi bu yeteneği olana ver (taskAssign)" notu gider. Bu kural sunucunun bütün araçlarını kapatan
+   B9b durumunu da doğru adlandırır. Kayıt o masayı "denied" okur, ama neden masa ayarı dosyası değil, roldür.
+2. **Bağlayıcı:** kalan yeteneklerden `coverage` durumu `shut` (masada var, açık değil) ya da `missing` (yok) olanlar.
 - `open` ve `manual` (elle kayıtlı adaptör/CLI, doğrulanamaz) bloklamaz.
 - `unseen` bloklamaz: masanın henüz oturumu yok. Masalar sahibinin ayarlarını devralır, bağlayıcı büyük olasılıkla
   gelir. İlk oturumdan sonra bir sonraki dağıtım yeniden denetler. Masanın oturumu hiç yoksa ilk görev oturumu açar.
@@ -41,13 +53,16 @@ o taramada dağıtılmaz; dağıtıcı eşzamanlı çalıştığı için aksi b�
 hangi durumda, "yetenek açılınca görev kendiliğinden sıraya döner". Koordinatöre `task.blocked` notu gider.
 
 **Geri bırakma:** dağıtıcının her taramasında (saat ya da olay) bu notla bloklanmış görevler yeniden denetlenir:
-- yetenekleri artık bloklamıyorsa görev `waiting`'e döner, not silinir;
+- yetenekleri artık bloklamıyorsa (rol yeteneği `editRoleCard` ile eklendi, bağlayıcı açıldı) görev `waiting`'e döner,
+  not silinir;
 - anahtar kapatıldıysa hepsi `waiting`'e döner (davranış eskisine döner).
 
 Bloğu ön-kontrol koyduğu için onu yalnız ön-kontrol kaldırır. Koordinatör görevi `taskAssign` ile başka birine
 verirse `waiting` olur ve yeni masa denetlenir.
 
 ## 3. Sahibine öneri
+
+Yalnız bağlayıcı nedeni (§2, 2. kural) öneri açar; rol nedeni koordinatöre gider (§2, 1. kural).
 
 Önerinin biçimi:
 - Başlık: `Yetki gerekiyor: <yetenek> (<ad>)`.
@@ -116,3 +131,11 @@ defterindeki sıradaki numara boş kalır.
   bloklanmaz. Geçmiş `isError` olayları bu kuralla kaç öneri açardı, ayrıca listelenir.
 - **K3:** gerekmedi. Davranış ofisin kendi kodunda; girdisi olan oturum araç listesi ve kayıt B3/B7'nin K3'lerinde
   kanıtlı.
+
+## 8. Değişiklik günlüğü
+
+- **Sürüm 2 (inceleme turu 1, Kerem, [önemli]).** B9b ile birlikte, rolün beyan etmediği dışa dönük yetenekte B8
+  tutmuyordu. Kerem'in yoklaması: Efe'nin oturumunda B9b'nin bıraktığı yalnız Gmail `get_message`; `email.send`
+  isteyen görev için tutma false ve öneri yok. Sunucunun bütün araçları kapandığında da yanlış neden yazılıyordu
+  (masa ayarı dosyası). Düzeltme: §2'deki rol kuralı (önce rol, sonra bağlayıcı); rol nedeni sahibine değil
+  koordinatöre; `editRoleCard` ile yetenek eklenince tarama geri bırakır. B8+B9b birleşik düzende sınandı.

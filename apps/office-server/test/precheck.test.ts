@@ -14,7 +14,9 @@ afterEach(async () => {
 
 /**
  * Ada: Gmail and jeeta waiting for authorisation, Google Calendar open, Higgsfield denied by her desk. Can: Gmail open.
- * Efe: no session yet. By hand: a CLI that reads payments. The switch on unless `off`.
+ * Efe: no session yet, and no capabilities declared. Ada and Can declare the outward ones their tasks need (review,
+ * Kerem round 1: an outward capability the role lacks is held for the role, not the connector). By hand: a CLI that
+ * reads payments. The switch on unless `off`.
  */
 function make(o: { off?: boolean } = {}) {
   const s = setup();
@@ -27,8 +29,8 @@ function make(o: { off?: boolean } = {}) {
     company: c.company, tasks: c.tasks, roster: s.roster, integrations, proposals: c.proposals, events: s.events, enabled: () => c.budget.constitution().capabilityPrecheckEnabled,
   });
   const coordinator = c.company.hireCoordinator();
-  const ada = c.company.hire(coordinator.id, { name: 'Ada', role: 'r' });
-  const can = c.company.hire(coordinator.id, { name: 'Can', role: 'r' });
+  const ada = c.company.hire(coordinator.id, { name: 'Ada', role: 'r', capabilities: ['email.read', 'email.send', 'media.generate'] });
+  const can = c.company.hire(coordinator.id, { name: 'Can', role: 'r', capabilities: ['email.read', 'email.send'] });
   const efe = c.company.hire(coordinator.id, { name: 'Efe', role: 'r' });
   const session = (who: Employee, mcp: Array<[string, string, number, string[]]>) =>
     s.events.append(who.id, { type: 'session.started', model: 'm', mcp: mcp.map(([name, status, tools, toolNames]) => ({ name, status, tools, toolNames })) });
@@ -129,6 +131,54 @@ describe('Capability precheck — holding a task before it is handed out', () =>
   });
 });
 
+describe('Capability precheck — an outward capability the role does not declare (review, Kerem round 1; B9b)', () => {
+  /** Efe's session as B9b leaves it: the outward Gmail tools his role lacks are out, the reading one stays. */
+  const asB9bLeavesIt = (t: ReturnType<typeof make>, toolNames: string[]) =>
+    t.session(t.efe, [['office', 'connected', 1, ['myTasks']], ['claude.ai Gmail', 'connected', toolNames.length, toolNames]]);
+
+  it('review focus: held for the role — the coordinator is told to add it with editRoleCard or give the task to someone who has it; no need to the owner', () => {
+    const t = make();
+    asB9bLeavesIt(t, ['get_message']);
+    const send = t.task(t.efe, 'Müşteriye yaz', ['email.send']);
+    expect(t.precheck.hold(t.tasks.get(send.id))).toBe(true);
+    expect(t.tasks.get(send.id)).toMatchObject({ status: 'blocked', note: `${HOLD_NOTE} Efe için rolde yok: email.send (dışa dönük; rolün yeteneklerinde değil). Yetenek rolüne eklenince görev kendiliğinden sıraya döner.` });
+    expect(t.notices.pending(t.coordinator.id).at(-1)?.text).toBe('“Müşteriye yaz” görevi (Efe) bloklandı: email.send, Efe adlı çalışanın rolünde yok (dışa dönük yetenek). editRoleCard ile rolüne ekle ya da görevi bu yeteneği olana ver (taskAssign).');
+    expect(t.needs()).toEqual([]);
+    // The coordinator adds it to Efe's role: the next sweep lets the task go.
+    t.company.editRoleCard(t.coordinator.id, t.efe.id, { capabilities: ['email.send'] } as never);
+    t.precheck.release();
+    expect(t.tasks.get(send.id)).toMatchObject({ status: 'waiting', note: null });
+  });
+
+  it('review focus: the role’s reason comes first — B9b closing every tool of a server reads as the role, not as the desk’s settings file', () => {
+    const t = make();
+    asB9bLeavesIt(t, []);
+    const send = t.task(t.efe, 'Gönder', ['email.send']);
+    expect(t.precheck.hold(t.tasks.get(send.id))).toBe(true);
+    expect(t.tasks.get(send.id).note).toContain('Efe için rolde yok: email.send');
+    expect(t.notices.pending(t.coordinator.id).at(-1)?.text).not.toContain('settings.json');
+    expect(t.needs()).toEqual([]);
+  });
+
+  it('review focus: what the role rule leaves alone — a capability that is not outward, or one the role declares', () => {
+    const t = make();
+    asB9bLeavesIt(t, ['get_message']);
+    // Reading is not outward: B9b keeps its tool, the role need not declare it.
+    expect(t.precheck.hold(t.tasks.get(t.task(t.efe, 'Oku', ['email.read']).id))).toBe(false);
+    // Can declares email.send and has Gmail with its tools.
+    expect(t.precheck.hold(t.tasks.get(t.task(t.can, 'Gönder', ['email.send']).id))).toBe(false);
+  });
+
+  it('both reasons at once: the role for one capability, the connector for another — one note, the owner asked only for the connector', () => {
+    const t = make();
+    // Ada declares email.send but not calendar.write (outward); her Gmail waits for authorisation.
+    const both = t.task(t.ada, 'Davet ve e-posta', ['email.send', 'calendar.write']);
+    expect(t.precheck.hold(t.tasks.get(both.id))).toBe(true);
+    expect(t.tasks.get(both.id).note).toBe(`${HOLD_NOTE} Ada için rolde yok: calendar.write (dışa dönük; rolün yeteneklerinde değil). Ada masasında açık değil: email.send [kapalı]. Yetenek açılınca ya da rolüne eklenince görev kendiliğinden sıraya döner.`);
+    expect(t.needs().map((p) => p.title)).toEqual(['Yetki gerekiyor: email.send (E-posta gönderme)']);
+  });
+});
+
 describe('Capability precheck — a connector tool’s error', () => {
   const toolRun = (t: ReturnType<typeof make>, who: Employee, id: string, name: string, isError: boolean, output = 'Error: unauthorized') => {
     t.events.append(who.id, { type: 'tool.started', toolUseId: id, name, input: {} });
@@ -195,6 +245,18 @@ describe('Capability precheck — the dispatcher, and the switch', () => {
     const messages = systemMessages(t.events.list({ limit: 5000 }), t.ada.id);
     expect(messages.some((m) => m.includes('## Görev: Düz iş'))).toBe(true);
     expect(messages.some((m) => m.includes('## Görev: Gönder'))).toBe(false);
+  });
+
+  it('review focus: the dispatcher’s sweep lets a task held for the role go once editRoleCard adds the capability', async () => {
+    const t = make();
+    const dispatcher = new Dispatcher({ events: t.events, roster: t.roster, tasks: t.tasks, notices: t.notices, plans: t.plans, company: t.company, engine: t.f.engine, budget: t.budget, precheck: t.precheck, tickMs: 50 });
+    cleanups.unshift(dispatcher.start());
+    t.session(t.efe, [['office', 'connected', 1, ['myTasks']], ['claude.ai Gmail', 'connected', 1, ['get_message']]]);
+    const send = t.task(t.efe, 'Gönder', ['email.send']);
+    await until(() => t.tasks.get(send.id).status === 'blocked', 8000);
+    t.company.editRoleCard(t.coordinator.id, t.efe.id, { capabilities: ['email.send'] } as never);
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), t.efe.id).some((m) => m.includes('## Görev: Gönder')), 8000);
+    expect(t.tasks.get(send.id)).toMatchObject({ status: 'in_progress', note: null });
   });
 
   it('review focus: the dispatcher’s own sweep lets a held task go once the capability is there, and hands it out (mutation D2)', async () => {

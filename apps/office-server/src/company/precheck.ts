@@ -45,15 +45,27 @@ export class CapabilityPrecheck {
     d.events.subscribe((e) => this.#onEvent(e));
   }
 
-  /** Before a task is handed out: held (blocked, noted, the owner asked) when its assignee's desk lacks a capability it requires. */
+  /**
+   * Before a task is handed out: held (blocked, noted) when it requires an outward capability its assignee's role does
+   * not declare — the coordinator's to fix — or one their desk lacks — the owner is asked (review, Kerem round 1).
+   */
   hold(task: Task): boolean {
     if (!this.#d.enabled() || !task.requires?.length) return false;
-    const lacking = this.#lacking(task);
-    if (lacking.length === 0) return false;
+    const { role, connectors } = this.#lacking(task);
+    if (role.length === 0 && connectors.length === 0) return false;
     const who = this.#d.roster.get(task.assignee);
-    const why = `${who.name} masasında açık değil: ${lacking.map((c) => `${c.id} [${STATUS_TR[c.status]}]`).join(', ')}. Yetenek açılınca görev kendiliğinden sıraya döner.`;
-    const asked = lacking.map((c) => this.#need(c, task.assignee, `“${task.title}” görevi (${who.name}) ${this.#named(c.id)} istiyor; ${who.name} masasında açık değil.`)).some(Boolean);
-    this.#d.company.holdForCapabilities(task.id, `${HOLD_NOTE} ${why}`, `“${task.title}” görevi (${who.name}) bloklandı: ${why} ${asked ? 'Sahibine yetki önerisi açıldı.' : 'Sahibine bu yetenek için öneri zaten gitti.'}`);
+    const roleWhy = role.length ? `${who.name} için rolde yok: ${role.join(', ')} (dışa dönük; rolün yeteneklerinde değil).` : '';
+    const deskWhy = connectors.length ? `${who.name} masasında açık değil: ${connectors.map((c) => `${c.id} [${STATUS_TR[c.status]}]`).join(', ')}.` : '';
+    const back = role.length && connectors.length ? 'Yetenek açılınca ya da rolüne eklenince' : role.length ? 'Yetenek rolüne eklenince' : 'Yetenek açılınca';
+    const note = [HOLD_NOTE, roleWhy, deskWhy, `${back} görev kendiliğinden sıraya döner.`].filter(Boolean).join(' ');
+    // The owner is asked only about connectors; the role is the coordinator's (B9b closes what the role lacks).
+    const asked = connectors.map((c) => this.#need(c, task.assignee, `“${task.title}” görevi (${who.name}) ${this.#named(c.id)} istiyor; ${who.name} masasında açık değil.`)).some(Boolean);
+    const tell = [
+      `“${task.title}” görevi (${who.name}) bloklandı:`,
+      role.length ? `${role.join(', ')}, ${who.name} adlı çalışanın rolünde yok (dışa dönük yetenek). editRoleCard ile rolüne ekle ya da görevi bu yeteneği olana ver (taskAssign).` : '',
+      connectors.length ? `${deskWhy} Yetenek açılınca görev kendiliğinden sıraya döner. ${asked ? 'Sahibine yetki önerisi açıldı.' : 'Sahibine bu yetenek için öneri zaten gitti.'}` : '',
+    ].filter(Boolean).join(' ');
+    this.#d.company.holdForCapabilities(task.id, note, tell);
     return true;
   }
 
@@ -62,13 +74,22 @@ export class CapabilityPrecheck {
     const on = this.#d.enabled();
     for (const task of this.#d.tasks.list({ statuses: ['blocked'], limit: 100_000 })) {
       if (!task.note?.startsWith(HOLD_NOTE)) continue;
-      if (on && this.#lacking(task).length > 0) continue;
+      const { role, connectors } = this.#lacking(task);
+      if (on && (role.length > 0 || connectors.length > 0)) continue;
       this.#d.company.releaseCapabilityHold(task.id);
     }
   }
 
-  #lacking(task: Task): CapabilityCoverage[] {
-    return coverage(this.#d.integrations.list(), task.requires ?? [], task.assignee).filter((c) => LACKING.has(c.status));
+  /**
+   * What holds a task: first the outward capabilities its assignee's role does not declare (B9b keeps their tools out
+   * of the session, whatever the connector says); then, for the rest, those their desk lacks (shut or missing).
+   */
+  #lacking(task: Task): { role: string[]; connectors: CapabilityCoverage[] } {
+    const declared = this.#d.roster.get(task.assignee).capabilities ?? [];
+    const outward = new Set(capabilityVocabulary().capabilities.filter((c) => c.outward).map((c) => c.id));
+    const role = (task.requires ?? []).filter((id) => outward.has(id) && !declared.includes(id));
+    const rest = (task.requires ?? []).filter((id) => !role.includes(id));
+    return { role, connectors: coverage(this.#d.integrations.list(), rest, task.assignee).filter((c) => LACKING.has(c.status)) };
   }
 
   #named(id: string): string {
