@@ -18,7 +18,8 @@ function settingsArgs(home: string | undefined): string[] {
   return ['--setting-sources', 'user,project,local', '--settings', JSON.stringify(employeeSettings(home ?? homedir()))];
 }
 
-export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: boolean; home?: string; mcpConfig?: string }): string[] {
+/** `disallowed`: the employee's own closed tools (B9b, session-deny.ts), in the same one --disallowedTools flag as the scheduler. */
+export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: boolean; home?: string; mcpConfig?: string; disallowed?: readonly string[] }): string[] {
   return [
     '-p',
     '--input-format',
@@ -34,6 +35,7 @@ export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: b
     ...settingsArgs(o.home),
     '--disallowedTools',
     ...DISALLOWED_TOOLS,
+    ...(o.disallowed ?? []),
     // The office tools come on top of every connection the owner has (no --strict-mcp-config).
     ...(o.mcpConfig ? ['--mcp-config', o.mcpConfig] : []),
     ...(o.resume ? ['--resume', o.sessionId] : ['--session-id', o.sessionId]),

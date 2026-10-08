@@ -7,7 +7,7 @@ import { mcpToolPrefix } from '../claude/normalize.ts';
 import { ConflictError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { BlueprintStore } from './blueprint-store.ts';
-import { capability, capabilityIds, capabilityVocabulary, coverage } from './capabilities.ts';
+import { capability, capabilityIds, capabilityVocabulary, coverage, knownServer } from './capabilities.ts';
 import type { Company, PlanDraft } from './company.ts';
 import type { IntegrationRegistry } from './integrations.ts';
 import { checkKpis } from './kpi.ts';
@@ -386,7 +386,8 @@ function knownRule(registry: Integration[], rule: string): boolean {
   const parts = ruleParts(rule);
   if (!parts) return true;
   const vocabulary = capabilityVocabulary().capabilities.flatMap((c) => c.tools);
-  if (parts.tool === null) return registry.some((i) => mcpToolPrefix(i.name) === parts.prefix) || vocabulary.some((t) => t.startsWith(parts.prefix));
+  // A server: some session reported it, or the vocabulary knows it (by a tool of it, or by its name only).
+  if (parts.tool === null) return registry.some((i) => mcpToolPrefix(i.name) === parts.prefix) || knownServer(parts.prefix);
   return vocabulary.includes(parts.tool) || registry.some((i) => i.desks.some((d) => d.toolNames?.includes(parts.tool!)));
 }
 

@@ -17,15 +17,18 @@ import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { Blueprints } from './company/blueprint.ts';
 import { BlueprintStore } from './company/blueprint-store.ts';
 import { IntegrationRegistry } from './company/integrations.ts';
+import { CapabilityPrecheck } from './company/precheck.ts';
 import { officeMetrics } from './company/office-metrics.ts';
 import { OnboardingStore } from './company/onboarding-store.ts';
 import { ProfileStore } from './company/profile-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
+import { relatedMemory } from './company/related-memory.ts';
 import { SearchIndex } from './company/search.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
 import { KpiReadings } from './company/kpi-readings.ts';
+import { sessionDeny } from './company/session-deny.ts';
 import { loadConfig } from './config.ts';
 import { aheadOfCode, migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
@@ -68,6 +71,8 @@ const quota = new QuotaTracker(db, events);
 const tokens = new TokenRegistry();
 let mcpUrl = '';
 const engine = new Engine({
+  // B9b: each session closes the employee's own list (the registry is built below; asked only when a session starts).
+  sessionDeny: (e) => sessionDeny({ capabilities: e.capabilities ?? [], seen: integrations.seenToolNames(), closedServers: integrations.closedServers() }),
   roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens },
   cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
   modelPolicyEnabled: () => budget.constitution().modelPolicyEnabled,
@@ -102,19 +107,23 @@ company.attachClock(clock);
 // KPI measurement (B26): the office reads its own KPIs from the metrics (B4) and asks the coordinator for the rest.
 const kpis = new KpiReadings({ db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(db, o) });
 company.attachKpis(kpis);
+// Which connectors the office has (B3): read from the sessions' reports and the coordinator's records. Before the
+// dispatcher, whose precheck (B8) reads it.
+const integrations = new IntegrationRegistry({ db, roster, events });
+// B8: holds a task whose required capability its desk lacks; the constitution's switch, off by default, turns it on.
+const precheck = new CapabilityPrecheck({ company, tasks, roster, integrations, proposals, events, enabled: () => budget.constitution().capabilityPrecheckEnabled });
 // Who does what when (spec §6.1): reads only, for the sheet, agendaRead and the management board.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 // The coordinator's management cycle (management cycle §3.1): when the board is due, built from the office's services.
 const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota };
 const cycle = new ManagementCycle({ events, state, company, roster, tasks, budget, clock, board: (o) => buildBoard(boardDeps, o) });
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, cycle });
+// B12: each task message carries what the memory holds for it (the index read, no memory.searched event).
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, related: (task) => relatedMemory(searchIndex, task), precheck, cycle });
 
 // How the work went (B4): read from the log on demand, the last `days` or all time.
 const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };
 // The top bar's figures (busy, delivered in the last day, stuck): read on demand.
 const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date.now()) };
-// Which connectors the office has (B3): read from the sessions' reports and the coordinator's records.
-const integrations = new IntegrationRegistry({ db, roster, events });
 const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, memory, store: new BlueprintStore(db), integrations, constitution: () => budget.constitution() });
 
 const api = createApi(

@@ -68,6 +68,8 @@ export interface EngineOptions {
    * model — all but role hints (the coordinator's model by turn type), which apply either way.
    */
   modelPolicyEnabled?: () => boolean;
+  /** The employee's own closed tools (B9b, session-deny.ts), asked for each time a session starts; absent: none. */
+  sessionDeny?: (employee: Employee) => string[];
   /** After the last background job ends between turns, how long the turn claude opens to read it may take to come (default 30 s). */
   followUpGraceMs?: number;
   /** Past this the jobs no longer hold the employee: idle, the office is told, the jobs run on (default BACKGROUND_LIMIT_MS). */
@@ -168,6 +170,7 @@ export class Engine {
   readonly #mcp: EngineOptions['mcp'];
   readonly #cacheTtlMinutes: () => number;
   readonly #modelPolicyEnabled: () => boolean;
+  readonly #sessionDeny: ((employee: Employee) => string[]) | undefined;
   readonly #followUpGraceMs: number;
   readonly #backgroundLimitMs: number;
   readonly #runtimes = new Map<string, Runtime>();
@@ -188,6 +191,7 @@ export class Engine {
     this.#mcp = o.mcp;
     this.#cacheTtlMinutes = o.cacheTtlMinutes ?? (() => 5);
     this.#modelPolicyEnabled = o.modelPolicyEnabled ?? (() => false);
+    this.#sessionDeny = o.sessionDeny;
     this.#followUpGraceMs = o.followUpGraceMs ?? 30_000;
     this.#backgroundLimitMs = o.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
   }
@@ -571,7 +575,7 @@ export class Engine {
     rt.proc = new ClaudeProcess(
       {
         command: this.#command,
-        args: sessionArgs({ model: rt.model ?? employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home, mcpConfig }),
+        args: sessionArgs({ model: rt.model ?? employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home, mcpConfig, disallowed: this.#sessionDeny?.(employee) }),
         cwd: prepareDesk(this.#dataDir, employee),
         env: this.#env,
       },

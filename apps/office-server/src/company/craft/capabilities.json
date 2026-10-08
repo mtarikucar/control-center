@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "capabilities": [
     {
       "id": "docs.read",
@@ -292,6 +292,16 @@
       "tools": [
         "mcp__claude_ai_apify__call-actor"
       ]
+    }
+  ],
+  "knownConnectors": [
+    {
+      "name": "claude.ai Slack",
+      "source": "Bu makinedeki 203 session.started olayının hepsinde (ofis kaydı, 2026-10-08) needs-auth ya da pending, 0 araç; Claude Code oturum kayıtlarında yalnız giriş yardımcıları (authenticate, complete_authentication). Hiç yetkilendirilmedi; araçları yetkiden sonra canlı tools/list'ten okunur (docs.slack.dev/ai/slack-mcp-server), o zamana kadar hepsi dışa dönük."
+    },
+    {
+      "name": "claude.ai Google Drive",
+      "source": "Bu makinedeki 203 session.started olayının hepsinde (ofis kaydı, 2026-10-08) needs-auth ya da pending, 0 araç; Claude Code oturum kayıtlarında yalnız giriş yardımcıları (authenticate, complete_authentication). Hiç yetkilendirilmedi; resmî araç listesi bulunamadı, yetkiden sonra canlı tools/list'ten okunur, o zamana kadar hepsi dışa dönük."
     }
   ]
 }

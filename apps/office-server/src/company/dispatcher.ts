@@ -41,6 +41,8 @@ export interface DispatcherDeps {
   pulse?: { check(): unknown };
   /** KPI measurement (B26), run on each tick after the pulse. */
   kpis?: { measure(): unknown };
+  /** The capability precheck (B8): holds a task whose required capability the desk lacks. Absent: none. */
+  precheck?: { hold(task: Task): boolean; release(): void };
   /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
   clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: () => void): void };
   /**
@@ -48,6 +50,11 @@ export interface DispatcherDeps {
    * its decisions; its information is the board's. Absent (tests, the economy scenario): the coordinator as before.
    */
   cycle?: Pick<ManagementCycle, 'due' | 'waiting' | 'isOpen' | 'ended' | 'opening' | 'started' | 'lost' | 'onDue' | 'trigger'>;
+  /**
+   * The task message's related memory (B12): the section put under the definition of done, '' for none. Absent (the
+   * economy scenario, tests that do not care): no section.
+   */
+  related?: (task: Task) => string;
 }
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
@@ -164,6 +171,8 @@ export class Dispatcher {
   }
 
   sweep(): void {
+    // B8: a held task whose capabilities are there now (or the switch off) waits in its queue again.
+    this.#d.precheck?.release();
     for (const e of this.#d.roster.list()) this.#consider(e.id);
   }
 
@@ -233,7 +242,15 @@ export class Dispatcher {
         if (since !== null) this.#escalate(id, focus);
       }
     } else {
-      const next = this.#d.tasks.nextFor(id);
+      let next = this.#d.tasks.nextFor(id);
+      // B8: a task whose required capability this desk lacks is held, and the next one is tried. Each task is held at
+      // most once here: a hold that leaves the task waiting must not spin the office.
+      const held = new Set<string>();
+      while (next && !held.has(next.id) && this.#d.precheck?.hold(next)) {
+        held.add(next.id);
+        next = this.#d.tasks.nextFor(id);
+      }
+      if (next && held.has(next.id)) next = null;
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
     const hint = this.#hint(employee, started);
@@ -454,13 +471,23 @@ export class Dispatcher {
     const returned = task.kind === 'work' && (task.round ?? 0) > 0 ? this.#returned(task) : '';
     const level = task.difficulty && this.#rules().difficultyModelsEnabled ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
     const due = task.dueAt ? `\nSon tarih: ${formatWhen(task.dueAt, this.#now())}` : '';
+    const related = this.#related(task);
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
 İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${due}${reviewer}${deps}${requires}${brief}
 
-${task.description || '(açıklama yok)'}${done}${returned}
+${task.description || '(açıklama yok)'}${done}${returned}${related}
 
 ${task.kind === 'review' ? REVIEW_CLOSING : WORK_CLOSING}`;
+  }
+
+  /** What the memory holds for the task (B12); a failing search costs the task nothing. */
+  #related(task: Task): string {
+    try {
+      return this.#d.related?.(task) ?? '';
+    } catch {
+      return '';
+    }
   }
 
   /** A task sent back by its reviewer: the findings of the last review go with it. */

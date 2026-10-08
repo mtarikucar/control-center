@@ -88,6 +88,23 @@ describe('Capability vocabulary — the file', () => {
     expect(v.capabilities[2]).toEqual({ id: 'email.send', title: 'E-posta gönderme', summary: 'Gönderir.', outward: true, builtin: [], tools: ['mcp__claude_ai_Gmail__send_message'] });
   });
 
+  it('reads the connectors known by name only (none when the field is absent): their tools are classified nowhere', () => {
+    expect(parseCapabilities(SAMPLE).knownConnectors).toEqual([]);
+    const v = parseCapabilities(variant((x) => void ((x as Record<string, unknown>).knownConnectors = [{ name: 'claude.ai Slack', source: 'oturumlar: needs-auth, 0 araç' }])));
+    expect(v.knownConnectors).toEqual([{ name: 'claude.ai Slack', source: 'oturumlar: needs-auth, 0 araç' }]);
+    const known = (list: unknown) => variant((x) => void ((x as Record<string, unknown>).knownConnectors = list));
+    const bad: Array<[string, RegExp]> = [
+      [known('claude.ai Slack'), /knownConnectors bir liste olmalı/],
+      [known([{ source: 's' }]), /knownConnectors: ad boş olamaz/],
+      [known([{ name: 'claude.ai Slack', source: ' ' }]), /knownConnectors: “claude.ai Slack” için kaynak boş olamaz/],
+      [known([{ name: 'claude.ai Slack', source: 's', tools: [] }]), /knownConnectors: “claude.ai Slack”: “tools” bilinmeyen alan/],
+      [known([{ name: 'claude.ai Slack', source: 's' }, { name: 'claude.ai_Slack', source: 's' }]), /knownConnectors: “claude.ai_Slack” iki kez geçiyor \(araç ön eki mcp__claude_ai_Slack__\)/],
+      // A connector whose tools the vocabulary classifies is known by them: listing it here would say the opposite.
+      [known([{ name: 'claude.ai Gmail', source: 's' }]), /knownConnectors: “claude.ai Gmail” araçları sözlükte sınıflandırılmış \(email.read, email.send\)/],
+    ];
+    for (const [text, error] of bad) expect(() => parseCapabilities(text), String(error)).toThrow(error);
+  });
+
   it('review focus: refuses a wrong vocabulary, saying what is wrong', () => {
     const bad: Array<[string, RegExp]> = [
       ['{', /Yetenek sözlüğü: JSON değil/],
@@ -110,7 +127,7 @@ describe('Capability vocabulary — the file', () => {
 
   it('the shipped vocabulary: twenty-three capabilities, which go outward, which the session always has, the connectors named by their tools', () => {
     const v = capabilityVocabulary();
-    expect(v.version).toBe(1);
+    expect(v.version).toBe(2);
     expect(v.capabilities.map((c) => c.id)).toEqual([
       'docs.read', 'docs.write', 'web.fetch', 'email.read', 'email.draft', 'email.send', 'calendar.read', 'calendar.write',
       'social.read', 'social.draft', 'social.publish', 'crm.read', 'crm.write', 'payments.read', 'payments.charge', 'ecommerce.orders',
@@ -169,6 +186,20 @@ describe('Capability vocabulary — the file', () => {
 const REAL_INIT = () => JSON.parse(readFileSync(new URL('./fixtures/init-mcp-deny.json', import.meta.url), 'utf8')) as Record<string, unknown>;
 
 describe('Capabilities — the vocabulary is an allow-list (review, Kerem round 1)', () => {
+  it('the shipped vocabulary knows Slack and Google Drive by name only, from the sessions that report them: no tool of theirs is named, each counts as outward', () => {
+    const v = capabilityVocabulary();
+    expect(v.knownConnectors.map((c) => c.name)).toEqual(['claude.ai Slack', 'claude.ai Google Drive']);
+    for (const c of v.knownConnectors) {
+      expect(c.source, c.name).toMatch(/session\.started/);
+      expect(c.source, c.name).toMatch(/needs-auth/);
+      expect(v.capabilities.flatMap((x) => x.tools).filter((t) => t.startsWith(mcpToolPrefix(c.name))), c.name).toEqual([]);
+    }
+    // The only tools of theirs a session here has listed: Claude Code's own sign-in helpers. Unclassified, so outward.
+    for (const tool of ['mcp__claude_ai_Slack__authenticate', 'mcp__claude_ai_Google_Drive__complete_authentication']) {
+      expect(toolClass(tool), tool).toEqual({ kind: 'unclassified', outward: true });
+    }
+  });
+
   it('every tool has a class: the office’s, built in, classified (its capability, outward or not) — or unclassified, which counts as outward', () => {
     expect(toolClass('mcp__office__taskFinish')).toEqual({ kind: 'office' });
     expect(toolClass('Bash')).toEqual({ kind: 'builtin' });
@@ -424,7 +455,8 @@ describe('Capabilities — reading them, and the tools that take them', () => {
       return text;
     };
     const all = await read(t.ada);
-    expect(all).toContain('# Yetenek sözlüğü (23 yetenek, sürüm 1) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
+    expect(all).toContain('# Yetenek sözlüğü (23 yetenek, sürüm 2) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
+    expect(all).toContain('\n## Adıyla bilinen bağlayıcılar — araçları sözlükte yok, hepsi dışa dönük sayılır: claude.ai Slack, claude.ai Google Drive');
     expect(all).toContain('• email.read — E-posta okuma [açık] claude.ai Gmail: açık: Ada');
     expect(all).toContain('• web.fetch — Web’den okuma [açık] yerleşik: WebFetch, WebSearch');
     expect(all).toContain('• payments.read — Ödeme kayıtlarını okuma [elle kayıtlı] iyzico-cli: elle kayıtlı (komut satırı), oturumlarda görünmez');
@@ -433,7 +465,7 @@ describe('Capabilities — reading them, and the tools that take them', () => {
     const ada = await read(t.can, { employee: 'Ada' });
     expect(ada).toContain('# Ada — yetenekler (3), masasındaki karşılığı');
     expect(ada).toContain('• email.read — E-posta okuma [açık] claude.ai Gmail: bu masada açık');
-    expect(ada).toContain('• crm.read — Müşteri kayıtlarını okuma [kapalı] claude.ai jeeta: masa ayarı: oturumda aracı yok (açık: Can)');
+    expect(ada).toContain('• crm.read — Müşteri kayıtlarını okuma [kapalı] claude.ai jeeta: oturumda aracı yok (masa ayarı ya da rolün kapatması) (açık: Can)');
     expect(await read(t.ada, { employee: 'Efe' })).toBe('Efe için bildirilmiş yetenek yok. Koordinatör editRoleCard(capabilities) ile bildirir.');
     const task = t.company.createTask(t.coordinator.id, { assignee: t.efe.id, title: 'Kampanya', requires: ['email.send', 'crm.read'] } as never);
     const forTask = await read(t.efe, { task: task.id });

@@ -17,7 +17,8 @@ import type { FakeEngine } from './engine-helpers.ts';
 import type { TestSetup } from './helpers.ts';
 
 /** The company layer over a test setup and a fake engine, wired like main.ts; `now` (optional) is every store's clock. */
-export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = ['coder', 'designer', 'manager'], now?: () => number) {
+/** `reload` (optional) is also called when the company restarts a session (as main.ts wires Engine.reload). */
+export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = ['coder', 'designer', 'manager'], now?: () => number, reload?: (id: string) => void) {
   const index = new SearchIndex(s.db);
   const tasks = new TaskStore(s.db, now, index);
   const plans = new PlanStore(s.db, now);
@@ -45,7 +46,10 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const clock = { touch: () => void (touched += 1) };
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
-    reload: (id) => void reloaded.push(id), schedules, clock, now, profile: new ProfileStore(s.db, now, index), onboarding: new OnboardingStore(s.db, now),
+    reload: (id) => {
+      reloaded.push(id);
+      reload?.(id);
+    }, schedules, clock, now, profile: new ProfileStore(s.db, now, index), onboarding: new OnboardingStore(s.db, now),
   });
   // KPI measurement (B26), wired like main.ts.
   const kpis = new KpiReadings({ db: s.db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(s.db, o), now });

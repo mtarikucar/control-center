@@ -320,6 +320,9 @@ export class Company {
     });
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
+    // What the session closes follows the capabilities (B9b): a change starts it again (now if idle, else after its turn).
+    const sorted = (list: string[] | undefined) => [...(list ?? [])].sort().join(',');
+    if (sorted(next.capabilities) !== sorted(current.capabilities)) this.#d.reload?.(id);
     return next;
   }
   /** The coordinator (or the owner) moves someone to another model; their session goes on with it, memory kept. */
@@ -776,6 +779,22 @@ export class Company {
     if (status === 'blocked' && task.status !== 'blocked') {
       this.#tellCoordinator(by, 'task.blocked', `${this.nameOf(by)} “${task.title}” görevinde takıldı${note ? `: ${note}` : '.'}`);
     }
+    this.#taskEvent('updated', next);
+    return next;
+  }
+
+  /** B8: the office holds a task it cannot hand out (its assignee's desk lacks a capability it requires). */
+  holdForCapabilities(taskId: string, note: string, tell: string): Task {
+    const task = this.#d.tasks.get(taskId);
+    const next = this.#d.tasks.update(taskId, { status: 'blocked', note });
+    this.#tellCoordinator(task.assignee, 'task.blocked', tell);
+    this.#taskEvent('updated', next);
+    return next;
+  }
+
+  /** B8: a task the precheck held goes back to the queue. */
+  releaseCapabilityHold(taskId: string): Task {
+    const next = this.#d.tasks.update(taskId, { status: 'waiting', note: null });
     this.#taskEvent('updated', next);
     return next;
   }

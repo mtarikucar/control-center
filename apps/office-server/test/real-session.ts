@@ -17,10 +17,10 @@ export const LOCKED_ARGS = ['--strict-mcp-config', '--disallowedTools', ...LOCKE
 /**
  * The system/init of a real session opened in `cwd` with the office's arguments, locked: only the given MCP servers
  * (--strict-mcp-config), the outward built-ins gone. The process is killed the moment the init arrives, before the
- * model answers anything.
+ * model answers anything. `disallowed`: the employee's own closed tools, as engine.#start gives them (B9b).
  */
-export async function realInit(cwd: string, mcpConfig: string): Promise<Record<string, unknown> | null> {
-  const args = [...LOCKED_ARGS, ...sessionArgs({ model: 'haiku', sessionId: crypto.randomUUID(), resume: false, mcpConfig })];
+export async function realInit(cwd: string, mcpConfig: string, o: { disallowed?: string[] } = {}): Promise<Record<string, unknown> | null> {
+  const args = [...LOCKED_ARGS, ...sessionArgs({ model: 'haiku', sessionId: crypto.randomUUID(), resume: false, mcpConfig, disallowed: o.disallowed })];
   const child = spawn('claude', args, { cwd, stdio: ['pipe', 'pipe', 'ignore'] });
   let init: Record<string, unknown> | null = null;
   const done = new Promise<void>((resolve) => {

@@ -1,17 +1,17 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
 import { applyText, blueprintText, type Blueprints } from '../company/blueprint.ts';
-import { capabilityVocabulary, coverage, coverageBrief, coverageLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
+import { capabilityVocabulary, coverage, coverageBrief, coverageLines, knownConnectorLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
 import { listRoleTemplates, roleTemplate, templateRole } from '../company/role-templates.ts';
 import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
 import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
 import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
 import { MAX_STREAMS } from '../company/streams.ts';
-import { memoryKinds, queryWords } from '../company/search.ts';
+import { hitLine, memoryKinds, queryWords } from '../company/search.ts';
 import type { TaskStore } from '../company/store.ts';
 import { formatPerformance, type PerformanceReport } from '../performance.ts';
 import { cronLabel, formatWhen, parseCron, parseSince } from '../company/time.ts';
@@ -23,9 +23,6 @@ import type { McpTool } from './protocol.ts';
 const EVERYONE: EmployeeKind[] = ['member', 'lead', 'coordinator'];
 const COORDINATOR: EmployeeKind[] = ['coordinator'];
 const LEADS: EmployeeKind[] = ['lead', 'coordinator'];
-const HIT_KIND: Record<MemoryHit['kind'], string> = { note: 'not', decision: 'karar', playbook: 'el kitabı', task: 'teslim', profile: 'profil' };
-/** Where to read the whole record: a playbook topic and a profile section have their own tools; the rest an id. */
-const hitRef = (h: MemoryHit) => (h.kind === 'playbook' ? `playbookRead konu: ${h.id}` : h.kind === 'profile' ? `profileRead bölüm: ${h.id}` : h.id);
 const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 
 type Args = Record<string, unknown>;
@@ -130,7 +127,7 @@ export function officeTools(o: {
   characters: () => string[];
   memory: Memory;
   budget: Budget;
-  engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown; sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }> };
+  engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown; sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }>; reload?(id: string): void };
   /** Every plan, newest first (goalsRead lists each goal's plans). */
   plans: () => Plan[];
   /** Who does what when, as Turkish text (agendaRead). */
@@ -381,7 +378,7 @@ export function officeTools(o: {
         if (status !== undefined && !(INTEGRATION_STATUSES as readonly string[]).includes(status)) throw new ValidationError(`durum (status) ${INTEGRATION_STATUSES.slice(0, -1).join(', ')} ya da ${INTEGRATION_STATUSES.at(-1)} olmalı.`);
         const who = optStr(args, 'employee');
         const list = o.integrations.list({ status: status as IntegrationStatus | undefined, employee: who === undefined ? undefined : findPerson(who).id });
-        return integrationsText(list, status !== undefined || who !== undefined);
+        return integrationsText(list, status !== undefined || who !== undefined, o.integrations.seenToolNames());
       },
     },
     {
@@ -411,6 +408,7 @@ export function officeTools(o: {
         return [
           `# Yetenek sözlüğü (${v.capabilities.length} yetenek, sürüm ${v.version}) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.`,
           ...coverageLines(coverage(registry, v.capabilities.map((c) => c.id)), false),
+          ...knownConnectorLines(),
           ...unclassifiedLines(registry),
         ].join('\n');
       },
@@ -435,7 +433,7 @@ export function officeTools(o: {
         const hits = memory.search(query, { limit: num(args, 'limit') ?? 10, kinds: memoryKinds(args.kinds), since: since === undefined ? undefined : parseSince(since, Date.now()), by: employee.id });
         if (hits.length === 0) return 'Şirket hafızasında bununla ilgili bir şey yok.';
         const total = queryWords(query).length;
-        return hits.map((h) => `• [${HIT_KIND[h.kind]}${h.partial ? `, kısmi ${h.matched}/${total}` : ''}] ${h.title} (${day(h.ts)}, ${hitRef(h)}): ${h.snippet}`).join('\n');
+        return hits.map((h) => hitLine(h, total)).join('\n');
       },
     },
     {
@@ -954,7 +952,7 @@ export function officeTools(o: {
     },
     {
       name: 'integrationRegister',
-      description: `Record a connector in the integration registry by hand (coordinator): one the sessions do not show (an adapter or a CLI, give kind), or notes on one they do — capabilities, what the owner must do (authNeeded), cost, a note — or close it (closed: true; the registry marks it, B9 will shut it in sessions). Fields given are written, the others kept. Kinds: ${INTEGRATION_KINDS.join(', ')}.`,
+      description: `Record a connector in the integration registry by hand (coordinator): one the sessions do not show (an adapter or a CLI, give kind), or notes on one they do — capabilities, what the owner must do (authNeeded), cost, a note — or close it (closed: true; every session starts again with it shut). Fields given are written, the others kept. Kinds: ${INTEGRATION_KINDS.join(', ')}.`,
       inputSchema: object(
         {
           name: s('Connector name as the sessions report it (e.g. "claude.ai Gmail") or your own.'), kind: { type: 'string', enum: [...INTEGRATION_KINDS] }, capabilities: strings('What it can do, e.g. email.read, social.publish.'),
@@ -965,7 +963,10 @@ export function officeTools(o: {
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
         if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
+        const wasClosed = o.integrations.closedServers().includes(str(args, 'name').trim());
         const i = o.integrations.register(employee.id, { name: args.name, kind: args.kind, capabilities: args.capabilities, authNeeded: args.authNeeded, costNote: args.costNote, note: args.note, closed: args.closed });
+        // Closed or opened in the registry (B9b): every session starts again (now if idle, else after its turn) with it shut or open.
+        if (i.registryClosed !== wasClosed) for (const e of roster.list()) if (e.lifecycle !== 'archived') o.engine.reload?.(e.id);
         // Kept as written (B3); only the vocabulary's ids take part in a match (B7).
         const unknown = args.capabilities === undefined ? [] : unknownCapabilities(i.capabilities);
         const warn = unknown.length ? `\nSözlükte olmayan yetenek: ${unknown.join(', ')} — eşleşmede kullanılmaz (sözlük: capabilitiesRead).` : '';

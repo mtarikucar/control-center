@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import {
   COVERAGE_STATUS_LABELS, INTEGRATION_KIND_LABELS, INTEGRATION_STATUS_LABELS,
   type Capability, type CapabilityCoverage, type CapabilityProvider, type CapabilityVocabulary, type CoverageStatus, type Integration, type IntegrationDesk,
-  type UnclassifiedTools,
+  type KnownConnector, type UnclassifiedTools,
 } from '@cc/shared';
 import { mcpToolPrefix } from '../claude/normalize.ts';
 import { NotFoundError, ValidationError } from '../errors.ts';
@@ -30,7 +30,7 @@ export function parseCapabilities(text: string): CapabilityVocabulary {
   } catch {
     throw fail('JSON değil.');
   }
-  const doc = raw as { version?: unknown; capabilities?: unknown };
+  const doc = raw as { version?: unknown; capabilities?: unknown; knownConnectors?: unknown };
   if (!Number.isInteger(doc.version) || (doc.version as number) < 1) throw fail('version pozitif bir tam sayı olmalı.');
   if (!Array.isArray(doc.capabilities)) throw fail('capabilities bir liste olmalı.');
   const seen = new Set<string>();
@@ -54,7 +54,24 @@ export function parseCapabilities(text: string): CapabilityVocabulary {
     }
     return { id, title: (entry.title as string).trim(), summary: (entry.summary as string).trim(), outward: entry.outward, builtin: entry.builtin as string[], tools };
   });
-  return { version: doc.version as number, capabilities };
+  // Known by name only: never a tool name — what a connector offers is read from a session, not written here.
+  const raw2 = doc.knownConnectors ?? [];
+  if (!Array.isArray(raw2)) throw fail('knownConnectors bir liste olmalı.');
+  const prefixes = new Set<string>();
+  const knownConnectors = raw2.map((entry: Record<string, unknown>): KnownConnector => {
+    const name = typeof entry?.name === 'string' ? entry.name.trim() : '';
+    if (!name) throw fail('knownConnectors: ad boş olamaz.');
+    if (typeof entry.source !== 'string' || !entry.source.trim()) throw fail(`knownConnectors: “${name}” için kaynak boş olamaz.`);
+    const extra = Object.keys(entry).find((k) => k !== 'name' && k !== 'source');
+    if (extra) throw fail(`knownConnectors: “${name}”: “${extra}” bilinmeyen alan.`);
+    const prefix = mcpToolPrefix(name);
+    if (prefixes.has(prefix)) throw fail(`knownConnectors: “${name}” iki kez geçiyor (araç ön eki ${prefix}).`);
+    prefixes.add(prefix);
+    const classified = capabilities.filter((c) => c.tools.some((t) => t.startsWith(prefix))).map((c) => c.id);
+    if (classified.length) throw fail(`knownConnectors: “${name}” araçları sözlükte sınıflandırılmış (${classified.join(', ')}); adıyla bilinen listesinde olamaz.`);
+    return { name, source: entry.source.trim() };
+  });
+  return { version: doc.version as number, capabilities, knownConnectors };
 }
 
 let cached: CapabilityVocabulary | null = null;
@@ -126,7 +143,7 @@ export function coverage(integrations: Integration[], wanted: string[], employee
 
 function shutReason(d: IntegrationDesk): string {
   if (d.closedBy === 'registry') return 'kayıtta kapalı';
-  if (d.closedBy === 'desk') return 'masa ayarı: oturumda aracı yok';
+  if (d.closedBy === 'desk') return 'oturumda aracı yok (masa ayarı ya da rolün kapatması)';
   return INTEGRATION_STATUS_LABELS[d.status];
 }
 
@@ -197,6 +214,18 @@ export function unclassifiedTools(integrations: Integration[]): UnclassifiedTool
     out.push({ server: i.name, kind: i.kind, tools, unclassified: named ? unclassified : null, atLeast });
   }
   return out.sort((a, b) => b.atLeast - a.atLeast || a.server.localeCompare(b.server, 'tr'));
+}
+
+/** A connector's tool prefix the vocabulary knows: by a classified tool of it, or by its name only (knownConnectors). */
+export function knownServer(prefix: string): boolean {
+  const v = capabilityVocabulary();
+  return v.capabilities.some((c) => c.tools.some((t) => t.startsWith(prefix))) || v.knownConnectors.some((k) => mcpToolPrefix(k.name) === prefix);
+}
+
+/** capabilitiesRead's line on the connectors known by name only. */
+export function knownConnectorLines(): string[] {
+  const names = capabilityVocabulary().knownConnectors.map((k) => k.name);
+  return names.length ? ['', `## Adıyla bilinen bağlayıcılar — araçları sözlükte yok, hepsi dışa dönük sayılır: ${names.join(', ')}`] : [];
 }
 
 /** The section capabilitiesRead ends with: each connector's unclassified tools (the first six by name). */
