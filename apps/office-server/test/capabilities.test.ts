@@ -225,6 +225,10 @@ describe('Capabilities — the vocabulary is an allow-list (review, Kerem round 
     expect(list.map((u) => u.server)).not.toContain('office');
     // A desk that denies a server has none of its tools: nothing to list.
     expect(list.map((u) => u.server)).not.toContain('blender');
+    // The move to names: a desk whose session predates them but denies jeeta (0 tools, no names) leaves the names known.
+    const efe = t.company.hire(c, { name: 'Efe', role: 'r' });
+    t.session(efe, [['claude.ai jeeta', 'connected', 0]]);
+    expect(unclassifiedTools(t.integrations.list()).find((u) => u.server === 'claude.ai jeeta')).toMatchObject({ unclassified: ['mcp__claude_ai_jeeta__jeeta_get_workspace_info', 'mcp__claude_ai_jeeta__jeeta_list_team'], atLeast: 2 });
   });
 
   it('capabilitiesRead and the API show them after the vocabulary', async () => {
