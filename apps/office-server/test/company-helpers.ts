@@ -9,13 +9,15 @@ import { ProfileStore } from '../src/company/profile-store.ts';
 import { ProposalStore } from '../src/company/proposal-store.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
 import { Scheduling } from '../src/company/scheduling.ts';
+import { SearchIndex } from '../src/company/search.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from '../src/company/store.ts';
 import type { FakeEngine } from './engine-helpers.ts';
 import type { TestSetup } from './helpers.ts';
 
 /** The company layer over a test setup and a fake engine, wired like main.ts; `now` (optional) is every store's clock. */
 export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = ['coder', 'designer', 'manager'], now?: () => number) {
-  const tasks = new TaskStore(s.db, now);
+  const index = new SearchIndex(s.db);
+  const tasks = new TaskStore(s.db, now, index);
   const plans = new PlanStore(s.db, now);
   const notices = new NoticeStore(s.db, now);
   const schedules = new ScheduleStore(s.db, now);
@@ -23,8 +25,8 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const goals = new GoalStore(s.db, now);
   const state = new CompanyStateStore(s.db);
   const memory = new Memory({
-    roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir,
-    decisions: new DecisionStore(s.db, now), playbook: new PlaybookStore(s.db, now), notes: new NoteStore(s.db, now), employeeNotes: new EmployeeNoteStore(s.db, now),
+    roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, index,
+    decisions: new DecisionStore(s.db, now, index), playbook: new PlaybookStore(s.db, now, index), notes: new NoteStore(s.db, now, index), employeeNotes: new EmployeeNoteStore(s.db, now),
   });
   let quotaState: QuotaState | null = null;
   // The approval flow is what most tests are about (tests of full autonomy set it themselves); written to the store
@@ -41,7 +43,7 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const clock = { touch: () => void (touched += 1) };
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
-    reload: (id) => void reloaded.push(id), schedules, clock, now, profile: new ProfileStore(s.db, now), onboarding: new OnboardingStore(s.db, now),
+    reload: (id) => void reloaded.push(id), schedules, clock, now, profile: new ProfileStore(s.db, now, index), onboarding: new OnboardingStore(s.db, now),
   });
   const scheduling = new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
   /** A restarted office's due-processor on the same database. */
@@ -55,7 +57,7 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     };
   };
   return {
-    tasks, plans, notices, memory, company, reloaded, budget, proposals, goals, state, schedules, scheduling, freshScheduling, breakReturnOf,
+    tasks, plans, notices, memory, company, reloaded, index, budget, proposals, goals, state, schedules, scheduling, freshScheduling, breakReturnOf,
     /** How often the fake clock was touched so far (a function: the tests spread this object, which would freeze a getter). */
     clockTouches: () => touched,
     setQuota: (q: QuotaState | null) => {

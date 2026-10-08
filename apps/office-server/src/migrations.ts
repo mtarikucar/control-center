@@ -440,4 +440,47 @@ export const MIGRATIONS: Migration[] = [
       );`,
     down: `DROP TABLE IF EXISTS integrations;`,
   },
+  {
+    // v16–v19 are held for B6, B7, B5 and B26 (company decision d63e5d27); this one goes live after them.
+    version: 20,
+    name: 'search: one index over notes, decisions, the playbook, finished work and the profile',
+    // Spec 2026-10-08-memory-search-design §3.2. The stores write it (the folded ft_* text comes from JS, which SQL
+    // cannot fold the Turkish way); the office fills it from the source tables on start (SearchIndex.rebuildIfStale),
+    // so it starts empty.
+    up: `
+      CREATE TABLE IF NOT EXISTS search_index (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        ref TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '',
+        ft_title TEXT NOT NULL,
+        ft_body TEXT NOT NULL,
+        ft_tags TEXT NOT NULL,
+        ts INTEGER NOT NULL,
+        UNIQUE (kind, ref)
+      );
+      CREATE INDEX IF NOT EXISTS search_index_kind_ts ON search_index (kind, ts);
+      CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+        ft_title, ft_body, ft_tags, content = 'search_index', content_rowid = 'id', tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER IF NOT EXISTS search_index_ai AFTER INSERT ON search_index BEGIN
+        INSERT INTO search_fts (rowid, ft_title, ft_body, ft_tags) VALUES (new.id, new.ft_title, new.ft_body, new.ft_tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS search_index_ad AFTER DELETE ON search_index BEGIN
+        INSERT INTO search_fts (search_fts, rowid, ft_title, ft_body, ft_tags) VALUES ('delete', old.id, old.ft_title, old.ft_body, old.ft_tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS search_index_au AFTER UPDATE ON search_index BEGIN
+        INSERT INTO search_fts (search_fts, rowid, ft_title, ft_body, ft_tags) VALUES ('delete', old.id, old.ft_title, old.ft_body, old.ft_tags);
+        INSERT INTO search_fts (rowid, ft_title, ft_body, ft_tags) VALUES (new.id, new.ft_title, new.ft_body, new.ft_tags);
+      END;`,
+    down: `
+      DROP TRIGGER IF EXISTS search_index_au;
+      DROP TRIGGER IF EXISTS search_index_ad;
+      DROP TRIGGER IF EXISTS search_index_ai;
+      DROP TABLE IF EXISTS search_fts;
+      DROP INDEX IF EXISTS search_index_kind_ts;
+      DROP TABLE IF EXISTS search_index;`,
+  },
 ];

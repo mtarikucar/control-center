@@ -43,13 +43,22 @@ export interface EmployeeNote {
   text: string;
 }
 
+/** What the memory search looks through: knowledge notes, decisions, playbook topics, finished work, profile sections. */
+export const MEMORY_KINDS = ['note', 'decision', 'playbook', 'task', 'profile'] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+
 /** One search result across the company's memory. */
 export interface MemoryHit {
-  kind: 'note' | 'decision' | 'playbook' | 'task';
+  kind: MemoryKind;
+  /** The note's number, the decision's or task's id, the playbook topic, the profile section. */
   id: string;
   title: string;
   snippet: string;
   ts: number;
+  /** Set when the record has only some of the query's words: found after every record that has them all. */
+  partial?: true;
+  /** With `partial`: how many of the query's (distinct) words it has. */
+  matched?: number;
 }
 
 /** What the company knows about one employee: the coordinator's notes and their track record. */

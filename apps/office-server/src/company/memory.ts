@@ -1,13 +1,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Decision, Employee, EmployeeFile, EmployeeNote, MemoryHit, Note, OfficeEvent, PlaybookEntry, Task, TaskResult } from '@cc/shared';
+import type { Decision, Employee, EmployeeFile, EmployeeNote, MemoryHit, MemoryKind, Note, OfficeEvent, PlaybookEntry, Task, TaskResult } from '@cc/shared';
 import { OWNER } from '@cc/shared';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import { slugify, type Roster } from '../roster.ts';
 import type { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './memory-store.ts';
+import type { SearchIndex } from './search.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
-import { clean, fold, lines, snippetOf, words } from './text.ts';
+import { clean, fold, lines, words } from './text.ts';
 
 export interface MemoryDeps {
   roster: Roster;
@@ -19,7 +20,19 @@ export interface MemoryDeps {
   playbook: PlaybookStore;
   notes: NoteStore;
   employeeNotes: EmployeeNoteStore;
+  /** The memory search's index (B11); the stores write it. */
+  index: SearchIndex;
   dataDir: string;
+}
+
+export interface MemorySearchOptions {
+  /** 1–30; default 10. */
+  limit?: number;
+  kinds?: MemoryKind[];
+  /** Only records from this time on (epoch ms). */
+  since?: number;
+  /** Who searched (an employee id); none = the owner. */
+  by?: string | null;
 }
 
 function matches(haystack: string, ws: string[]): boolean {
@@ -151,24 +164,21 @@ export class Memory {
     return query?.trim() ? this.#d.notes.search(query, limit) : this.#d.notes.list(limit).map((note) => ({ note, snippet: '' }));
   }
 
-  /** Everything the company knows that mentions every word of the query: notes, decisions, playbook topics, finished work. */
-  search(query: string, limit = 10): MemoryHit[] {
-    const ws = words(query);
-    if (ws.length === 0) throw new ValidationError('Arama için en az bir kelime yaz.');
-    const hits: MemoryHit[] = this.#d.notes.search(query, limit).map(({ note, snippet }) => ({ kind: 'note', id: String(note.id), title: note.title, snippet, ts: note.ts }));
-    for (const x of this.#d.decisions.list({ limit: 500 })) {
-      const body = `${x.chosen}. ${x.reason}${x.alternatives.length ? ` (alternatifler: ${x.alternatives.join(', ')})` : ''}`;
-      if (matches(`${x.title} ${body}`, ws)) hits.push({ kind: 'decision', id: x.id, title: x.title, snippet: snippetOf(body, ws), ts: x.ts });
-    }
-    for (const p of this.#d.playbook.topics()) {
-      if (matches(`${p.topic} ${p.text}`, ws)) hits.push({ kind: 'playbook', id: p.topic, title: p.topic, snippet: snippetOf(p.text, ws), ts: p.ts });
-    }
-    for (const t of this.#d.tasks.list({ statuses: ['done'], limit: 100_000 })) {
-      if (!t.result) continue;
-      const body = `${t.result.summary} ${t.result.learned}`.trim();
-      if (matches(`${t.title} ${body}`, ws)) hits.push({ kind: 'task', id: t.id, title: t.title, snippet: snippetOf(body, ws), ts: t.finishedAt ?? t.createdAt });
-    }
-    return hits.sort((a, b) => b.ts - a.ts).slice(0, limit);
+  /**
+   * What the company knows about the query — notes, decisions, playbook topics, finished work, the profile (spec
+   * 2026-10-08-memory-search-design §3.5): records with every word first, best match first; if they are fewer than
+   * `limit`, records with some of the words follow, marked partial. Every search is logged (memory.searched): the share
+   * that finds nothing is measured from it.
+   */
+  search(query: string, o: MemorySearchOptions = {}): MemoryHit[] {
+    if (words(query).length === 0) throw new ValidationError('Arama için en az bir kelime yaz.');
+    const limit = o.limit ?? 10;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 30) throw new ValidationError('limit 1 ile 30 arasında bir tam sayı olmalı.');
+    const start = performance.now();
+    const { hits, mode } = this.#d.index.search(query, { limit, kinds: o.kinds, since: o.since });
+    const ms = Math.round((performance.now() - start) * 10) / 10;
+    this.#emit(o.by ?? null, { type: 'memory.searched', query: query.trim().slice(0, 300), hits: hits.length, mode, ms });
+    return hits;
   }
 
   /** What a hand-in taught goes to the notes, so the next person who searches finds it. */

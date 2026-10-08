@@ -7,7 +7,9 @@ import { MODEL_RANK } from './model-policy.ts';
 import type { Company } from './company/company.ts';
 import type { Memory } from './company/memory.ts';
 import type { ProposalStore } from './company/proposal-store.ts';
+import { memoryKinds } from './company/search.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
+import { parseSince } from './company/time.ts';
 import type { Engine } from './engine.ts';
 import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } from './errors.ts';
 import type { EventStore } from './event-store.ts';
@@ -203,6 +205,17 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'GET' && url.pathname === '/api/memory/playbook') return sendJson(res, 200, memory.playbookTopics());
     if (method === 'GET' && url.pathname === '/api/memory/playbook/history') return sendJson(res, 200, memory.playbookHistory(url.searchParams.get('topic') ?? ''));
     if (method === 'GET' && url.pathname === '/api/memory/notes') return sendJson(res, 200, memory.notes(url.searchParams.get('q') ?? undefined, 100));
+    if (method === 'GET' && url.pathname === '/api/memory/search') {
+      // The whole memory for the owner (B11): ?q=words&kinds=note,decision&limit=10&since=7d.
+      const p = url.searchParams;
+      const limit = p.get('limit');
+      const since = p.get('since');
+      return sendJson(res, 200, memory.search(p.get('q') ?? '', {
+        limit: limit === null ? undefined : Number(limit),
+        kinds: memoryKinds(p.get('kinds')?.split(',').map((k) => k.trim()).filter(Boolean)),
+        since: since ? parseSince(since, Date.now()) : undefined,
+      }));
+    }
     const budget = d.company.budget;
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());

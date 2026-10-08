@@ -3,6 +3,7 @@ import type { Plan, PlanMethod, PlanStatus, Schedule, ScheduleStatus, Task, Task
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 import { NOTICE_TOPICS, type Notice, type NoticeTopic } from './notices.ts';
+import type { SearchIndex } from './search.ts';
 
 interface TaskRow {
   id: string;
@@ -101,10 +102,13 @@ export const OPEN_STATUSES: TaskStatus[] = ['waiting', 'in_progress', 'review', 
 export class TaskStore {
   readonly #db: Db;
   readonly #now: () => number;
+  readonly #index: SearchIndex | undefined;
 
-  constructor(db: Db, now: () => number = Date.now) {
+  /** `index`: the memory search's index, which holds finished work (B11); none in tests that do not search. */
+  constructor(db: Db, now: () => number = Date.now, index?: SearchIndex) {
     this.#db = db;
     this.#now = now;
+    this.#index = index;
   }
 
   create(t: NewTask): Task {
@@ -162,6 +166,7 @@ export class TaskStore {
         next.assignee, next.priority, next.difficulty ?? null, next.reviewer ?? null, next.round ?? 0, next.status, next.note, next.result ? JSON.stringify(next.result) : null, next.nudged ? 1 : 0, next.nudgedAt ?? null, next.startedAt, next.finishedAt,
         next.notBefore ?? null, next.dueAt ?? null, next.parkedReason ?? null, next.parkCount ?? 0, id,
       );
+    this.#index?.task(next);
     return next;
   }
 
