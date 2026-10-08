@@ -2,6 +2,7 @@ import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, typ
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
+import { listRoleTemplates, roleTemplate, templateRole } from '../company/role-templates.ts';
 import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
 import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
@@ -669,6 +670,26 @@ export function officeTools(o: {
       },
     },
     {
+      name: 'roleTemplates',
+      description: 'Read the role template catalog (coordinator or team lead): without id, every template with its title, model, methods and one line; with id, one whole — defaults, capabilities, checks, measures and the role text a hire from it gets. Hire from one with hire(template).',
+      inputSchema: object({ id: s('Template id.') }),
+      kinds: LEADS,
+      run: (_ctx, args) => {
+        const id = optStr(args, 'id');
+        if (id === undefined) {
+          const all = listRoleTemplates();
+          return [`# Rol şablonları (${all.length})`, ...all.map((t) => `• ${t.id} — ${t.title} (${t.model}; yöntem: ${t.methods.join(', ')}): ${t.summary}`)].join('\n');
+        }
+        const t = roleTemplate(id);
+        return [
+          `# ${t.title} (${t.id}, sürüm ${t.version})`,
+          `Model: ${t.model} · Ekip: ${t.team} · Yöntemler: ${t.methods.join(', ')} · Yetenekler: ${t.capabilities.join(', ')}`,
+          '',
+          templateRole(t),
+        ].join('\n');
+      },
+    },
+    {
       name: 'goalsRead',
       description: 'Read the company’s goals (coordinator or team lead): each active goal with why, its definition of done and its plans; then the recently closed ones.',
       inputSchema: object({}),
@@ -698,16 +719,27 @@ export function officeTools(o: {
     },
     {
       name: 'hire',
-      description: `Hire a new employee (coordinator): name, job title, team, the role card text (responsibilities, how to work, what "done" means), the model (${MODEL_ALIASES.join(', ')}) and the look (characterId). Desks are limited.`,
+      description: `Hire a new employee (coordinator). From a role template (template; read them with roleTemplates): the role text, title, team and model come from it; role is then this company's own part (brand voice, channels, language, limits from the profile) and title, team or model given override the template's. Without a template: the role card text (responsibilities, how to work, what "done" means) and the model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
       inputSchema: {
-        ...object({ name: s('Name.'), title: s('Job title.'), team: s('Team.'), role: s('Role card: responsibilities and way of working.'), model: { type: 'string', enum: [...MODEL_ALIASES] }, characterId: { type: 'string', enum: characterList(), description: 'Look in the 3D office.' } }, ['name', 'role', 'model']),
+        ...object(
+          {
+            name: s('Name.'), template: { type: 'string', enum: listRoleTemplates().map((t) => t.id), description: 'Role template id (roleTemplates).' }, title: s('Job title.'), team: s('Team.'),
+            role: s('Without a template: the role card. With one: this company’s own part of the role.'), model: { type: 'string', enum: [...MODEL_ALIASES] },
+            characterId: { type: 'string', enum: characterList(), description: 'Look in the 3D office.' },
+          },
+          ['name'],
+        ),
       },
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const model = str(args, 'model') as ModelAlias;
-        if (!(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${model}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
-        const hired = company.hire(employee.id, { name: str(args, 'name'), role: str(args, 'role'), title: optStr(args, 'title'), team: optStr(args, 'team'), model, characterId: optStr(args, 'characterId'), reportsTo: null });
-        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}.`;
+        const template = optStr(args, 'template');
+        // Without a template, as before: role and model are required.
+        const model = (template === undefined ? str(args, 'model') : optStr(args, 'model')) as ModelAlias | undefined;
+        if (model !== undefined && !(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${model}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
+        const role = template === undefined ? str(args, 'role') : (optStr(args, 'role') ?? '');
+        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, characterId: optStr(args, 'characterId'), reportsTo: null });
+        const from = hired.template ? `, şablon ${hired.template.id} (sürüm ${hired.template.version})` : '';
+        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}${from}.`;
       },
     },
     {

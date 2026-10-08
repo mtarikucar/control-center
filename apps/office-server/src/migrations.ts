@@ -440,4 +440,15 @@ export const MIGRATIONS: Migration[] = [
       );`,
     down: `DROP TABLE IF EXISTS integrations;`,
   },
+  {
+    version: 16,
+    name: 'role templates: which one an employee was hired from',
+    // Employees from before were hired with free text: no template.
+    up: `
+      ALTER TABLE employees ADD COLUMN template TEXT;
+      ALTER TABLE employees ADD COLUMN template_version INTEGER;`,
+    down: `
+      ALTER TABLE employees DROP COLUMN template_version;
+      ALTER TABLE employees DROP COLUMN template;`,
+  },
 ];

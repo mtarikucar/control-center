@@ -28,7 +28,7 @@ const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version)
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
     expect(tables(db)).toEqual(V15_TABLES);
   });
 
@@ -42,14 +42,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
     expect(tables(db)).toEqual(V15_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -306,7 +306,7 @@ describe('migrations', () => {
     const db = openDb(':memory:');
     migrateUp(db, upTo(14));
     db.prepare("INSERT INTO onboarding (id, description, status, started_by, started_at) VALUES ('o1', 'cümle', 'active', 'c', 1)").run();
-    migrateUp(db);
+    migrateUp(db, upTo(15));
     expect(appliedVersion(db)).toBe(15);
     expect(tables(db)).toEqual(V15_TABLES);
     expect(columns(db, 'integrations')).toEqual(['name', 'kind', 'closed', 'capabilities', 'auth_needed', 'cost_note', 'note', 'registered_by', 'registered_at', 'updated_at']);
@@ -316,6 +316,24 @@ describe('migrations', () => {
     expect(migrateDown(db, 14)).toBe(14);
     expect(tables(db)).toEqual(V14_TABLES);
     expect(db.prepare('SELECT COUNT(*) AS n FROM onboarding').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db, upTo(15))).toBe(15);
+  });
+
+  it('v16 records which role template an employee was hired from, none for those before; v16 down restores v15 exactly and keeps them', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(15));
+    const before = columns(db, 'employees');
+    db.prepare(
+      `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started, lifecycle, created_at, title, team, kind)
+       VALUES ('e1', 'ada', 'Ada', 'serbest metin', 'sonnet', 'coder', 0, 's1', 0, 'stopped', 1, '', '', 'member')`,
+    ).run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(16);
+    expect(columns(db, 'employees')).toEqual([...before, 'template', 'template_version']);
+    expect({ ...(db.prepare('SELECT role, template, template_version FROM employees').get() as object) }).toEqual({ role: 'serbest metin', template: null, template_version: null });
+    expect(migrateDown(db, 15)).toBe(15);
+    expect(columns(db, 'employees')).toEqual(before);
+    expect(db.prepare('SELECT name FROM employees').get()).toMatchObject({ name: 'Ada' });
+    expect(migrateUp(db)).toBe(16);
   });
 });

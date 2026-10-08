@@ -9,7 +9,7 @@ import { ConflictError, ValidationError } from './errors.ts';
 import type { EventStore } from './event-store.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
 import { modelPolicy } from './model-policy.ts';
-import type { Roster } from './roster.ts';
+import type { NewEmployee, Roster } from './roster.ts';
 
 export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam et.';
 export const CONTINUE_AFTER_RESTART = 'Ofis yeniden başladı; yarım kalan işine kaldığın yerden devam et.';
@@ -162,7 +162,7 @@ export class Engine {
     this.#modelPolicyEnabled = o.modelPolicyEnabled ?? (() => false);
   }
 
-  hire(input: HireInput): Employee {
+  hire(input: NewEmployee): Employee {
     const employee = this.#roster.create(input);
     this.#emit(employee.id, { type: 'employee.hired', name: employee.name });
     return this.#start(employee, 'işe alındı');

@@ -14,6 +14,7 @@ import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
+import { listRoleTemplates } from './company/role-templates.ts';
 import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
 import type { Roster } from './roster.ts';
@@ -204,6 +205,7 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     const budget = d.company.budget;
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
+    if (method === 'GET' && url.pathname === '/api/role-templates') return sendJson(res, 200, listRoleTemplates());
     if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {
       const raw = url.searchParams.get('days');
       const days = raw === null ? undefined : Number(raw);
