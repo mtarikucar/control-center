@@ -60,6 +60,8 @@ export const NOTICE_TOPICS = {
   'pulse.goal_idle': 'decision',
   /** The pulse: no goal and no work — set a goal from the mission or rest. */
   'pulse.no_goal': 'decision',
+  /** The pulse: goals are active and some people have had no work for hours — give them work or say the team is too big. */
+  'pulse.idle_capacity': 'decision',
   /** Someone else parked the task you were working on: stop until it comes back. */
   'task.parked': 'decision',
   /** The same task was parked a third time: is it real work? */

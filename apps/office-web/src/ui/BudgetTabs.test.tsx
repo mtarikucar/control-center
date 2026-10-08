@@ -7,7 +7,7 @@ import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
   constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17],
     coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
-    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
+    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
   reserve: { active: true, limitPct: 75, fiveHourPct: 82, sevenDayPct: 40 },
   month: { key: '2026-10', usd: 31.5 },
   plans: { p1: { spentUsd: 25, claudeUsd: 3.2 } },
@@ -131,5 +131,14 @@ describe('ConstitutionTab', () => {
     fireEvent.change(screen.getByLabelText('En fazla rutin'), { target: { value: '5' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
     expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ defaultTaskMinutes: 30, minScheduleMinutes: 120, maxSchedules: 5 }));
+  });
+
+  it('edits the idle-capacity warning hours', async () => {
+    render(<ConstitutionTab />);
+    const field = screen.getByLabelText('Boşta kapasite uyarısı (saat)') as HTMLInputElement;
+    expect(field.value).toBe('2');
+    fireEvent.change(field, { target: { value: '4' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ idleCapacityHours: 4, pulseHours: 6 }));
   });
 });

@@ -209,6 +209,12 @@ export class TaskStore {
     return row.t;
   }
 
+  /** When this person's last task closed (done or cancelled); null: none ever did. */
+  lastFinishedAt(assignee: string): number | null {
+    const row = this.#db.prepare('SELECT MAX(finished_at) AS t FROM tasks WHERE assignee = ?').get(assignee) as unknown as { t: number | null };
+    return row.t;
+  }
+
   /** One finished turn's Claude usage, added to the task the employee was on. */
   charge(id: string, usd: number, tokens: number): void {
     this.#db.prepare('UPDATE tasks SET cost_usd = cost_usd + ?, tokens = tokens + ? WHERE id = ?').run(usd, tokens, id);

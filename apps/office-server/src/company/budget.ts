@@ -35,6 +35,7 @@ const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number
   cacheTtlMinutes: { label: 'Önbellek süresi (dk)', min: 0, max: () => 60, integer: true },
   activeGoals: { label: 'En fazla aktif hedef', min: 1, max: () => 10, integer: true },
   pulseHours: { label: 'Nabız aralığı (saat)', min: 0, max: () => 168, integer: true },
+  idleCapacityHours: { label: 'Boşta kapasite uyarısı (saat)', min: 0, max: () => 48, integer: true },
   defaultTaskMinutes: { label: 'Varsayılan görev süresi (dk)', min: 5, max: () => 480, integer: true },
   minScheduleMinutes: { label: 'Rutin aralığı en az (dk)', min: 1, max: () => 1440, integer: true },
   maxSchedules: { label: 'En fazla rutin', min: 0, max: () => 100, integer: true },

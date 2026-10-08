@@ -115,8 +115,9 @@ Koordinatör projenin proje yöneticisidir; proje sizin her adımı söylemenizi
   Anayasa'da **Tam serbest** kapatılırsa her plan yine sizin onayınızı bekler. Satın almalar, geri alınamaz işler ve
   bütçe sınırları her durumda sizdedir.
 - **Nabız:** ofisin kodu projeyi izler (model kullanmaz) ve koordinatörü yalnız karar gerektiğinde uyandırır: bir plan
-  bitince (değerlendirme), bir hedefin süren planı kalmayınca, hiç hedef ve iş yokken (en fazla "Nabız aralığı" saatte
-  bir). Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp dinlenir.
+  bitince (değerlendirme), bir hedefin süren planı kalmayınca, hedefler sürerken biri "Boşta kapasite uyarısı" saatinden
+  (varsayılan 2) uzun süredir işsizken (her boşlukta bir kez, hepsi tek notta), hiç hedef ve iş yokken (en fazla "Nabız
+  aralığı" saatte bir). Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp dinlenir.
 - **Sizin denetiminiz:** her süren planda ve her aktif hedefte **Durdur** (açık görevler iptal olur); üst çubukta
   **Şirketi duraklat / Sürdür** (duraklatılmışken ofis kimseye iş ve not vermez; siz yine yazabilirsiniz).
 

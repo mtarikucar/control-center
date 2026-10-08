@@ -43,6 +43,11 @@ export interface Constitution {
   activeGoals: number;
   /** With neither goals nor work, the coordinator is told at most this often, hours; 0 = never (spec §6.3). */
   pulseHours: number;
+  /**
+   * While goals are active, the coordinator hears of anyone who has held no task this many hours (once for each idle
+   * stretch); 0 = never.
+   */
+  idleCapacityHours: number;
   /** The agenda's estimate for a task with no history, minutes (spec §6.1). */
   defaultTaskMinutes: number;
   /** A routine may not fire more often than this, minutes (spec §4.4). */
@@ -69,6 +74,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   autonomy: 'free',
   activeGoals: 10,
   pulseHours: 6,
+  idleCapacityHours: 2,
   defaultTaskMinutes: 45,
   minScheduleMinutes: 60,
   maxSchedules: 20,

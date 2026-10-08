@@ -68,7 +68,7 @@ const budget = new Budget({
 });
 const characters = manifestCharacters(config.assetsDir);
 const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db), onboarding: new OnboardingStore(db) });
-const pulse = new Pulse({ company, goals, state, plans, tasks, notices, budget });
+const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, budget });
 // The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
 const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });
 const clock = new Clock({ scheduling, state, events, label: (now) => dueLabel(tasks, schedules, company, now) });

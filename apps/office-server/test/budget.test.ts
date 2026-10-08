@@ -98,6 +98,18 @@ describe('Budget — constitution', () => {
     expect(() => t.budget.setConstitution({ minScheduleMinutes: 0 })).toThrow(/Rutin aralığı/);
     expect(() => t.budget.setConstitution({ maxSchedules: 101 })).toThrow(/En fazla rutin/);
   });
+
+  it('the idle-capacity key: 2 hours by default, 0 (off) to 48 whole hours, validated in Turkish', () => {
+    const t = make();
+    expect(DEFAULT_CONSTITUTION.idleCapacityHours).toBe(2);
+    expect(t.budget.constitution().idleCapacityHours).toBe(2);
+    expect(t.budget.setConstitution({ idleCapacityHours: 0 }).idleCapacityHours).toBe(0);
+    expect(t.budget.setConstitution({ idleCapacityHours: 48 }).idleCapacityHours).toBe(48);
+    for (const bad of [-1, 49, 1.5, '2', null]) {
+      expect(() => t.budget.setConstitution({ idleCapacityHours: bad }), String(bad)).toThrow('Anayasa: Boşta kapasite uyarısı (saat) 0 ile 48 arasında bir tam sayı olmalı.');
+    }
+    expect(t.budget.constitution().idleCapacityHours).toBe(48);
+  });
 });
 
 describe('Budget — the owner’s reserve', () => {

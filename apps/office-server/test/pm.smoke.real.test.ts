@@ -50,7 +50,7 @@ describe.skipIf(!enabled)('the coordinator as project manager with the real clau
     // The brief (the mission) is written before the office starts, so the first pulse already sees it.
     const coordinator = company.hireCoordinator('sonnet');
     company.updateBrief(coordinator.id, '# Şirket\n\nMisyon: küçük işletmelere ofis yazılımımızı tanıtmak. Şu an tek ürün var; tanıtım metni ve kısa bir SSS yok.\n');
-    const pulse = new Pulse({ company, goals, state, plans, tasks, notices, budget });
+    const pulse = new Pulse({ company, roster: s.roster, goals, state, plans, tasks, notices, budget });
     const stop = new Dispatcher({ events: s.events, roster: s.roster, tasks, notices, plans, company, engine, budget, pulse, tickMs: 5_000 }).start();
     try {
       // A company with a mission and no goals: the pulse tells the coordinator, who sets a goal and starts a plan itself.

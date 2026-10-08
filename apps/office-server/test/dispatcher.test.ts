@@ -799,7 +799,7 @@ describe('Dispatcher — a paused company', () => {
     const c = companyFor(s, f);
     const coordinator = c.company.hireCoordinator('sonnet');
     c.company.goalSet(coordinator.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
-    const pulse = new Pulse({ company: c.company, goals: c.goals, state: c.state, plans: c.plans, tasks: c.tasks, notices: c.notices, budget: c.budget });
+    const pulse = new Pulse({ company: c.company, roster: s.roster, goals: c.goals, state: c.state, plans: c.plans, tasks: c.tasks, notices: c.notices, budget: c.budget });
     const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine: f.engine, budget: c.budget, pulse, tickMs: 200 });
     const stop = dispatcher.start();
     cleanups.push(stop, f.cleanup, s.cleanup);

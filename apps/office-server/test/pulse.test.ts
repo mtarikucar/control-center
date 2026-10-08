@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { OWNER } from '@cc/shared';
 import { Pulse } from '../src/company/pulse.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
@@ -19,7 +20,8 @@ function make() {
   cleanups.push(f.cleanup, s.cleanup);
   const c = companyFor(s, f, undefined, now);
   c.budget.setConstitution({ autonomy: 'free' });
-  const pulse = () => new Pulse({ company: c.company, goals: c.goals, state: c.state, plans: c.plans, tasks: c.tasks, notices: c.notices, budget: c.budget, now });
+  const pulse = () =>
+    new Pulse({ company: c.company, roster: s.roster, goals: c.goals, state: c.state, plans: c.plans, tasks: c.tasks, notices: c.notices, budget: c.budget, now });
   return { ...s, ...c, pulse, advance: (ms: number) => (clock += ms) };
 }
 
@@ -126,5 +128,71 @@ describe('the pulse (spec §6.3)', () => {
     t.advance(11 * 60_000);
     expect(t.pulse().check()).toEqual(['pulse.goal_idle']);
     expect(t.notices.pending(c.id).find((n) => n.topic === 'pulse.goal_idle')?.text).toContain('Boş plan');
+  });
+
+  it('W2: with goals active, names everyone who has had no work for idleCapacityHours in one decision notice, once per idle stretch', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const goal = t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    const plan = t.company.propose(c.id, { title: 'Site', goal: 'g', approach: 'a', method: METHOD, goalId: goal.id });
+    const deniz = t.company.hire(OWNER, { name: 'Deniz', role: 'r', title: 'Pazar araştırmacısı' });
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', title: 'Geliştirici' });
+    t.company.createTask(c.id, { assignee: ada.id, title: 'uzun iş', planId: plan.id });
+    const gone = t.company.hire(OWNER, { name: 'Eski', role: 'r' });
+    t.roster.update(gone.id, { lifecycle: 'archived' });
+    t.advance(HOUR);
+    const selin = t.company.hire(OWNER, { name: 'Selin', role: 'r', title: 'Mimar' });
+    const idle = () => t.notices.pending(c.id).filter((n) => n.topic === 'pulse.idle_capacity');
+    expect(t.pulse().check()).not.toContain('pulse.idle_capacity');
+    t.advance(HOUR - 1);
+    expect(t.pulse().check()).not.toContain('pulse.idle_capacity');
+    t.advance(4 * HOUR + 1);
+    expect(t.pulse().check()).toEqual(['pulse.idle_capacity']);
+    expect(idle()).toHaveLength(1);
+    expect(idle()[0]!.kind).toBe('decision');
+    expect(idle()[0]!.text).toBe(
+      'Boşta kapasite: Deniz (Pazar araştırmacısı, 6 saattir), Selin (Mimar, 5 saattir) işsiz; aktif hedefler sürüyor. Onlara bağımsız iş ver (sonraki adımların tasarımı, araştırma, test, ölçüm) ya da ekibin fazla olduğuna karar verip kısa yaz.',
+    );
+    // A restarted office (a new Pulse) remembers the stretch: no second notice for the same people.
+    expect(t.pulse().check()).toEqual([]);
+    t.advance(10 * HOUR);
+    expect(t.pulse().check()).toEqual([]);
+    // Deniz gets work and closes it: a new stretch, announced again after the hours; Selin's stretch was already told.
+    const task = t.company.createTask(c.id, { assignee: deniz.id, title: 'pazar notu' });
+    t.advance(HOUR);
+    t.company.finish(deniz.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
+    expect(t.pulse().check()).toEqual([]);
+    t.advance(2 * HOUR);
+    expect(t.pulse().check()).toEqual(['pulse.idle_capacity']);
+    expect(idle()).toHaveLength(2);
+    expect(idle()[1]!.text).toBe(
+      'Boşta kapasite: Deniz (Pazar araştırmacısı, 2 saattir) işsiz; aktif hedefler sürüyor. Ona bağımsız iş ver (sonraki adımların tasarımı, araştırma, test, ölçüm) ya da ekibin fazla olduğuna karar verip kısa yaz.',
+    );
+    for (const n of idle()) for (const name of ['Ada', 'Eski', 'Koordinatör']) expect(n.text).not.toContain(name);
+    expect(selin.id).toBeTruthy();
+  });
+
+  it('W2: says nothing about idle people while paused, during the owner’s reserve, without an active goal, or with the hours at 0', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    t.company.hire(OWNER, { name: 'Deniz', role: 'r', title: 'Pazar araştırmacısı' });
+    t.advance(3 * HOUR);
+    // No goal: the no-goal pulse speaks, the idle one does not.
+    expect(t.pulse().check()).toEqual(['pulse.no_goal']);
+    const goal = t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    t.company.propose(c.id, { title: 'Site', goal: 'g', approach: 'a', method: METHOD, goalId: goal.id });
+    t.company.pause();
+    expect(t.pulse().check()).toEqual([]);
+    t.company.resume();
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.99, resetsAt: Date.now() + HOUR }, sevenDay: null, updatedAt: Date.now() });
+    t.budget.checkReserve();
+    expect(t.pulse().check()).toEqual([]);
+    t.setQuota(null);
+    t.budget.checkReserve();
+    t.budget.setConstitution({ idleCapacityHours: 0 });
+    expect(t.pulse().check()).toEqual([]);
+    t.budget.setConstitution({ idleCapacityHours: 2 });
+    expect(t.pulse().check()).toEqual(['pulse.idle_capacity']);
+    expect(t.notices.pending(c.id).filter((n) => n.topic === 'pulse.idle_capacity')).toHaveLength(1);
   });
 });
