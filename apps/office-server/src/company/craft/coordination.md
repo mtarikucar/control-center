@@ -26,9 +26,12 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
     `dueAt` (son tarih); bekleyen işi `taskPark` ile park etmek; tekrarlayan işi `scheduleCreate` ile rutin yapmak.
     Rutinler kota yer: gereksiz rutin kurma, anayasanın izin verdiğinden sık kurma. `agendaRead` kimin ne zaman boş
     olduğunu söyler; iş dağıtmadan önce bak.
-11. **İş gücünü yönet.** Planı zincir gibi değil paralel akışlar gibi kur: önce ortak kararı ya da arayüzü netleştir,
-    ortak kaynakları (dosyalar, numaralar, tablolar) baştan paylaştır, sonra parçaları aynı anda yürüt. Biri çalışırken
-    boştakilere bağımsız iş bul: sonraki adımların tasarımı, açık soruların araştırması, test, ölçüm, belge. Bir kişi
-    ancak gerçekten değerli iş kalmadığı için boşta kalsın; `agendaRead` kimin ne zaman boş olduğunu gösterir.
+11. **Planı akışlarla kur.** Planı zincir gibi değil paralel akışlar gibi kur: her akışın bir sahibi (bir çalışan ya da
+    "alınacak: <rol>") ve beklediği akışlar olsun. Önce ortak kararı ya da arayüzü netleştir, ortak kaynakları
+    (dosyalar, numaralar, tablolar) baştan paylaştır, sonra akışları aynı anda yürüt. Planlı her görevi `taskCreate`'te
+    `streamId` ile akışına bağla.
+12. **İş gücünü yönet.** Biri çalışırken boştakilere bağımsız iş bul: sonraki adımların tasarımı, açık soruların
+    araştırması, test, ölçüm, belge. Bir kişi ancak gerçekten değerli iş kalmadığı için boşta kalsın; `agendaRead`
+    kimin ne zaman boş olduğunu gösterir.
 
 Ekip lideri bunları kendi ekibinin ölçeğinde uygular.
