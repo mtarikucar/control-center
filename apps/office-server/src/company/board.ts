@@ -89,6 +89,12 @@ const ENTRIES = 10;
 /** What “Ne değişti” reads from the log; over this many, the newest. */
 const LOG_LIMIT = 2000;
 const CHANGE_TYPES: OfficeEventType[] = ['task.changed', 'plan.changed', 'goal.changed', 'message.user', 'company.paused', 'budget.changed', 'employee.hired', 'employee.fired'];
+/**
+ * The notice topics whose news the board itself reports (hand-ins and review decisions, due dates passed, a plan done,
+ * proposals waiting for the owner): the coordinator does not need them as notes beside it. Any other information
+ * (the owner's agenda changes, a task moved, a role) comes with the board as a note.
+ */
+export const BOARD_COVERS: ReadonlySet<string> = new Set(['task.finished', 'review.approved', 'review.changes', 'task.overdue', 'plan.done', 'proposal.to_owner']);
 /** A due date this close is a risk. */
 const DUE_SOON_MS = DAY;
 

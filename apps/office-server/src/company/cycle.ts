@@ -40,6 +40,13 @@ export interface CycleDeps {
   now?: () => number;
 }
 
+/** What cycleClose said. */
+interface CycleClose {
+  changes: string[];
+  reasoning: string;
+  next: string | null;
+}
+
 /** The cycle the coordinator is in: from the board's delivery to the end of the turn that carried it. */
 interface OpenCycle {
   startedAt: number;
@@ -47,8 +54,8 @@ interface OpenCycle {
   triggers: CycleTrigger[];
   /** What the turn's results cost so far (null: none yet). */
   costUsd: number | null;
-  /** cycleClose recorded it. */
-  closed: boolean;
+  /** cycleClose's words, kept until the turn ends and the cycle is recorded (null: not closed yet). */
+  close: CycleClose | null;
 }
 
 /** What a cycle opens with: the board, and why it opened. */
@@ -64,8 +71,12 @@ export interface CycleOpening {
   kickoff: boolean;
 }
 
-/** The events the cycle reads; any other is passed by at once. */
-const WATCHED = new Set<OfficeEvent['type']>(['task.changed', 'plan.changed', 'goal.changed', 'company.paused', 'budget.changed', 'turn.finished', 'lifecycle.changed']);
+/** The events that may be triggers; any other is passed by (but for the cycle turn's own steps). */
+const WATCHED = new Set<OfficeEvent['type']>(['task.changed', 'plan.changed', 'goal.changed', 'company.paused', 'budget.changed']);
+/** Lifecycles in which the cycle's turn is gone: it will not go on. */
+const TURN_GONE = new Set<string>(['interrupted', 'error', 'stopped', 'archived', 'in_terminal']);
+/** A reason beyond “değişiklik yok” (and “çünkü”) has at least this many letters. */
+const REASON_LETTERS = 5;
 
 /** Logged under the coordinator's desk although the owner or the office did it: the owner's plan and goal decisions, a pause, a plan the office finished. */
 function onDesk(ev: OfficeEvent): boolean {
@@ -96,9 +107,9 @@ function parse<T>(raw: string | null, fallback: T): T {
  * office starts with work open. Triggers close together go into one cycle (CYCLE_WINDOW_MS from the first). Nothing the
  * coordinator does itself is a trigger: what is logged under its desk (but for what the owner or the office logs there)
  * and whatever happens inside its own tool calls (`acting`). Nothing while the company is paused, no heartbeat in the
- * owner's reserve, nothing without a coordinator. The dispatcher delivers a due cycle and says so (`started`); the turn
- * ends with cycleClose (`close`) or is logged not closed (`ended`), and the next board warns. What it needs to survive a
- * restart is kept in company_state.
+ * owner's reserve, nothing without a coordinator. The dispatcher delivers a due cycle and says so (`started`); cycleClose
+ * (`close`) gives the cycle its words; when the turn ends (`ended`) the cycle is recorded with the turn's cost — closed,
+ * or not closed and the next board warns. What it needs to survive a restart is kept in company_state.
  */
 export class ManagementCycle {
   readonly #d: CycleDeps;
@@ -113,6 +124,8 @@ export class ManagementCycle {
   #reserve = false;
   /** The last moment the office had no open work: the heartbeat counts from it or from the last cycle, the later. */
   #quietAt = 0;
+  /** The cycle turn's last result came with nothing queued: the coordinator's next step says whether the engine ended the turn. */
+  #resultIn = false;
   #running = false;
 
   constructor(d: CycleDeps) {
@@ -200,7 +213,7 @@ export class ManagementCycle {
     this.#savePending(this.#pending().filter((t) => !o.triggers.some((x) => identical(x, t))));
     this.#d.state.set(KEY.lastStart, String(o.at));
     this.#d.state.set(KEY.unclosed, null);
-    this.#saveOpen({ startedAt: o.at, since: o.since, triggers: o.triggers, costUsd: null, closed: false });
+    this.#saveOpen({ startedAt: o.at, since: o.since, triggers: o.triggers, costUsd: null, close: null });
     this.#d.events.append(this.#d.company.coordinator()?.id ?? null, { type: 'management.cycle.started', triggers: o.triggers, since: o.since, unclosedWarning: o.unclosedWarning });
   }
 
@@ -217,29 +230,43 @@ export class ManagementCycle {
     this.#savePending([...back, ...kept].slice(0, MAX_TRIGGERS));
   }
 
-  /** The turn that carried the board is over. Without cycleClose it is logged not closed, once, and the next board warns. */
+  /**
+   * The turn that carried the board is over: the cycle is recorded — closed with cycleClose's words, or not closed (once;
+   * the next board warns) — with what its turn cost.
+   */
   ended(): void {
     const open = this.#open();
     if (!open) return;
     this.#saveOpen(null);
-    if (open.closed) return;
-    this.#d.state.set(KEY.unclosed, 'true');
-    this.#record(false, open, { changes: [], reasoning: '', next: null });
+    this.#resultIn = false;
+    if (!open.close) this.#d.state.set(KEY.unclosed, 'true');
+    this.#d.events.append(this.#d.company.coordinator()?.id ?? null, {
+      type: 'management.cycle', closed: open.close !== null, startedAt: open.startedAt, triggers: open.triggers, ...(open.close ?? { changes: [], reasoning: '', next: null }), costUsd: open.costUsd,
+      model: null,
+    });
   }
 
-  /** cycleClose: the coordinator closes the open cycle with what it changed and why (with no change, “değişiklik yok, çünkü …”). */
+  /**
+   * cycleClose: the coordinator closes the open cycle with what it changed and why — with no change, “değişiklik yok,
+   * çünkü …” and the reason. Recorded when its turn ends (with the turn's cost).
+   */
   close(by: string, input: { changes?: string[]; reasoning?: string; next?: string }): { changes: string[] } {
     const c = this.#d.company.coordinator();
     if (!c || c.id !== by) throw new ForbiddenError('Yönetim turunu yalnız koordinatör kapatır.');
     const open = this.#open();
     if (!open) throw new ConflictError('Açık bir yönetim turu yok: cycleClose yalnız yönetim panosuyla açılan turu kapatır.');
-    if (open.closed) throw new ConflictError('Bu yönetim turu zaten kapandı.');
+    if (open.close) throw new ConflictError('Bu yönetim turu zaten kapandı.');
     const changes = lines(input.changes, 'Değişiklikler', 20, 300);
     const reasoning = clean(input.reasoning, 'Gerekçe', 2000, true);
     const next = clean(input.next, 'Sonraki tur', 500, false) || null;
-    if (changes.length === 0 && !fold(reasoning).includes('degisiklik yok')) throw new ValidationError('Değişiklik yoksa gerekçeyi “değişiklik yok, çünkü …” diye yaz.');
-    this.#saveOpen({ ...open, closed: true });
-    this.#record(true, open, { changes, reasoning, next });
+    if (changes.length === 0) {
+      const folded = fold(reasoning);
+      const why = folded.replace('degisiklik yok', '').replace(/\bcunku\b/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+      if (!folded.includes('degisiklik yok') || why.length < REASON_LETTERS) {
+        throw new ValidationError('Değişiklik yoksa gerekçeyi “değişiklik yok, çünkü …” diye yaz ve nedenini söyle (ör. “değişiklik yok, çünkü iki akış da planda yürüyor”).');
+      }
+    }
+    this.#saveOpen({ ...open, close: { changes, reasoning, next } });
     return { changes };
   }
 
@@ -251,25 +278,38 @@ export class ManagementCycle {
 
   #onEvent(e: StoredEvent): void {
     const ev = e.event;
+    // The cycle turn's steps: the coordinator's results and lifecycle while a cycle is open (and whatever follows a last result).
+    const step = ev.type === 'turn.finished' || ev.type === 'lifecycle.changed';
+    if ((step || this.#resultIn) && e.employeeId !== null && (this.#resultIn || this.#open())) {
+      if (e.employeeId === this.#d.company.coordinator()?.id) this.#turnStep(ev);
+    }
     if (!WATCHED.has(ev.type)) return;
-    // A turn's end and cost matter only to an open cycle.
-    if ((ev.type === 'turn.finished' || ev.type === 'lifecycle.changed') && (e.employeeId === null || !this.#open())) return;
     // Kept up to date whoever acted: the next event is judged against it.
     const before = ev.type === 'task.changed' ? this.#track(ev.task) : undefined;
     const constraint = ev.type === 'budget.changed' ? this.#constraintOf(ev.budget) : null;
     const c = this.#d.company.coordinator();
     if (!c) return;
-    if (e.employeeId === c.id) this.#coordinatorEvent(ev);
     if (this.#actor === c.id || (e.employeeId === c.id && !onDesk(ev))) return;
     for (const t of this.#triggersOf(e, c.id, before, constraint)) this.#push(t);
   }
 
-  /** The cycle's turn: its cost, and its end (the coordinator leaves `working`). */
-  #coordinatorEvent(ev: OfficeEvent): void {
+  /**
+   * One step of the cycle's turn. It ends only as the engine ends a turn — its last result (nothing queued), then idle —
+   * or in a lifecycle it does not come back from. A crash (the session starts again, idle, and the work is sent again),
+   * a quota pause (limited, then on) or a model retry (the turn runs again on the old model) go on: the cycle stays open.
+   */
+  #turnStep(ev: OfficeEvent): void {
+    const resultIn = this.#resultIn;
+    this.#resultIn = false;
     const open = this.#open();
     if (!open) return;
-    if (ev.type === 'turn.finished') this.#saveOpen({ ...open, costUsd: Math.round(((open.costUsd ?? 0) + ev.costUsd) * 1e6) / 1e6 });
-    else if (ev.type === 'lifecycle.changed' && ev.from === 'working' && ev.to !== 'working') this.ended();
+    if (ev.type === 'turn.finished') {
+      this.#saveOpen({ ...open, costUsd: Math.round(((open.costUsd ?? 0) + ev.costUsd) * 1e6) / 1e6 });
+      this.#resultIn = ev.queuedTurns === 0;
+      return;
+    }
+    if (ev.type !== 'lifecycle.changed') return;
+    if ((resultIn && ev.from === 'working' && ev.to === 'idle') || TURN_GONE.has(ev.to)) this.ended();
   }
 
   #triggersOf(e: StoredEvent, coordinatorId: string, before: { assignee: string; status: TaskStatus } | undefined, constraint: string | null): CycleTrigger[] {
@@ -393,10 +433,6 @@ export class ManagementCycle {
         // A listener's failure is its own.
       }
     }
-  }
-
-  #record(closed: boolean, open: OpenCycle, body: { changes: string[]; reasoning: string; next: string | null }): void {
-    this.#d.events.append(this.#d.company.coordinator()?.id ?? null, { type: 'management.cycle', closed, startedAt: open.startedAt, triggers: open.triggers, ...body, costUsd: open.costUsd });
   }
 
   #lastStart(): number {

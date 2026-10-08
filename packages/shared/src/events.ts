@@ -91,9 +91,10 @@ export type OfficeEvent =
    */
   | { type: 'management.cycle.started'; triggers: CycleTrigger[]; since: number; unclosedWarning: boolean }
   /**
-   * A management cycle's record (§3.3): closed with cycleClose (its changes, reasoning and what to look at next), or not
-   * closed — the turn that carried the board ended without it (logged once). `costUsd`: what the cycle's turn cost as
-   * far as known when this was logged (null: no result of it yet).
+   * A management cycle's record (§3.3), logged when the turn that carried the board ends: closed with cycleClose (its
+   * changes, reasoning and what to look at next) or not closed (the turn ended without it). `costUsd`: what the turn's
+   * results cost (null: none came — a restart in the middle records what was known); `model`: the model the cycle was
+   * routed to (null until the model routing).
    */
   | {
       type: 'management.cycle';
@@ -104,6 +105,7 @@ export type OfficeEvent =
       reasoning: string;
       next: string | null;
       costUsd: number | null;
+      model: ModelAlias | null;
     }
   | { type: 'error'; message: string };
 

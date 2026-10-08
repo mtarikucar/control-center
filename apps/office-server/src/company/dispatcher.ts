@@ -2,6 +2,7 @@ import { DEFAULT_CONSTITUTION, REVIEW_SEVERITY_LABELS, TASK_DIFFICULTY_LABELS, t
 import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
+import { BOARD_COVERS } from './board.ts';
 import type { Company } from './company.ts';
 import type { ManagementCycle } from './cycle.ts';
 import { digestText, lastDigestSlot, type Notice } from './notices.ts';
@@ -186,7 +187,7 @@ export class Dispatcher {
         this.#deliverCycle(employee, pending);
         return;
       }
-      // The coordinator's information is the next board's (its “Ne değişti”); its decisions wait for a cycle on its way.
+      // The coordinator's information comes with the next board (in it, or beside it as notes); its decisions wait for a cycle on its way.
       pending = cycle.waiting() ? [] : pending.filter((n) => n.kind === 'decision');
     }
     // With the digest switched off every notice goes at once, as before the economy plan.
@@ -243,15 +244,16 @@ export class Dispatcher {
   }
 
   /**
-   * A management cycle is due (management cycle §3.1): one message — the board, the coordinator's pending decisions, what
-   * the turn is for — on the coordinator's current hint. Its information is marked delivered with them (the board's “Ne
-   * değişti” covers it). Lost on the way: the notices and the cycle's triggers wait for the next idle moment.
+   * A management cycle is due (management cycle §3.1): one message — the board, then as notes the coordinator's pending
+   * decisions and the information the board does not report (BOARD_COVERS), then what the turn is for — on the
+   * coordinator's current hint. Every pending notice is marked delivered: what the board reports is in it. Lost on the
+   * way: the notices and the cycle's triggers wait for the next idle moment.
    */
   #deliverCycle(e: Employee, pending: Notice[]): void {
     const cycle = this.#d.cycle!;
     const opening = cycle.opening(this.#now());
-    const decisions = pending.filter((n) => n.kind === 'decision');
-    const text = [opening.text, decisions.length ? `${NOTICES_PREFIX}\n${decisions.map((n) => `- ${n.text}`).join('\n')}` : '', CYCLE_CLOSING].filter(Boolean).join('\n\n');
+    const notes = pending.filter((n) => n.kind === 'decision' || !BOARD_COVERS.has(n.topic));
+    const text = [opening.text, notes.length ? `${NOTICES_PREFIX}\n${notes.map((n) => `- ${n.text}`).join('\n')}` : '', CYCLE_CLOSING].filter(Boolean).join('\n\n');
     const onLost = () => {
       this.#d.notices.markUndelivered(pending.map((n) => n.id));
       cycle.lost(opening);

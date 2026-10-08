@@ -84,6 +84,9 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
       setLifecycle(id, 'idle');
     },
   };
+  /** One of claude's results (more may be queued, or the engine may go on: a quota pause, a model retry). */
+  const result = (id: string, costUsd: number, o: { ok?: boolean; queuedTurns?: number } = {}) =>
+    void s.events.append(id, { type: 'turn.finished', ok: o.ok ?? true, subtype: o.ok === false ? 'error_during_execution' : 'success', usage: ZERO, costUsd, numTurns: 1, queuedTurns: o.queuedTurns ?? 0, sessionUsage: null, sessionCostUsd: 0 });
   /** The turn ends as the engine logs it: claude's result, then idle. */
   const endTurn = (id: string, costUsd = 0.3) => {
     s.events.append(id, { type: 'turn.finished', ok: true, subtype: 'success', usage: ZERO, costUsd, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 });
@@ -161,7 +164,7 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
   const goal = () => c.company.goalSet(coord!.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
 
   return {
-    ...s, ...c, coord: coord!, person, settle, endTurn, setLifecycle, inTurn, sent, woken, boot, restart, advance, call, log, started, records, kinds, toCoordinator, boards, closeCycle, task, finish, goal,
+    ...s, ...c, coord: coord!, person, settle, result, endTurn, setLifecycle, inTurn, sent, woken, boot, restart, advance, call, log, started, records, kinds, toCoordinator, boards, closeCycle, task, finish, goal,
     now, cycle: () => office!.cycle,
   };
 }
@@ -498,19 +501,25 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     expect(t.started()).toHaveLength(0);
   });
 
-  it('cycleClose records the cycle closed, with its triggers; it asks for a reason when nothing changed and closes only an open cycle once', async () => {
+  it('cycleClose closes the cycle once, recorded when its turn ends with the turn’s cost; with no change it wants “değişiklik yok, çünkü …” and a reason', async () => {
     const t = make();
     const ada = t.person('Ada');
     t.task(ada.id, 'Yaz');
     t.boot();
     const close = (args: { [key: string]: unknown }) => t.call(t.coord, 'cycleClose', args);
-    await expect(close({ changes: [], reasoning: 'her şey yolunda' })).rejects.toThrow('değişiklik yok, çünkü');
+    // The phrase alone is no reason.
+    for (const reasoning of ['her şey yolunda', 'değişiklik yok', 'Değişiklik yok, çünkü', 'değişiklik yok, çünkü …']) {
+      await expect(close({ changes: [], reasoning })).rejects.toThrow('gerekçeyi “değişiklik yok, çünkü …” diye yaz');
+    }
+    // A result came before the close, with more queued: the same turn goes on.
+    t.result(t.coord.id, 0.2, { queuedTurns: 1 });
     expect(await close({ changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi' })).toBe('Yönetim turu kapandı: 2 değişiklik kaydedildi.');
     await expect(close({ changes: [], reasoning: NO_CHANGE })).rejects.toThrow('zaten kapandı');
+    expect(t.records()).toEqual([]);
     t.endTurn(t.coord.id, 0.5);
     await expect(close({ changes: [], reasoning: NO_CHANGE })).rejects.toThrow('Açık bir yönetim turu yok');
     expect(t.records()).toEqual([
-      { type: 'management.cycle', closed: true, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: null },
+      { type: 'management.cycle', closed: true, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.7, model: null },
     ]);
     expect(t.started()).toEqual([{ type: 'management.cycle.started', triggers: [{ kind: 'start', at: T0, note: '', seq: null }], since: 0, unclosedWarning: false }]);
   });
@@ -521,7 +530,7 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     const x = t.task(ada.id, 'Yaz');
     t.boot();
     t.endTurn(t.coord.id, 0.42);
-    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42 }]);
+    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42, model: null }]);
     t.advance(30 * MIN);
     expect(t.started()).toHaveLength(1);
     t.finish(ada.id, x.id);
@@ -579,6 +588,68 @@ describe('management cycle — the dispatcher’s edges', () => {
     expect(text).toMatch(/^Yönetim panosu hazırlanamadı \(disk dolu\)/);
     expect(text).toContain('cycleClose');
     expect(t.log().filter((e) => e.event.type === 'error').map((e) => (e.event as { message: string }).message)).toEqual(['Yönetim panosu hazırlanamadı: disk dolu']);
+  });
+
+  it('a crash, a quota pause or a model retry in the middle of the cycle’s turn does not end it: cycleClose still closes it, nothing is logged not closed', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    t.task(ada.id, 'Yaz');
+    t.boot();
+    const id = t.coord.id;
+    // A crash: the session starts again (idle) and the engine sends the work again at once.
+    t.events.append(id, { type: 'error', message: 'claude süreci beklenmedik şekilde kapandı (kod 1, sinyal -).' });
+    t.setLifecycle(id, 'idle');
+    t.events.append(id, { type: 'turn.started' });
+    t.setLifecycle(id, 'working');
+    // The quota runs out: the result is refused, the engine waits for the window and goes on.
+    t.result(id, 0.1, { ok: false });
+    t.setLifecycle(id, 'limited');
+    t.advance(10 * MIN);
+    t.events.append(id, { type: 'turn.started' });
+    t.setLifecycle(id, 'working');
+    // A model the account cannot use: the engine runs the turn again on the model it had.
+    t.result(id, 0.05, { ok: false });
+    t.events.append(id, { type: 'model.switch.failed', from: 'sonnet', to: 'opus', reason: 'model yok' });
+    t.setLifecycle(id, 'idle');
+    t.events.append(id, { type: 'turn.started' });
+    t.setLifecycle(id, 'working');
+    t.settle();
+    expect(t.records()).toEqual([]);
+    expect(await t.call(t.coord, 'cycleClose', { changes: [], reasoning: NO_CHANGE })).toBe('Yönetim turu kapandı: değişiklik yok, gerekçe kaydedildi.');
+    t.endTurn(id, 0.25);
+    expect(t.records().map((r) => [r.closed, r.costUsd])).toEqual([[true, 0.4]]);
+    expect(t.started()).toHaveLength(1);
+  });
+
+  it('the turn’s own death ends the cycle not closed, once: the session failing for good', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    t.task(ada.id, 'Yaz');
+    t.boot();
+    t.setLifecycle(t.coord.id, 'error');
+    expect(t.records().map((r) => r.closed)).toEqual([false]);
+    t.advance(10 * MIN);
+    expect(t.records()).toHaveLength(1);
+  });
+
+  it('information the board does not show (the owner’s agenda changes) comes with the board as notes; what it shows is only marked delivered', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    const can = t.person('Can');
+    const x = t.task(ada.id, 'Yaz');
+    const y = t.task(can.id, 'Çiz');
+    t.boot();
+    await t.closeCycle();
+    t.advance(30 * SEC);
+    t.company.parkTask(OWNER, y.id, '+2h', 'müşteri bekleniyor');
+    t.finish(ada.id, x.id);
+    expect(t.notices.pending(t.coord.id).map((n) => n.topic)).toEqual(['agenda.owner_changed', 'task.finished']);
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    const message = t.boards().at(-1)!.text;
+    expect(message).toContain(`${NOTICES_PREFIX}\n- Sahibi “Çiz” görevini`);
+    expect(message).toContain('müşteri bekleniyor');
+    expect(message).not.toContain('Görev bitti:');
+    expect(t.notices.pending(t.coord.id)).toEqual([]);
   });
 
   it('a sleeping coordinator wakes for a due cycle, never for its information alone', async () => {
@@ -655,6 +726,26 @@ describe('management cycle — a restart (§5)', () => {
     expect(t.started()).toHaveLength(2);
     expect(t.started()[1]!.unclosedWarning).toBe(true);
     expect(t.records()).toHaveLength(1);
+  });
+
+  it('a cycle closed but still in its turn when the office stops is recorded at the restart: closed, with the cost known', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    t.task(ada.id, 'Yaz');
+    t.boot();
+    t.result(t.coord.id, 0.2, { queuedTurns: 1 });
+    await t.call(t.coord, 'cycleClose', { changes: ['Can işe alınacak'], reasoning: 'tek geliştirici yetmiyor' });
+    expect(t.records()).toEqual([]);
+    t.restart(() => {
+      t.inTurn.delete(t.coord.id);
+      t.setLifecycle(t.coord.id, 'interrupted');
+    });
+    expect(t.records().map((r) => [r.closed, r.changes, r.costUsd])).toEqual([[true, ['Can işe alınacak'], 0.2]]);
+    t.setLifecycle(t.coord.id, 'idle');
+    t.settle();
+    // The restart's cycle: no warning, the previous one was closed.
+    expect(t.started()).toHaveLength(2);
+    expect(t.started()[1]!.unclosedWarning).toBe(false);
   });
 
   it('without open work the office starts quietly', () => {
