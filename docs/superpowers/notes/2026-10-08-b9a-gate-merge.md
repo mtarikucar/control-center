@@ -18,8 +18,8 @@
 - Dal `feat/b9a-gate`, `integration/core-4` (8ecec35) üstünde.
   - Koordinatör kararı: core-3 değil core-4. Gerekçe: v21 v20'nin hemen arkasına gelsin, açılış denetimi dalda olsun.
   - İnceleme turu 1'de core-4'ün yeni ucuna (8ecec35, yalnız not) yeniden kuruldu.
-- **Sahibi bu dalı tek başına almaz:** B8 ve B9b ile birlikte, çakışmaları çözülmüş olarak `integration/core-5-gate`'te
-  gelir (§3, §4).
+- **Sahibi bu dalı tek başına almaz:** adım 5 olarak, `integration/core-5`'in ucunda ve çakışmaları çözülmüş halde
+  `integration/core-5-gate`'te gelir. B8 ve B9b core-5'in içindedir (§3, §4).
 - Göç: **v21** (`approvals`, yalnız yeni tablo).
 
 ## 1. Ne geldi
@@ -108,8 +108,10 @@
      - Eklenmedi: `ListAgents` yalnız listeler, `Skill` yalnız yönerge yükler.
      - `Task`/`Workflow`'un başlattığı alt ajanın çağrıları kancadan geçer. Kilitli K3 bunu sabitliyor: alt ajanın stub
        çağrısı kapıya takıldı.
-   - **[küçük] Birleştirme:** B8 + B9b + B9a için `integration/core-5-gate`. Tek satır ön koşulları denetler, ofisi
-     durdurur, `main.pre-gate` ve `office.pre-gate.db`'yi yazar; prova iki kez koşuldu (§4).
+   - **[küçük] Birleştirme:** `integration/core-5-gate`, Can'ın `integration/core-5`'i (B8 ve B9b içinde) üstüne B9a
+     olarak kuruldu. core-5'in notu da B9a'yı adım 5 olarak bekliyor.
+     - Tek satır core-5'i denetler, ofisi durdurur, `main.pre-gate` ve `office.pre-gate.db`'yi yazar.
+     - Prova A–E (§4).
    - **[küçük] git'in durumu eşzamansız:**
      - Kapı önce önbellekle sınıflar (2 sn). Cevabı olmayan soru temkinli cevaplanır: worktree kirli, liste boş.
      - Sonra git'i `execFile` ile eşzamansız sorar (2 sn sınır, paralel) ve yeniden sınıflar.
@@ -123,24 +125,24 @@
   3. **B9a (v21)**.
 - B9a core-4'ten önce alınamaz: v19–v20 atlanır. Açılış denetimi bunu yakalar ve ofisi açmaz.
 - v21 yalnız yeni tablo ve iki indekstir. Eski kod onu yok sayar, yalnız-kod geri alma güvenlidir.
-- **B8 (`feat/capability-precheck`) ve B9b (`feat/b9b-session-deny`):** ikisi de core-3 üstünde, B9a ile çakışıyor. Sahibi
-  çakışmayı elle çözmesin diye üçü `integration/core-5-gate`'te core-4 üstüne birleştirildi; çakışmaların hepsi "ikisi de
-  tutulur" türünde. Ayrıntı o dalın notunda: `2026-10-08-core-5-gate-merge.md`.
-  - B9b: `claude/args.ts`'te `sessionArgs` hem `hook` hem `disallowed` alır. `engine.ts` ikisini birlikte geçirir.
-  - B8: anayasa anahtarları yan yana (`capabilityPrecheckEnabled`, `gateEnabled`); dağıtıcıda B26'nın `kpis`'i ile
-    B8'in `precheck`'i yan yana.
+- **B8 (`feat/capability-precheck`) ve B9b (`feat/b9b-session-deny`):** ikisi de Can'ın `integration/core-5`'inde
+  (adım 4). B9a onun ucuna `integration/core-5-gate` olarak kuruldu (adım 5). Çakışmaların hepsi "ikisi de tutulur"
+  türünde; ayrıntı o dalın notunda (`2026-10-08-core-5-gate-merge.md`):
+  - B9b: `claude/args.ts`'te `sessionArgs` hem `hook` hem `disallowed` alır; `engine.ts` ikisini birlikte geçirir.
+  - B8: anayasa anahtarları yan yana (`capabilityPrecheckEnabled`, `gateEnabled`).
+  - C5-5 ile anlamsal: pilot ölçüm testi `approvals`'ı artık v21'den alıyor.
 
 ## 4. Birleştirme (sahibi)
 
-**Adım 4:** `integration/core-5-gate`, adım 1–3'ten sonra. Tek satır o dalın notunda
+**Adım 5:** `integration/core-5-gate`, adım 4'ten (`integration/core-5`) sonra. Tek satır o dalın notunda
 (`docs/superpowers/notes/2026-10-08-core-5-gate-merge.md`). Satırın yaptıkları:
-- main'de adım 1–3 (açılış denetimi, core-3, core-4) yoksa hiçbir şeye dokunmadan durur;
+- main'de core-5 yoksa hiçbir şeye dokunmadan durur;
 - açık ofisi durdurur;
 - `~/.control-center/main.pre-gate`'i yazar; dosya varsa durur, yani ikinci yapıştırmada hiçbir şeye dokunmaz;
 - veritabanının tutarlı yedeğini alır: `office.pre-gate.db`;
 - `integration/core-5-gate`'i `--no-ff` birleştirir, ofisi başlatır; açılışta v21 uygulanır.
 
-Kapılar kapalı başlar.
+Kapı kapalı başlar.
 
 ## 5. Prova
 
@@ -163,9 +165,12 @@ Kapılar kapalı başlar.
     - Kerem'in kapıyı deneyen bataryaları (3);
     - eşleşmeyen ters tırnaklı bozuk bir komut (1).
   - Write, Edit, WebFetch, Read ve ofis araçlarında takılan yok.
-- **Tek satır ve B8 + B9b + B9a:** `integration/core-5-gate` notunda ve `outputs/b9a-gate/core-5-gate-rehearsal.txt`'te.
-  Ön koşul eksikken durma, açık ofisi durdurup birleştirme, ikinci yapıştırmada dokunmadan durma, v21 göçü, yalnız kod
-  geri alma ve yedekten dönüş denendi.
+- **Tek satır (adım 5):** `integration/core-5-gate` notunda ve `outputs/b9a-gate/core-5-gate-rehearsal.txt`'te. Denenenler:
+  - ön koşul (core-5) eksikken durma;
+  - açık ofisi durdurup birleştirme;
+  - ikinci yapıştırmada dokunmadan durma;
+  - v21 göçü, yalnız kod geri alma ve yedekten dönüş.
+  - Entegrasyon dalında `pnpm test` (sunucu 1017, web 201) ve kilitli K3 4/4 geçti.
 
 ## 6. Geri alma
 
