@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Employee, HireInput, Lifecycle, ModelAlias, OfficeEvent, QuotaWindow, Usage } from '@cc/shared';
 import { sessionArgs, sideQuestionArgs, terminalCommand } from './claude/args.ts';
-import { normalize, replayedUuid, usageSince } from './claude/normalize.ts';
+import { normalize, replayedUuid, taskChange, usageSince } from './claude/normalize.ts';
 import { runOnce } from './claude/once.ts';
 import { ClaudeProcess } from './claude/process.ts';
 import { deskDir, prepareDesk } from './desk.ts';
@@ -35,6 +35,8 @@ function describeTool(name: string, input: unknown): string {
 
 export const CONTINUE_AFTER_CRASH =
   'Oturumun beklenmedik şekilde kapandı ve yeniden açıldı; yarım kalan işine kaldığın yerden devam et.';
+export const CONTINUE_AFTER_TERMINAL =
+  'Terminalden ofise döndün. Terminale alınırken süren işin ve arka planda çalışan komutların durduruldu; yarım kalmış bir değişiklik varsa kontrol et ve kaldığın yerden devam et.';
 
 type TurnFinished = Extract<OfficeEvent, { type: 'turn.finished' }>;
 interface Totals {
@@ -61,6 +63,8 @@ export interface EngineOptions {
   cacheTtlMinutes?: () => number;
   /** The constitution's modelPolicyEnabled (default off): off, hints are ignored and sessions run on the employee's own model. */
   modelPolicyEnabled?: () => boolean;
+  /** After the last background job ends between turns, how long the turn claude opens to read it may take to come (default 30 s). */
+  followUpGraceMs?: number;
 }
 
 /** What a message would best run on; the session moves there only as modelPolicy allows, never in the middle of a turn. */
@@ -125,6 +129,10 @@ interface Runtime {
   failedModel: { model: ModelAlias; at: number } | null;
   /** Reset of the window that rejected the last request, when claude named it. */
   limitAt: number | null;
+  /** Jobs the session runs beside its turns (claude's task ids); they end with the process. */
+  background: Set<string>;
+  /** The last job ended between turns: waiting for the turn claude opens by itself to read it. */
+  followUpTimer: NodeJS.Timeout | null;
 }
 
 export class Engine {
@@ -142,6 +150,7 @@ export class Engine {
   readonly #mcp: EngineOptions['mcp'];
   readonly #cacheTtlMinutes: () => number;
   readonly #modelPolicyEnabled: () => boolean;
+  readonly #followUpGraceMs: number;
   readonly #runtimes = new Map<string, Runtime>();
   readonly #sideRuns = new Set<AbortController>();
 
@@ -160,6 +169,7 @@ export class Engine {
     this.#mcp = o.mcp;
     this.#cacheTtlMinutes = o.cacheTtlMinutes ?? (() => 5);
     this.#modelPolicyEnabled = o.modelPolicyEnabled ?? (() => false);
+    this.#followUpGraceMs = o.followUpGraceMs ?? 30_000;
   }
 
   hire(input: HireInput): Employee {
@@ -417,9 +427,16 @@ export class Engine {
   returnFromTerminal(id: string): Employee {
     const employee = this.#roster.get(id);
     if (employee.lifecycle !== 'in_terminal') throw new ConflictError('Bu çalışan terminalde değil.');
+    // Taken there at work (a turn, or a job it left running): closing the session for the terminal cut that work.
+    const opened = this.#events.latest(id, 'lifecycle.changed')?.event;
+    const cut = opened?.type === 'lifecycle.changed' && opened.to === 'in_terminal' && opened.from === 'working';
     // Back at the desk and ready: the office picks the same session up again (an idle process spends no tokens).
     this.#runtime(id).crashes = [];
-    return this.#start(employee, 'terminalden ofise döndü');
+    const back = this.#start(employee, 'terminalden ofise döndü');
+    if (!cut) return back;
+    // It hears so and goes on: working, as its process is.
+    this.send(id, CONTINUE_AFTER_TERMINAL, 'system');
+    return this.#roster.get(id);
   }
 
   fire(id: string): Promise<void> {
@@ -530,8 +547,12 @@ export class Engine {
       rt.unread = rt.unread.filter((m) => m.uuid !== acknowledged);
       rt.consumedInTurn = true;
     }
+    const task = taskChange(raw);
+    if (task) this.#onTask(id, task);
     for (const event of normalize(raw)) {
       if (event.type === 'session.started' && !this.#roster.get(id).sessionStarted) this.#roster.update(id, { sessionStarted: true });
+      // claude opened a turn by itself (to read what a background job left): work, as a turn the office opens is.
+      if ((event.type === 'message.assistant' || event.type === 'tool.started') && !rt.turnActive) this.#ownTurn(id);
       if (event.type === 'message.assistant') rt.lastText = event.text;
       if (event.type === 'tool.started') rt.toolsInTurn = true;
       if (event.type === 'quota.updated') {
@@ -601,8 +622,47 @@ export class Engine {
       this.#scheduleLimitContinue(id, resetsAt);
       return;
     }
-    this.#setLifecycle(employee, 'idle', ok ? 'iş bitti' : 'iş hatayla bitti');
+    // A job it started runs on (its end opens the next turn): still at work.
+    this.#idleIfDone(id, ok ? 'iş bitti' : 'iş hatayla bitti');
+  }
+
+  /** The work is over when no turn is open and no job of the session runs: idle, and a reload waiting for it happens. */
+  #idleIfDone(id: string, reason: string): void {
+    const rt = this.#runtime(id);
+    const employee = this.#roster.get(id);
+    if (rt.turnActive || rt.background.size > 0 || employee.lifecycle !== 'working') return;
+    this.#setLifecycle(employee, 'idle', reason);
     if (rt.reloadPending) this.#reloadNow(id);
+  }
+
+  #ownTurn(id: string): void {
+    const rt = this.#runtime(id);
+    rt.turnActive = true;
+    this.#emit(id, { type: 'turn.started' });
+    this.#setLifecycle(this.#roster.get(id), 'working', 'kendi açtığı tur (arka plan işi)');
+  }
+
+  #onTask(id: string, task: { taskId: string; running: boolean }): void {
+    const rt = this.#runtime(id);
+    if (task.running) {
+      rt.background.add(task.taskId);
+      return;
+    }
+    if (!rt.background.delete(task.taskId) || rt.background.size > 0 || rt.turnActive) return;
+    // The last job ended between turns: claude opens a turn by itself to read it. Idle only if none comes in time.
+    if (rt.followUpTimer) clearTimeout(rt.followUpTimer);
+    rt.followUpTimer = setTimeout(() => {
+      rt.followUpTimer = null;
+      this.#idleIfDone(id, 'arka plan işi bitti');
+    }, this.#followUpGraceMs);
+    rt.followUpTimer.unref();
+  }
+
+  /** The process is gone: the jobs it ran are gone with it. */
+  #endBackground(rt: Runtime): void {
+    rt.background.clear();
+    if (rt.followUpTimer) clearTimeout(rt.followUpTimer);
+    rt.followUpTimer = null;
   }
 
   #onExit(id: string, code: number | null, signal: NodeJS.Signals | null, stderr: string): void {
@@ -613,6 +673,7 @@ export class Engine {
     rt.consumedInTurn = false;
     rt.proc = null;
     rt.turnActive = false;
+    this.#endBackground(rt);
     for (const resolve of rt.turnWaiters.splice(0)) resolve();
     if (rt.expectingExit) {
       rt.expectingExit = false;
@@ -799,6 +860,8 @@ export class Engine {
         toolsInTurn: false,
         lastText: '',
         failedModel: null,
+        background: new Set(),
+        followUpTimer: null,
       };
       this.#runtimes.set(id, rt);
     }

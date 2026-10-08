@@ -87,6 +87,19 @@ export function replayedUuid(raw: unknown): string | null {
   return typeof raw.uuid === 'string' ? raw.uuid : null;
 }
 
+/**
+ * A job the session runs beside its turns (Bash run_in_background, Monitor, a background agent) started or ended,
+ * from claude's `system` task messages — counted as the CLI's own session runner counts them.
+ */
+export function taskChange(raw: unknown): { taskId: string; running: boolean } | null {
+  if (!isObj(raw) || raw.type !== 'system' || typeof raw.task_id !== 'string') return null;
+  if (raw.subtype === 'task_started') return raw.task_type === 'in_process_teammate' ? null : { taskId: raw.task_id, running: true };
+  if (raw.subtype === 'task_notification') return { taskId: raw.task_id, running: false };
+  const status = isObj(raw.patch) ? raw.patch.status : undefined;
+  if (raw.subtype === 'task_updated' && (status === 'completed' || status === 'failed' || status === 'killed')) return { taskId: raw.task_id, running: false };
+  return null;
+}
+
 /** How the CLI names a server's tools: `claude.ai Gmail` → `mcp__claude_ai_Gmail__…`. */
 export function mcpToolPrefix(server: string): string {
   return `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__`;

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { TOOL_OUTPUT_LIMIT, mcpToolPrefix, normalize, truncate } from '../src/claude/normalize.ts';
+import { TOOL_OUTPUT_LIMIT, mcpToolPrefix, normalize, taskChange, truncate } from '../src/claude/normalize.ts';
 
 // Shapes copied from a real `claude -p --output-format stream-json --verbose` run (2026-10-06), trimmed.
 const INIT = {
@@ -216,5 +216,24 @@ describe('normalize', () => {
     expect(out.file_path).toBe('/d/a.txt');
     expect(out.edits[0]!.old_string.length).toBeLessThan(2100);
     expect(out.edits[0]!.new_string).toBe('b');
+  });
+});
+
+// Shapes from the CLI's SDK schema (claude 2.1.293: system task_started / task_updated / task_notification).
+describe('taskChange', () => {
+  const started = { type: 'system', subtype: 'task_started', task_id: 'b1', tool_use_id: 'toolu_1', description: 'mutasyonlar', task_type: 'local_bash' };
+
+  it('a started job runs; its notification, or a final status, ends it', () => {
+    expect(taskChange(started)).toEqual({ taskId: 'b1', running: true });
+    expect(taskChange({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'stopped', output_file: '', summary: '' })).toEqual({ taskId: 'b1', running: false });
+    for (const status of ['completed', 'failed', 'killed']) expect(taskChange({ type: 'system', subtype: 'task_updated', task_id: 'b1', patch: { status } })).toEqual({ taskId: 'b1', running: false });
+  });
+
+  it('a teammate in the same process is not a job of the session, and other updates change nothing', () => {
+    expect(taskChange({ ...started, task_type: 'in_process_teammate' })).toBeNull();
+    expect(taskChange({ type: 'system', subtype: 'task_updated', task_id: 'b1', patch: { status: 'running' } })).toBeNull();
+    expect(taskChange({ type: 'system', subtype: 'task_updated', task_id: 'b1', patch: { is_backgrounded: true } })).toBeNull();
+    expect(taskChange(INIT)).toBeNull();
+    expect(taskChange({ type: 'assistant', task_id: 'b1' })).toBeNull();
   });
 });
