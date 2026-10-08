@@ -25,17 +25,13 @@ const T0 = new Date(2026, 9, 5, 9, 0).getTime();
 const SINCE = T0 - HOUR;
 const UNTIL = T0 + 7 * DAY;
 
-// The tables of branches not on main yet, as they define them: B5 (core-3 v18), B26 (kpi_readings), B9a (v21, spec).
-const BLUEPRINTS = `
-  CREATE TABLE blueprints (plan_id TEXT PRIMARY KEY, json TEXT NOT NULL, profile_version INTEGER NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-  CREATE TABLE blueprint_steps (plan_id TEXT NOT NULL, step TEXT NOT NULL, ref TEXT, outcome TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (plan_id, step));`;
-const KPI_READINGS = `
-  CREATE TABLE kpi_readings (id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id TEXT NOT NULL, kpi TEXT NOT NULL, value REAL, unit TEXT NOT NULL, target REAL NOT NULL,
-    direction TEXT NOT NULL, source TEXT NOT NULL, period_start INTEGER, recorded_at INTEGER NOT NULL, recorded_by TEXT NOT NULL, note TEXT);`;
+// On core-4 the schema has B5's blueprints (v18) and B26's kpi_readings (v19); B9a's approvals (v21, spec) is not in
+// any branch yet, so a test that needs it makes it. An older office (the live one is v15) has none of the three.
 const APPROVALS = `
   CREATE TABLE approvals (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, task_id TEXT, kind TEXT NOT NULL, tool TEXT NOT NULL, target TEXT NOT NULL, fingerprint TEXT NOT NULL,
     summary TEXT NOT NULL, scope TEXT NOT NULL, status TEXT NOT NULL, requested_at INTEGER NOT NULL, decided_at INTEGER, decided_by TEXT, decided_via TEXT,
     expires_at INTEGER, used_at INTEGER, note TEXT);`;
+const AS_BEFORE_V18 = 'DROP TABLE blueprint_steps; DROP TABLE blueprints; DROP TABLE kpi_readings;';
 
 /** An office database on disk, filled by the test, then read by a second, read-only connection. */
 function office(o: { pilot: boolean }) {
@@ -65,7 +61,7 @@ const turn = (costUsd: number): OfficeEvent => ({
 function pilotWeek(withNewTables = true) {
   const t = office({ pilot: true });
   const { db, ev, hire } = t;
-  if (withNewTables) db.exec(BLUEPRINTS + KPI_READINGS + APPROVALS);
+  db.exec(withNewTables ? APPROVALS : AS_BEFORE_V18);
   const coord = hire('Koordinatör', 'coordinator');
   const yazar = hire('Yazar');
   const editor = hire('Editör');
@@ -253,7 +249,9 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     t.db.close();
     const before = createHash('sha256').update(readFileSync(t.file)).digest('hex');
     const r = pilotMetrics(t.read(), { since: SINCE, until: UNTIL });
-    expect(r.measures.filter((m) => m.pass === null).map((m) => m.id)).toEqual(['KÖ1', 'KÖ2', 'KÖ3', 'KÖ4', 'KÖ5', 'KÖ6', 'KÖ8', 'KÖ10', 'KÖ11']);
+    expect(r.measures.filter((m) => m.pass === null).map((m) => m.id)).toEqual(['KÖ1', 'KÖ2', 'KÖ3', 'KÖ4', 'KÖ5', 'KÖ6', 'KÖ8', 'KÖ10']);
+    // kpi_readings is there (v19) and no goal defines a KPI: that is a measure, and it does not hold.
+    expect([measure(r, 'KÖ11').value, measure(r, 'KÖ11').pass]).toEqual(['KPI tanımlı etkin hedef yok', false]);
     expect(createHash('sha256').update(readFileSync(t.file)).digest('hex')).toBe(before);
   });
 
