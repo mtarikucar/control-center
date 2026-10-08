@@ -457,4 +457,52 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE tasks DROP COLUMN stream_id;
       ALTER TABLE plans DROP COLUMN streams;`,
   },
+  {
+    // Core 3's 16–18 are 17–19 on the main that has the management cycle's 16 (decision 18591573, note #99).
+    version: 17,
+    name: 'role templates: which one an employee was hired from',
+    // Employees from before were hired with free text: no template.
+    up: `
+      ALTER TABLE employees ADD COLUMN template TEXT;
+      ALTER TABLE employees ADD COLUMN template_version INTEGER;`,
+    down: `
+      ALTER TABLE employees DROP COLUMN template_version;
+      ALTER TABLE employees DROP COLUMN template;`,
+  },
+  {
+    version: 18,
+    name: 'capabilities: what an employee declares and a task requires',
+    // JSON lists; NULL for none — every row from before, and every one written with none (spec §6).
+    up: `
+      ALTER TABLE employees ADD COLUMN capabilities TEXT;
+      ALTER TABLE tasks ADD COLUMN requires TEXT;`,
+    down: `
+      ALTER TABLE tasks DROP COLUMN requires;
+      ALTER TABLE employees DROP COLUMN capabilities;`,
+  },
+  {
+    version: 19,
+    name: 'blueprints: the install plan behind a plan card, and the steps its install made',
+    // New tables only: plans from before have no blueprint and stay as they are.
+    up: `
+      CREATE TABLE blueprints (
+        plan_id TEXT PRIMARY KEY,
+        json TEXT NOT NULL,
+        profile_version INTEGER NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE blueprint_steps (
+        plan_id TEXT NOT NULL,
+        step TEXT NOT NULL,
+        ref TEXT,
+        outcome TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (plan_id, step)
+      );`,
+    down: `
+      DROP TABLE blueprint_steps;
+      DROP TABLE blueprints;`,
+  },
 ];

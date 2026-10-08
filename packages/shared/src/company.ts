@@ -85,6 +85,8 @@ export interface Task {
   scheduleId?: string | null;
   /** The stream of its plan it belongs to (management cycle §3.4), if any. */
   streamId?: string | null;
+  /** The capabilities the work needs (B7), ids of the vocabulary; empty when none. */
+  requires?: string[];
   dependsOn: string[];
   status: TaskStatus;
   /** How many passes deep this task is (a task passed while working on a passed task is one deeper). */

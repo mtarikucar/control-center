@@ -3,6 +3,9 @@ import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
+import { applyText, blueprintText, type Blueprints } from '../company/blueprint.ts';
+import { capabilityVocabulary, coverage, coverageBrief, coverageLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
+import { listRoleTemplates, roleTemplate, templateRole } from '../company/role-templates.ts';
 import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
 import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
@@ -64,7 +67,8 @@ const STATUS_TR: Record<Task['status'], string> = { waiting: 'bekliyor', in_prog
 function taskLine(t: Task, company: Company): string {
   const done = t.done.length ? ` — bitti tanımı: ${t.done.join('; ')}` : '';
   const review = t.reviewer ? `, inceleyen ${company.nameOf(t.reviewer)}${t.round ? `, tur ${t.round}` : ''}` : '';
-  return `• [${STATUS_TR[t.status]}] ${t.id} “${t.title}” (öncelik ${t.priority}, isteyen ${company.nameOf(t.requester)}${review})${done}`;
+  const requires = t.requires?.length ? ` — gereken yetenekler: ${t.requires.join(', ')}` : '';
+  return `• [${STATUS_TR[t.status]}] ${t.id} “${t.title}” (öncelik ${t.priority}, isteyen ${company.nameOf(t.requester)}${review})${done}${requires}`;
 }
 
 const s = (description: string) => ({ type: 'string', description });
@@ -79,6 +83,7 @@ const difficulty = {
 };
 const difficultyArg = (args: Args) => optStr(args, 'difficulty') as TaskDifficulty | undefined;
 const reviewer = s('Who checks the hand-in before it closes (id or name); never the one who does the task. Give one for any task with a quality risk.');
+const requires = strings('The capabilities the work needs, from the vocabulary (capabilitiesRead), e.g. email.read, social.publish. The reply says how the assignee’s desk has each; the task opens anyway.');
 const until = s('When: relative (+30m, +6h, +1d) or a local time (2026-10-08T14:55).');
 const startAfter = { ...until, description: 'Do not hand this out before this time: relative (+6h, +1d) or a local time (2026-10-08T14:55). For follow-ups and waiting periods.' };
 const dueAt = { ...until, description: 'Should be done by this time (same forms). Nearer due dates go first within a priority; the coordinator hears once when it passes.' };
@@ -135,6 +140,8 @@ export function officeTools(o: {
    * opens a cycle. Absent: neither (an office without cycles).
    */
   cycle?: Pick<ManagementCycle, 'acting' | 'close'>;
+  /** The blueprints (B5: blueprintPropose, blueprintApply, blueprintRead); absent in tests that do not care. */
+  blueprints?: Blueprints;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -159,6 +166,13 @@ export function officeTools(o: {
     const titleOf = (id: string) => list.find((x) => x.id === id)?.title ?? id;
     const owner = (who: string) => (who.startsWith(`${STREAM_TO_HIRE}:`) ? who : company.nameOf(who));
     return ` Akışlar: ${list.map((x) => `${x.title} → ${owner(x.owner)}${x.dependsOn.length ? ` (önce: ${x.dependsOn.map(titleOf).join(', ')})` : ''}`).join('; ')}.`;
+  };
+
+  /** How a desk has these capabilities, as a reply's extra line; with no registry, only the list. */
+  const deskBrief = (ids: string[] | undefined, employeeId: string, lead: string, anyway = ''): string => {
+    if (!ids?.length) return '';
+    if (!o.integrations) return `\n${lead}: ${ids.join(', ')}.`;
+    return `\n${coverageBrief(coverage(o.integrations.list(), ids, employeeId), lead, anyway)}`;
   };
 
   const tools: McpTool[] = [
@@ -305,15 +319,15 @@ export function officeTools(o: {
     {
       name: 'taskPass',
       description: 'Pass a piece of work to a colleague (by id or name). It goes to the end of their queue; they are not interrupted. Say what, why and when it counts as done.',
-      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer, startAfter, dueAt }, ['to', 'title']),
+      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer, startAfter, dueAt, requires }, ['to', 'title']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         // Arguments first: a malformed call should say what is malformed, not that a person was not found.
-        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt') };
+        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt'), requires: list(args, 'requires') };
         const to = findPerson(str(args, 'to'));
         const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         const lowered = input.difficulty === 'critical' && task.difficulty === 'hard' ? ' Zorluk “kritik” yerine “zor” sayıldı: kritik işi koordinatör ya da ekip lideri açar.' : '';
-        return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).${lowered}`;
+        return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).${lowered}${deskBrief(task.requires, to.id, `Gereken yetenekler, ${to.name} masasında`, 'Görev yine açıldı')}`;
       },
     },
     {
@@ -362,6 +376,37 @@ export function officeTools(o: {
         const who = optStr(args, 'employee');
         const list = o.integrations.list({ status: status as IntegrationStatus | undefined, employee: who === undefined ? undefined : findPerson(who).id });
         return integrationsText(list, status !== undefined || who !== undefined);
+      },
+    },
+    {
+      name: 'capabilitiesRead',
+      description:
+        'Read the capability model, read-only: without arguments the vocabulary — every capability the product knows, which go outward — and how the office has each (built in, or which connectors and on which desks they are open), then each connector’s tools no capability names (unclassified: no role gets them, the gate counts them outward); with employee, the capabilities that person declares and how their desk has each; with task, what the task requires and how its assignee’s desk has each (with employee as well: on that person’s desk instead, to see who could do it). It calls no connector.',
+      inputSchema: object({ employee: s('Id or name.'), task: s('Task id.') }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
+        const who = optStr(args, 'employee');
+        const taskId = optStr(args, 'task');
+        const person = who === undefined ? null : findPerson(who);
+        const registry = o.integrations.list();
+        if (taskId !== undefined) {
+          const task = tasks.get(taskId);
+          const desk = person ?? roster.get(task.assignee);
+          if (!task.requires?.length) return `“${task.title}” görevi yetenek istemiyor.`;
+          return [`# Görev “${task.title}” — gereken yetenekler (${task.requires.length}); masa: ${desk.name}`, ...coverageLines(coverage(registry, task.requires, desk.id), true)].join('\n');
+        }
+        if (person) {
+          const declared = person.capabilities ?? [];
+          if (!declared.length) return `${person.name} için bildirilmiş yetenek yok. Koordinatör editRoleCard(capabilities) ile bildirir.`;
+          return [`# ${person.name} — yetenekler (${declared.length}), masasındaki karşılığı`, ...coverageLines(coverage(registry, declared, person.id), true)].join('\n');
+        }
+        const v = capabilityVocabulary();
+        return [
+          `# Yetenek sözlüğü (${v.capabilities.length} yetenek, sürüm ${v.version}) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.`,
+          ...coverageLines(coverage(registry, v.capabilities.map((c) => c.id)), false),
+          ...unclassifiedLines(registry),
+        ].join('\n');
       },
     },
     {
@@ -584,10 +629,10 @@ export function officeTools(o: {
       name: 'taskCreate',
       description:
         'Open a task for someone (coordinator). With planId it belongs to an approved plan, with streamId also to one of its streams (recommended for planned work). Use dependsOn for "start when that part is done". Give a difficulty: when difficulty models are on in the constitution, the task starts on its model (by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
-      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), streamId: s('Id of the plan’s stream this belongs to (needs planId).'), dependsOn: strings('Task ids that must be done first.'), startAfter, dueAt }, ['assignee', 'title']),
+      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), streamId: s('Id of the plan’s stream this belongs to (needs planId).'), dependsOn: strings('Task ids that must be done first.'), startAfter, dueAt, requires }, ['assignee', 'title']),
       kinds: LEADS,
       run: ({ employee }, args) => {
-        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, streamId: optStr(args, 'streamId') ?? null, dependsOn: list(args, 'dependsOn'), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt') };
+        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, streamId: optStr(args, 'streamId') ?? null, dependsOn: list(args, 'dependsOn'), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt'), requires: list(args, 'requires') };
         const to = findPerson(str(args, 'assignee'));
         if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
           throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
@@ -595,7 +640,7 @@ export function officeTools(o: {
         const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         const stream = task.streamId ? (plans().find((p) => p.id === task.planId)?.streams?.find((x) => x.id === task.streamId)?.title ?? task.streamId) : null;
         const when = [stream ? `akış: ${stream}` : '', task.notBefore ? `başlangıç ${formatWhen(task.notBefore, Date.now())}` : '', task.dueAt ? `son tarih ${formatWhen(task.dueAt, Date.now())}` : ''].filter(Boolean).join(', ');
-        return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}${when ? ` (${when})` : ''}.`;
+        return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}${when ? ` (${when})` : ''}.${deskBrief(task.requires, to.id, `Gereken yetenekler, ${to.name} masasında`, 'Görev yine açıldı')}`;
       },
     },
     {
@@ -606,7 +651,7 @@ export function officeTools(o: {
       run: ({ employee }, args) => {
         const to = findPerson(str(args, 'assignee'));
         const task = company.assign(employee.id, str(args, 'taskId'), to.id, { difficulty: difficultyArg(args), reviewer: reviewerArg(args) });
-        return `“${task.title}” artık ${to.name} adlı çalışanda.`;
+        return `“${task.title}” artık ${to.name} adlı çalışanda.${deskBrief(task.requires, to.id, `Gereken yetenekler, ${to.name} masasında`)}`;
       },
     },
     {
@@ -716,6 +761,68 @@ export function officeTools(o: {
       },
     },
     {
+      name: 'roleTemplates',
+      description: 'Read the role template catalog (coordinator or team lead): without id, every template with its title, model, methods and one line; with id, one whole — defaults, capabilities, checks, measures and the role text a hire from it gets. Hire from one with hire(template).',
+      inputSchema: object({ id: s('Template id.') }),
+      kinds: LEADS,
+      run: (_ctx, args) => {
+        const id = optStr(args, 'id');
+        if (id === undefined) {
+          const all = listRoleTemplates();
+          return [`# Rol şablonları (${all.length})`, ...all.map((t) => `• ${t.id} — ${t.title} (${t.model}; yöntem: ${t.methods.join(', ')}): ${t.summary}`)].join('\n');
+        }
+        const t = roleTemplate(id);
+        return [
+          `# ${t.title} (${t.id}, sürüm ${t.version})`,
+          `Model: ${t.model} · Ekip: ${t.team} · Yöntemler: ${t.methods.join(', ')} · Yetenekler: ${t.capabilities.join(', ')}`,
+          '',
+          templateRole(t),
+        ].join('\n');
+      },
+    },
+    {
+      name: 'blueprintPropose',
+      description:
+        'Propose the company’s setup as a blueprint (coordinator), once the onboarding’s required questions are in: the roles (from roleTemplates, with capabilities — read capabilitiesRead and integrationsList), the playbook topics to seed, the first goals with KPIs, routines, the first tasks, optionally the brief and a closed mode (deny rules each new desk gets before its first session). The office checks it against the profile, the catalog and the constitution, shows it to the owner as a plan card (what is open, what is missing, what goes outward) and keeps it with the plan. With planId: that blueprint plan’s revision. Install it with blueprintApply once approved.',
+      inputSchema: object({
+        blueprint: {
+          type: 'object',
+          description: 'title, summary (the business in a paragraph), brief?, roles [{key, name, template?, role?, title?, team?, model?, capabilities?}], playbook [{topic, text}], goals [{key, title, why, done[], kpis?}], routines [{key, title, role (a role key or "coordinator"), reviewer?, cron, done?, description?, difficulty?}], tasks [{key, title, role, reviewer?, done?, description?, requires?, difficulty?, priority?}], closedMode? {deny[]}, estimates? {quotaPct, usd, days}, risks?. Keys: a-z, 0-9, dashes; at most 40 steps.',
+        },
+        planId: s('Revise this blueprint plan instead of opening a new one.'),
+        goalId: s('The active goal the setup serves.'),
+      }, ['blueprint']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.blueprints) throw new ConflictError('Bu ofiste blueprint açık değil.');
+        const { plan, blueprint } = o.blueprints.propose(employee.id, args.blueprint, { planId: optStr(args, 'planId'), goalId: optStr(args, 'goalId') });
+        const n = plan.steps.length;
+        if (plan.status === 'approved') return `Blueprint planı başladı (tam serbestlik): “${blueprint.title}” (plan ${plan.id}), ${n} adım. Şimdi blueprintApply ile kur.`;
+        return `Blueprint plan kartı olarak sahibine gitti: “${blueprint.title}” (plan ${plan.id}), ${n} adım. Onaylanınca blueprintApply ile kur.`;
+      },
+    },
+    {
+      name: 'blueprintApply',
+      description: 'Install an approved blueprint plan (coordinator): brief, playbook, hires, goals, routines, tasks in that order. Idempotent: a step already done — recorded, or found by its natural key (same name, title or topic) — is not done again; if it stops halfway, fix what it says and run it again, it goes on where it stopped.',
+      inputSchema: object({ planId: s('The blueprint plan.') }, ['planId']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.blueprints) throw new ConflictError('Bu ofiste blueprint açık değil.');
+        return applyText(o.blueprints.apply(employee.id, str(args, 'planId')));
+      },
+    },
+    {
+      name: 'blueprintRead',
+      description: 'Read a blueprint plan (coordinator or team lead): its steps and how far the install went, the profile version it stood on, and — when it has a closed mode — each installed desk’s rules as its latest session shows them (read only: no tool is called to check).',
+      inputSchema: object({ planId: s('The blueprint plan.') }, ['planId']),
+      kinds: LEADS,
+      run: (_ctx, args) => {
+        if (!o.blueprints) throw new ConflictError('Bu ofiste blueprint açık değil.');
+        const planId = str(args, 'planId');
+        return blueprintText(o.blueprints.read(planId), plans().find((p) => p.id === planId)!);
+      },
+    },
+    {
       name: 'goalsRead',
       description: 'Read the company’s goals (coordinator or team lead): each active goal with why, its definition of done and its plans; then the recently closed ones.',
       inputSchema: object({}),
@@ -745,27 +852,40 @@ export function officeTools(o: {
     },
     {
       name: 'hire',
-      description: `Hire a new employee (coordinator): name, job title, team, the role card text (responsibilities, how to work, what "done" means), the model (${MODEL_ALIASES.join(', ')}) and the look (characterId). Desks are limited.`,
+      description: `Hire a new employee (coordinator). From a role template (template; read them with roleTemplates): the role text, title, team and model come from it; role is then this company's own part (brand voice, channels, language, limits from the profile) and title, team or model given override the template's. Without a template: the role card text (responsibilities, how to work, what "done" means) and the model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
       inputSchema: {
-        ...object({ name: s('Name.'), title: s('Job title.'), team: s('Team.'), role: s('Role card: responsibilities and way of working.'), model: { type: 'string', enum: [...MODEL_ALIASES] }, characterId: { type: 'string', enum: characterList(), description: 'Look in the 3D office.' } }, ['name', 'role', 'model']),
+        ...object(
+          {
+            name: s('Name.'), template: { type: 'string', enum: listRoleTemplates().map((t) => t.id), description: 'Role template id (roleTemplates).' }, title: s('Job title.'), team: s('Team.'),
+            role: s('Without a template: the role card. With one: this company’s own part of the role.'), model: { type: 'string', enum: [...MODEL_ALIASES] },
+            capabilities: strings('The capabilities the role needs, from the vocabulary (capabilitiesRead): the whole list, replacing the template’s; none given, the template’s. The reply says how the new desk has each.'),
+            characterId: { type: 'string', enum: characterList(), description: 'Look in the 3D office.' },
+          },
+          ['name'],
+        ),
       },
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const model = str(args, 'model') as ModelAlias;
-        if (!(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${model}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
-        const hired = company.hire(employee.id, { name: str(args, 'name'), role: str(args, 'role'), title: optStr(args, 'title'), team: optStr(args, 'team'), model, characterId: optStr(args, 'characterId'), reportsTo: null });
-        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}.`;
+        const template = optStr(args, 'template');
+        // Without a template, as before: role and model are required.
+        const model = (template === undefined ? str(args, 'model') : optStr(args, 'model')) as ModelAlias | undefined;
+        if (model !== undefined && !(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${model}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
+        const role = template === undefined ? str(args, 'role') : (optStr(args, 'role') ?? '');
+        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, characterId: optStr(args, 'characterId'), reportsTo: null, capabilities: list(args, 'capabilities') });
+        const from = hired.template ? `, şablon ${hired.template.id} (sürüm ${hired.template.version})` : '';
+        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}${from}.${deskBrief(hired.capabilities, hired.id, 'Yetenekler')}`;
       },
     },
     {
       name: 'editRoleCard',
-      description: 'Rewrite someone’s role card (coordinator): title, team and/or the role text. It takes effect when their session next loads it.',
-      inputSchema: object({ employee: s('Employee id or name.'), title: s('Job title.'), team: s('Team.'), role: s('Role card text.') }, ['employee']),
+      description: 'Rewrite someone’s role card (coordinator): title, team, the role text and/or the capabilities the role needs (the whole list; [] clears it). It takes effect when their session next loads it.',
+      inputSchema: object({ employee: s('Employee id or name.'), title: s('Job title.'), team: s('Team.'), role: s('Role card text.'), capabilities: strings('The capabilities the role needs, from the vocabulary (capabilitiesRead): the whole list.') }, ['employee']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
         const who = findPerson(str(args, 'employee'));
-        const next = company.editRoleCard(employee.id, who.id, { title: optStr(args, 'title'), team: optStr(args, 'team'), role: optStr(args, 'role') });
-        return `${next.name} adlı çalışanın rol kartı güncellendi.`;
+        const capabilities = list(args, 'capabilities');
+        const next = company.editRoleCard(employee.id, who.id, { title: optStr(args, 'title'), team: optStr(args, 'team'), role: optStr(args, 'role'), capabilities });
+        return `${next.name} adlı çalışanın rol kartı güncellendi.${capabilities === undefined ? '' : deskBrief(next.capabilities, next.id, 'Yetenekler')}`;
       },
     },
     {
@@ -814,7 +934,10 @@ export function officeTools(o: {
       run: ({ employee }, args) => {
         if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
         const i = o.integrations.register(employee.id, { name: args.name, kind: args.kind, capabilities: args.capabilities, authNeeded: args.authNeeded, costNote: args.costNote, note: args.note, closed: args.closed });
-        return `Kayıt güncellendi: ${i.name} [${INTEGRATION_STATUS_LABELS[i.status]}].`;
+        // Kept as written (B3); only the vocabulary's ids take part in a match (B7).
+        const unknown = args.capabilities === undefined ? [] : unknownCapabilities(i.capabilities);
+        const warn = unknown.length ? `\nSözlükte olmayan yetenek: ${unknown.join(', ')} — eşleşmede kullanılmaz (sözlük: capabilitiesRead).` : '';
+        return `Kayıt güncellendi: ${i.name} [${INTEGRATION_STATUS_LABELS[i.status]}].${warn}`;
       },
     },
     {

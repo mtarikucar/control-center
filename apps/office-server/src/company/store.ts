@@ -34,6 +34,8 @@ interface TaskRow {
   park_count: number | null;
   schedule_id: string | null;
   stream_id: string | null;
+  /** Absent in a database before v18. */
+  requires?: string | null;
 }
 
 function taskFromRow(r: TaskRow): Task {
@@ -57,6 +59,7 @@ function taskFromRow(r: TaskRow): Task {
     parkCount: r.park_count ?? 0,
     scheduleId: r.schedule_id ?? null,
     streamId: r.stream_id ?? null,
+    requires: r.requires ? (JSON.parse(r.requires) as string[]) : [],
     dependsOn: JSON.parse(r.depends_on) as string[],
     status: r.status as TaskStatus,
     chainDepth: r.chain_depth,
@@ -92,6 +95,8 @@ export interface NewTask {
   scheduleId?: string | null;
   /** The stream of its plan it belongs to (checked by the company). */
   streamId?: string | null;
+  /** The capabilities it needs (B7), checked by the company. */
+  requires?: string[];
   dependsOn: string[];
   chainDepth: number;
 }
@@ -114,16 +119,19 @@ export class TaskStore {
   create(t: NewTask): Task {
     const task: Task = {
       ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, reviewer: t.reviewer ?? null, reviewOf: t.reviewOf ?? null, round: 0,
-      notBefore: t.notBefore ?? null, dueAt: t.dueAt ?? null, parkedReason: null, parkCount: 0, scheduleId: t.scheduleId ?? null, streamId: t.streamId ?? null,
+      notBefore: t.notBefore ?? null, dueAt: t.dueAt ?? null, parkedReason: null, parkCount: 0, scheduleId: t.scheduleId ?? null, streamId: t.streamId ?? null, requires: t.requires ?? [],
       id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, nudgedAt: null, createdAt: this.#now(), startedAt: null, finishedAt: null,
     };
+    // A task in no stream and requiring nothing is written exactly as before v16; each column only when it is set.
+    const stream = task.streamId ? [task.streamId] : [];
+    const requires = task.requires!.length > 0 ? [JSON.stringify(task.requires)] : [];
     this.#db
       .prepare(
         `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth,
-           note, result, nudged, created_at, started_at, finished_at, kind, difficulty, reviewer, review_of, round, not_before, due_at, schedule_id, stream_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+           note, result, nudged, created_at, started_at, finished_at, kind, difficulty, reviewer, review_of, round, not_before, due_at, schedule_id${stream.length ? ', stream_id' : ''}${requires.length ? ', requires' : ''})
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?${stream.length ? ', ?' : ''}${requires.length ? ', ?' : ''})`,
       )
-      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null, task.reviewer ?? null, task.reviewOf ?? null, task.notBefore ?? null, task.dueAt ?? null, task.scheduleId ?? null, task.streamId ?? null);
+      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null, task.reviewer ?? null, task.reviewOf ?? null, task.notBefore ?? null, task.dueAt ?? null, task.scheduleId ?? null, ...stream, ...requires);
     return task;
   }
 

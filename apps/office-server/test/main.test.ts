@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { migrateUp, openDb } from '../src/db.ts';
 import { MIGRATIONS } from '../src/migrations.ts';
 import { FAKE_CLAUDE, tempDir, until } from './helpers.ts';
+import { pageHeaders } from './owner-helpers.ts';
 
 const MAIN = fileURLToPath(new URL('../src/main.ts', import.meta.url));
 const cleanups: Array<() => unknown> = [];
@@ -29,9 +30,11 @@ function startOffice(dataDir: string) {
   return { child, exited, output: () => output };
 }
 
-function call(port: number, method: string, path: string, body?: unknown): Promise<any> {
+/** A change goes as the office page sends it (pageHeaders). */
+async function call(port: number, method: string, path: string, body?: unknown): Promise<any> {
+  const page = method === 'GET' ? {} : await pageHeaders(port);
   return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: { 'content-type': 'application/json' } }, (res) => {
+    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: { 'content-type': 'application/json', ...page } }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
       res.on('end', () => resolve(data ? JSON.parse(data) : null));

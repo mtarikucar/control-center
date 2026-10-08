@@ -5,12 +5,15 @@ import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
 import { ManagementCycle } from '../src/company/cycle.ts';
+import { Blueprints } from '../src/company/blueprint.ts';
+import { BlueprintStore } from '../src/company/blueprint-store.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { officeMetrics } from '../src/company/office-metrics.ts';
 import { performanceReport } from '../src/performance.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
+import { pageHeaders } from './owner-helpers.ts';
 import { setup, until } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
@@ -31,16 +34,19 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   const metrics = { report: () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks, state: c.state }, Date.now()) };
   // The management cycle as main.ts builds it, but with a fixed board and no office clock: the tests open and end cycles.
   const cycle = new ManagementCycle({ events: s.events, state: c.state, company: c.company, roster: s.roster, tasks: c.tasks, budget: c.budget, board: () => ({ text: 'Yönetim panosu', kickoff: false }) });
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, metrics, integrations, management: cycle, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
+  const blueprints = new Blueprints({ company: c.company, roster: s.roster, tasks: c.tasks, plans: c.plans, schedules: c.schedules, memory: c.memory, store: new BlueprintStore(s.db), integrations, constitution: () => c.budget.constitution() });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, metrics, integrations, blueprints, management: cycle, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine, cycle };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine, cycle, blueprints };
 }
 
-function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
+/** A change goes as the office page sends it (pageHeaders). */
+async function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
+  const page = method === 'GET' ? {} : await pageHeaders(port);
   return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: method === 'POST' ? { 'content-type': 'application/json' } : {} }, (res) => {
+    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: { ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...page } }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : null }));
@@ -256,6 +262,57 @@ describe('company API', () => {
     expect(t.company.profile().sections.identity).toMatchObject({ by: 'owner', assumedFields: [], fields: { name: 'Tatlı Fırın' } });
     expect((await call(t.port, 'POST', '/api/onboarding/answers', { answers: { revenue: '1M' } })).status).toBe(400);
     expect((await call(t.port, 'POST', '/api/onboarding/answers', {})).status).toBe(400);
+  });
+
+  it('shows the owner the role templates and hires from one', async () => {
+    const t = await start();
+    t.company.hireCoordinator();
+    const templates = (await call(t.port, 'GET', '/api/role-templates')).body;
+    expect(templates.map((x: { id: string }) => x.id)).toContain('icerik-yazari');
+    expect(templates.find((x: { id: string }) => x.id === 'icerik-yazari')).toMatchObject({ title: 'İçerik Yazarı', model: 'sonnet', methods: ['content'] });
+    const hired = await call(t.port, 'POST', '/api/employees', { name: 'Ece', template: 'icerik-yazari', role: 'Marka dili: samimi.' });
+    expect(hired.status).toBe(201);
+    expect(hired.body).toMatchObject({ name: 'Ece', title: 'İçerik Yazarı', template: { id: 'icerik-yazari' } });
+    expect(hired.body.role).toContain('### Bu şirkette\n\nMarka dili: samimi.');
+    expect((await call(t.port, 'POST', '/api/employees', { name: 'Can', template: 'yok' })).status).toBe(400);
+    // The old form, free text, as before.
+    expect((await call(t.port, 'POST', '/api/employees', { name: 'Ada', role: 'Testleri yazar.' })).body).toMatchObject({ role: 'Testleri yazar.', template: null });
+  });
+
+  it('shows the owner a plan’s blueprint and how far its install went (B5)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const plain = t.company.propose(c.id, { method: METHOD, title: 'Düz plan', goal: 'g', approach: 'a' });
+    expect((await call(t.port, 'GET', `/api/plans/${plain.id}/blueprint`)).status).toBe(404);
+    expect((await call(t.port, 'GET', '/api/plans/yok/blueprint')).status).toBe(404);
+    // A blueprint plan: the whole blueprint, every step pending until it is installed.
+    for (const [section, fields] of [['identity', { name: 'Fırın', sector: 'gıda' }], ['offer', { products: ['ekmek'] }], ['customers', { segments: ['mahalle'], channels: ['dükkan'] }], ['goals', { goals: ['satış'] }], ['success', { done: ['kâr'] }], ['tools', { email: ['Gmail'] }], ['constraints', { budget: '0', other: ['yok'] }]] as const) {
+      t.company.profileUpdate(c.id, { section, fields, assumed: false });
+    }
+    const { plan } = t.blueprints.propose(c.id, { title: 'Kurulum', summary: 'Bir fırın.', roles: [{ key: 'satis', name: 'Ada', template: 'satis-asistani' }], playbook: [], goals: [], routines: [], tasks: [] });
+    const body = (await call(t.port, 'GET', `/api/plans/${plan.id}/blueprint`)).body;
+    expect(body).toMatchObject({ planId: plan.id, blueprint: { title: 'Kurulum', roles: [{ key: 'satis', name: 'Ada' }] }, steps: [{ step: 'role:satis', state: 'pending' }], closedMode: [] });
+  });
+
+  it('shows the owner the capability vocabulary and what the office or one desk has of it; hires with capabilities (B7)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    t.events.append(c.id, { type: 'session.started', model: 'm', mcp: [{ name: 'claude.ai Gmail', status: 'connected', tools: 30 }, { name: 'office', status: 'connected', tools: 18 }] });
+    const all = (await call(t.port, 'GET', '/api/capabilities')).body;
+    expect(all.version).toBe(1);
+    expect(all.capabilities).toHaveLength(23);
+    // Gmail's session from before names: only a lower bound of what the vocabulary does not know.
+    expect(all.unclassified).toEqual([expect.objectContaining({ server: 'claude.ai Gmail', tools: 30, unclassified: null })]);
+    expect(all.capabilities.find((x: { id: string }) => x.id === 'email.send')).toMatchObject({ title: 'E-posta gönderme', outward: true });
+    expect(all.coverage.map((x: { id: string }) => x.id)).toEqual(all.capabilities.map((x: { id: string }) => x.id));
+    expect(all.coverage.find((x: { id: string }) => x.id === 'email.read')).toMatchObject({ status: 'open', providers: [expect.objectContaining({ name: 'claude.ai Gmail', openOn: ['Koordinatör'] })] });
+    const hired = await call(t.port, 'POST', '/api/employees', { name: 'Ada', role: 'Yanıtlar.', capabilities: ['email.read', 'crm.read'] });
+    expect(hired.status).toBe(201);
+    expect(hired.body).toMatchObject({ name: 'Ada', capabilities: ['email.read', 'crm.read'] });
+    const ada = (await call(t.port, 'GET', `/api/capabilities?employee=${hired.body.id}`)).body;
+    expect(ada.coverage.map((x: { id: string; status: string }) => [x.id, x.status])).toEqual([['email.read', 'unseen'], ['crm.read', 'missing']]);
+    expect((await call(t.port, 'GET', '/api/capabilities?employee=yok')).status).toBe(404);
+    expect((await call(t.port, 'POST', '/api/employees', { name: 'Can', role: 'r', capabilities: ['email.sending'] })).status).toBe(400);
   });
 
   it('shows the owner the integration registry, read-only', async () => {

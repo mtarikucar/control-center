@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { Employee, HireInput, Lifecycle, ModelAlias, OfficeEvent, QuotaWindow, Usage } from '@cc/shared';
 import { sessionArgs, sideQuestionArgs, terminalCommand } from './claude/args.ts';
-import { normalize, replayedUuid, usageSince } from './claude/normalize.ts';
+import { normalize, replayedUuid, taskChange, usageSince } from './claude/normalize.ts';
 import { runOnce } from './claude/once.ts';
 import { ClaudeProcess } from './claude/process.ts';
-import { deskDir, prepareDesk } from './desk.ts';
+import { deskDir, prepareDesk, writeDeskDeny } from './desk.ts';
 import { ConflictError, ValidationError } from './errors.ts';
 import type { EventStore } from './event-store.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
 import { modelPolicy } from './model-policy.ts';
-import type { Roster } from './roster.ts';
+import type { NewEmployee, Roster } from './roster.ts';
 
 export const CONTINUE_AFTER_LIMIT = 'Limit açıldı, kaldığın yerden devam et.';
 export const CONTINUE_AFTER_RESTART = 'Ofis yeniden başladı; yarım kalan işine kaldığın yerden devam et.';
@@ -35,6 +35,10 @@ function describeTool(name: string, input: unknown): string {
 
 export const CONTINUE_AFTER_CRASH =
   'Oturumun beklenmedik şekilde kapandı ve yeniden açıldı; yarım kalan işine kaldığın yerden devam et.';
+/** How long jobs of the session alone (no turn) may keep an employee working before they are free for tasks again. */
+export const BACKGROUND_LIMIT_MS = 2 * 60 * 60_000;
+export const CONTINUE_AFTER_TERMINAL =
+  'Terminalden ofise döndün. Terminale alınırken süren işin ve arka planda çalışan komutların durduruldu; yarım kalmış bir değişiklik varsa kontrol et ve kaldığın yerden devam et.';
 
 type TurnFinished = Extract<OfficeEvent, { type: 'turn.finished' }>;
 interface Totals {
@@ -64,6 +68,10 @@ export interface EngineOptions {
    * model — all but role hints (the coordinator's model by turn type), which apply either way.
    */
   modelPolicyEnabled?: () => boolean;
+  /** After the last background job ends between turns, how long the turn claude opens to read it may take to come (default 30 s). */
+  followUpGraceMs?: number;
+  /** Past this the jobs no longer hold the employee: idle, the office is told, the jobs run on (default BACKGROUND_LIMIT_MS). */
+  backgroundLimitMs?: number;
 }
 
 /** What a message would best run on; the session moves there only as modelPolicy allows, never in the middle of a turn. */
@@ -135,6 +143,14 @@ interface Runtime {
   failedModel: { model: ModelAlias; at: number } | null;
   /** Reset of the window that rejected the last request, when claude named it. */
   limitAt: number | null;
+  /** Jobs the session runs beside its turns that keep the employee working (claude's task id → description); they end with the process. */
+  background: Map<string, string>;
+  /** Jobs still running that the cap freed the employee from. */
+  freed: Set<string>;
+  /** Jobs alone hold the employee: when the cap comes. */
+  capTimer: NodeJS.Timeout | null;
+  /** The last job ended between turns: waiting for the turn claude opens by itself to read it. */
+  followUpTimer: NodeJS.Timeout | null;
 }
 
 export class Engine {
@@ -152,6 +168,8 @@ export class Engine {
   readonly #mcp: EngineOptions['mcp'];
   readonly #cacheTtlMinutes: () => number;
   readonly #modelPolicyEnabled: () => boolean;
+  readonly #followUpGraceMs: number;
+  readonly #backgroundLimitMs: number;
   readonly #runtimes = new Map<string, Runtime>();
   readonly #sideRuns = new Set<AbortController>();
 
@@ -170,11 +188,15 @@ export class Engine {
     this.#mcp = o.mcp;
     this.#cacheTtlMinutes = o.cacheTtlMinutes ?? (() => 5);
     this.#modelPolicyEnabled = o.modelPolicyEnabled ?? (() => false);
+    this.#followUpGraceMs = o.followUpGraceMs ?? 30_000;
+    this.#backgroundLimitMs = o.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
   }
 
-  hire(input: HireInput): Employee {
+  hire(input: NewEmployee): Employee {
     const employee = this.#roster.create(input);
     this.#emit(employee.id, { type: 'employee.hired', name: employee.name });
+    // Closed mode (B5): the desk's settings are in place before the first session opens and reads them.
+    if (input.deskDeny?.length) writeDeskDeny(this.#dataDir, employee.slug, input.deskDeny);
     return this.#start(employee, 'işe alındı');
   }
 
@@ -225,7 +247,8 @@ export class Engine {
    */
   #switchTo(employee: Employee, rt: Runtime, requested: ModelHint): ModelAlias | null {
     const hint: ModelHint = this.#modelPolicyEnabled() || requested.role ? requested : { model: employee.model, taskStart: true };
-    if (!hint.model || rt.turnActive) return null;
+    // Restarting the session would end the jobs it runs.
+    if (!hint.model || rt.turnActive || this.#jobsRunning(rt)) return null;
     if (rt.failedModel?.model === hint.model && this.#now() - rt.failedModel.at < FAILED_MODEL_PAUSE_MS) return null;
     const lastTurnFinishedAt = rt.lastTurnAt ?? this.#events.latest(employee.id, 'turn.finished')?.ts ?? null;
     const choice = modelPolicy.decide({
@@ -404,6 +427,7 @@ export class Engine {
       const employee = this.#roster.get(id);
       if (employee.lifecycle === 'sleeping') return employee;
       if (employee.lifecycle !== 'idle' || this.#runtime(id).turnActive) throw new ConflictError('Yalnız boştaki bir çalışan uyutulabilir; işi bitince uyut.');
+      if (this.#jobsRunning(this.#runtime(id))) throw new ConflictError('Arka planda işi sürüyor; uyutulursa o iş de kapanır.');
       await this.#halt(id);
       return this.#setLifecycle(this.#roster.get(id), 'sleeping', 'uyutuldu');
     });
@@ -442,9 +466,18 @@ export class Engine {
   returnFromTerminal(id: string): Employee {
     const employee = this.#roster.get(id);
     if (employee.lifecycle !== 'in_terminal') throw new ConflictError('Bu çalışan terminalde değil.');
+    // Taken there at work (a turn, or a job it left running) closing the session for the terminal cut that work; taken
+    // there interrupted, the office restart had cut it before.
+    const opened = this.#events.latest(id, 'lifecycle.changed')?.event;
+    const from = opened?.type === 'lifecycle.changed' && opened.to === 'in_terminal' ? opened.from : null;
+    const note = from === 'working' ? CONTINUE_AFTER_TERMINAL : from === 'interrupted' ? CONTINUE_AFTER_RESTART : null;
     // Back at the desk and ready: the office picks the same session up again (an idle process spends no tokens).
     this.#runtime(id).crashes = [];
-    return this.#start(employee, 'terminalden ofise döndü');
+    const back = this.#start(employee, 'terminalden ofise döndü');
+    if (!note) return back;
+    // It hears so and goes on: working, as its process is.
+    this.send(id, note, 'system');
+    return this.#roster.get(id);
   }
 
   fire(id: string): Promise<void> {
@@ -466,7 +499,7 @@ export class Engine {
   reload(id: string): void {
     const rt = this.#runtime(id);
     if (!rt.proc || rt.proc.exited) return;
-    if (rt.turnActive || this.#roster.get(id).lifecycle !== 'idle') {
+    if (rt.turnActive || this.#roster.get(id).lifecycle !== 'idle' || this.#jobsRunning(rt)) {
       rt.reloadPending = true;
       return;
     }
@@ -475,6 +508,8 @@ export class Engine {
 
   #reloadNow(id: string): void {
     const rt = this.#runtime(id);
+    // A job still runs: the reload waits for a later idle moment with none.
+    if (this.#jobsRunning(rt)) return;
     rt.reloadPending = false;
     void this.#exclusive(id, async () => {
       const employee = this.#roster.get(id);
@@ -555,8 +590,12 @@ export class Engine {
       rt.unread = rt.unread.filter((m) => m.uuid !== acknowledged);
       rt.consumedInTurn = true;
     }
+    const task = taskChange(raw);
+    if (task) this.#onTask(id, task);
     for (const event of normalize(raw)) {
       if (event.type === 'session.started' && !this.#roster.get(id).sessionStarted) this.#roster.update(id, { sessionStarted: true });
+      // claude opened a turn by itself (to read what a background job left): work, as a turn the office opens is.
+      if ((event.type === 'message.assistant' || event.type === 'tool.started') && !rt.turnActive) this.#ownTurn(id);
       if (event.type === 'message.assistant') rt.lastText = event.text;
       if (event.type === 'tool.started') rt.toolsInTurn = true;
       if (event.type === 'quota.updated') {
@@ -626,18 +665,87 @@ export class Engine {
       this.#scheduleLimitContinue(id, resetsAt);
       return;
     }
-    this.#setLifecycle(employee, 'idle', ok ? 'iş bitti' : 'iş hatayla bitti');
+    // A job it started runs on (its end opens the next turn): still at work.
+    this.#idleIfDone(id, ok ? 'iş bitti' : 'iş hatayla bitti');
+  }
+
+  /** The work is over when no turn is open and no job of the session runs: idle, and a reload waiting for it happens. */
+  #idleIfDone(id: string, reason: string): void {
+    const rt = this.#runtime(id);
+    const employee = this.#roster.get(id);
+    if (rt.turnActive || employee.lifecycle !== 'working') return;
+    if (rt.background.size > 0) {
+      this.#armCap(id);
+      return;
+    }
+    this.#setLifecycle(employee, 'idle', reason);
     if (rt.reloadPending) this.#reloadNow(id);
+  }
+
+  #ownTurn(id: string): void {
+    const rt = this.#runtime(id);
+    rt.turnActive = true;
+    this.#emit(id, { type: 'turn.started' });
+    this.#setLifecycle(this.#roster.get(id), 'working', 'kendi açtığı tur (arka plan işi)');
+  }
+
+  #onTask(id: string, task: { taskId: string; running: boolean; description?: string }): void {
+    const rt = this.#runtime(id);
+    if (task.running) {
+      rt.background.set(task.taskId, task.description ?? '');
+      return;
+    }
+    rt.freed.delete(task.taskId);
+    if (!rt.background.delete(task.taskId) || rt.background.size > 0 || rt.turnActive) return;
+    // The last job ended between turns: claude opens a turn by itself to read it. Idle only if none comes in time.
+    if (rt.followUpTimer) clearTimeout(rt.followUpTimer);
+    rt.followUpTimer = setTimeout(() => {
+      rt.followUpTimer = null;
+      this.#idleIfDone(id, 'arka plan işi bitti');
+    }, this.#followUpGraceMs);
+    rt.followUpTimer.unref();
+  }
+
+  /** Jobs alone hold the employee: past the cap they are free for tasks again (a turn running then: at its end). */
+  #armCap(id: string): void {
+    const rt = this.#runtime(id);
+    if (rt.capTimer) return;
+    rt.capTimer = setTimeout(() => {
+      rt.capTimer = null;
+      if (rt.background.size === 0 || rt.turnActive) return;
+      // The jobs run on (nothing is killed) but no longer keep the employee working; the office decides about them.
+      const jobs = [...rt.background.values()];
+      for (const taskId of rt.background.keys()) rt.freed.add(taskId);
+      rt.background.clear();
+      this.#emit(id, { type: 'background.overdue', jobs, limitMs: this.#backgroundLimitMs });
+      this.#idleIfDone(id, 'arka plan işi üst süreyi aştı; süreç sürüyor');
+    }, this.#backgroundLimitMs);
+    rt.capTimer.unref();
+  }
+
+  #jobsRunning(rt: Runtime): boolean {
+    return rt.background.size > 0 || rt.freed.size > 0;
+  }
+
+  /** The process is gone: the jobs it ran are gone with it. */
+  #endBackground(rt: Runtime): void {
+    rt.background.clear();
+    rt.freed.clear();
+    if (rt.capTimer) clearTimeout(rt.capTimer);
+    rt.capTimer = null;
+    if (rt.followUpTimer) clearTimeout(rt.followUpTimer);
+    rt.followUpTimer = null;
   }
 
   #onExit(id: string, code: number | null, signal: NodeJS.Signals | null, stderr: string): void {
     const rt = this.#runtime(id);
-    const wasTurnActive = rt.turnActive;
-    const resumeWork = wasTurnActive && rt.consumedInTurn;
+    // Work was under way: a turn that took its message in, a job beside the turns, or one that ended and waits to be read.
+    const resumeWork = (rt.turnActive && rt.consumedInTurn) || this.#jobsRunning(rt) || rt.followUpTimer !== null;
     const unread = rt.unread.splice(0);
     rt.consumedInTurn = false;
     rt.proc = null;
     rt.turnActive = false;
+    this.#endBackground(rt);
     for (const resolve of rt.turnWaiters.splice(0)) resolve();
     if (rt.expectingExit) {
       rt.expectingExit = false;
@@ -825,6 +933,10 @@ export class Engine {
         toolsInTurn: false,
         lastText: '',
         failedModel: null,
+        background: new Map(),
+        freed: new Set(),
+        capTimer: null,
+        followUpTimer: null,
       };
       this.#runtimes.set(id, rt);
     }

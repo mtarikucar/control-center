@@ -2,17 +2,28 @@ import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, Emp
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** The server's machine-readable reason, when it gives one (e.g. owner_nonce). */
+  readonly code: string | undefined;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+/** The page's nonce for the owner's changes (office-server owner-guard.ts); fetched again a minute before it expires. */
+let ownerNonce: { nonce: string; expiresAt: number } | null = null;
+
+async function nonce(): Promise<string> {
+  if (!ownerNonce || ownerNonce.expiresAt - Date.now() < 60_000) ownerNonce = await send<{ nonce: string; expiresAt: number }>('GET', '/api/owner/nonce');
+  return ownerNonce.nonce;
+}
+
+async function send<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
   const init: RequestInit =
     method === 'POST'
-      ? { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? '{}' : JSON.stringify(body) }
-      : { method, body: undefined };
+      ? { method, headers: { 'content-type': 'application/json', ...headers }, body: body === undefined ? '{}' : JSON.stringify(body) }
+      : { method, ...(method === 'DELETE' ? { headers } : {}), body: undefined };
   const res = await fetch(path, init);
   const text = await res.text();
   let data: unknown = null;
@@ -24,13 +35,30 @@ async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?
     }
   }
   if (!res.ok) {
-    const message = (data as { error?: unknown } | null)?.error;
-    throw new ApiError(res.status, typeof message === 'string' ? message : `İstek başarısız (HTTP ${res.status}).`);
+    const error = data as { error?: unknown; code?: unknown } | null;
+    throw new ApiError(res.status, typeof error?.error === 'string' ? error.error : `İstek başarısız (HTTP ${res.status}).`, typeof error?.code === 'string' ? error.code : undefined);
   }
   return data as T;
 }
 
+/** A change carries the page's nonce; one the server no longer knows (it restarted, the laptop slept) is fetched again once. */
+async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  if (method === 'GET') return send<T>(method, path, body);
+  try {
+    return await send<T>(method, path, body, { 'x-owner-nonce': await nonce() });
+  } catch (err) {
+    if (!(err instanceof ApiError && err.code === 'owner_nonce')) throw err;
+    ownerNonce = null;
+    return send<T>(method, path, body, { 'x-owner-nonce': await nonce() });
+  }
+}
+
 const employee = (id: string) => `/api/employees/${encodeURIComponent(id)}`;
+
+/** For tests: forget the page's nonce. */
+export function resetOwnerNonce(): void {
+  ownerNonce = null;
+}
 
 export const api = {
   office: () => request<OfficeSnapshot>('GET', '/api/office'),

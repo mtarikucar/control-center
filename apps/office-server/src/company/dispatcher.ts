@@ -106,6 +106,8 @@ export class Dispatcher {
         if (ev.to === 'idle') this.#idleSince.set(stored.employeeId, this.#now());
         else this.#idleSince.delete(stored.employeeId);
         if (ev.to === 'idle') this.#schedule(stored.employeeId);
+      } else if (ev.type === 'background.overdue' && stored.employeeId) {
+        this.#overdue(stored.employeeId, ev.jobs, ev.limitMs);
       } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed', 'company.paused', 'schedule.changed'].includes(ev.type)) this.#scheduleSweep();
     });
     const off = () => {
@@ -434,6 +436,7 @@ export class Dispatcher {
     }
     const done = task.done.length ? `\n\nBitti tanımı:\n${task.done.map((d) => `- ${d}`).join('\n')}` : '';
     const deps = task.dependsOn.length ? `\nÖnce bitenler: ${task.dependsOn.join(', ')}` : '';
+    const requires = task.requires?.length ? `\nGereken yetenekler: ${task.requires.join(', ')} (masandaki karşılığı: capabilitiesRead)` : '';
     const brief = this.#briefChanged(task) ? '\nŞirket özeti değişti; güncelini briefRead ile oku.' : '';
     const reviewer = task.kind === 'work' && task.reviewer ? `\nİnceleyen: ${this.#d.company.nameOf(task.reviewer)} — teslimin onun onayıyla kapanır.` : '';
     const returned = task.kind === 'work' && (task.round ?? 0) > 0 ? this.#returned(task) : '';
@@ -441,7 +444,7 @@ export class Dispatcher {
     const due = task.dueAt ? `\nSon tarih: ${formatWhen(task.dueAt, this.#now())}` : '';
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
-İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${due}${reviewer}${deps}${brief}
+İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${due}${reviewer}${deps}${requires}${brief}
 
 ${task.description || '(açıklama yok)'}${done}${returned}
 
@@ -472,6 +475,20 @@ ${task.kind === 'review' ? REVIEW_CLOSING : WORK_CLOSING}`;
       task.kind === 'handover'
         ? `${name} devir görevini hatırlatmaya rağmen teslim etmedi. Devir başkasına verilemez: ona sor, gerekirse reportToOwner ile sahibine bildir (sahibi Hemen çıkar ile devri atlayabilir).`
         : `${name} “${task.title}” ${task.kind === 'review' ? 'incelemesini' : 'görevini'} (no ${task.id}) hatırlatmaya rağmen ${task.kind === 'review' ? 'karara bağlamadı' : 'teslim etmedi'}; sırasındaki işler bekliyor. Ona sor ya da taskAssign ile başkasına ver.`,
+    );
+    this.#schedule(coordinator.id);
+  }
+
+  /** A job held someone alone past the cap: the engine freed them, the coordinator decides about the job. */
+  #overdue(id: string, jobs: string[], limitMs: number): void {
+    const coordinator = this.#d.company.coordinator();
+    if (!coordinator || coordinator.id === id) return;
+    const name = this.#d.company.nameOf(id);
+    const span = limitMs % 3_600_000 === 0 ? `${limitMs / 3_600_000} saattir` : `${Math.round(limitMs / 60_000)} dakikadır`;
+    this.#d.notices.add(
+      coordinator.id,
+      'background.overdue',
+      `${name} adlı çalışanın arka plan işi (${jobs.join(', ') || 'adı yok'}) ${span} tek başına sürüyor. Süreç öldürülmedi, iş sürüyor; ${name} yeniden görev alabilir. İşi sormak ya da durdurmasını istemek (askColleague), görevini başkasına vermek (taskAssign) ya da sürmesine izin vermek senin kararın.`,
     );
     this.#schedule(coordinator.id);
   }

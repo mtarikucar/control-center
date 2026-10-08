@@ -14,7 +14,11 @@ import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } 
 import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
+import type { Blueprints } from './company/blueprint.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
+import { OwnerGuard } from './owner-guard.ts';
+import { capabilityVocabulary, coverage, unclassifiedTools } from './company/capabilities.ts';
+import { listRoleTemplates } from './company/role-templates.ts';
 import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
 import type { Roster } from './roster.ts';
@@ -36,6 +40,7 @@ export interface ApiDeps {
     integrations?: IntegrationRegistry;
     /** The coordinator's management cycle: its log for the owner's Yönetim tab (management cycle §3.3). */
     management?: Pick<ManagementCycle, 'log'>;
+    blueprints?: Blueprints;
   };
 }
 
@@ -47,6 +52,8 @@ export interface ApiOptions {
   webDir?: string;
   /** Models + manifest served under /assets3d/. */
   assetsDir?: string;
+  /** How long a nonce of the page stays good (default OWNER_NONCE_TTL_MS). */
+  ownerNonceTtlMs?: number;
 }
 
 export interface Api {
@@ -135,7 +142,7 @@ function sendEmpty(res: ServerResponse, status: number): void {
   res.end();
 }
 
-async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Server, req: IncomingMessage, res: ServerResponse): Promise<void> {
   checkRequest(req, portOf(server), opts.allowedOrigins, opts.allowedHosts);
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -146,6 +153,9 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (out.body === undefined) return sendEmpty(res, out.status);
     return sendJson(res, out.status, out.body);
   }
+  // The owner's endpoints: anything under /api/ that changes something (the MCP tools above have their own tokens).
+  if (method === 'GET' && url.pathname === '/api/owner/nonce') return sendJson(res, 200, guard.issue(req, url.pathname));
+  if (method !== 'GET' && method !== 'HEAD' && url.pathname.startsWith('/api/')) guard.check(req, url.pathname);
   if (method === 'POST' && !(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new UnsupportedMediaTypeError('İstek gövdesi application/json olmalı.');
   }
@@ -214,6 +224,19 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     const budget = d.company.budget;
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
+    if (method === 'GET' && url.pathname === '/api/role-templates') return sendJson(res, 200, listRoleTemplates());
+    // The blueprint behind a plan card (B5): its steps, how far the install went, its closed mode.
+    const blueprintRoute = /^\/api\/plans\/([^/]+)\/blueprint$/.exec(url.pathname);
+    if (method === 'GET' && blueprintRoute && d.company.blueprints) return sendJson(res, 200, d.company.blueprints.read(blueprintRoute[1] ?? ''));
+    // The capability model (B7): the vocabulary and how the office, or one desk, has each capability.
+    if (method === 'GET' && url.pathname === '/api/capabilities' && d.company.integrations) {
+      const vocabulary = capabilityVocabulary();
+      const who = url.searchParams.get('employee');
+      const person = who === null ? null : d.roster.get(who);
+      const wanted = person ? (person.capabilities ?? []) : vocabulary.capabilities.map((c) => c.id);
+      const registry = d.company.integrations.list();
+      return sendJson(res, 200, { ...vocabulary, coverage: coverage(registry, wanted, person?.id), unclassified: unclassifiedTools(registry) });
+    }
     if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {
       const raw = url.searchParams.get('days');
       const days = raw === null ? undefined : Number(raw);
@@ -334,9 +357,11 @@ function attach(d: ApiDeps, ws: WebSocket, after: number): void {
 }
 
 export function createApi(d: ApiDeps, opts: ApiOptions): Api {
+  const guard = new OwnerGuard({ events: d.events, ttlMs: opts.ownerNonceTtlMs });
   const server = createServer((req, res) => {
-    route(d, opts, server, req, res).catch((err: unknown) => {
-      sendJson(res, statusOf(err), { error: err instanceof Error ? err.message : String(err) });
+    route(d, opts, guard, server, req, res).catch((err: unknown) => {
+      const code = err instanceof ForbiddenError ? err.code : undefined;
+      sendJson(res, statusOf(err), { error: err instanceof Error ? err.message : String(err), ...(code ? { code } : {}) });
     });
   });
   const wss = new WebSocketServer({ noServer: true });

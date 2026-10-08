@@ -87,6 +87,19 @@ export function replayedUuid(raw: unknown): string | null {
   return typeof raw.uuid === 'string' ? raw.uuid : null;
 }
 
+/**
+ * A job the session runs beside its turns (Bash run_in_background, Monitor, a background agent) started or ended,
+ * from claude's `system` task messages — counted as the CLI's own session runner counts them.
+ */
+export function taskChange(raw: unknown): { taskId: string; running: boolean; description?: string } | null {
+  if (!isObj(raw) || raw.type !== 'system' || typeof raw.task_id !== 'string') return null;
+  if (raw.subtype === 'task_started') return raw.task_type === 'in_process_teammate' ? null : { taskId: raw.task_id, running: true, description: str(raw.description) };
+  if (raw.subtype === 'task_notification') return { taskId: raw.task_id, running: false };
+  const status = isObj(raw.patch) ? raw.patch.status : undefined;
+  if (raw.subtype === 'task_updated' && (status === 'completed' || status === 'failed' || status === 'killed')) return { taskId: raw.task_id, running: false };
+  return null;
+}
+
 /** How the CLI names a server's tools: `claude.ai Gmail` → `mcp__claude_ai_Gmail__…`. */
 export function mcpToolPrefix(server: string): string {
   return `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__`;
@@ -100,12 +113,17 @@ export function normalize(raw: unknown): OfficeEvent[] {
       const servers = Array.isArray(raw.mcp_servers) ? raw.mcp_servers.filter(isObj) : [];
       // The session's own tool list: a server the desk's settings deny stays connected but has none of its tools in it.
       const tools = Array.isArray(raw.tools) ? raw.tools.filter((t): t is string => typeof t === 'string') : null;
-      const count = (name: string) => tools!.filter((t) => t.startsWith(mcpToolPrefix(name))).length;
+      // Each server's tools, without its prefix (B7: the vocabulary tells which are its own).
+      const own = (name: string) => tools!.filter((t) => t.startsWith(mcpToolPrefix(name))).map((t) => t.slice(mcpToolPrefix(name).length));
       return [
         {
           type: 'session.started',
           model: str(raw.model),
-          mcp: servers.map((m) => (tools === null ? { name: str(m.name), status: str(m.status) } : { name: str(m.name), status: str(m.status), tools: count(str(m.name)) })),
+          mcp: servers.map((m) => {
+            if (tools === null) return { name: str(m.name), status: str(m.status) };
+            const toolNames = own(str(m.name));
+            return { name: str(m.name), status: str(m.status), tools: toolNames.length, toolNames };
+          }),
         },
       ];
     }

@@ -5,7 +5,7 @@ import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
-import type { Roster } from '../roster.ts';
+import type { NewEmployee, Roster } from '../roster.ts';
 import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
@@ -18,6 +18,8 @@ import type { OnboardingStore } from './onboarding-store.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
+import { roleTemplate, templateRole } from './role-templates.ts';
+import { capabilityIds } from './capabilities.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
 import { checkStreams } from './streams.ts';
@@ -57,7 +59,7 @@ export interface CompanyDeps {
   notices: NoticeStore;
   dataDir: string;
   /** Hires and starts a session (Engine.hire). */
-  hire: (input: HireInput) => Employee;
+  hire: (input: NewEmployee) => Employee;
   /** Character ids from the asset manifest. */
   characters: () => string[];
   /** Restarts a session so it reads a new role card and tool list (Engine.reload); absent in tests that do not care. */
@@ -102,6 +104,8 @@ export interface TaskInput {
   scheduleId?: string | null;
   /** The stream of its plan it belongs to (management cycle §3.4); needs planId. */
   streamId?: string | null;
+  /** The capabilities the work needs (B7): ids of the vocabulary. */
+  requires?: unknown;
 }
 
 /** Recurring work (spec §4.4): each firing opens an ordinary task with these fields. */
@@ -201,6 +205,7 @@ export class Company {
   readonly #now: () => number;
   /** The clock attached after construction (attachClock); else the one in the deps. */
   #clock: { touch(): void } | null = null;
+  #isBlueprint: ((planId: string) => boolean) | null = null;
 
   constructor(d: CompanyDeps) {
     this.#d = d;
@@ -235,13 +240,32 @@ export class Company {
   }
 
   /** The owner or the coordinator hires a member; the character is the given one if the manifest has it, else the least used. */
-  hire(by: string, input: HireInput): Employee {
+  /**
+   * The owner or the coordinator hires. With a role template (B6) the role text comes from it — the given `role`
+   * becomes the company's own part — and so do the title, team and model unless given; the template and its version
+   * are recorded. Without one, as before: the role text as given. The capabilities (B7) given replace the template's;
+   * none given, the template's (or none).
+   */
+  hire(by: string, input: HireInput, o: { deny?: string[] } = {}): Employee {
     if (by !== OWNER) this.#assertCoordinator(by);
+    const template = input.template === undefined || input.template === null || input.template === '' ? null : roleTemplate(input.template);
+    const capabilities = input.capabilities === undefined || input.capabilities === null ? (template?.capabilities ?? []) : capabilityIds(input.capabilities, 'Yetenekler');
+    const resolved: NewEmployee = template
+      ? {
+          ...input,
+          role: templateRole(template, typeof input.role === 'string' ? input.role : undefined),
+          title: input.title?.trim() ? input.title : template.title,
+          team: input.team?.trim() ? input.team : template.team,
+          model: input.model ?? template.model,
+          templateRef: { id: template.id, version: template.version },
+          capabilityIds: capabilities,
+        }
+      : { ...input, templateRef: null, capabilityIds: capabilities };
     const characters = this.#d.characters();
     const characterId = input.characterId && characters.includes(input.characterId) ? input.characterId : this.#leastUsedCharacter(characters);
-    const lead = input.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === input.team?.trim()) : undefined;
+    const lead = resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
     this.#assertRoom();
-    return this.#d.hire({ ...input, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null });
+    return this.#d.hire({ ...resolved, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null, ...(o.deny?.length ? { deskDeny: o.deny } : {}) });
   }
 
   /** Fable by default: planning and judgement are the hardest work in the company. */
@@ -282,13 +306,15 @@ export class Company {
     return next;
   }
 
-  editRoleCard(by: string, id: string, patch: { title?: string; team?: string; role?: string }): Employee {
+  /** `capabilities` (B7), when given, is the whole new list ([] clears it); not given, it stays. */
+  editRoleCard(by: string, id: string, patch: { title?: string; team?: string; role?: string; capabilities?: unknown }): Employee {
     this.#assertCoordinator(by);
     const current = this.#d.roster.get(id);
     const next = this.#d.roster.update(id, {
       title: patch.title === undefined ? current.title : clean(patch.title, 'Unvan', 80, false),
       team: patch.team === undefined ? current.team : clean(patch.team, 'Ekip adı', 40, false),
       role: patch.role === undefined ? current.role : clean(patch.role, 'Rol tanımı', 4000, true),
+      ...(patch.capabilities === undefined ? {} : { capabilities: capabilityIds(patch.capabilities, 'Yetenekler') }),
     });
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
@@ -336,6 +362,7 @@ export class Company {
     }
     const dependsOn = (input.dependsOn ?? []).filter(Boolean);
     for (const dep of dependsOn) this.#d.tasks.get(dep);
+    const requires = input.requires === undefined || input.requires === null ? [] : capabilityIds(input.requires, 'Gereken yetenekler');
     const chainDepth = by === OWNER ? 0 : (this.#d.tasks.inProgressOf(by)?.chainDepth ?? -1) + 1;
     if (chainDepth > rules.chainDepth) {
       this.#tellCoordinator(by, 'limit.chain', `${this.nameOf(by)} “${title}” görevini paslayamadı: görev zinciri ${rules.chainDepth} halkayı geçti. Zinciri sen çöz.`);
@@ -353,7 +380,7 @@ export class Company {
     const reviewer = this.#reviewerOf(input.reviewer, assignee.id);
     const task = this.#d.tasks.create({
       planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), reviewer, dependsOn, chainDepth: Math.max(0, chainDepth),
-      notBefore, dueAt, scheduleId: input.scheduleId ?? null, streamId,
+      notBefore, dueAt, scheduleId: input.scheduleId ?? null, streamId, requires,
     });
     this.#taskEvent('created', task);
     if (notBefore !== null || dueAt !== null) this.#touchClock();
@@ -544,6 +571,11 @@ export class Company {
     this.#taskEvent('reprioritized', next);
     this.#tellOwnerChanged(`Sahibi “${task.title}” görevini öne aldı (öncelik 1).`);
     return next;
+  }
+
+  /** The blueprints (B5) are built after the company (they need it): which plans are install plans, attached here. */
+  attachBlueprints(isBlueprint: (planId: string) => boolean): void {
+    this.#isBlueprint = isBlueprint;
   }
 
   /** The clock is built after the company (it needs the scheduling service, which needs the company): attached here. */
@@ -938,7 +970,8 @@ export class Company {
     const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now(), approvedBy: 'owner' });
     this.#d.plans.clearApproved(planId);
     const desk = this.#planDesk(plan);
-    this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
+    const next = this.#isBlueprint?.(plan.id) ? 'Bu bir kurulum planı: blueprintApply ile kur; yarıda kalırsa yeniden çalıştır, yapılmışı atlar.' : 'Görevleri aç ve dağıt.';
+    this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). ${next}`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
     // An approved revision may leave nothing to do (it dropped the last unfinished stream, or its work closed while it
     // waited): the plan finishes now. Only a plan that has streams or has had work: a fresh one is only starting.

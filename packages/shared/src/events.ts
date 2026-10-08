@@ -25,7 +25,11 @@ export type OfficeEvent =
   | { type: 'employee.hired'; name: string }
   | { type: 'employee.fired' }
   /** `tools`: how many of the server's tools the session has (sessions from before carry none). */
-  | { type: 'session.started'; model: string; mcp: { name: string; status: string; tools?: number }[] }
+  /**
+   * `tools`: how many of the server's tools the session has; `toolNames` (B7): their names without the server's prefix.
+   * Both absent in sessions from before them.
+   */
+  | { type: 'session.started'; model: string; mcp: { name: string; status: string; tools?: number; toolNames?: string[] }[] }
   | { type: 'turn.started' }
   | {
       type: 'turn.finished';
@@ -55,6 +59,8 @@ export type OfficeEvent =
       limitResetsAt?: number | null;
     }
   | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string }
+  /** Jobs of the session (their descriptions) held the employee working alone past the cap: free for tasks again, the jobs run on. */
+  | { type: 'background.overdue'; jobs: string[]; limitMs: number }
   | { type: 'task.changed'; change: TaskChange; task: Task }
   | { type: 'plan.changed'; change: PlanChange; plan: Plan }
   | { type: 'goal.changed'; change: GoalChange; goal: Goal }
@@ -114,7 +120,14 @@ export type OfficeEvent =
       costUsd: number | null;
       model: ModelAlias | null;
     }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  /**
+   * A request to an owner endpoint that did not come the page's way (no Origin, no valid nonce, no browser fetch
+   * metadata): refused, or let through and marked. Detection only: a process of the same user can forge every header.
+   */
+  | { type: 'owner.request.flagged'; mark: OwnerRequestMark; outcome: 'rejected' | 'accepted'; method: string; path: string; userAgent: string };
+
+export type OwnerRequestMark = 'owner-endpoint, origin-less' | 'owner-endpoint, nonce-less' | 'owner-endpoint, no fetch metadata';
 
 export type OfficeEventType = OfficeEvent['type'];
 

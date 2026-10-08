@@ -22,14 +22,15 @@ const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
 const V13_TABLES = [...V10_TABLES, 'company_profile'].sort();
 const V14_TABLES = [...V13_TABLES, 'onboarding', 'onboarding_rounds'].sort();
 const V15_TABLES = [...V14_TABLES, 'integrations'].sort();
+const V19_TABLES = [...V15_TABLES, 'blueprints', 'blueprint_steps'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(16);
-    expect(tables(db)).toEqual(V15_TABLES);
+    expect(migrateUp(db)).toBe(19);
+    expect(tables(db)).toEqual(V19_TABLES);
   });
 
   it('review (Kerem): the applied migrations keep the names the live database has (checkApplied compares them; renaming one stops the office)', () => {
@@ -63,14 +64,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(16);
-    expect(tables(db)).toEqual(V15_TABLES);
+    expect(migrateUp(db)).toBe(19);
+    expect(tables(db)).toEqual(V19_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(16);
+    expect(migrateUp(db)).toBe(19);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -353,7 +354,7 @@ describe('migrations', () => {
       `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
        VALUES ('t1', 'p1', 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'in_progress', 0, 1)`,
     ).run();
-    migrateUp(db);
+    migrateUp(db, upTo(16));
     expect(appliedVersion(db)).toBe(16);
     expect({ ...(db.prepare('SELECT title, steps, streams FROM plans').get() as object) }).toEqual({ title: 'eski plan', steps: '["adım"]', streams: '[]' });
     expect({ ...(db.prepare('SELECT title, status, stream_id FROM tasks').get() as object) }).toEqual({ title: 'eski', status: 'in_progress', stream_id: null });
@@ -365,8 +366,70 @@ describe('migrations', () => {
     expect({ ...(db.prepare('SELECT id, title, steps FROM plans').get() as object) }).toEqual({ id: 'p1', title: 'eski plan', steps: '["adım"]' });
     expect({ ...(db.prepare('SELECT id, plan_id, status FROM tasks').get() as object) }).toEqual({ id: 't1', plan_id: 'p1', status: 'in_progress' });
     expect(migrateDown(db, 15)).toBe(15);
-    expect(migrateUp(db)).toBe(16);
+    expect(migrateUp(db, upTo(16))).toBe(16);
     expect({ ...(db.prepare('SELECT streams FROM plans').get() as object) }).toEqual({ streams: '[]' });
     expect({ ...(db.prepare('SELECT stream_id FROM tasks').get() as object) }).toEqual({ stream_id: null });
+  });
+
+  it('v17 records which role template an employee was hired from, none for those before; v17 down restores v16 exactly and keeps them', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(16));
+    const before = columns(db, 'employees');
+    db.prepare(
+      `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started, lifecycle, created_at, title, team, kind)
+       VALUES ('e1', 'ada', 'Ada', 'serbest metin', 'sonnet', 'coder', 0, 's1', 0, 'stopped', 1, '', '', 'member')`,
+    ).run();
+    migrateUp(db, upTo(17));
+    expect(appliedVersion(db)).toBe(17);
+    expect(columns(db, 'employees')).toEqual([...before, 'template', 'template_version']);
+    expect({ ...(db.prepare('SELECT role, template, template_version FROM employees').get() as object) }).toEqual({ role: 'serbest metin', template: null, template_version: null });
+    expect(migrateDown(db, 16)).toBe(16);
+    expect(columns(db, 'employees')).toEqual(before);
+    expect(db.prepare('SELECT name FROM employees').get()).toMatchObject({ name: 'Ada' });
+    expect(migrateUp(db, upTo(17))).toBe(17);
+  });
+
+  it('v18 records the capabilities an employee declares and a task requires, none for those before; v18 down restores v17 exactly and keeps them', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(17));
+    const employees = columns(db, 'employees');
+    const tasks = columns(db, 'tasks');
+    db.prepare(
+      `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started, lifecycle, created_at, title, team, kind)
+       VALUES ('e1', 'ada', 'Ada', 'serbest metin', 'sonnet', 'coder', 0, 's1', 0, 'stopped', 1, '', '', 'member')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
+       VALUES ('t1', NULL, 'Rapor', '', '[]', 'owner', 'e1', 3, '[]', 'waiting', 0, 1)`,
+    ).run();
+    expect(migrateUp(db, upTo(18))).toBe(18);
+    expect(columns(db, 'employees')).toEqual([...employees, 'capabilities']);
+    expect(columns(db, 'tasks')).toEqual([...tasks, 'requires']);
+    expect({ ...(db.prepare('SELECT role, template, capabilities FROM employees').get() as object) }).toEqual({ role: 'serbest metin', template: null, capabilities: null });
+    expect({ ...(db.prepare('SELECT title, requires FROM tasks').get() as object) }).toEqual({ title: 'Rapor', requires: null });
+    expect(migrateDown(db, 17)).toBe(17);
+    expect(columns(db, 'employees')).toEqual(employees);
+    expect(columns(db, 'tasks')).toEqual(tasks);
+    expect(db.prepare('SELECT name FROM employees').get()).toMatchObject({ name: 'Ada' });
+    expect(db.prepare('SELECT title FROM tasks').get()).toMatchObject({ title: 'Rapor' });
+    expect(migrateUp(db, upTo(18))).toBe(18);
+  });
+
+  it('v19 adds the blueprints and their install steps, empty (plans from before have none); v19 down restores v18 exactly', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(18));
+    db.prepare("INSERT INTO plans (id, title, goal, approach, people, steps, risks, status, version, proposed_by, created_at, updated_at) VALUES ('p1', 'Eski plan', 'g', 'a', '', '[]', '', 'approved', 1, 'c', 1, 1)").run();
+    expect(migrateUp(db)).toBe(19);
+    expect(tables(db)).toEqual(V19_TABLES);
+    expect(columns(db, 'blueprints')).toEqual(['plan_id', 'json', 'profile_version', 'created_by', 'created_at', 'updated_at']);
+    expect(columns(db, 'blueprint_steps')).toEqual(['plan_id', 'step', 'ref', 'outcome', 'at']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM blueprints').get()).toMatchObject({ n: 0 });
+    // One record per plan and step.
+    db.prepare("INSERT INTO blueprint_steps (plan_id, step, ref, outcome, at) VALUES ('p1', 'role:yazar', 'e1', 'done', 1)").run();
+    expect(() => db.prepare("INSERT INTO blueprint_steps (plan_id, step, ref, outcome, at) VALUES ('p1', 'role:yazar', 'e2', 'done', 2)").run()).toThrow(/UNIQUE/);
+    expect(migrateDown(db, 18)).toBe(18);
+    expect(tables(db)).toEqual(V15_TABLES);
+    expect(db.prepare('SELECT title FROM plans').get()).toMatchObject({ title: 'Eski plan' });
+    expect(migrateUp(db)).toBe(19);
   });
 });

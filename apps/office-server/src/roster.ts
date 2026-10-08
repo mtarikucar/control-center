@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { EMPLOYEE_KINDS, MODEL_ALIASES, type Employee, type EmployeeKind, type HireInput, type ModelAlias } from '@cc/shared';
+import { EMPLOYEE_KINDS, MODEL_ALIASES, type Employee, type EmployeeKind, type HireInput, type ModelAlias, type TemplateRef } from '@cc/shared';
 import type { Db } from './db.ts';
 import { ConflictError, NotFoundError, ValidationError } from './errors.ts';
 
@@ -35,6 +35,10 @@ interface Row {
   team: string;
   kind: string;
   reports_to: string | null;
+  template: string | null;
+  template_version: number | null;
+  /** Absent in a database before v18. */
+  capabilities?: string | null;
 }
 
 function fromRow(r: Row): Employee {
@@ -56,11 +60,20 @@ function fromRow(r: Row): Employee {
     limitResetsAt: r.limit_resets_at,
     lastError: r.last_error,
     createdAt: r.created_at,
+    template: r.template ? { id: r.template, version: r.template_version ?? 1 } : null,
+    capabilities: r.capabilities ? (JSON.parse(r.capabilities) as string[]) : [],
   };
 }
 
+/**
+ * What the roster writes for a hire: the input, and what the company resolved — the template (never the raw id) and the
+ * capabilities checked against the vocabulary (never the raw list), and the deny rules the desk gets before its first
+ * session (B5's closed mode; the engine writes them).
+ */
+export type NewEmployee = HireInput & { templateRef?: TemplateRef | null; capabilityIds?: string[]; deskDeny?: string[] };
+
 export type EmployeePatch = Partial<
-  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model'>
+  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities'>
 >;
 
 export class Roster {
@@ -77,7 +90,7 @@ export class Roster {
     this.#slugTaken = slugTaken;
   }
 
-  create(input: HireInput): Employee {
+  create(input: NewEmployee): Employee {
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     const role = typeof input.role === 'string' ? input.role.trim() : '';
     if (!name) throw new ValidationError('Ad boş olamaz.');
@@ -122,32 +135,25 @@ export class Roster {
       limitResetsAt: null,
       lastError: null,
       createdAt: this.#now(),
+      template: input.templateRef ?? null,
+      capabilities: input.capabilityIds ?? [],
     };
-    this.#db
-      .prepare(
-        `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started,
-           lifecycle, limit_resets_at, last_error, created_at, title, team, kind, reports_to)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        employee.id,
-        employee.slug,
-        employee.name,
-        employee.role,
-        employee.model,
-        employee.characterId,
-        employee.deskIndex,
-        employee.sessionId,
-        0,
-        employee.lifecycle,
-        null,
-        null,
-        employee.createdAt,
-        employee.title,
-        employee.team,
-        employee.kind,
-        employee.reportsTo,
-      );
+    // A free-text hire with no capabilities writes the row exactly as before templates (v17) and capabilities (v18);
+    // the template columns only for a template hire, the capabilities only when some are declared.
+    const columns = ['id', 'slug', 'name', 'role', 'model', 'character_id', 'desk_index', 'session_id', 'session_started', 'lifecycle', 'limit_resets_at', 'last_error', 'created_at', 'title', 'team', 'kind', 'reports_to'];
+    const values: Array<string | number | null> = [
+      employee.id, employee.slug, employee.name, employee.role, employee.model, employee.characterId, employee.deskIndex, employee.sessionId, 0, employee.lifecycle, null, null,
+      employee.createdAt, employee.title, employee.team, employee.kind, employee.reportsTo,
+    ];
+    if (employee.template) {
+      columns.push('template', 'template_version');
+      values.push(employee.template.id, employee.template.version);
+    }
+    if (employee.capabilities!.length > 0) {
+      columns.push('capabilities');
+      values.push(JSON.stringify(employee.capabilities));
+    }
+    this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
     return employee;
   }
 
@@ -194,6 +200,10 @@ export class Roster {
            team = ?, kind = ?, reports_to = ?, model = ? WHERE id = ?`,
       )
       .run(next.lifecycle, next.sessionStarted ? 1 : 0, next.limitResetsAt, next.lastError, next.role, next.title, next.team, next.kind, next.reportsTo, next.model, id);
+    // Only when given: every other change leaves the v18 column alone (and works on a database before it).
+    if (patch.capabilities !== undefined) {
+      this.#db.prepare('UPDATE employees SET capabilities = ? WHERE id = ?').run(patch.capabilities.length ? JSON.stringify(patch.capabilities) : null, id);
+    }
     return next;
   }
 

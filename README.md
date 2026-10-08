@@ -193,4 +193,8 @@ Ortam değişkenleri: `OFFICE_DATA_DIR` (repo içinde olamaz), `OFFICE_PORT`, `O
 (virgülle), `OFFICE_CLAUDE_COMMAND` (JSON dizi).
 
 Çalışanlar onay istemeden ve sahibinin bütün bağlantılarıyla çalışır; ofis API'si yalnızca
-`127.0.0.1`'den ve izin verilen kaynaklardan gelen istekleri kabul eder.
+`127.0.0.1`'den ve izin verilen kaynaklardan gelen istekleri kabul eder. Sahibine ait değiştiren uçlar
+(`/api/` altında GET dışı her istek) yalnızca ofis sayfasından gelen isteği kabul eder: Origin ve sayfanın aldığı
+anahtar (nonce) gerekir, `curl` ile yapılan denemeler olay kaydında işaretlenir. Bu bir tespit ve engel; aynı Unix
+kullanıcısındaki bir süreç için güvenlik sınırı değildir. Sınırı ve gerçek ayrım için öneri:
+[docs/security/owner-endpoints.md](docs/security/owner-endpoints.md).
