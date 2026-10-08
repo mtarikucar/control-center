@@ -148,8 +148,8 @@ export class KpiReadings {
     return ['| KPI | Hedef | Son okuma | Önceki | Durum |', '|---|---|---|---|---|', ...rows].join('\n');
   }
 
-  /** goalsRead's line: the last reading of each KPI that has one; null when none has. */
-  lastReadings(goal: Goal): string | null {
+  /** goalsRead's line: the last reading of each KPI that has one; empty when none has. */
+  lastReadings(goal: Goal): string {
     const readings = this.#readingsOf(goal.id);
     const parts = goal.kpis.flatMap((kpi) => {
       const last = this.#of(readings, kpi).at(-1);
@@ -157,7 +157,7 @@ export class KpiReadings {
       const verdict = last.value === null ? '' : `, ${met(kpi, last.value) ? 'tuttu' : 'tutmadı'}`;
       return [`${kpi.name} ${valueText(last)} (${formatStamp(last.recordedAt)}${verdict})`];
     });
-    return parts.length > 0 ? parts.join('; ') : null;
+    return parts.join('; ');
   }
 
   /** The office's value over the goal's plans' work in the KPI's window; a rate is shown as a %. */

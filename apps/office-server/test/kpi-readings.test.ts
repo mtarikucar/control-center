@@ -86,6 +86,12 @@ describe('KPI readings — kpiRecord', () => {
     ]);
   });
 
+  it('a value right at the target meets it, either way', async () => {
+    const t = office();
+    expect(await t.call(t.coordinator, 'kpiRecord', { goalId: t.goal.id, kpi: 'Zamanında hazır oranı', value: 90 })).toBe('“Zamanında hazır oranı” okuması kaydedildi: %90; hedef ≥ %90: tuttu.');
+    expect(await t.call(t.coordinator, 'kpiRecord', { goalId: t.goal.id, kpi: 'Rapor gecikmesi', value: 0 })).toBe('“Rapor gecikmesi” okuması kaydedildi: 0 gün; hedef ≤ 0 gün: tuttu.');
+  });
+
   it('review focus: refuses every wrong reading with a Turkish reason and writes nothing', async () => {
     const t = office();
     const c = t.coordinator;
@@ -181,6 +187,11 @@ describe('KPI readings — the measuring routine', () => {
     t.kpis.measure();
     expect(t.readings().map((r) => r.kpi)).toEqual(['Onay oranı']);
     expect(t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'kpi.due')).toEqual([]);
+    // Nobody was told, so nothing counts as told: a coordinator again hears at once.
+    t.roster.update(t.coordinator.id, { kind: 'coordinator' });
+    t.advance(60_000);
+    t.kpis.measure();
+    expect(t.dueNotices()).toHaveLength(1);
   });
 
   it('runs on the office tick, after the pulse; a failing measurement does not stop the tick', () => {

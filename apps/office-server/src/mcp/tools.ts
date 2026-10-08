@@ -685,7 +685,7 @@ export function officeTools(o: {
           .map((g) => {
             const own = plansOf(g.id).map((p) => `   - ${p.title} [${p.status}]`).join('\n');
             const kpis = g.kpis.length ? `\n   KPI: ${g.kpis.map(kpiText).join('; ')}` : '';
-        const read = g.kpis.length ? o.kpis?.lastReadings(g) : null;
+        const read = g.kpis.length ? o.kpis?.lastReadings(g) : '';
         const readings = read ? `\n   son okuma: ${read}` : '';
             return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${kpis}${readings}${own ? `\n${own}` : ''}`;
           })
