@@ -125,6 +125,7 @@ const FIELDS: Array<{ key: keyof Constitution; label: string; hint: string; null
   { key: 'digestEnabled', label: 'Özet açık', hint: 'Kapalıyken bilgi notları da karar notu gibi hemen gelir.', toggle: true },
   { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır (koordinatör de).', toggle: true },
   { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },
+  { key: 'capabilityPrecheckEnabled', label: 'Yetenek ön-kontrolü açık', hint: 'Açıkken istediği yetenek masada açık olmayan görev dağıtılmaz, bloklanır ve sana yetki önerisi gelir. Kapalıyken görev eskisi gibi dağıtılır.', toggle: true },
   { key: 'autonomy', label: 'Tam serbest', hint: 'Açıkken koordinatör hedef koyar ve planlarını sormadan başlatır; kapalıyken her plan senin onayını bekler.', toggle: true, choice: ['free', 'plans'] },
   { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
   { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre en çok bu sıklıkla hatırlatılır; 0 = hiç.' },

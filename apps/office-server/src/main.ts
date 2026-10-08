@@ -15,6 +15,7 @@ import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { Blueprints } from './company/blueprint.ts';
 import { BlueprintStore } from './company/blueprint-store.ts';
 import { IntegrationRegistry } from './company/integrations.ts';
+import { CapabilityPrecheck } from './company/precheck.ts';
 import { officeMetrics } from './company/office-metrics.ts';
 import { OnboardingStore } from './company/onboarding-store.ts';
 import { ProfileStore } from './company/profile-store.ts';
@@ -103,8 +104,13 @@ company.attachClock(clock);
 // KPI measurement (B26): the office reads its own KPIs from the metrics (B4) and asks the coordinator for the rest.
 const kpis = new KpiReadings({ db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(db, o) });
 company.attachKpis(kpis);
+// Which connectors the office has (B3): read from the sessions' reports and the coordinator's records. Before the
+// dispatcher, whose precheck (B8) reads it.
+const integrations = new IntegrationRegistry({ db, roster, events });
+// B8: holds a task whose required capability its desk lacks; the constitution's switch, off by default, turns it on.
+const precheck = new CapabilityPrecheck({ company, tasks, roster, integrations, proposals, events, enabled: () => budget.constitution().capabilityPrecheckEnabled });
 // B12: each task message carries what the memory holds for it (the index read, no memory.searched event).
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, related: (task) => relatedMemory(searchIndex, task) });
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, related: (task) => relatedMemory(searchIndex, task), precheck });
 // Who does what when (spec §6.1): reads only, for the sheet and agendaRead.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 
@@ -112,8 +118,6 @@ const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };
 // The top bar's figures (busy, delivered in the last day, stuck): read on demand.
 const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date.now()) };
-// Which connectors the office has (B3): read from the sessions' reports and the coordinator's records.
-const integrations = new IntegrationRegistry({ db, roster, events });
 const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, memory, store: new BlueprintStore(db), integrations, constitution: () => budget.constitution() });
 
 const api = createApi(

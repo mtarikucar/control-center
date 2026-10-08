@@ -773,6 +773,22 @@ export class Company {
     return next;
   }
 
+  /** B8: the office holds a task it cannot hand out (its assignee's desk lacks a capability it requires). */
+  holdForCapabilities(taskId: string, note: string, tell: string): Task {
+    const task = this.#d.tasks.get(taskId);
+    const next = this.#d.tasks.update(taskId, { status: 'blocked', note });
+    this.#tellCoordinator(task.assignee, 'task.blocked', tell);
+    this.#taskEvent('updated', next);
+    return next;
+  }
+
+  /** B8: a task the precheck held goes back to the queue. */
+  releaseCapabilityHold(taskId: string): Task {
+    const next = this.#d.tasks.update(taskId, { status: 'waiting', note: null });
+    this.#taskEvent('updated', next);
+    return next;
+  }
+
   finish(by: string, taskId: string, result: TaskResult): Task {
     const task = this.#d.tasks.get(taskId);
     const coordinator = this.coordinator();
