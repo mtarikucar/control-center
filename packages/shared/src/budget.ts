@@ -37,6 +37,13 @@ export interface Constitution {
   digestEnabled: boolean;
   modelPolicyEnabled: boolean;
   difficultyModelsEnabled: boolean;
+  /**
+   * The gate for work that cannot be taken back (B9a), OFF by default (and in a database that has no such key): on,
+   * a tool call that publishes, sends, pays, deletes, acts in a browser or touches the office itself waits for the
+   * owner's approval on the office page. The hook is in every session either way; off, it lets every call through
+   * and nothing is written, so turning it on needs no restart.
+   */
+  gateEnabled: boolean;
   /** 'free': the coordinator sets goals and starts its plans without waiting (spec §6.2); 'plans': each plan waits for the owner. */
   autonomy: Autonomy;
   /** Goals active at once, at most (spec §6.1). */
@@ -71,6 +78,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   digestEnabled: false,
   modelPolicyEnabled: false,
   difficultyModelsEnabled: false,
+  gateEnabled: false,
   autonomy: 'free',
   activeGoals: 10,
   pulseHours: 6,

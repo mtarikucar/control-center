@@ -61,6 +61,11 @@ export interface EngineOptions {
   sideQuestionTimeoutMs?: number;
   /** The office tools (MCP over HTTP): `url` is read at every session start, a fresh token is issued each time. */
   mcp?: { url: () => string; tokens: TokenRegistry };
+  /**
+   * The gate (B9a): the hook's command for the sessions' settings and where it asks. The session's environment gets
+   * OFFICE_GATE_URL and OFFICE_GATE_TOKEN (the session's own office token). Needs `mcp`.
+   */
+  gate?: { url: () => string; hook: string };
   /** How long a session's prompt cache stays warm (the constitution's cacheTtlMinutes; default 5). */
   cacheTtlMinutes?: () => number;
   /** The constitution's modelPolicyEnabled (default off): off, hints are ignored and sessions run on the employee's own model. */
@@ -156,6 +161,7 @@ export class Engine {
   readonly #stopTimeoutMs: number;
   readonly #sideQuestionTimeoutMs: number;
   readonly #mcp: EngineOptions['mcp'];
+  readonly #gate: EngineOptions['gate'];
   readonly #cacheTtlMinutes: () => number;
   readonly #modelPolicyEnabled: () => boolean;
   readonly #followUpGraceMs: number;
@@ -176,6 +182,7 @@ export class Engine {
     this.#stopTimeoutMs = o.stopTimeoutMs ?? 10_000;
     this.#sideQuestionTimeoutMs = o.sideQuestionTimeoutMs ?? 120_000;
     this.#mcp = o.mcp;
+    this.#gate = o.gate;
     this.#cacheTtlMinutes = o.cacheTtlMinutes ?? (() => 5);
     this.#modelPolicyEnabled = o.modelPolicyEnabled ?? (() => false);
     this.#followUpGraceMs = o.followUpGraceMs ?? 30_000;
@@ -536,19 +543,22 @@ export class Engine {
     if (rt.proc && !rt.proc.exited) return this.#roster.get(employee.id);
     rt.expectingExit = false;
     rt.turnActive = false;
+    const token = this.#mcp?.tokens.issue(employee.id);
     const mcpConfig = this.#mcp
       ? JSON.stringify({
           mcpServers: {
-            office: { type: 'http', url: this.#mcp.url(), headers: { Authorization: `Bearer ${this.#mcp.tokens.issue(employee.id)}` } },
+            office: { type: 'http', url: this.#mcp.url(), headers: { Authorization: `Bearer ${token}` } },
           },
         })
       : undefined;
+    // The gate's hook asks the office with this session's own token (B9a).
+    const gate = this.#gate && token ? this.#gate : undefined;
     rt.proc = new ClaudeProcess(
       {
         command: this.#command,
-        args: sessionArgs({ model: rt.model ?? employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home, mcpConfig }),
+        args: sessionArgs({ model: rt.model ?? employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home, mcpConfig, hook: gate?.hook }),
         cwd: prepareDesk(this.#dataDir, employee),
-        env: this.#env,
+        env: gate ? { ...(this.#env ?? process.env), OFFICE_GATE_URL: gate.url(), OFFICE_GATE_TOKEN: token } : this.#env,
       },
       {
         onJson: (obj) => this.#onJson(employee.id, obj),

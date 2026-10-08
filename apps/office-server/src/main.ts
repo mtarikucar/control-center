@@ -24,13 +24,19 @@ import { dueLabel, Scheduling } from './company/scheduling.ts';
 import { SearchIndex } from './company/search.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
 import { KpiReadings } from './company/kpi-readings.ts';
-import { loadConfig } from './config.ts';
+import { loadConfig, REPO_ROOT } from './config.ts';
 import { aheadOfCode, migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
 import { Engine } from './engine.ts';
 import { EventStore } from './event-store.ts';
 import { acquireLock } from './lock.ts';
 import { TokenRegistry } from './mcp/tokens.ts';
+import { gateHookCommand } from './claude/args.ts';
+import { ApprovalStore } from './company/approval-store.ts';
+import { Approvals } from './company/approvals.ts';
+import { Gate, liveContext } from './company/gate.ts';
+import { OwnerFlags } from './owner-flags.ts';
+import { homedir } from 'node:os';
 import { officeTools } from './mcp/tools.ts';
 import { performanceReport } from './performance.ts';
 import { QuotaTracker } from './quota.ts';
@@ -65,8 +71,12 @@ const roster = new Roster(db, config.deskCount, Date.now, (slug) => existsSync(d
 const quota = new QuotaTracker(db, events);
 const tokens = new TokenRegistry();
 let mcpUrl = '';
+let gateUrl = '';
+let port = config.port;
 const engine = new Engine({
   roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens },
+  // B9a: every session's hook asks the gate before a tool call (the constitution's gateEnabled decides whether it holds).
+  gate: { url: () => gateUrl, hook: gateHookCommand() },
   cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
   modelPolicyEnabled: () => budget.constitution().modelPolicyEnabled,
 });
@@ -109,13 +119,21 @@ const performance = { report: (o: { days?: number }) => performanceReport(db, { 
 const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date.now()) };
 // Which connectors the office has (B3): read from the sessions' reports and the coordinator's records.
 const integrations = new IntegrationRegistry({ db, roster, events });
+// The gate for work that cannot be taken back (B9a): the owner's approvals, and the check the sessions' hook asks for.
+const approvals = new Approvals({ store: new ApprovalStore(db), events, notices, roster, tasks, coordinator: () => company.coordinator(), memory });
+const gate = new Gate({
+  approvals, events, roster, enabled: () => budget.constitution().gateEnabled,
+  context: liveContext({ repoRoot: REPO_ROOT, dataDir: config.dataDir, home: homedir(), port: () => port, hosts: config.allowedHosts }),
+});
+// Owner endpoints called not the page's way: the coordinator hears, at most once an hour per kind.
+new OwnerFlags({ events, notices, coordinator: () => company.coordinator() });
 const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, memory, store: new BlueprintStore(db), integrations, constitution: () => budget.constitution() });
 
 const api = createApi(
   {
-    engine, roster, events, quota,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis }) },
-    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints },
+    engine, roster, events, quota, gate,
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis, approvals, gate }) },
+    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints, approvals },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );
@@ -133,8 +151,9 @@ let stopDispatcher: (() => void) | null = null;
 let stopClock: (() => void) | null = null;
 // Recover only once the port is ours, so a failed start never touches the employees.
 api.server.listen(config.port, config.host, () => {
-  const { port } = api.server.address() as AddressInfo;
+  port = (api.server.address() as AddressInfo).port;
   mcpUrl = `http://${config.host}:${port}/mcp`;
+  gateUrl = `http://${config.host}:${port}/gate/check`;
   engine.recover();
   stopDispatcher = dispatcher.start();
   stopClock = clock.start();

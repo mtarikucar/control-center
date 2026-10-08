@@ -49,7 +49,8 @@ describe('Budget — constitution', () => {
 
   it('R9: the economy switches are off by default, also in a database written before they existed; the owner turns them on and off', () => {
     const t = make();
-    const off = { digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false };
+    // B9a's gate is off the same way.
+    const off = { digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, gateEnabled: false };
     expect(DEFAULT_CONSTITUTION).toMatchObject({ ...off, cacheTtlMinutes: 5, coordinatorModels: { owner: 'sonnet' } });
     expect(t.budget.constitution()).toMatchObject(off);
     // The live office's constitution today: one row, nothing about the switches.
@@ -65,7 +66,7 @@ describe('Budget — constitution', () => {
       { maxEmployees: 9 }, { maxEmployees: 0 }, { maxEmployees: 2.5 }, { ownerReservePct: -1 }, { ownerReservePct: 95 }, { ownerReservePct: '25' },
       { monthlyUsdCap: -5 }, { chainDepth: 0 }, { tasksPerDay: 501 }, { idleSleepMinutes: 1441 }, { salary: 10 },
       { digestHours: [] }, { digestHours: [24] }, { digestHours: [9.5] }, { digestHours: '9, 17' }, { digestHours: [1, 2, 3, 4, 5, 6, 7] },
-      { cacheTtlMinutes: 61 }, { digestEnabled: 'false' }, { modelPolicyEnabled: 0 }, { difficultyModelsEnabled: null }, { coordinatorModels: { boss: 'fable' } }, { coordinatorModels: { owner: 'gpt' } }, { difficultyModels: 'haiku' }, { difficultyModels: [] },
+      { cacheTtlMinutes: 61 }, { digestEnabled: 'false' }, { modelPolicyEnabled: 0 }, { difficultyModelsEnabled: null }, { gateEnabled: 'true' }, { coordinatorModels: { boss: 'fable' } }, { coordinatorModels: { owner: 'gpt' } }, { difficultyModels: 'haiku' }, { difficultyModels: [] },
     ]) {
       expect(() => t.budget.setConstitution(bad), JSON.stringify(bad)).toThrow(/Anayasa|anayasa/);
     }

@@ -20,7 +20,7 @@ export interface BudgetDeps {
   now?: () => number;
 }
 
-const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri' } as const;
+const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri', gateEnabled: 'Geri alınamaz iş kapısı' } as const;
 type SwitchKey = keyof typeof SWITCHES;
 type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | SwitchKey>;
 

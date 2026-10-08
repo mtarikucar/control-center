@@ -559,4 +559,35 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS search_index_kind_ts;
       DROP TABLE IF EXISTS search_index;`,
   },
+  {
+    version: 21,
+    name: 'approvals: the owner\'s approvals of calls the gate holds',
+    // B9a (design tasarim-b9-kanca-onay.md §5): a new table only, so code from before ignores it (rolling back is safe).
+    up: `
+      CREATE TABLE IF NOT EXISTS approvals (
+        id TEXT PRIMARY KEY,
+        employee_id TEXT NOT NULL,
+        task_id TEXT,
+        kind TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        target TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        status TEXT NOT NULL,
+        requested_at INTEGER NOT NULL,
+        decided_at INTEGER,
+        decided_by TEXT,
+        decided_via TEXT,
+        expires_at INTEGER,
+        used_at INTEGER,
+        note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS approvals_lookup ON approvals (employee_id, fingerprint, status);
+      CREATE INDEX IF NOT EXISTS approvals_status ON approvals (status, requested_at);`,
+    down: `
+      DROP INDEX IF EXISTS approvals_status;
+      DROP INDEX IF EXISTS approvals_lookup;
+      DROP TABLE IF EXISTS approvals;`,
+  },
 ];

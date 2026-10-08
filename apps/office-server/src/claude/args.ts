@@ -1,24 +1,41 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelAlias } from '@cc/shared';
+import { REPO_ROOT } from '../config.ts';
 
-/** Keeps every connection the owner has, but not superpowers, the personal CLAUDE.md or Claude attribution. */
-export function employeeSettings(home: string = homedir()) {
+/**
+ * The tools the gate's hook sees (B9a, design §3): the shell (Bash, and Monitor, which runs a command too), file
+ * writes, web fetches and every connector tool but the office's own. Read-only built-ins never reach the hook.
+ */
+export const GATE_MATCHER = '^(Bash|Monitor|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__(?!office__).+)$';
+
+/** The hook's command: the office's own node running this checkout's script, quoted for the shell Claude Code uses. */
+export function gateHookCommand(node: string = process.execPath, script: string = join(REPO_ROOT, 'apps', 'office-server', 'hooks', 'gate.mjs')): string {
+  return `${shellQuote(node)} ${shellQuote(script)}`;
+}
+
+/**
+ * Keeps every connection the owner has, but not superpowers, the personal CLAUDE.md or Claude attribution. With the
+ * gate (B9a), a PreToolUse hook asks the office before a call runs; `disableAllHooks: false` here outranks a desk's
+ * .claude/settings.local.json that would turn hooks off (design §11, deney 6A/6B).
+ */
+export function employeeSettings(home: string = homedir(), o: { hook?: string } = {}) {
   return {
     enabledPlugins: { 'superpowers@claude-plugins-official': false },
     claudeMdExcludes: [join(home, '.claude', 'CLAUDE.md')],
     attribution: { commit: '', pr: '' },
+    ...(o.hook ? { disableAllHooks: false, hooks: { PreToolUse: [{ matcher: GATE_MATCHER, hooks: [{ type: 'command', command: o.hook, timeout: 10 }] }] } } : {}),
   };
 }
 
 /** Claude's own scheduler is closed in the office (spec §8): time goes through the office's clock, which the owner sees and the rules govern. */
 export const DISALLOWED_TOOLS = ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'RemoteTrigger'] as const;
 
-function settingsArgs(home: string | undefined): string[] {
-  return ['--setting-sources', 'user,project,local', '--settings', JSON.stringify(employeeSettings(home ?? homedir()))];
+function settingsArgs(home: string | undefined, hook?: string): string[] {
+  return ['--setting-sources', 'user,project,local', '--settings', JSON.stringify(employeeSettings(home ?? homedir(), { hook }))];
 }
 
-export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: boolean; home?: string; mcpConfig?: string }): string[] {
+export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: boolean; home?: string; mcpConfig?: string; hook?: string }): string[] {
   return [
     '-p',
     '--input-format',
@@ -31,7 +48,7 @@ export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: b
     o.model,
     '--permission-mode',
     'bypassPermissions',
-    ...settingsArgs(o.home),
+    ...settingsArgs(o.home, o.hook),
     '--disallowedTools',
     ...DISALLOWED_TOOLS,
     // The office tools come on top of every connection the owner has (no --strict-mcp-config).

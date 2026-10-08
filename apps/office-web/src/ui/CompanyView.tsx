@@ -9,6 +9,7 @@ import { formatWhenTR } from './format.ts';
 import { GoalsTab } from './GoalsTab.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
+import { ApprovalsTab } from './ApprovalCard.tsx';
 
 const TABS = [
   ['org', 'Örgüt'],
@@ -16,6 +17,7 @@ const TABS = [
   ['agenda', 'Ajanda'],
   ['tasks', 'Görevler'],
   ['proposals', 'Öneriler'],
+  ['approvals', 'Onaylar'],
   ['decisions', 'Kararlar'],
   ['playbook', 'El kitabı'],
   ['notes', 'Notlar'],
@@ -251,6 +253,8 @@ export function CompanyView() {
           </div>
         ) : tab === 'proposals' ? (
           <ProposalsTab />
+        ) : tab === 'approvals' ? (
+          <ApprovalsTab />
         ) : tab === 'decisions' ? (
           <DecisionsTab />
         ) : tab === 'playbook' ? (

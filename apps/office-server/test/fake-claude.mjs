@@ -16,7 +16,9 @@ mkdirSync(stateDir, { recursive: true });
 // What the session would read at start: the desk's own settings' deny rules (B5's closed mode), or null without a file.
 const deskSettings = join(process.cwd(), '.claude', 'settings.json');
 const deny = existsSync(deskSettings) ? (JSON.parse(readFileSync(deskSettings, 'utf8')).permissions?.deny ?? null) : null;
-if (process.env.FAKE_CLAUDE_ARGV_LOG) appendFileSync(process.env.FAKE_CLAUDE_ARGV_LOG, `${JSON.stringify({ args, cwd: process.cwd(), deny })}\n`);
+// B9a: what the gate's hook would get from the session's environment.
+const gate = { url: process.env.OFFICE_GATE_URL ?? null, token: process.env.OFFICE_GATE_TOKEN ?? null };
+if (process.env.FAKE_CLAUDE_ARGV_LOG) appendFileSync(process.env.FAKE_CLAUDE_ARGV_LOG, `${JSON.stringify({ args, cwd: process.cwd(), deny, gate })}\n`);
 
 const failFlag = process.env.FAKE_CLAUDE_FAIL_FLAG;
 if (failFlag && existsSync(failFlag)) {

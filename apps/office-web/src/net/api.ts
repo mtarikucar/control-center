@@ -1,4 +1,4 @@
-import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
+import type { AgendaReport, Approval, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -78,6 +78,10 @@ export const api = {
   spending: (planId?: string) => request<Spend[]>('GET', `/api/budget/spend${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`),
   setConstitution: (patch: Record<string, unknown>) => request<Constitution>('POST', '/api/constitution', patch),
   proposals: () => request<Proposal[]>('GET', '/api/proposals'),
+  /** B9a: the owner's approvals of calls the gate held; deciding goes through the owner guard like every change. */
+  approvals: () => request<Approval[]>('GET', '/api/approvals'),
+  approveApproval: (id: string, note?: string) => request<Approval>('POST', `/api/approvals/${encodeURIComponent(id)}/approve`, note ? { note } : {}),
+  denyApproval: (id: string, note?: string) => request<Approval>('POST', `/api/approvals/${encodeURIComponent(id)}/deny`, note ? { note } : {}),
   approveProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/approve`, note ? { note } : {}),
   rejectProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/reject`, note ? { note } : {}),
   decisions: () => request<Decision[]>('GET', '/api/memory/decisions'),

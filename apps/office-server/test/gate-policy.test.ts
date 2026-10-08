@@ -2,54 +2,13 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { ApprovalKind } from '@cc/shared';
-import { classifyCall, fingerprint, type GateContext } from '../src/company/gate-policy.ts';
+import { classifyCall, fingerprint } from '../src/company/gate-policy.ts';
+import { DATA, DESK, HOME, REPO, testContext } from './gate-helpers.ts';
 
 /**
  * B9a K1: the gate's policy as a table (design tasarim-b9-kanca-onay.md §7 K1-1, every row; §3 and §3.1). A row is a
  * tool call as the hook sees it and what the gate makes of it: 'pass', or the kind it is held as.
  */
-
-const HOME = '/home/x';
-const REPO = `${HOME}/Projects/control-center`;
-const DATA = `${HOME}/.control-center`;
-const DESK = `${DATA}/desks/mert`;
-
-/** REPO_ROOT's registered worktrees and whether each has uncommitted work (the real one asks git; K2 does that). */
-const WORKTREES: Record<string, boolean> = {
-  [`${HOME}/Projects/control-center-core3`]: true,
-  [`${HOME}/Projects/control-center-x`]: false,
-  [`${HOME}/Projects/control-center-b11`]: false,
-  '/tmp/m': false,
-  '/tmp/wt-x': false,
-};
-const SCRIPTS: Record<string, string> = {
-  [`${DESK}/release.sh`]: 'cd ~/Projects/control-center-x\ngit push origin main\n',
-  [`${DESK}/check.sh`]: 'pnpm test\npnpm typecheck\n',
-};
-
-export function testContext(over: Partial<GateContext> = {}): GateContext {
-  return {
-    home: HOME,
-    repoRoot: REPO,
-    dataDir: DATA,
-    deskDir: DESK,
-    officePort: 4319,
-    officeHosts: [],
-    tmpDirs: ['/tmp'],
-    toplevel: (p) => {
-      if (p === REPO || p.startsWith(`${REPO}/`)) return REPO;
-      const project = /^(\/home\/x\/Projects\/[^/]+)/.exec(p);
-      if (project) return project[1]!;
-      const tmp = /^(\/tmp\/[^/]+)/.exec(p);
-      return tmp ? tmp[1]! : null;
-    },
-    worktrees: () => Object.keys(WORKTREES),
-    dirty: (wt) => WORKTREES[wt] ?? false,
-    readScript: (p) => SCRIPTS[p] ?? null,
-    realpath: (p) => p,
-    ...over,
-  };
-}
 
 const ctx = testContext();
 type Expect = 'pass' | ApprovalKind;

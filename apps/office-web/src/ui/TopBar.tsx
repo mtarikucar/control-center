@@ -15,7 +15,10 @@ export function TopBar() {
   const company = useOffice((s) => s.budget !== null);
   const metrics = useMetrics();
   const waiting = useOffice(
-    (s) => Object.values(s.plans).filter((p) => p.status === 'draft').length + Object.values(s.proposals).filter((p) => p.status === 'owner').length,
+    (s) =>
+      Object.values(s.plans).filter((p) => p.status === 'draft').length +
+      Object.values(s.proposals).filter((p) => p.status === 'owner').length +
+      Object.values(s.approvals).filter((a) => a.status === 'pending').length,
   );
   return (
     <header className="topbar">
