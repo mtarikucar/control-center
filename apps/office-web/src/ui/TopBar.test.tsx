@@ -7,9 +7,10 @@ import { TopBar } from './TopBar.tsx';
 const NOW = new Date(2026, 9, 8, 15, 0).getTime();
 const MIN = 60_000;
 const H = 60 * MIN;
+const who = (id: string, name: string) => ({ id, name, title: '' });
 const reading = (over: Partial<OfficeMetrics> = {}): OfficeMetrics => ({
   generatedAt: NOW,
-  busy: { busy: 1, total: 3, idle: [{ id: 'd', name: 'Deniz', title: 'Testçi', since: NOW - 6 * H - 10 * MIN }, { id: 's', name: 'Selin', title: '', since: NOW - 5 * H }], unavailable: [] },
+  busy: { busy: 1, total: 3, atWork: [who('m', 'Mert')], holding: [], idle: [{ id: 'd', name: 'Deniz', title: 'Testçi', since: NOW - 6 * H - 10 * MIN }, { id: 's', name: 'Selin', title: '', since: NOW - 5 * H }], unavailable: [] },
   delivered: { count: 7, firstPassRate: 4 / 7, windowHours: 24 },
   stuck: { count: 1, items: [{ taskId: 't6', title: 'B6 raporu', assignee: 'Mert', reason: 'stalled' }] },
   ...over,
@@ -58,7 +59,7 @@ describe('TopBar — the office at a glance', () => {
     render(<TopBar />);
     expect(screen.queryByRole('button', { name: /Meşgul/ })).toBeNull();
     const busy = await chip('Meşgul 1/3');
-    expect(busy.title).toBe('Deniz — 6 sa boşta, Selin — 5 sa boşta');
+    expect(busy.title).toBe('Çalışıyor: Mert\nDeniz — 6 sa boşta, Selin — 5 sa boşta');
     // Someone has been idle two hours or more while the team is not all busy.
     expect(busy.className).toContain('warn');
     const delivered = await chip('Teslim (24 sa) 7');
@@ -72,14 +73,14 @@ describe('TopBar — the office at a glance', () => {
     useOffice.setState({ budget: RESERVE_OFF });
     vi.mocked(api.metrics).mockResolvedValueOnce(
       reading({
-        busy: { busy: 2, total: 3, idle: [{ id: 'c', name: 'Can', title: '', since: NOW - 90 * MIN }], unavailable: [] },
+        busy: { busy: 2, total: 3, atWork: [who('a', 'Ada'), who('b', 'Bora')], holding: [], idle: [{ id: 'c', name: 'Can', title: '', since: NOW - 90 * MIN }], unavailable: [] },
         delivered: { count: 0, firstPassRate: null, windowHours: 24 },
         stuck: { count: 0, items: [] },
       }),
     );
     render(<TopBar />);
     const busy = await chip('Meşgul 2/3');
-    expect(busy.title).toBe('Can — 1 sa boşta');
+    expect(busy.title).toBe('Çalışıyor: Ada, Bora\nCan — 1 sa boşta');
     expect(busy.className).not.toContain('warn');
     expect((await chip('Teslim (24 sa) 0')).title).toBe('İlk turda geçen: henüz incelenen yok');
     const stuck = await chip('Takılan 0');
@@ -87,25 +88,25 @@ describe('TopBar — the office at a glance', () => {
     expect(stuck.className).not.toContain('bad');
   });
 
-  it('says who is idle in minutes, hours or days; everyone busy says so; a long stuck list is cut short', async () => {
+  it('says who is idle in minutes, hours or days; everyone at work is named; a long stuck list is cut short', async () => {
     useOffice.setState({ budget: RESERVE_OFF });
     const items = Array.from({ length: 12 }, (_, i) => ({ taskId: `t${i}`, title: `İş ${i + 1}`, assignee: 'Ada', reason: (['blocked', 'overdue', 'stalled'] as const)[i % 3]! }));
     vi.mocked(api.metrics).mockResolvedValueOnce(
       reading({
-        busy: { busy: 1, total: 3, idle: [{ id: 'a', name: 'Ali', title: '', since: NOW - 50 * H }, { id: 'e', name: 'Ece', title: '', since: NOW - 40 * MIN }], unavailable: [] },
+        busy: { busy: 1, total: 3, atWork: [who('m', 'Mert')], holding: [], idle: [{ id: 'a', name: 'Ali', title: '', since: NOW - 50 * H }, { id: 'e', name: 'Ece', title: '', since: NOW - 40 * MIN }], unavailable: [] },
         stuck: { count: 12, items },
       }),
     );
     const { unmount } = render(<TopBar />);
-    expect((await chip('Meşgul 1/3')).title).toBe('Ali — 2 gün boşta, Ece — 40 dk boşta');
+    expect((await chip('Meşgul 1/3')).title).toBe('Çalışıyor: Mert\nAli — 2 gün boşta, Ece — 40 dk boşta');
     const lines = (await chip('Takılan 12')).title.split('\n');
     expect(lines.slice(0, 3)).toEqual(['Ada: İş 1 — engellendi', 'Ada: İş 2 — son tarihi geçti', 'Ada: İş 3 — hatırlatmaya rağmen ilerlemiyor']);
     expect(lines).toHaveLength(11);
     expect(lines[10]).toBe('… ve 2 iş daha');
     unmount();
-    vi.mocked(api.metrics).mockResolvedValueOnce(reading({ busy: { busy: 3, total: 3, idle: [], unavailable: [] } }));
+    vi.mocked(api.metrics).mockResolvedValueOnce(reading({ busy: { busy: 3, total: 3, atWork: [who('a', 'Ada'), who('b', 'Bora'), who('c', 'Can')], holding: [], idle: [], unavailable: [] } }));
     render(<TopBar />);
-    expect((await chip('Meşgul 3/3')).title).toBe('Herkes meşgul');
+    expect((await chip('Meşgul 3/3')).title).toBe('Çalışıyor: Ada, Bora, Can');
   });
 
   it('who cannot take work shows on lines of their own with their state, and never makes the busy chip warn', async () => {
@@ -116,6 +117,8 @@ describe('TopBar — the office at a glance', () => {
         busy: {
           busy: 1,
           total: 6,
+          atWork: [who('s', 'Su')],
+          holding: [],
           idle: [{ id: 'c', name: 'Can', title: '', since: NOW - 30 * MIN }],
           unavailable: [away('a', 'Ada', 'limited'), away('b', 'Bora', 'error'), away('e', 'Ece', 'stopped'), away('m', 'Mert', 'in_terminal')],
         },
@@ -123,13 +126,34 @@ describe('TopBar — the office at a glance', () => {
     );
     const { unmount } = render(<TopBar />);
     const busy = await chip('Meşgul 1/6');
-    expect(busy.title).toBe('Can — 30 dk boşta\nAda — kota doldu\nBora — hata\nEce — durduruldu\nMert — terminalde');
+    expect(busy.title).toBe('Çalışıyor: Su\nCan — 30 dk boşta\nAda — kota doldu\nBora — hata\nEce — durduruldu\nMert — terminalde');
     expect(busy.className).not.toContain('warn');
     unmount();
-    // Nobody idle, someone away: not "Herkes meşgul".
-    vi.mocked(api.metrics).mockResolvedValueOnce(reading({ busy: { busy: 1, total: 2, idle: [], unavailable: [away('a', 'Ada', 'limited')] } }));
+    // Nobody at work: no "Çalışıyor" line.
+    vi.mocked(api.metrics).mockResolvedValueOnce(reading({ busy: { busy: 0, total: 1, atWork: [], holding: [], idle: [], unavailable: [away('a', 'Ada', 'limited')] } }));
     render(<TopBar />);
-    expect((await chip('Meşgul 1/2')).title).toBe('Ada — kota doldu');
+    expect((await chip('Meşgul 0/1')).title).toBe('Ada — kota doldu');
+  });
+
+  it('who holds work but is not at it shows in its own group with why (and when); holding never warns', async () => {
+    useOffice.setState({ budget: RESERVE_OFF });
+    const holds = (id: string, name: string, why: 'queued' | 'scheduled' | 'parked' | 'review', at: number | null = null) => ({ id, name, title: '', why, at });
+    vi.mocked(api.metrics).mockResolvedValueOnce(
+      reading({
+        busy: {
+          busy: 1,
+          total: 5,
+          atWork: [who('m', 'Mert')],
+          holding: [holds('c', 'Can', 'review'), holds('a', 'Ali', 'parked', NOW + 18 * H), holds('e', 'Ece', 'scheduled', NOW + 43 * MIN), holds('d', 'Deniz', 'queued')],
+          idle: [],
+          unavailable: [],
+        },
+      }),
+    );
+    render(<TopBar />);
+    const busy = await chip('Meşgul 1/5');
+    expect(busy.title).toBe('Çalışıyor: Mert\nElinde iş var, şu an çalışmıyor: Can — incelemede, Ali — park (yarın 09:00), Ece — saatli (bugün 15:43), Deniz — sırada');
+    expect(busy.className).not.toContain('warn');
   });
 
   it('a figure opens the company on the Ajanda tab; the Şirket button on its first tab', async () => {
