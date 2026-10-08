@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Plan, PlanMethod, PlanStatus, Schedule, ScheduleStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
+import type { Plan, PlanMethod, PlanStatus, PlanStream, Schedule, ScheduleStatus, Task, TaskDifficulty, TaskKind, TaskResult, TaskStatus } from '@cc/shared';
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 import { NOTICE_TOPICS, type Notice, type NoticeTopic } from './notices.ts';
@@ -33,6 +33,7 @@ interface TaskRow {
   parked_reason: string | null;
   park_count: number | null;
   schedule_id: string | null;
+  stream_id: string | null;
 }
 
 function taskFromRow(r: TaskRow): Task {
@@ -55,6 +56,7 @@ function taskFromRow(r: TaskRow): Task {
     parkedReason: r.parked_reason ?? null,
     parkCount: r.park_count ?? 0,
     scheduleId: r.schedule_id ?? null,
+    streamId: r.stream_id ?? null,
     dependsOn: JSON.parse(r.depends_on) as string[],
     status: r.status as TaskStatus,
     chainDepth: r.chain_depth,
@@ -88,6 +90,8 @@ export interface NewTask {
   dueAt?: number | null;
   /** The routine that opens it. */
   scheduleId?: string | null;
+  /** The stream of its plan it belongs to (checked by the company). */
+  streamId?: string | null;
   dependsOn: string[];
   chainDepth: number;
 }
@@ -110,16 +114,16 @@ export class TaskStore {
   create(t: NewTask): Task {
     const task: Task = {
       ...t, kind: t.kind ?? 'work', difficulty: t.difficulty ?? null, reviewer: t.reviewer ?? null, reviewOf: t.reviewOf ?? null, round: 0,
-      notBefore: t.notBefore ?? null, dueAt: t.dueAt ?? null, parkedReason: null, parkCount: 0, scheduleId: t.scheduleId ?? null,
+      notBefore: t.notBefore ?? null, dueAt: t.dueAt ?? null, parkedReason: null, parkCount: 0, scheduleId: t.scheduleId ?? null, streamId: t.streamId ?? null,
       id: randomUUID(), status: 'waiting', note: null, result: null, nudged: false, nudgedAt: null, createdAt: this.#now(), startedAt: null, finishedAt: null,
     };
     this.#db
       .prepare(
         `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth,
-           note, result, nudged, created_at, started_at, finished_at, kind, difficulty, reviewer, review_of, round, not_before, due_at, schedule_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?)`,
+           note, result, nudged, created_at, started_at, finished_at, kind, difficulty, reviewer, review_of, round, not_before, due_at, schedule_id, stream_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
       )
-      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null, task.reviewer ?? null, task.reviewOf ?? null, task.notBefore ?? null, task.dueAt ?? null, task.scheduleId ?? null);
+      .run(task.id, task.planId, task.title, task.description, JSON.stringify(task.done), task.requester, task.assignee, task.priority, JSON.stringify(task.dependsOn), task.status, task.chainDepth, task.createdAt, task.kind, task.difficulty ?? null, task.reviewer ?? null, task.reviewOf ?? null, task.notBefore ?? null, task.dueAt ?? null, task.scheduleId ?? null, task.streamId ?? null);
     return task;
   }
 
@@ -337,6 +341,7 @@ interface PlanRow {
   method: string | null;
   goal_id: string | null;
   approved_by: string | null;
+  streams: string | null;
 }
 
 function planFromRow(r: PlanRow): Plan {
@@ -359,6 +364,7 @@ function planFromRow(r: PlanRow): Plan {
     approvedAt: r.approved_at,
     method: r.method ? (JSON.parse(r.method) as PlanMethod) : null,
     goalId: r.goal_id ?? null,
+    streams: JSON.parse(r.streams ?? '[]') as PlanStream[],
     approvedBy: (r.approved_by as Plan['approvedBy']) ?? null,
   };
 }
@@ -376,6 +382,8 @@ export interface NewPlan {
   proposedBy: string;
   method?: PlanMethod | null;
   goalId?: string | null;
+  /** Checked by the company. */
+  streams?: PlanStream[];
   approvedBy?: 'owner' | 'coordinator' | null;
 }
 
@@ -392,7 +400,7 @@ export class PlanStore {
 
   create(p: NewPlan): Plan {
     const at = this.#now();
-    const plan: Plan = { ...p, method: p.method ?? null, goalId: p.goalId ?? null, approvedBy: p.approvedBy ?? null, id: randomUUID(), status: 'draft', version: 1, createdAt: at, updatedAt: at, approvedAt: null };
+    const plan: Plan = { ...p, method: p.method ?? null, goalId: p.goalId ?? null, streams: p.streams ?? [], approvedBy: p.approvedBy ?? null, id: randomUUID(), status: 'draft', version: 1, createdAt: at, updatedAt: at, approvedAt: null };
     this.#write(plan, true);
     return plan;
   }
@@ -406,6 +414,12 @@ export class PlanStore {
   list(limit = 100): Plan[] {
     const rows = this.#db.prepare('SELECT * FROM plans ORDER BY created_at DESC LIMIT ?').all(limit) as unknown as PlanRow[];
     return rows.map(planFromRow);
+  }
+
+  /** Any plan, however old, has one of these statuses. */
+  anyIn(statuses: PlanStatus[]): boolean {
+    if (statuses.length === 0) return false;
+    return this.#db.prepare(`SELECT 1 FROM plans WHERE status IN (${statuses.map(() => '?').join(', ')}) LIMIT 1`).get(...statuses) !== undefined;
   }
 
   update(id: string, patch: PlanPatch): Plan {
@@ -429,7 +443,8 @@ export class PlanStore {
     const snap = this.approvedSnapshot(id);
     if (!snap) throw new NotFoundError(`Bu planın saklanmış onaylı sürümü yok: ${id}`);
     const { id: _id, createdAt: _c, proposedBy: _p, updatedAt: _u, ...fields } = snap;
-    const restored = this.update(id, fields);
+    // A version saved before streams existed had none.
+    const restored = this.update(id, { ...fields, streams: snap.streams ?? [] });
     this.clearApproved(id);
     return restored;
   }
@@ -439,19 +454,19 @@ export class PlanStore {
   }
 
   #write(p: Plan, insert: boolean): void {
-    const values = [p.title, p.goal, p.approach, p.people, JSON.stringify(p.steps), p.quotaPct, p.usd, p.days, p.risks, p.status, p.version, p.updatedAt, p.approvedAt, p.method ? JSON.stringify(p.method) : null, p.goalId ?? null, p.approvedBy ?? null];
+    const values = [p.title, p.goal, p.approach, p.people, JSON.stringify(p.steps), p.quotaPct, p.usd, p.days, p.risks, p.status, p.version, p.updatedAt, p.approvedAt, p.method ? JSON.stringify(p.method) : null, p.goalId ?? null, p.approvedBy ?? null, JSON.stringify(p.streams ?? [])];
     if (insert) {
       this.#db
         .prepare(
-          `INSERT INTO plans (title, goal, approach, people, steps, quota_pct, usd, days, risks, status, version, updated_at, approved_at, method, goal_id, approved_by, id, proposed_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO plans (title, goal, approach, people, steps, quota_pct, usd, days, risks, status, version, updated_at, approved_at, method, goal_id, approved_by, streams, id, proposed_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(...values, p.id, p.proposedBy, p.createdAt);
     } else {
       this.#db
         .prepare(
           `UPDATE plans SET title = ?, goal = ?, approach = ?, people = ?, steps = ?, quota_pct = ?, usd = ?, days = ?, risks = ?, status = ?,
-             version = ?, updated_at = ?, approved_at = ?, method = ?, goal_id = ?, approved_by = ? WHERE id = ?`,
+             version = ?, updated_at = ?, approved_at = ?, method = ?, goal_id = ?, approved_by = ?, streams = ? WHERE id = ?`,
         )
         .run(...values, p.id);
     }

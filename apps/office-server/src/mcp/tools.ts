@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
@@ -6,6 +6,7 @@ import { integrationsText, type IntegrationRegistry } from '../company/integrati
 import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
 import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
+import { MAX_STREAMS } from '../company/streams.ts';
 import type { TaskStore } from '../company/store.ts';
 import { formatPerformance, type PerformanceReport } from '../performance.ts';
 import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
@@ -80,6 +81,23 @@ const reviewer = s('Who checks the hand-in before it closes (id or name); never 
 const until = s('When: relative (+30m, +6h, +1d) or a local time (2026-10-08T14:55).');
 const startAfter = { ...until, description: 'Do not hand this out before this time: relative (+6h, +1d) or a local time (2026-10-08T14:55). For follow-ups and waiting periods.' };
 const dueAt = { ...until, description: 'Should be done by this time (same forms). Nearer due dates go first within a priority; the coordinator hears once when it passes.' };
+const streamItems = {
+  type: 'object',
+  properties: {
+    id: s('Short lowercase slug, unique in the plan (a-z, 0-9 and -), e.g. "api".'),
+    title: s('Stream title.'),
+    owner: s('Who carries it: an employee id or name, or "alınacak: <role>" for a role still to hire.'),
+    dependsOn: strings('Ids of streams of this plan that must be done first (no cycles).'),
+  },
+  required: ['id', 'title', 'owner'],
+};
+const streams = {
+  type: 'array',
+  maxItems: MAX_STREAMS,
+  items: streamItems,
+  description:
+    'The plan’s parallel streams of work (recommended): each with an owner and the streams it waits for, so the work runs side by side instead of piling on one person. Share common resources between streams up front. Link tasks to a stream with taskCreate streamId.',
+};
 const method = {
   type: 'object',
   description: 'How the work is done (read methodRead first): the work type, at least two stages with who does each and whether someone else checks it, and at least one quality check.',
@@ -116,12 +134,8 @@ export function officeTools(o: {
 
   /** A colleague by id or by name (case and Turkish dotted/dotless i insensitive). */
   const findPerson = (who: string): Employee => {
-    const people = roster.list();
-    const byId = people.find((e) => e.id === who);
-    if (byId) return byId;
-    const norm = (x: string) => x.toLocaleLowerCase('tr').trim();
-    const byName = people.filter((e) => norm(e.name) === norm(who));
-    if (byName.length === 1) return byName[0]!;
+    const found = roster.byIdOrName(who);
+    if (found) return found;
     throw new NotFoundError(`Çalışan bulunamadı: ${who}. officeStatus ile ofistekileri görebilirsin.`);
   };
 
@@ -131,6 +145,15 @@ export function officeTools(o: {
   };
 
   const characterList = () => [...o.characters(), 'voxel'];
+
+  /** " Akışlar: API → Ada; Arayüz → alınacak: tasarımcı (önce: API)." — how the office understood the streams ('' for none). */
+  const streamsLine = (plan: Plan): string => {
+    const list = plan.streams ?? [];
+    if (list.length === 0) return '';
+    const titleOf = (id: string) => list.find((x) => x.id === id)?.title ?? id;
+    const owner = (who: string) => (who.startsWith(`${STREAM_TO_HIRE}:`) ? who : company.nameOf(who));
+    return ` Akışlar: ${list.map((x) => `${x.title} → ${owner(x.owner)}${x.dependsOn.length ? ` (önce: ${x.dependsOn.map(titleOf).join(', ')})` : ''}`).join('; ')}.`;
+  };
 
   return [
     {
@@ -554,17 +577,18 @@ export function officeTools(o: {
     {
       name: 'taskCreate',
       description:
-        'Open a task for someone (coordinator). With planId it belongs to an approved plan. Use dependsOn for "start when that part is done". Give a difficulty: when difficulty models are on in the constitution, the task starts on its model (by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
-      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), dependsOn: strings('Task ids that must be done first.'), startAfter, dueAt }, ['assignee', 'title']),
+        'Open a task for someone (coordinator). With planId it belongs to an approved plan, with streamId also to one of its streams (recommended for planned work). Use dependsOn for "start when that part is done". Give a difficulty: when difficulty models are on in the constitution, the task starts on its model (by default easy → haiku, medium → sonnet, hard → opus, critical → fable), so routine work does not run on an expensive model.',
+      inputSchema: object({ assignee: s('Employee id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done.'), priority: integer('1 = most urgent … 5 = whenever.', 1, 5), difficulty, reviewer, planId: s('Id of the approved plan this belongs to.'), streamId: s('Id of the plan’s stream this belongs to (needs planId).'), dependsOn: strings('Task ids that must be done first.'), startAfter, dueAt }, ['assignee', 'title']),
       kinds: LEADS,
       run: ({ employee }, args) => {
-        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, dependsOn: list(args, 'dependsOn'), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt') };
+        const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, streamId: optStr(args, 'streamId') ?? null, dependsOn: list(args, 'dependsOn'), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt') };
         const to = findPerson(str(args, 'assignee'));
         if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
           throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
         }
         const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
-        const when = [task.notBefore ? `başlangıç ${formatWhen(task.notBefore, Date.now())}` : '', task.dueAt ? `son tarih ${formatWhen(task.dueAt, Date.now())}` : ''].filter(Boolean).join(', ');
+        const stream = task.streamId ? (plans().find((p) => p.id === task.planId)?.streams?.find((x) => x.id === task.streamId)?.title ?? task.streamId) : null;
+        const when = [stream ? `akış: ${stream}` : '', task.notBefore ? `başlangıç ${formatWhen(task.notBefore, Date.now())}` : '', task.dueAt ? `son tarih ${formatWhen(task.dueAt, Date.now())}` : ''].filter(Boolean).join(', ');
         return `Görev açıldı: ${task.id} “${task.title}” → ${to.name}${when ? ` (${when})` : ''}.`;
       },
     },
@@ -594,23 +618,24 @@ export function officeTools(o: {
     {
       name: 'planPropose',
       description:
-        'Propose a plan card to the owner before starting any work they asked for: goal, approach, the method (work type, stages with who does and who checks each, quality checks — read methodRead first), who works on it (existing people and roles to hire), draft tasks, estimates (share of weekly quota %, money in USD, days) and risks. The owner approves it on screen.',
-      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), method, goalId: s('The active goal this plan serves (from goalSet / goalsRead).'), people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach', 'method']),
+        'Propose a plan card to the owner before starting any work they asked for: goal, approach, the method (work type, stages with who does and who checks each, quality checks — read methodRead first), its parallel streams (who owns each, which waits for which), who works on it (existing people and roles to hire), draft tasks, estimates (share of weekly quota %, money in USD, days) and risks. The owner approves it on screen.',
+      inputSchema: object({ title: s('Plan title.'), goal: s('What the owner wants to achieve.'), approach: s('How you will do it.'), method, streams, goalId: s('The active goal this plan serves (from goalSet / goalsRead).'), people: s('Who works on it.'), steps: strings('Draft tasks, one each.'), quotaPct: number('Estimated share of the weekly Claude quota, %.'), usd: number('Estimated money to spend, USD.'), days: number('Estimated days.'), risks: s('What could go wrong.') }, ['title', 'goal', 'approach', 'method']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), method: args.method, goalId: optStr(args, 'goalId') ?? null, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
-        if (plan.status === 'approved') return `Plan başladı (${plan.id}): tam serbestsin, sahibini beklemiyorsun. Görevleri taskCreate ile aç ve dağıt; sahibi kartı görüyor ve isterse durdurabilir.`;
-        return `Plan kartı açıldı (${plan.id}). Sahibinin onayını bekle; onay gelince sana haber verilecek.`;
+        const plan = company.propose(employee.id, { title: str(args, 'title'), goal: str(args, 'goal'), approach: str(args, 'approach'), method: args.method, streams: args.streams, goalId: optStr(args, 'goalId') ?? null, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct') ?? null, usd: num(args, 'usd') ?? null, days: num(args, 'days') ?? null, risks: optStr(args, 'risks') });
+        if (plan.status === 'approved') return `Plan başladı (${plan.id}): tam serbestsin, sahibini beklemiyorsun. Görevleri taskCreate ile aç ve dağıt; sahibi kartı görüyor ve isterse durdurabilir.${streamsLine(plan)}`;
+        return `Plan kartı açıldı (${plan.id}). Sahibinin onayını bekle; onay gelince sana haber verilecek.${streamsLine(plan)}`;
       },
     },
     {
       name: 'planRevise',
-      description: 'Revise a plan card (only the fields you pass change). Revising an approved plan sends it back to the owner for approval.',
-      inputSchema: object({ planId: s('The plan id.'), title: s('Plan title.'), goal: s('Goal.'), approach: s('Approach.'), method, people: s('Who.'), steps: strings('Draft tasks.'), quotaPct: number('Quota share, %.'), usd: number('Money, USD.'), days: number('Days.'), risks: s('Risks.') }, ['planId']),
+      description:
+        'Revise a plan card (only the fields you pass change). Revising an approved plan sends it back to the owner for approval. Streams are changed here: pass the whole list to add a stream, change its owner, fix a dependency or split one; a stream that has tasks cannot be dropped.',
+      inputSchema: object({ planId: s('The plan id.'), title: s('Plan title.'), goal: s('Goal.'), approach: s('Approach.'), method, streams: { ...streams, description: 'The whole stream list (replaces it; omit to keep it).' }, people: s('Who.'), steps: strings('Draft tasks.'), quotaPct: number('Quota share, %.'), usd: number('Money, USD.'), days: number('Days.'), risks: s('Risks.') }, ['planId']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), method: args.method, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
-        return plan.status === 'approved' ? `Plan güncellendi: sürüm ${plan.version}, sürüyor.` : `Plan güncellendi: sürüm ${plan.version}, sahibinin onayını bekliyor.`;
+        const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), method: args.method, streams: args.streams, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
+        return `${plan.status === 'approved' ? `Plan güncellendi: sürüm ${plan.version}, sürüyor.` : `Plan güncellendi: sürüm ${plan.version}, sahibinin onayını bekliyor.`}${streamsLine(plan)}`;
       },
     },
     {

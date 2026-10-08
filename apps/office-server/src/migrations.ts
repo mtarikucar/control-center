@@ -440,4 +440,16 @@ export const MIGRATIONS: Migration[] = [
       );`,
     down: `DROP TABLE IF EXISTS integrations;`,
   },
+  {
+    version: 16,
+    name: 'living plans: a plan’s streams, a task’s stream',
+    // Spec 2026-10-08-management-cycle-design §3.4. A stream's status is derived from its tasks, never stored.
+    // Plans and tasks from before: no streams, no stream.
+    up: `
+      ALTER TABLE plans ADD COLUMN streams TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE tasks ADD COLUMN stream_id TEXT;`,
+    down: `
+      ALTER TABLE tasks DROP COLUMN stream_id;
+      ALTER TABLE plans DROP COLUMN streams;`,
+  },
 ];

@@ -270,6 +270,34 @@ describe('office tools — task difficulty', () => {
     expect(schema.required).toContain('method');
   });
 
+  it('planPropose and planRevise take the plan’s streams; taskCreate links a task to one of them', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const reply = await t.call(c, 'planPropose', {
+      method: METHOD, title: 'Site', goal: 'g', approach: 'a',
+      streams: [{ id: 'api', title: 'API', owner: 'ada' }, { id: 'ui', title: 'Arayüz', owner: 'alınacak: tasarımcı', dependsOn: ['api'] }],
+    });
+    expect(reply).toMatch(/Plan kartı açıldı/);
+    expect(reply).toMatch(/Akışlar: API → Ada; Arayüz → alınacak: tasarımcı \(önce: API\)\./);
+    const plan = t.plans.list()[0]!;
+    expect(plan.streams).toEqual([
+      { id: 'api', title: 'API', owner: ada.id, dependsOn: [] },
+      { id: 'ui', title: 'Arayüz', owner: 'alınacak: tasarımcı', dependsOn: ['api'] },
+    ]);
+    await expect(t.call(c, 'planPropose', { method: METHOD, title: 'X', goal: 'g', approach: 'a', streams: [{ id: 'API', title: 'API', owner: 'Ada' }] })).rejects.toThrow(/Akış kimliği/);
+    expect(await t.call(c, 'planRevise', { planId: plan.id, streams: [...plan.streams!, { id: 'doc', title: 'Belgeler', owner: ada.id }] })).toMatch(/Akışlar: .*Belgeler → Ada/);
+    expect(t.plans.get(plan.id).streams?.map((x) => x.id)).toEqual(['api', 'ui', 'doc']);
+    t.company.approve(plan.id);
+    expect(await t.call(c, 'taskCreate', { assignee: 'Ada', title: 'Uç noktalar', planId: plan.id, streamId: 'api' })).toMatch(/Görev açıldı: .*→ Ada \(akış: API\)/);
+    expect(t.tasks.list({ planId: plan.id })[0]!.streamId).toBe('api');
+    await expect(t.call(c, 'taskCreate', { assignee: 'Ada', title: 'x', planId: plan.id, streamId: 'yok' })).rejects.toThrow(/“yok” akışı yok/);
+    const props = (name: string) => (t.tools.find((x) => x.name === name)!.inputSchema as { properties: Record<string, unknown> }).properties;
+    expect(props('planPropose')).toHaveProperty('streams');
+    expect(props('planRevise')).toHaveProperty('streams');
+    expect(props('taskCreate')).toHaveProperty('streamId');
+  });
+
   it('taskFinish takes evidence and says how many lines a hand-in needs', async () => {
     const t = make();
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });

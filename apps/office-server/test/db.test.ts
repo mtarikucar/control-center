@@ -28,7 +28,7 @@ const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version)
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
     expect(tables(db)).toEqual(V15_TABLES);
   });
 
@@ -42,14 +42,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
     expect(tables(db)).toEqual(V15_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -306,7 +306,7 @@ describe('migrations', () => {
     const db = openDb(':memory:');
     migrateUp(db, upTo(14));
     db.prepare("INSERT INTO onboarding (id, description, status, started_by, started_at) VALUES ('o1', 'cümle', 'active', 'c', 1)").run();
-    migrateUp(db);
+    migrateUp(db, upTo(15));
     expect(appliedVersion(db)).toBe(15);
     expect(tables(db)).toEqual(V15_TABLES);
     expect(columns(db, 'integrations')).toEqual(['name', 'kind', 'closed', 'capabilities', 'auth_needed', 'cost_note', 'note', 'registered_by', 'registered_at', 'updated_at']);
@@ -316,6 +316,36 @@ describe('migrations', () => {
     expect(migrateDown(db, 14)).toBe(14);
     expect(tables(db)).toEqual(V14_TABLES);
     expect(db.prepare('SELECT COUNT(*) AS n FROM onboarding').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db, upTo(15))).toBe(15);
+  });
+
+  it('v16 gives plans their streams (none for older ones) and tasks a stream (none); up → down → up keeps the rows', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(15));
+    const plansBefore = columns(db, 'plans');
+    const tasksBefore = columns(db, 'tasks');
+    db.prepare(
+      `INSERT INTO plans (id, title, goal, approach, people, steps, risks, status, version, proposed_by, created_at, updated_at)
+       VALUES ('p1', 'eski plan', 'g', 'a', '', '["adım"]', '', 'approved', 1, 'c', 1, 1)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
+       VALUES ('t1', 'p1', 'eski', '', '[]', 'owner', 'e1', 3, '[]', 'in_progress', 0, 1)`,
+    ).run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(16);
+    expect({ ...(db.prepare('SELECT title, steps, streams FROM plans').get() as object) }).toEqual({ title: 'eski plan', steps: '["adım"]', streams: '[]' });
+    expect({ ...(db.prepare('SELECT title, status, stream_id FROM tasks').get() as object) }).toEqual({ title: 'eski', status: 'in_progress', stream_id: null });
+    db.prepare(`UPDATE plans SET streams = '[{"id":"api","title":"API","owner":"e1","dependsOn":[]}]'`).run();
+    db.prepare("UPDATE tasks SET stream_id = 'api'").run();
+    expect(migrateDown(db, 15)).toBe(15);
+    expect(columns(db, 'plans')).toEqual(plansBefore);
+    expect(columns(db, 'tasks')).toEqual(tasksBefore);
+    expect({ ...(db.prepare('SELECT id, title, steps FROM plans').get() as object) }).toEqual({ id: 'p1', title: 'eski plan', steps: '["adım"]' });
+    expect({ ...(db.prepare('SELECT id, plan_id, status FROM tasks').get() as object) }).toEqual({ id: 't1', plan_id: 'p1', status: 'in_progress' });
+    expect(migrateDown(db, 15)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
+    expect({ ...(db.prepare('SELECT streams FROM plans').get() as object) }).toEqual({ streams: '[]' });
+    expect({ ...(db.prepare('SELECT stream_id FROM tasks').get() as object) }).toEqual({ stream_id: null });
   });
 });

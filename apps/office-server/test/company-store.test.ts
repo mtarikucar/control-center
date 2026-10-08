@@ -7,7 +7,7 @@ function stores() {
   migrateUp(db);
   let t = 1_000;
   const now = () => (t += 1);
-  return { tasks: new TaskStore(db, now), plans: new PlanStore(db, now), notices: new NoticeStore(db, now), schedules: new ScheduleStore(db, now) };
+  return { db, tasks: new TaskStore(db, now), plans: new PlanStore(db, now), notices: new NoticeStore(db, now), schedules: new ScheduleStore(db, now) };
 }
 
 const task = (over: Partial<NewTask> = {}): NewTask => ({
@@ -155,6 +155,60 @@ describe('PlanStore — method (v8)', () => {
     expect(plans.get(old.id).method).toBeNull();
     plans.update(old.id, { method });
     expect(plans.get(old.id).method).toEqual(method);
+  });
+});
+
+describe('streams (v16)', () => {
+  const draft = { title: 'Site', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '', proposedBy: 'c' };
+  const api = { id: 'api', title: 'API', owner: 'e1', dependsOn: [] };
+  const ui = { id: 'ui', title: 'Arayüz', owner: 'alınacak: tasarımcı', dependsOn: ['api'] };
+
+  it('PlanStore keeps a plan’s streams, none for a plan made without; an update replaces them', () => {
+    const { plans } = stores();
+    const p = plans.create({ ...draft, streams: [api, ui] });
+    expect(p.streams).toEqual([api, ui]);
+    expect(plans.get(p.id).streams).toEqual([api, ui]);
+    expect(plans.get(plans.create(draft).id).streams).toEqual([]);
+    plans.update(p.id, { streams: [api] });
+    expect(plans.get(p.id).streams).toEqual([api]);
+  });
+
+  it('restoring the approved version restores its streams — none for a version saved before streams existed', () => {
+    const { plans, db } = stores();
+    const p = plans.create({ ...draft, streams: [api] });
+    plans.update(p.id, { status: 'approved', approvedAt: 5 });
+    plans.saveApproved(p.id);
+    plans.update(p.id, { status: 'draft', streams: [api, ui], version: 2 });
+    expect(plans.restoreApproved(p.id)).toMatchObject({ status: 'approved', version: 1, streams: [api] });
+    // A snapshot written before v16 has no streams field: the restored plan has none, not the revision's.
+    plans.update(p.id, { status: 'draft', streams: [api, ui], version: 2 });
+    const { streams: _s, ...old } = plans.get(p.id);
+    db.prepare('UPDATE plans SET approved_snapshot = ? WHERE id = ?').run(JSON.stringify({ ...old, status: 'approved', version: 1 }), p.id);
+    expect(plans.restoreApproved(p.id).streams).toEqual([]);
+  });
+
+  it('TaskStore keeps a task’s stream, none by default', () => {
+    const { tasks } = stores();
+    const linked = tasks.create(task({ planId: 'p1', streamId: 'api' }));
+    expect(linked.streamId).toBe('api');
+    expect(tasks.get(linked.id).streamId).toBe('api');
+    const loose = tasks.create(task({ planId: 'p1' }));
+    expect(loose.streamId).toBeNull();
+    expect(tasks.get(loose.id).streamId).toBeNull();
+    expect(tasks.update(linked.id, { status: 'in_progress' }).streamId).toBe('api');
+    expect(tasks.list({ planId: 'p1' }).map((t) => t.streamId)).toEqual(['api', null]);
+  });
+
+  it('PlanStore says whether any plan has one of the given statuses, however many newer plans there are', () => {
+    const { plans } = stores();
+    expect(plans.anyIn(['draft', 'approved'])).toBe(false);
+    const old = plans.create(draft);
+    plans.update(old.id, { status: 'approved', approvedAt: 1 });
+    for (let i = 0; i < 120; i += 1) plans.update(plans.create(draft).id, { status: 'done' });
+    expect(plans.anyIn(['draft', 'approved'])).toBe(true);
+    expect(plans.anyIn(['declined'])).toBe(false);
+    plans.update(old.id, { status: 'stopped' });
+    expect(plans.anyIn(['draft', 'approved'])).toBe(false);
   });
 });
 

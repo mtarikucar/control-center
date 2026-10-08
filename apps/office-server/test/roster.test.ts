@@ -82,6 +82,22 @@ describe('Roster', () => {
     expect(roster.list().map((e) => e.name)).toEqual(['Can']);
     expect(roster.list({ includeArchived: true }).map((e) => e.name).sort()).toEqual(['Ada', 'Can']);
   });
+
+  it('finds someone at work by id or by name (case and Turkish i insensitive), never someone archived or a name two share', () => {
+    const { roster } = setup();
+    const ada = roster.create({ name: 'Ada', role: 'r' });
+    const ilker = roster.create({ name: 'İlker Işık', role: 'r' });
+    roster.create({ name: 'Can', role: 'r' });
+    roster.create({ name: 'can', role: 'r' });
+    expect(roster.byIdOrName(ada.id)?.id).toBe(ada.id);
+    expect(roster.byIdOrName('  ada ')?.id).toBe(ada.id);
+    expect(roster.byIdOrName('ilker ışık')?.id).toBe(ilker.id);
+    expect(roster.byIdOrName('Can')).toBeNull();
+    expect(roster.byIdOrName('kimse')).toBeNull();
+    roster.update(ada.id, { lifecycle: 'archived' });
+    expect(roster.byIdOrName(ada.id)).toBeNull();
+    expect(roster.byIdOrName('Ada')).toBeNull();
+  });
 });
 
 describe('Roster — company fields', () => {

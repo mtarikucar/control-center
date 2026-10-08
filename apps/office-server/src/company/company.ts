@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { CompanyProfile, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
+import type { CompanyProfile, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, PlanStream, PlanStreamView, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -20,6 +20,7 @@ import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
+import { checkStreams } from './streams.ts';
 import type { NoticeStore, PlanStore, SchedulePatch, ScheduleStore, TaskPatch, TaskStore } from './store.ts';
 import { clean, lines } from './text.ts';
 import { formatWhen, minIntervalMinutes, nextCron, parseCron, parseUntil, type CronSpec } from './time.ts';
@@ -97,6 +98,8 @@ export interface TaskInput {
   dueAt?: string | null;
   /** The routine this task is an instance of (spec §4.4; set by the due-processor only). */
   scheduleId?: string | null;
+  /** The stream of its plan it belongs to (management cycle §3.4); needs planId. */
+  streamId?: string | null;
 }
 
 /** Recurring work (spec §4.4): each firing opens an ordinary task with these fields. */
@@ -132,6 +135,8 @@ export interface PlanDraft {
   method?: unknown;
   /** The active goal it serves (spec §6.1). */
   goalId?: string | null;
+  /** Its parallel lines of work (management cycle §3.4), checked by checkStreams; on a revision the whole list, kept unless given. */
+  streams?: unknown;
 }
 
 export interface GoalInput {
@@ -313,6 +318,8 @@ export class Company {
     const priority = input.priority ?? 3;
     if (!Number.isInteger(priority) || priority < 1 || priority > 5) throw new ValidationError('Öncelik 1 (en acil) ile 5 arasında bir tam sayı olmalı.');
     const planId = input.planId ?? null;
+    const streamId = clean(input.streamId ?? undefined, 'Akış', 40, false) || null;
+    if (streamId !== null && planId === null) throw new ValidationError('Akış (streamId) yalnız bir plana bağlı göreve verilir; planId de ver.');
     if (planId !== null) {
       const plan = this.#d.plans.get(planId);
       if (plan.status === 'draft') throw new ConflictError(`“${plan.title}” planı henüz onaylanmadı; görevleri onaydan sonra aç.`);
@@ -323,6 +330,7 @@ export class Company {
         if (goal.status !== 'active') throw new ConflictError(`“${plan.title}” planının hedefi (“${goal.title}”) kapalı; bitmiş bu plan yeniden açılamaz. Gerekiyorsa aktif bir hedefe yeni bir plan öner.`);
       }
       if (this.#d.tasks.openInPlan(planId) >= rules.openTasksPerPlan) throw new ConflictError(`Bu planda en fazla ${rules.openTasksPerPlan} açık görev olabilir.`);
+      if (streamId !== null) this.#assertStreamOf(plan, streamId);
     }
     const dependsOn = (input.dependsOn ?? []).filter(Boolean);
     for (const dep of dependsOn) this.#d.tasks.get(dep);
@@ -343,7 +351,7 @@ export class Company {
     const reviewer = this.#reviewerOf(input.reviewer, assignee.id);
     const task = this.#d.tasks.create({
       planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), reviewer, dependsOn, chainDepth: Math.max(0, chainDepth),
-      notBefore, dueAt, scheduleId: input.scheduleId ?? null,
+      notBefore, dueAt, scheduleId: input.scheduleId ?? null, streamId,
     });
     this.#taskEvent('created', task);
     if (notBefore !== null || dueAt !== null) this.#touchClock();
@@ -758,7 +766,7 @@ export class Company {
       const next = this.#d.tasks.update(taskId, { status: 'review', result: archived, round, ...this.#leaveParked(task) });
       this.#taskEvent('in_review', next);
       const review = this.#d.tasks.create({
-        kind: 'review', planId: task.planId, title: `İnceleme: ${task.title} (tur ${round})`, description: reviewBrief(next, this.nameOf(task.assignee), round),
+        kind: 'review', planId: task.planId, streamId: task.streamId ?? null, title: `İnceleme: ${task.title} (tur ${round})`, description: reviewBrief(next, this.nameOf(task.assignee), round),
         done: [], requester: task.requester, assignee: reviewer.id, priority: task.priority, difficulty: task.difficulty ?? null, dependsOn: [], chainDepth: 0, reviewOf: task.id,
       });
       this.#taskEvent('created', review);
@@ -869,9 +877,10 @@ export class Company {
   propose(by: string, draft: PlanDraft): Plan {
     this.#assertCoordinator(by);
     const fields = this.#draft(draft);
+    const streams = this.#streams(draft.streams);
     const goalId = this.#goalOf(draft.goalId);
     const free = this.#rules().autonomy === 'free';
-    const plan = this.#d.plans.create({ ...fields, method: planMethod(draft.method), goalId, proposedBy: by });
+    const plan = this.#d.plans.create({ ...fields, method: planMethod(draft.method), goalId, streams, proposedBy: by });
     this.#emit(by, { type: 'plan.changed', change: 'proposed', plan });
     // Full autonomy (spec §6.2): the coordinator's plan starts now; the owner sees it and may stop it.
     if (!free) return plan;
@@ -897,12 +906,15 @@ export class Company {
       risks: draft.risks ?? current.risks,
     });
     const method = draft.method === undefined ? (current.method ?? null) : planMethod(draft.method);
+    // Not given (or null): kept; [] clears them.
+    const streams = draft.streams === undefined || draft.streams === null ? (current.streams ?? []) : this.#streams(draft.streams);
+    this.#assertStreamsKept(current, streams);
     const free = this.#rules().autonomy === 'free';
     if (free) {
       // Full autonomy: the revision goes on at once, as the coordinator's.
       // A finished plan stays finished until it gets new work (a task reopens it): an empty "approved" would look running forever.
       const status = current.status === 'done' && this.#d.tasks.openInPlan(planId) === 0 ? 'done' : 'approved';
-      const plan = this.#d.plans.update(planId, { ...merged, method, version: current.version + 1, status, approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
+      const plan = this.#d.plans.update(planId, { ...merged, method, streams, version: current.version + 1, status, approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
       this.#d.plans.clearApproved(planId);
       this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
       return plan;
@@ -910,7 +922,7 @@ export class Company {
     // A revision of an approved (or finished) plan is a new proposal: it waits for the owner again (rule B, big change).
     // Rule B: the approved version is kept until the owner decides on the revision (only the first revision saves it).
     if (current.status === 'approved' || current.status === 'done') this.#d.plans.saveApproved(planId);
-    const plan = this.#d.plans.update(planId, { ...merged, method, version: current.version + 1, status: 'draft', approvedAt: null });
+    const plan = this.#d.plans.update(planId, { ...merged, method, streams, version: current.version + 1, status: 'draft', approvedAt: null });
     this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
     return plan;
   }
@@ -942,6 +954,18 @@ export class Company {
     this.#emit(desk, { type: 'plan.changed', change: 'declined', plan });
     return plan;
   }
+  /** A plan's streams with the status their tasks give them (management cycle §3.4). */
+  planStreams(planId: string): PlanStreamView[] {
+    const plan = this.#d.plans.get(planId);
+    const tasks = this.#d.tasks.list({ planId });
+    return (plan.streams ?? []).map((s) => ({ ...s, status: streamStatus(tasks.filter((t) => t.streamId === s.id)) }));
+  }
+
+  /** A plan waits for the owner or is under way. */
+  hasRunningPlan(): boolean {
+    return this.#d.plans.anyIn(['draft', 'approved']);
+  }
+
   /** The coordinator assesses a plan (spec §5.4): a note tagged retro; a method suggestion becomes its own note. */
   retro(by: string, planId: string, r: { wentWell: string; stuck: string; change: string; methodSuggestion?: string }): { retro: Note; suggestion: Note | null } {
     this.#assertCoordinator(by);
@@ -1431,6 +1455,30 @@ export class Company {
       days: amount(d.days, 'Süre'),
       risks: clean(d.risks, 'Riskler', 2000, false),
     };
+  }
+
+  /** A plan's streams as given, with their owners looked up by id or name. */
+  #streams(value: unknown): PlanStream[] {
+    return checkStreams(value, (who) => this.#d.roster.byIdOrName(who));
+  }
+
+  /** A revision may change any stream but not drop one that tasks belong to: they would point at nothing. */
+  #assertStreamsKept(plan: Plan, next: PlanStream[]): void {
+    const kept = new Set(next.map((s) => s.id));
+    const dropped = (plan.streams ?? []).filter((s) => !kept.has(s.id));
+    if (dropped.length === 0) return;
+    const tasks = this.#d.tasks.list({ planId: plan.id });
+    const held = dropped.find((s) => tasks.some((t) => t.streamId === s.id));
+    if (held) {
+      throw new ConflictError(`“${held.title}” akışına bağlı görevler var; akış plandan çıkarılamaz. Adını, sahibini ya da bağımlılıklarını değiştirebilir, bölmek için yanına yeni akışlar ekleyebilirsin.`);
+    }
+  }
+
+  /** A task's stream is one of its plan's. */
+  #assertStreamOf(plan: Plan, streamId: string): void {
+    const ids = (plan.streams ?? []).map((s) => s.id);
+    if (ids.length === 0) throw new ValidationError(`“${plan.title}” planının akışı yok; görevi akışsız aç ya da önce planRevise ile akışları ekle.`);
+    if (!ids.includes(streamId)) throw new ValidationError(`“${plan.title}” planında “${streamId}” akışı yok. Planın akışları: ${ids.join(', ')}.`);
   }
 
   #maybeFinishPlan(planId: string): void {

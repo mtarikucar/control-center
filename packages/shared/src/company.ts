@@ -81,6 +81,8 @@ export interface Task {
   parkCount?: number;
   /** The routine that opened it, if any. */
   scheduleId?: string | null;
+  /** The stream of its plan it belongs to (management cycle §3.4), if any. */
+  streamId?: string | null;
   dependsOn: string[];
   status: TaskStatus;
   /** How many passes deep this task is (a task passed while working on a passed task is one deeper). */
@@ -261,6 +263,34 @@ export interface AgendaReport {
 export const PLAN_STATUSES = ['draft', 'approved', 'done', 'declined', 'stopped'] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];
 
+/** A stream's state (spec 2026-10-08-management-cycle-design §3.4): derived from its tasks, never stored. */
+export const STREAM_STATUSES = ['planned', 'active', 'blocked', 'done'] as const;
+export type StreamStatus = (typeof STREAM_STATUSES)[number];
+/** The owner of a stream no one in the office carries yet starts with this: `alınacak: <rol>` (a role to hire). */
+export const STREAM_TO_HIRE = 'alınacak';
+/** A parallel line of work in a plan (spec §3.4): who carries it and which of the plan's streams come first. */
+export interface PlanStream {
+  /** A short lowercase slug, unique in its plan. */
+  id: string;
+  title: string;
+  /** An employee id, or `alınacak: <rol>` for a role still to hire. */
+  owner: string;
+  /** Ids of streams of the same plan that must be done first. */
+  dependsOn: string[];
+}
+/** A stream with the status its tasks give it. */
+export interface PlanStreamView extends PlanStream {
+  status: StreamStatus;
+}
+
+/** A stream's status from its tasks: done (it has tasks, all done or cancelled), blocked (any blocked), active (any in progress or in review), planned otherwise. */
+export function streamStatus(tasks: ReadonlyArray<Pick<Task, 'status'>>): StreamStatus {
+  if (tasks.length > 0 && tasks.every((t) => t.status === 'done' || t.status === 'cancelled')) return 'done';
+  if (tasks.some((t) => t.status === 'blocked')) return 'blocked';
+  if (tasks.some((t) => t.status === 'in_progress' || t.status === 'review')) return 'active';
+  return 'planned';
+}
+
 export interface Plan {
   id: string;
   title: string;
@@ -279,6 +309,8 @@ export interface Plan {
   method?: PlanMethod | null;
   /** The goal it serves (spec §6.1), if any. */
   goalId?: string | null;
+  /** Its parallel lines of work (management cycle §3.4); none for plans from before them. */
+  streams?: PlanStream[];
   /** Who started it: the owner's approval, or the coordinator itself under full autonomy (spec §6.2). */
   approvedBy?: 'owner' | 'coordinator' | null;
   status: PlanStatus;

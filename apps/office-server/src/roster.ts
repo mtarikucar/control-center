@@ -176,6 +176,16 @@ export class Roster {
     return rows.map(fromRow);
   }
 
+  /** Someone at work (not archived) by id, or by a name only they have (case and Turkish dotted/dotless i insensitive); null: no one. */
+  byIdOrName(who: string): Employee | null {
+    const people = this.list();
+    const byId = people.find((e) => e.id === who);
+    if (byId) return byId;
+    const norm = (x: string) => x.toLocaleLowerCase('tr').trim();
+    const byName = people.filter((e) => norm(e.name) === norm(who));
+    return byName.length === 1 ? byName[0]! : null;
+  }
+
   update(id: string, patch: EmployeePatch): Employee {
     const next = { ...this.get(id), ...patch };
     this.#db
