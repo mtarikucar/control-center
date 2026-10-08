@@ -91,9 +91,9 @@ export function replayedUuid(raw: unknown): string | null {
  * A job the session runs beside its turns (Bash run_in_background, Monitor, a background agent) started or ended,
  * from claude's `system` task messages — counted as the CLI's own session runner counts them.
  */
-export function taskChange(raw: unknown): { taskId: string; running: boolean } | null {
+export function taskChange(raw: unknown): { taskId: string; running: boolean; description?: string } | null {
   if (!isObj(raw) || raw.type !== 'system' || typeof raw.task_id !== 'string') return null;
-  if (raw.subtype === 'task_started') return raw.task_type === 'in_process_teammate' ? null : { taskId: raw.task_id, running: true };
+  if (raw.subtype === 'task_started') return raw.task_type === 'in_process_teammate' ? null : { taskId: raw.task_id, running: true, description: str(raw.description) };
   if (raw.subtype === 'task_notification') return { taskId: raw.task_id, running: false };
   const status = isObj(raw.patch) ? raw.patch.status : undefined;
   if (raw.subtype === 'task_updated' && (status === 'completed' || status === 'failed' || status === 'killed')) return { taskId: raw.task_id, running: false };

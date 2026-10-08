@@ -1,10 +1,10 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EngineOptions } from '../src/engine.ts';
-import { CONTINUE_AFTER_CRASH, CONTINUE_AFTER_RESTART, CONTINUE_AFTER_TERMINAL } from '../src/engine.ts';
+import { BACKGROUND_LIMIT_MS, CONTINUE_AFTER_CRASH, CONTINUE_AFTER_RESTART, CONTINUE_AFTER_TERMINAL } from '../src/engine.ts';
 import { ConflictError } from '../src/errors.ts';
-import { fakeEngine } from './engine-helpers.ts';
+import { fakeEngine, readArgv } from './engine-helpers.ts';
 import { setup, tempDir, until, waitFor } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
@@ -195,5 +195,101 @@ describe('Engine — interrupted, then the terminal', () => {
     expect(told?.event).toEqual({ type: 'message.user', text: CONTINUE_AFTER_RESTART, source: 'system' });
     await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: before });
     expect(t.roster.get(e.id).lifecycle).toBe('idle');
+  });
+});
+
+describe('Engine — the cap on work held by background jobs alone', () => {
+  const overdue = (t: ReturnType<typeof make>, id: string, after = 0) => t.events.list({ after, employeeId: id, limit: 5000 }).filter((x) => x.event.type === 'background.overdue');
+
+  it('a job that runs on alone past the cap: free for tasks again, the office is told, the process lives on', async () => {
+    const t = make({}, { backgroundLimitMs: 300 });
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'BACKGROUND pnpm dev', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    expect(t.roster.get(e.id).lifecycle).toBe('working');
+    await until(() => t.engine.ready(e.id), 3000);
+    expect(overdue(t, e.id, first.seq).map((x) => x.event)).toEqual([{ type: 'background.overdue', jobs: ['arka plan işi'], limitMs: 300 }]);
+    expect(changesOf(t, e.id, first.seq)).toEqual([{ from: 'working', to: 'idle', reason: 'arka plan işi üst süreyi aştı; süreç sürüyor' }]);
+    // Not killed: the same process, and the job's end still comes back as a turn of its own.
+    t.release(e.sessionId, '.bg');
+    const follow = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.assistant', { after: first.seq });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: follow.seq });
+    expect(await readArgv(t.argvLog, 1)).toHaveLength(1);
+    expect(t.roster.get(e.id).lifecycle).toBe('idle');
+  });
+
+  it('a turn running when the cap comes keeps the employee working; the cap waits for its end', async () => {
+    const t = make({}, { backgroundLimitMs: 300 });
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'BACKGROUND', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    t.engine.send(e.id, 'SLOW job', 'owner');
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'tool.started', { after: first.seq });
+    await new Promise((r) => setTimeout(r, 500));
+    // The cap passed in the middle of the turn: still working, nobody told yet.
+    expect(t.roster.get(e.id).lifecycle).toBe('working');
+    expect(overdue(t, e.id, first.seq)).toHaveLength(0);
+    await until(() => t.engine.ready(e.id), 4000);
+    expect(overdue(t, e.id, first.seq)).toHaveLength(1);
+  });
+
+  it('a job that ends before the cap: nobody is told', async () => {
+    const t = make({}, { backgroundLimitMs: 300 });
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'BACKGROUND', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    t.release(e.sessionId, '.bg');
+    const follow = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.assistant', { after: first.seq });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: follow.seq });
+    await new Promise((r) => setTimeout(r, 500));
+    expect(overdue(t, e.id)).toHaveLength(0);
+    expect(changesOf(t, e.id, first.seq).map((c) => c.reason)).toEqual(['iş bitti']);
+  });
+
+  it('freed by the cap while the job runs: sleep, a model switch and a reload do not restart the session', async () => {
+    const t = make({}, { backgroundLimitMs: 300, modelPolicyEnabled: () => true });
+    const e = t.engine.hire({ name: 'Mert', role: 'r', model: 'haiku' });
+    t.engine.send(e.id, 'BACKGROUND', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    await until(() => t.engine.ready(e.id), 3000);
+    await expect(t.engine.sleep(e.id)).rejects.toThrow(ConflictError);
+    t.engine.reload(e.id);
+    const before = t.events.lastSeq();
+    t.engine.send(e.id, 'yeni görev', 'system', { model: 'sonnet', taskStart: true });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: before });
+    expect(await readArgv(t.argvLog, 1)).toHaveLength(1);
+    // The job lives: its end comes back as a turn; then, nothing running, the reload that waited happens.
+    t.release(e.sessionId, '.bg');
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.assistant' && x.event.text.startsWith('arka plan işi bitti'), { after: first.seq });
+    expect(await readArgv(t.argvLog, 2)).toHaveLength(2);
+  });
+
+  it('freed by the cap, the job is still work: a crash that ends it is followed by the note to go on', async () => {
+    const t = make({ FAKE_CLAUDE_BG_CRASH: 'running' }, { backgroundLimitMs: 300 });
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'BACKGROUND', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    await until(() => t.engine.ready(e.id), 3000);
+    t.release(e.sessionId, '.bg');
+    const told = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.user', { after: first.seq, timeoutMs: 3000 });
+    expect(told.event).toEqual({ type: 'message.user', text: CONTINUE_AFTER_CRASH, source: 'system' });
+  });
+
+  it('unless set, the cap is two hours', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      expect(BACKGROUND_LIMIT_MS).toBe(2 * 60 * 60_000);
+      const t = make();
+      const e = t.engine.hire({ name: 'Mert', role: 'r' });
+      t.engine.send(e.id, 'BACKGROUND', 'system');
+      await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+      vi.advanceTimersByTime(BACKGROUND_LIMIT_MS - 60_000);
+      expect(t.roster.get(e.id).lifecycle).toBe('working');
+      vi.advanceTimersByTime(60_000);
+      expect(t.roster.get(e.id).lifecycle).toBe('idle');
+      expect(overdue(t, e.id).map((x) => x.event)).toEqual([{ type: 'background.overdue', jobs: ['arka plan işi'], limitMs: BACKGROUND_LIMIT_MS }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

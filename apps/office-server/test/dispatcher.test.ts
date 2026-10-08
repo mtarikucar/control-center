@@ -876,4 +876,21 @@ describe('Dispatcher — time', () => {
     await until(() => s.roster.get(ada.id).lifecycle !== 'sleeping', 8000);
     await until(() => c.tasks.get(task.id).status === 'in_progress', 8000);
   });
+
+  it('a job that held someone past the cap reaches the coordinator as a decision: who, which job, the process lives, tasks go to them', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    t.events.append(c.id, { type: 'background.overdue', jobs: ['kendi işi'], limitMs: 2 * 60 * 60_000 });
+    t.events.append(ada.id, { type: 'background.overdue', jobs: ['pnpm dev', 'mutasyon koşusu'], limitMs: 2 * 60 * 60_000 });
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), c.id).some((m) => m.includes('pnpm dev')), 8000);
+    const told = systemMessages(t.events.list({ limit: 5000 }), c.id).find((m) => m.includes('pnpm dev'))!;
+    expect(told).toContain(NOTICES_PREFIX);
+    expect(told).toContain('Ada adlı çalışanın arka plan işi (pnpm dev, mutasyon koşusu) 2 saattir tek başına sürüyor.');
+    expect(told).toContain('Süreç öldürülmedi');
+    expect(told).toContain('Ada yeniden görev alabilir');
+    // Its own job is not a matter for the coordinator to decide about.
+    expect(systemMessages(t.events.list({ limit: 5000 }), c.id).some((m) => m.includes('kendi işi'))).toBe(false);
+  });
 });
+

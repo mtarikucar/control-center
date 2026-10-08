@@ -55,6 +55,8 @@ export type OfficeEvent =
       limitResetsAt?: number | null;
     }
   | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string }
+  /** Jobs of the session (their descriptions) held the employee working alone past the cap: free for tasks again, the jobs run on. */
+  | { type: 'background.overdue'; jobs: string[]; limitMs: number }
   | { type: 'task.changed'; change: TaskChange; task: Task }
   | { type: 'plan.changed'; change: PlanChange; plan: Plan }
   | { type: 'goal.changed'; change: GoalChange; goal: Goal }

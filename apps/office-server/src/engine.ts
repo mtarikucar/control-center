@@ -35,6 +35,8 @@ function describeTool(name: string, input: unknown): string {
 
 export const CONTINUE_AFTER_CRASH =
   'Oturumun beklenmedik şekilde kapandı ve yeniden açıldı; yarım kalan işine kaldığın yerden devam et.';
+/** How long jobs of the session alone (no turn) may keep an employee working before they are free for tasks again. */
+export const BACKGROUND_LIMIT_MS = 2 * 60 * 60_000;
 export const CONTINUE_AFTER_TERMINAL =
   'Terminalden ofise döndün. Terminale alınırken süren işin ve arka planda çalışan komutların durduruldu; yarım kalmış bir değişiklik varsa kontrol et ve kaldığın yerden devam et.';
 
@@ -65,6 +67,8 @@ export interface EngineOptions {
   modelPolicyEnabled?: () => boolean;
   /** After the last background job ends between turns, how long the turn claude opens to read it may take to come (default 30 s). */
   followUpGraceMs?: number;
+  /** Past this the jobs no longer hold the employee: idle, the office is told, the jobs run on (default BACKGROUND_LIMIT_MS). */
+  backgroundLimitMs?: number;
 }
 
 /** What a message would best run on; the session moves there only as modelPolicy allows, never in the middle of a turn. */
@@ -129,8 +133,12 @@ interface Runtime {
   failedModel: { model: ModelAlias; at: number } | null;
   /** Reset of the window that rejected the last request, when claude named it. */
   limitAt: number | null;
-  /** Jobs the session runs beside its turns (claude's task ids); they end with the process. */
-  background: Set<string>;
+  /** Jobs the session runs beside its turns that keep the employee working (claude's task id → description); they end with the process. */
+  background: Map<string, string>;
+  /** Jobs still running that the cap freed the employee from. */
+  freed: Set<string>;
+  /** Jobs alone hold the employee: when the cap comes. */
+  capTimer: NodeJS.Timeout | null;
   /** The last job ended between turns: waiting for the turn claude opens by itself to read it. */
   followUpTimer: NodeJS.Timeout | null;
 }
@@ -151,6 +159,7 @@ export class Engine {
   readonly #cacheTtlMinutes: () => number;
   readonly #modelPolicyEnabled: () => boolean;
   readonly #followUpGraceMs: number;
+  readonly #backgroundLimitMs: number;
   readonly #runtimes = new Map<string, Runtime>();
   readonly #sideRuns = new Set<AbortController>();
 
@@ -170,6 +179,7 @@ export class Engine {
     this.#cacheTtlMinutes = o.cacheTtlMinutes ?? (() => 5);
     this.#modelPolicyEnabled = o.modelPolicyEnabled ?? (() => false);
     this.#followUpGraceMs = o.followUpGraceMs ?? 30_000;
+    this.#backgroundLimitMs = o.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
   }
 
   hire(input: HireInput): Employee {
@@ -212,7 +222,8 @@ export class Engine {
   /** The model a hint moves the session to now, or null to keep it. With the policy off: back to their own model. */
   #switchTo(employee: Employee, rt: Runtime, requested: ModelHint): ModelAlias | null {
     const hint: ModelHint = this.#modelPolicyEnabled() ? requested : { model: employee.model, taskStart: true };
-    if (!hint.model || rt.turnActive) return null;
+    // Restarting the session would end the jobs it runs.
+    if (!hint.model || rt.turnActive || this.#jobsRunning(rt)) return null;
     if (rt.failedModel?.model === hint.model && this.#now() - rt.failedModel.at < FAILED_MODEL_PAUSE_MS) return null;
     const lastTurnFinishedAt = rt.lastTurnAt ?? this.#events.latest(employee.id, 'turn.finished')?.ts ?? null;
     const choice = modelPolicy.decide({
@@ -389,6 +400,7 @@ export class Engine {
       const employee = this.#roster.get(id);
       if (employee.lifecycle === 'sleeping') return employee;
       if (employee.lifecycle !== 'idle' || this.#runtime(id).turnActive) throw new ConflictError('Yalnız boştaki bir çalışan uyutulabilir; işi bitince uyut.');
+      if (this.#jobsRunning(this.#runtime(id))) throw new ConflictError('Arka planda işi sürüyor; uyutulursa o iş de kapanır.');
       await this.#halt(id);
       return this.#setLifecycle(this.#roster.get(id), 'sleeping', 'uyutuldu');
     });
@@ -460,7 +472,7 @@ export class Engine {
   reload(id: string): void {
     const rt = this.#runtime(id);
     if (!rt.proc || rt.proc.exited) return;
-    if (rt.turnActive || this.#roster.get(id).lifecycle !== 'idle') {
+    if (rt.turnActive || this.#roster.get(id).lifecycle !== 'idle' || this.#jobsRunning(rt)) {
       rt.reloadPending = true;
       return;
     }
@@ -469,6 +481,8 @@ export class Engine {
 
   #reloadNow(id: string): void {
     const rt = this.#runtime(id);
+    // A job still runs: the reload waits for a later idle moment with none.
+    if (this.#jobsRunning(rt)) return;
     rt.reloadPending = false;
     void this.#exclusive(id, async () => {
       const employee = this.#roster.get(id);
@@ -632,7 +646,11 @@ export class Engine {
   #idleIfDone(id: string, reason: string): void {
     const rt = this.#runtime(id);
     const employee = this.#roster.get(id);
-    if (rt.turnActive || rt.background.size > 0 || employee.lifecycle !== 'working') return;
+    if (rt.turnActive || employee.lifecycle !== 'working') return;
+    if (rt.background.size > 0) {
+      this.#armCap(id);
+      return;
+    }
     this.#setLifecycle(employee, 'idle', reason);
     if (rt.reloadPending) this.#reloadNow(id);
   }
@@ -644,12 +662,13 @@ export class Engine {
     this.#setLifecycle(this.#roster.get(id), 'working', 'kendi açtığı tur (arka plan işi)');
   }
 
-  #onTask(id: string, task: { taskId: string; running: boolean }): void {
+  #onTask(id: string, task: { taskId: string; running: boolean; description?: string }): void {
     const rt = this.#runtime(id);
     if (task.running) {
-      rt.background.add(task.taskId);
+      rt.background.set(task.taskId, task.description ?? '');
       return;
     }
+    rt.freed.delete(task.taskId);
     if (!rt.background.delete(task.taskId) || rt.background.size > 0 || rt.turnActive) return;
     // The last job ended between turns: claude opens a turn by itself to read it. Idle only if none comes in time.
     if (rt.followUpTimer) clearTimeout(rt.followUpTimer);
@@ -660,9 +679,33 @@ export class Engine {
     rt.followUpTimer.unref();
   }
 
+  /** Jobs alone hold the employee: past the cap they are free for tasks again (a turn running then: at its end). */
+  #armCap(id: string): void {
+    const rt = this.#runtime(id);
+    if (rt.capTimer) return;
+    rt.capTimer = setTimeout(() => {
+      rt.capTimer = null;
+      if (rt.background.size === 0 || rt.turnActive) return;
+      // The jobs run on (nothing is killed) but no longer keep the employee working; the office decides about them.
+      const jobs = [...rt.background.values()];
+      for (const taskId of rt.background.keys()) rt.freed.add(taskId);
+      rt.background.clear();
+      this.#emit(id, { type: 'background.overdue', jobs, limitMs: this.#backgroundLimitMs });
+      this.#idleIfDone(id, 'arka plan işi üst süreyi aştı; süreç sürüyor');
+    }, this.#backgroundLimitMs);
+    rt.capTimer.unref();
+  }
+
+  #jobsRunning(rt: Runtime): boolean {
+    return rt.background.size > 0 || rt.freed.size > 0;
+  }
+
   /** The process is gone: the jobs it ran are gone with it. */
   #endBackground(rt: Runtime): void {
     rt.background.clear();
+    rt.freed.clear();
+    if (rt.capTimer) clearTimeout(rt.capTimer);
+    rt.capTimer = null;
     if (rt.followUpTimer) clearTimeout(rt.followUpTimer);
     rt.followUpTimer = null;
   }
@@ -670,7 +713,7 @@ export class Engine {
   #onExit(id: string, code: number | null, signal: NodeJS.Signals | null, stderr: string): void {
     const rt = this.#runtime(id);
     // Work was under way: a turn that took its message in, a job beside the turns, or one that ended and waits to be read.
-    const resumeWork = (rt.turnActive && rt.consumedInTurn) || rt.background.size > 0 || rt.followUpTimer !== null;
+    const resumeWork = (rt.turnActive && rt.consumedInTurn) || this.#jobsRunning(rt) || rt.followUpTimer !== null;
     const unread = rt.unread.splice(0);
     rt.consumedInTurn = false;
     rt.proc = null;
@@ -862,7 +905,9 @@ export class Engine {
         toolsInTurn: false,
         lastText: '',
         failedModel: null,
-        background: new Set(),
+        background: new Map(),
+        freed: new Set(),
+        capTimer: null,
         followUpTimer: null,
       };
       this.#runtimes.set(id, rt);

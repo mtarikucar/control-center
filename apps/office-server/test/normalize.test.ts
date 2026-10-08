@@ -224,7 +224,8 @@ describe('taskChange', () => {
   const started = { type: 'system', subtype: 'task_started', task_id: 'b1', tool_use_id: 'toolu_1', description: 'mutasyonlar', task_type: 'local_bash' };
 
   it('a started job runs; its notification, or a final status, ends it', () => {
-    expect(taskChange(started)).toEqual({ taskId: 'b1', running: true });
+    expect(taskChange(started)).toEqual({ taskId: 'b1', running: true, description: 'mutasyonlar' });
+    expect(taskChange({ ...started, description: undefined })).toEqual({ taskId: 'b1', running: true, description: '' });
     expect(taskChange({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'stopped', output_file: '', summary: '' })).toEqual({ taskId: 'b1', running: false });
     for (const status of ['completed', 'failed', 'killed']) expect(taskChange({ type: 'system', subtype: 'task_updated', task_id: 'b1', patch: { status } })).toEqual({ taskId: 'b1', running: false });
   });
