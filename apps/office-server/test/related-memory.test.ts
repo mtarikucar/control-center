@@ -29,6 +29,26 @@ describe('B12 related memory: the section a task message carries (C5-6, pilot A9
     expect(relatedQuery(task(' ', ['ve', 'bir']))).toBe('');
   });
 
+  it('review (Kerem): a task code keeps its number (C5-1 is one word, not c5 and a dropped 1); “inceleme” and “tur” say nothing', () => {
+    expect(relatedQuery(task('C5-1 B9a: kanca + onay kaydı', ['v21 gidiş-dönüş']))).toBe('c5-1 b9a kanca onay kaydi v21 gidis donus');
+    expect(relatedQuery(task('İnceleme: C5-6 B12: göreve ilgili hafıza (tur 1)'))).toBe('c5-6 b12 goreve ilgili hafiza');
+  });
+
+  it('a code is searched as itself: C5-1 finds C5-1, not C5-5; a partial record with a single word of the task is left out', () => {
+    const s = setup();
+    cleanups.push(s.cleanup);
+    const index = new SearchIndex(s.db);
+    index.upsert(doc('task', 'a', 'C5-5 Pilot ölçüm betiği', 'KÖ1–KÖ11 tablosu; kanca yok.'));
+    index.upsert(doc('decision', 'b', 'C5-1 B9a sırası', 'Kanca ve onay kaydı v21.'));
+    index.upsert(doc('note', 'c', 'Kanca deneyi', 'PreToolUse.'));
+    const section = relatedMemory(index, task('C5-1 B9a: kanca + onay kaydı'));
+    expect(lines(section)[0]).toContain('C5-1 B9a sırası');
+    expect(section).not.toContain('C5-5 Pilot');
+    // “Kanca deneyi” has one of the five words only.
+    expect(section).not.toContain('Kanca deneyi');
+    expect(index.search('C5-1', { limit: 10 }).hits.map((h) => h.title)).toEqual(['C5-1 B9a sırası']);
+  });
+
   it('the first three records, best first; partial ones marked with how many words; nothing at all when nothing matches', () => {
     const s = setup();
     cleanups.push(s.cleanup);
