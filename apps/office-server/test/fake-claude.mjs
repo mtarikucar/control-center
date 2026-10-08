@@ -118,6 +118,39 @@ if (process.env.FAKE_CLAUDE_NOISE) process.stdout.write('Warning: something odd\
 
 let initSent = false;
 let busy = null;
+let backgroundJobs = 0;
+
+/** Waits for the test to release `${sessionId}${suffix}` (FAKE_CLAUDE_HOLD_DIR); without the directory it goes on at once. */
+async function heldUntil(suffix) {
+  if (!process.env.FAKE_CLAUDE_HOLD_DIR) return;
+  const release = join(process.env.FAKE_CLAUDE_HOLD_DIR, `${sessionId}${suffix}`);
+  while (!existsSync(release)) await sleep(10);
+  unlinkSync(release);
+}
+
+/**
+ * A job left running after the turn (Bash run_in_background, Monitor). Like the real CLI: `task_notification` when it
+ * ends, then a follow-up turn the CLI opens by itself, with no user message, so the model reads what the job found.
+ * FAKE_CLAUDE_BG_SILENT drops the task messages (only the follow-up turn shows), FAKE_CLAUDE_BG_NO_FOLLOWUP the turn.
+ */
+async function backgroundJob(taskId, toolUseId) {
+  await heldUntil('.bg');
+  // FAKE_CLAUDE_BG_CRASH: claude dies while the job runs ('running') or after it ended, before its follow-up turn ('notified').
+  const crash = () => {
+    process.stderr.write('boom: crash beside a background job\n');
+    process.exit(3);
+  };
+  if (process.env.FAKE_CLAUDE_BG_CRASH === 'running') crash();
+  if (!process.env.FAKE_CLAUDE_BG_SILENT) out({ type: 'system', subtype: 'task_notification', task_id: taskId, tool_use_id: toolUseId, status: 'completed', output_file: '', summary: 'arka plan işi bitti' });
+  if (process.env.FAKE_CLAUDE_BG_CRASH === 'notified') crash();
+  if (process.env.FAKE_CLAUDE_BG_NO_FOLLOWUP) return;
+  chain = chain.then(async () => {
+    await sleep(50); // the model takes a moment to answer
+    say('arka plan işi bitti, sonuca bakıyorum');
+    if (process.env.FAKE_CLAUDE_HOLD_FOLLOWUP) await heldUntil('.follow');
+    result();
+  });
+}
 
 async function turn(text, uuid) {
   // The real CLI announces itself (system init) at every turn; once per process is enough for the office.
@@ -183,6 +216,19 @@ async function turn(text, uuid) {
     say(`slow-done${injected.length ? ` saw:${injected.join(',')}` : ''}`);
     rateLimit('allowed', 3600);
     result({ num_turns: 2, result: 'slow-done' });
+    return;
+  }
+  if (text.includes('BACKGROUND')) {
+    // The tool returns at once and the turn ends; the job it started runs on (backgroundJob).
+    backgroundJobs += 1;
+    const taskId = `bg${backgroundJobs}`;
+    const toolUseId = `toolu_bg${backgroundJobs}`;
+    out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input: { command: 'sleep 600', run_in_background: true } }] } });
+    if (!process.env.FAKE_CLAUDE_BG_SILENT) out({ type: 'system', subtype: 'task_started', task_id: taskId, tool_use_id: toolUseId, description: 'arka plan işi', task_type: 'local_bash' });
+    out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, is_error: false, content: `Command running in background with ID: ${taskId}` }] } });
+    say('arka planda sürüyor');
+    result();
+    void backgroundJob(taskId, toolUseId);
     return;
   }
   if (text.includes('HOLD') && process.env.FAKE_CLAUDE_HOLD_DIR) {

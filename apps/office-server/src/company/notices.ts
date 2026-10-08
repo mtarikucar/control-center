@@ -14,6 +14,8 @@ export const NOTICE_TOPICS = {
   /** A plan has no open task left: assess it (planRetro), write the lessons, report, go on (spec §5.4). */
   'plan.retro': 'decision',
   'task.blocked': 'decision',
+  /** Someone's background job ran alone past the cap: they take tasks again; stop the job or move the task, or let it run. */
+  'background.overdue': 'decision',
   /** Still open after the office's reminder: the queue behind it is stuck. */
   'task.stalled': 'decision',
   /** A started (or blocked) task went to someone else: its holder must stop working on it. */

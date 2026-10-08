@@ -876,4 +876,50 @@ describe('Dispatcher — time', () => {
     await until(() => s.roster.get(ada.id).lifecycle !== 'sleeping', 8000);
     await until(() => c.tasks.get(task.id).status === 'in_progress', 8000);
   });
+
+  it('a job that held someone past the cap reaches the coordinator as a decision: who, which job, the process lives, tasks go to them', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    t.events.append(c.id, { type: 'background.overdue', jobs: ['kendi işi'], limitMs: 2 * 60 * 60_000 });
+    t.events.append(ada.id, { type: 'background.overdue', jobs: ['pnpm dev', 'mutasyon koşusu'], limitMs: 2 * 60 * 60_000 });
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), c.id).some((m) => m.includes('pnpm dev')), 8000);
+    const told = systemMessages(t.events.list({ limit: 5000 }), c.id).find((m) => m.includes('pnpm dev'))!;
+    expect(told).toContain(NOTICES_PREFIX);
+    expect(told).toContain('Ada adlı çalışanın arka plan işi (pnpm dev, mutasyon koşusu) 2 saattir tek başına sürüyor.');
+    expect(told).toContain('Süreç öldürülmedi');
+    expect(told).toContain('Ada yeniden görev alabilir');
+    // Its own job is not a matter for the coordinator to decide about.
+    expect(systemMessages(t.events.list({ limit: 5000 }), c.id).some((m) => m.includes('kendi işi'))).toBe(false);
+  });
 });
+
+describe('Dispatcher — a background job that never ends (review 6b475116)', () => {
+  it('an open task and a job that never ends: past the cap the employee is reminded and the coordinator hears', async () => {
+    const s = setup();
+    const hold = tempDir('hold-');
+    // The job is held until the test releases it, which it never does: a dev server left running.
+    const f = fakeEngine(s, { env: { FAKE_CLAUDE_HOLD_DIR: hold }, engine: { backgroundLimitMs: 400 } });
+    const tasks = new TaskStore(s.db);
+    const plans = new PlanStore(s.db);
+    const notices = new NoticeStore(s.db);
+    const company = new Company({ constitution: PLANS_ONLY, roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => ['coder'] });
+    const dispatcher = new Dispatcher({ events: s.events, roster: s.roster, tasks, notices, plans, company, engine: f.engine });
+    cleanups.push(dispatcher.start(), f.cleanup, s.cleanup);
+    const c = company.hireCoordinator();
+    const ada = company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const task = company.createTask(OWNER, { assignee: ada.id, title: 'Arayüzü dene', description: 'BACKGROUND pnpm --filter @cc/office-web dev ile aç ve bak' });
+    const delivered = await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('Arayüzü dene'), { timeoutMs: 8000 });
+    const turnEnd = await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'turn.finished', { after: delivered.seq, timeoutMs: 8000 });
+    // The job runs on: still working, so no reminder yet (the old code reminded at once, the fix of 6b475116 never).
+    expect(s.roster.get(ada.id).lifecycle).toBe('working');
+    const nudge = await waitFor(s.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.startsWith(NUDGE_PREFIX), { after: turnEnd.seq, timeoutMs: 8000 });
+    const over = s.events.list({ after: turnEnd.seq, employeeId: ada.id, limit: 5000 }).find((e) => e.event.type === 'background.overdue');
+    expect(over).toBeDefined();
+    expect(over!.seq).toBeLessThan(nudge.seq);
+    expect((nudge.event as { text: string }).text).toContain(task.id);
+    await until(() => systemMessages(s.events.list({ limit: 5000 }), c.id).some((m) => m.includes('Ada adlı çalışanın arka plan işi')), 8000);
+    expect(tasks.get(task.id).status).toBe('in_progress');
+  });
+});
+
