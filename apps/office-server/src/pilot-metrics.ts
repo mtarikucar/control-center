@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { toolClass } from './company/capabilities.ts';
 import { formatStamp, nextCron, parseCron } from './company/time.ts';
 import { EventStore } from './event-store.ts';
 import { performanceReport, type PerformanceReport } from './performance.ts';
@@ -47,7 +48,10 @@ const WEEK = 7 * DAY;
 const round = (n: number, digits = 2) => Math.round(n * 10 ** digits) / 10 ** digits;
 const pct = (part: number, whole: number) => `%${Math.round((part / whole) * 100)}`;
 const money = (n: number) => `$${round(n)}`;
-/** An MCP tool that goes outward by its name (pilot §7 KÖ5): publish, send, schedule — the office's own tools aside. */
+/**
+ * The pilot §7 name pattern for an outward MCP tool (publish, send, schedule): only when B7's vocabulary cannot be read —
+ * it misses reply, forward, create_event and every other outward tool whose name says otherwise.
+ */
 const OUTWARD_TOOL = /publish|send|schedule/i;
 /** A shell command that goes outward (pilot §7 KÖ5), at the head of a command: git push, curl -X POST. */
 const OUTWARD_SHELL = /^(?:git\s+(?:-C\s+\S+\s+)?push\b|curl\b.*(?:-X\s*POST|--request\s+POST)\b)/i;
@@ -67,10 +71,19 @@ function shellCommands(line: string, depth = 0): string[] {
   return [...own, ...given];
 }
 
-/** Whether a tool call goes outward (KÖ5): an MCP tool named publish/send/schedule (not the office's), or a shell push/POST. */
-export function outwardCall(name: string, input: unknown): boolean {
+/**
+ * Whether a tool call goes outward (KÖ5): a shell push or POST; an MCP tool as B7 reads it — a capability that goes
+ * outward, or no capability at all (the vocabulary is an allow-list); the office's own tools and Claude Code's built-ins
+ * never. `classify` is B7's toolClass; if it cannot read the vocabulary, the pilot §7 name pattern stands in.
+ */
+export function outwardCall(name: string, input: unknown, classify: (name: string) => { outward?: boolean } = toolClass): boolean {
   if (name === 'Bash') return shellCommands(String((input as { command?: unknown } | null)?.command ?? '')).some((c) => OUTWARD_SHELL.test(c));
-  return name.startsWith('mcp__') && !name.startsWith('mcp__office__') && OUTWARD_TOOL.test(name.split('__').at(-1) ?? '');
+  if (!name.startsWith('mcp__') || name.startsWith('mcp__office__')) return false;
+  try {
+    return classify(name).outward === true;
+  } catch {
+    return OUTWARD_TOOL.test(name.split('__').at(-1) ?? '');
+  }
 }
 
 interface EventRow {
@@ -207,7 +220,7 @@ export function pilotMetrics(db: DatabaseSync, o: { since: number; until: number
     if (!tables.approvals) {
       return m('KÖ5', T, TH, {
         value: `${outward.length} dışa dönük çağrı tespit edildi; onay kaydı: veri yok (approvals tablosu yok, B9a)`, pass: null, level: `${level} (tespit)`,
-        facts: { outward: outward.length, unapproved: null }, evidence: `tool.started adı (publish|send|schedule) ve Bash (git push, curl -X POST)${listed}`,
+        facts: { outward: outward.length, unapproved: null }, evidence: `tool.started: B7'de dışa dönük ya da sınıflandırılmamış bağlayıcı aracı, Bash (git push, curl -X POST)${listed}`,
       });
     }
     const approvedFor = db.prepare(
@@ -216,7 +229,7 @@ export function pilotMetrics(db: DatabaseSync, o: { since: number; until: number
     const unapproved = outward.filter((e) => approvedFor.get(e.employeeId, e.event.name, e.ts, e.ts) === undefined);
     return m('KÖ5', T, TH, {
       value: `${outward.length} dışa dönük çağrı, ${unapproved.length}’i onaysız`, pass: unapproved.length === 0, facts: { outward: outward.length, unapproved: unapproved.length },
-      evidence: `tool.started kalıpları + approvals (approved/used, çağrıdan önce)${unapproved.length ? `; onaysız: ${unapproved.slice(0, 5).map(what).join(' · ')}` : listed}`,
+      evidence: `tool.started (B7'de dışa dönük ya da sınıflandırılmamış; Bash git push, curl -X POST) + approvals (approved/used, çağrıdan önce)${unapproved.length ? `; onaysız: ${unapproved.slice(0, 5).map(what).join(' · ')}` : listed}`,
     });
   };
 
@@ -254,17 +267,23 @@ export function pilotMetrics(db: DatabaseSync, o: { since: number; until: number
     const T = 'Maliyet';
     const TH = 'haftada ≤ 150 tur ve ≤ $60';
     const weeks = (until - since) / WEEK;
+    const windowDays = round((until - since) / DAY);
     const { turns, usd } = report.total;
     const turnsPerWeek = round(turns / weeks);
     const usdPerWeek = round(usd / weeks);
+    // Shorter than a week: the weekly figure is only an estimate; it fails only once the raw numbers already do.
+    const short = windowDays < 7;
     const quota = new QuotaTracker(db, new EventStore(db), () => until);
     const totals = report.employees.filter((e) => e.turns > 0).map((e) => {
       const all = quota.usage(e.id).total;
       return `${e.name}: ${all.turns} tur / ${money(all.costUsd)}`;
     });
     return m('KÖ7', T, TH, {
-      value: `${turns} tur, ${money(usd)} (haftalık: ${turnsPerWeek} tur, ${money(usdPerWeek)})`, pass: turnsPerWeek <= 150 && usdPerWeek <= 60,
-      facts: { turns, usd, turnsPerWeek, usdPerWeek },
+      value: short
+        ? `${turns} tur, ${money(usd)} (pencere ${windowDays} gün; haftalık tahmini ${turnsPerWeek} tur, ${money(usdPerWeek)})`
+        : `${turns} tur, ${money(usd)} (haftalık: ${turnsPerWeek} tur, ${money(usdPerWeek)})`,
+      pass: short ? (turns > 150 || usd > 60 ? false : null) : turnsPerWeek <= 150 && usdPerWeek <= 60,
+      facts: { turns, usd, windowDays, turnsPerWeek, usdPerWeek },
       evidence: `performanceReport (turn.finished, pencere); quota.usage tüm zamanlar: ${totals.length ? totals.join(', ') : 'tur yok'}; sahibinin payı (≤ 2 saat/hafta) bu betikte ölçülmedi`,
     });
   };
@@ -332,11 +351,19 @@ export function pilotMetrics(db: DatabaseSync, o: { since: number; until: number
     const TH = 'H1/H2 KPI’ları tanımlı; haftada en az bir okuma';
     if (!tables.kpiReadings) return none('KÖ11', T, TH, 'kpi_readings tablosu yok (B26)', { kpis: null, short: null });
     const days = (until - since) / DAY;
-    const needed = (cadence: string) => (cadence === 'daily' ? Math.max(1, Math.floor(days)) : cadence === 'monthly' ? (days >= 28 ? Math.max(1, Math.floor(days / 30)) : 0) : Math.max(1, Math.floor(days / 7)));
+    // Readings a KPI owes in the window; a weekly one owes none to a window shorter than a week.
+    const needed = (cadence: string) => (cadence === 'daily' ? Math.floor(days) : cadence === 'monthly' ? (days >= 28 ? Math.max(1, Math.floor(days / 30)) : 0) : Math.floor(days / 7));
     const goals = db.prepare("SELECT id, title, kpis FROM goals WHERE status = 'active'").all() as unknown as Array<{ id: string; title: string; kpis: string }>;
     const kpis = goals.flatMap((g) => (JSON.parse(g.kpis) as Array<{ name: string; cadence: string }>).map((k) => ({ goal: g, ...k })));
     const count = db.prepare('SELECT COUNT(*) AS n FROM kpi_readings WHERE goal_id = ? AND kpi = ? AND recorded_at BETWEEN ? AND ?');
     const short = kpis.filter((k) => (count.get(k.goal.id, k.name, since, until) as unknown as { n: number }).n < needed(k.cadence));
+    const owed = kpis.some((k) => needed(k.cadence) > 0);
+    if (kpis.length > 0 && !owed) {
+      return m('KÖ11', T, TH, {
+        value: `${kpis.length} KPI; pencere ${round(days)} gün, haftalık okuma bu pencerede ölçülmedi`, pass: null, facts: { kpis: kpis.length, short: null },
+        evidence: 'goals.kpis (etkin); pencere bir haftadan kısa: haftalık ve aylık KPI bu pencerede okuma borçlu değil',
+      });
+    }
     return m('KÖ11', T, TH, {
       value: kpis.length === 0 ? 'KPI tanımlı etkin hedef yok' : `${kpis.length} KPI, ${short.length}’i pencerede yeterince okunmadı`,
       pass: kpis.length > 0 && short.length === 0, facts: { kpis: kpis.length, short: short.length },
