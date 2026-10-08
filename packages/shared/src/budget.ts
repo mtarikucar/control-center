@@ -37,6 +37,12 @@ export interface Constitution {
   digestEnabled: boolean;
   modelPolicyEnabled: boolean;
   difficultyModelsEnabled: boolean;
+  /**
+   * The capability precheck (B8), OFF by default (and in a database that has no such key): on, a task whose required
+   * capability its assignee's desk lacks is held before it is handed out and the owner gets one need proposal; a
+   * connector tool's error raises the same proposal once. Off is the behaviour before it.
+   */
+  capabilityPrecheckEnabled: boolean;
   /** 'free': the coordinator sets goals and starts its plans without waiting (spec §6.2); 'plans': each plan waits for the owner. */
   autonomy: Autonomy;
   /** Goals active at once, at most (spec §6.1). */
@@ -71,6 +77,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   digestEnabled: false,
   modelPolicyEnabled: false,
   difficultyModelsEnabled: false,
+  capabilityPrecheckEnabled: false,
   autonomy: 'free',
   activeGoals: 10,
   pulseHours: 6,

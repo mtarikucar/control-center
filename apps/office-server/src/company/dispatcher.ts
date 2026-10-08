@@ -32,6 +32,8 @@ export interface DispatcherDeps {
   tickMs?: number;
   /** The project's pulse (spec §6.3), run on each tick. */
   pulse?: { check(): unknown };
+  /** The capability precheck (B8): holds a task whose required capability the desk lacks. Absent: none. */
+  precheck?: { hold(task: Task): boolean; release(): void };
   /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
   clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: () => void): void };
 }
@@ -122,6 +124,8 @@ export class Dispatcher {
   }
 
   sweep(): void {
+    // B8: a held task whose capabilities are there now (or the switch off) waits in its queue again.
+    this.#d.precheck?.release();
     for (const e of this.#d.roster.list()) this.#consider(e.id);
   }
 
@@ -180,7 +184,9 @@ export class Dispatcher {
         if (since !== null) this.#escalate(id, focus);
       }
     } else {
-      const next = this.#d.tasks.nextFor(id);
+      let next = this.#d.tasks.nextFor(id);
+      // B8: a task whose required capability this desk lacks is held, and the next one is tried.
+      while (next && this.#d.precheck?.hold(next)) next = this.#d.tasks.nextFor(id);
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
     const hint = this.#hint(employee, started, Boolean(body) || started !== null || decisions.length > 0);
