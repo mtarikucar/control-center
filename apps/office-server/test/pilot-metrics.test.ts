@@ -79,6 +79,8 @@ function pilotWeek(withNewTables = true) {
   ev(coord, T0, { type: 'onboarding.changed', change: 'started', onboarding: onboarding('active', []) } as OfficeEvent);
   ev(coord, T0 + 1 * MIN, turn(0.5));
   ev(coord, T0 + 3 * MIN, turn(0.5));
+  // A member's turn while the onboarding runs is not the coordinator's.
+  ev(yazar, T0 + 4 * MIN, turn(1));
   ev(coord, T0 + 5 * MIN, { type: 'onboarding.changed', change: 'finished', onboarding: onboarding('done', [{ questions: ['a', 'b', 'c', 'd', 'e'] }, { questions: ['f', 'g', 'h'] }]) } as OfficeEvent);
 
   // KÖ2: the install plan approved at +10 min, its last step at +28 min, no owner message in between.
@@ -130,7 +132,7 @@ function pilotWeek(withNewTables = true) {
   proposal('p4', 'declined', 'owner');
   proposal('p5', 'declined', coord);
 
-  // KÖ7: 2 coordinator turns ($0.5 each, above) and 3 writer turns ($1 each); one before the week does not count.
+  // KÖ7: 2 coordinator turns ($0.5 each, above) and 4 writer turns ($1 each, one above); one before the week does not count.
   for (const h of [1, 2, 3]) ev(yazar, T0 + h * HOUR, turn(1));
   ev(yazar, SINCE - DAY, turn(7));
 
@@ -186,7 +188,7 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
       KÖ4: [{ done: 2, withEvidence: 1, reviewed: 2, approvedWithin2: 1, selfReviews: 0 }, false],
       KÖ5: [{ outward: 2, unapproved: 1 }, false],
       KÖ6: [{ decided: 4, accepted: 3, approvalsDecided: 1, approvalsApproved: 1 }, true],
-      KÖ7: [{ turns: 5, usd: 4, turnsPerWeek: 4.97, usdPerWeek: 3.98 }, true],
+      KÖ7: [{ turns: 6, usd: 5, turnsPerWeek: 5.96, usdPerWeek: 4.97 }, true],
       KÖ8: [{ searches: 2, empty: 1 }, null],
       KÖ9: [{ toCoordinator: 2, toMembers: 1, plans: 1, plansByCoordinator: 1 }, false],
       KÖ10: [{ fired: 3, late: 1, maxDelaySec: 120, maxSkip: 1 }, false],
@@ -194,6 +196,20 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     });
     expect(r.measures.every((m) => m.level === 'K4')).toBe(true);
     expect(measure(r, 'KÖ5').evidence).toContain('git push');
+  });
+
+  it('KÖ2 fails when the owner had to write during the install; KÖ10 holds on time with one skip, fails with two', () => {
+    const t = pilotWeek();
+    const db = new DatabaseSync(t.file);
+    db.prepare("DELETE FROM events WHERE type = 'schedule.changed' AND ts = ?").run(new Date(2026, 9, 7, 8, 30).getTime() + 120_000);
+    const r1 = pilotMetrics(t.read(), { since: SINCE, until: UNTIL });
+    expect([measure(r1, 'KÖ10').facts, measure(r1, 'KÖ10').pass]).toEqual([{ fired: 2, late: 0, maxDelaySec: 45, maxSkip: 1 }, true]);
+    db.exec("UPDATE schedules SET skip_count = 2 WHERE skip_count = 1");
+    db.prepare('INSERT INTO events (employee_id, ts, type, payload) VALUES (?, ?, ?, ?)').run(t.coord, T0 + 20 * MIN, 'message.user', JSON.stringify({ type: 'message.user', text: 'Durum ne?', source: 'owner' }));
+    db.close();
+    const r2 = pilotMetrics(t.read(), { since: SINCE, until: UNTIL });
+    expect([measure(r2, 'KÖ10').facts.maxSkip, measure(r2, 'KÖ10').pass]).toEqual([2, false]);
+    expect([measure(r2, 'KÖ2').facts, measure(r2, 'KÖ2').pass]).toEqual([{ minutes: 18, steps: 4, ownerMessages: 1 }, false]);
   });
 
   it('KÖ3, KÖ4 and KÖ7 are read through performanceReport, KÖ7 also through quota.usage — not counted again', () => {
