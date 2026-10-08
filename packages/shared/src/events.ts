@@ -1,7 +1,10 @@
 import type { BudgetSummary, Spend } from './budget.ts';
 import type { ClockStatus, Goal, GoalChange, Plan, PlanChange, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
+import type { Integration } from './integration.ts';
 import type { Decision } from './memory.ts';
+import type { Onboarding, OnboardingChange, OnboardingRound } from './onboarding.ts';
+import type { ProfileEntry } from './profile.ts';
 import type { Proposal, ProposalChange } from './proposal.ts';
 
 export interface Usage {
@@ -21,7 +24,8 @@ export interface QuotaWindow {
 export type OfficeEvent =
   | { type: 'employee.hired'; name: string }
   | { type: 'employee.fired' }
-  | { type: 'session.started'; model: string; mcp: { name: string; status: string }[] }
+  /** `tools`: how many of the server's tools the session has (sessions from before carry none). */
+  | { type: 'session.started'; model: string; mcp: { name: string; status: string; tools?: number }[] }
   | { type: 'turn.started' }
   | {
       type: 'turn.finished';
@@ -64,6 +68,12 @@ export type OfficeEvent =
   /** The coordinator was reminded to report, for the digest hour `slot` (so a restart does not remind again). */
   | { type: 'report.reminded'; slot: number }
   | { type: 'brief.updated' }
+  /** A section of the company profile changed; `entry` is the section as it now stands. */
+  | { type: 'profile.updated'; entry: ProfileEntry }
+  /** The coordinator registered or changed a connector by hand (B3). */
+  | { type: 'integration.changed'; integration: Integration }
+  /** The onboarding moved; `round` with change 'round': the questions just asked (KÖ1 counts them). */
+  | { type: 'onboarding.changed'; change: OnboardingChange; onboarding: Onboarding; round?: OnboardingRound }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
   | { type: 'decision.recorded'; decision: Decision }
   | { type: 'playbook.updated'; topic: string; version: number; reason: string }

@@ -26,6 +26,17 @@ describe('GoalStore', () => {
     expect(goals.list().map((g) => g.id)).toEqual([a.id, b.id]);
     expect(() => goals.get('yok')).toThrow(/Hedef bulunamadı/);
   });
+
+  it('keeps a goal’s KPIs; a goal created without them has none, and an update without them keeps them', () => {
+    const { goals } = stores();
+    const kpi = { name: 'Onay', target: 70, direction: 'atLeast' as const, unit: '%', source: 'manual' as const, metric: null, cadence: 'weekly' as const };
+    const a = goals.create({ title: 'Lansman', why: 'w', done: ['d'], createdBy: 'c' });
+    expect(a.kpis).toEqual([]);
+    expect(goals.update(a.id, { kpis: [kpi] }).kpis).toEqual([kpi]);
+    expect(goals.update(a.id, { note: 'n' }).kpis).toEqual([kpi]);
+    expect(goals.get(a.id).kpis).toEqual([kpi]);
+    expect(goals.create({ title: 'B', why: 'w', done: ['d'], kpis: [kpi], createdBy: 'c' }).kpis).toEqual([kpi]);
+  });
 });
 
 describe('CompanyStateStore', () => {

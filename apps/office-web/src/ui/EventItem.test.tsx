@@ -64,8 +64,16 @@ describe('EventItem', () => {
     expect(screen.getByText('İnceleme: Metin (tur 1) — değişiklik istendi (2 önemli, 1 küçük)')).toBeTruthy();
   });
 
+  it('notes a company profile change with its section, version and whether assumed', () => {
+    const entry = { id: 'p1', version: 3, section: 'identity' as const, fields: { name: 'Tatlı Fırın' }, assumed: true, assumedFields: ['name'], by: 'c', ts: 0 };
+    const { rerender } = render(<EventItem stored={{ seq: 1, employeeId: 'c', ts: 0, event: { type: 'profile.updated', entry } }} />);
+    expect(screen.getByText('Şirket profili: Kimlik (sürüm 3, varsayım)')).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 2, employeeId: 'c', ts: 0, event: { type: 'profile.updated', entry: { ...entry, section: 'customers', version: 4, assumed: false, assumedFields: [] } } }} />);
+    expect(screen.getByText('Şirket profili: Müşteri ve kanallar (sürüm 4)')).toBeTruthy();
+  });
+
   it('notes goals and the pause in the feed', () => {
-    const goal = { id: 'g1', title: 'Lansman', why: 'w', done: ['d'], status: 'active' as const, createdBy: 'c', createdAt: 1, closedAt: null, note: null };
+    const goal = { id: 'g1', title: 'Lansman', why: 'w', done: ['d'], kpis: [], status: 'active' as const, createdBy: 'c', createdAt: 1, closedAt: null, note: null };
     const { rerender } = render(<EventItem stored={{ seq: 1, employeeId: 'c', ts: 0, event: { type: 'goal.changed', change: 'set', goal } }} />);
     expect(screen.getByText('Hedef: Lansman')).toBeTruthy();
     rerender(<EventItem stored={{ seq: 2, employeeId: 'c', ts: 0, event: { type: 'goal.changed', change: 'stopped', goal: { ...goal, status: 'dropped' } } }} />);

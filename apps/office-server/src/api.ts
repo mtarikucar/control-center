@@ -13,6 +13,8 @@ import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } 
 import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
+import type { IntegrationRegistry } from './company/integrations.ts';
+import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
 import type { Roster } from './roster.ts';
 import { resolveInside, sendFile } from './static.ts';
@@ -25,7 +27,11 @@ export interface ApiDeps {
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
   /** The company layer: plans, tasks and the coordinator (absent: v1 office); `clock` is the office clock (spec §5), `agenda` the per-employee sheet (§6.1). */
-  company?: { service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport } };
+  company?: {
+    service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport };
+    performance?: { report(o: { days?: number }): PerformanceReport };
+    integrations?: IntegrationRegistry;
+  };
 }
 
 export interface ApiOptions {
@@ -147,6 +153,12 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       const id = plan[1] ?? '';
       return sendJson(res, 200, plan[2] === 'approve' ? company.approve(id) : plan[2] === 'decline' ? company.decline(id) : company.stopPlan(id));
     }
+    // The onboarding (B1): the owner follows it and answers its questions as their own word.
+    if (method === 'GET' && url.pathname === '/api/onboarding') return sendJson(res, 200, company.onboarding());
+    if (method === 'POST' && url.pathname === '/api/onboarding/answers') {
+      const body = (await readJson(req)) as { answers?: unknown } | null;
+      return sendJson(res, 200, company.onboardingAnswer(body?.answers));
+    }
     const goalStop = GOAL_ROUTE.exec(url.pathname);
     if (method === 'POST' && goalStop) return sendJson(res, 200, company.stopGoal(goalStop[1] ?? ''));
     // The owner's buttons on the agenda sheet (spec §6.3): "Park et…", "Şimdi başlasın" (also priority 1), "Öne al".
@@ -191,6 +203,13 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'GET' && url.pathname === '/api/memory/notes') return sendJson(res, 200, memory.notes(url.searchParams.get('q') ?? undefined, 100));
     const budget = d.company.budget;
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
+    if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
+    if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {
+      const raw = url.searchParams.get('days');
+      const days = raw === null ? undefined : Number(raw);
+      if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new ValidationError('days 1 ile 365 arasında bir tam sayı olmalı.');
+      return sendJson(res, 200, d.company.performance.report({ days }));
+    }
     if (method === 'GET' && url.pathname === '/api/budget/spend') return sendJson(res, 200, budget.spending(url.searchParams.get('planId') ?? undefined));
     if (method === 'POST' && url.pathname === '/api/constitution') {
       const body = await readJson(req);

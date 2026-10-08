@@ -1,9 +1,13 @@
-import { MODEL_ALIASES, PROPOSAL_KINDS, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
-import { methodText } from '../company/craft.ts';
+import { methodText, onboardingGuideText } from '../company/craft.ts';
+import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
+import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
+import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
 import type { TaskStore } from '../company/store.ts';
+import { formatPerformance, type PerformanceReport } from '../performance.ts';
 import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
@@ -103,6 +107,10 @@ export function officeTools(o: {
   plans: () => Plan[];
   /** Who does what when, as Turkish text (agendaRead). */
   agenda: { text(employeeId?: string): string };
+  /** How the work went, from the log (performanceRead); absent in tests that do not care. */
+  performance?: { report(o: { days?: number }): PerformanceReport };
+  /** The integration registry (integrationsList, integrationRegister); absent in tests that do not care. */
+  integrations?: IntegrationRegistry;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -298,6 +306,34 @@ export function officeTools(o: {
       inputSchema: object({}),
       kinds: EVERYONE,
       run: () => company.brief(),
+    },
+    {
+      name: 'profileRead',
+      description: `Read the company profile: what the company is, section by section (${PROFILE_SECTIONS.join(', ')}); empty sections show as empty, assumed ones are marked. With section only that one; with section and history: true its versions, newest first.`,
+      inputSchema: object({ section: { type: 'string', enum: [...PROFILE_SECTIONS], description: 'One section only.' }, history: { type: 'boolean', description: 'The section’s versions, newest first (needs section).' } }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        const section = optStr(args, 'section');
+        if (bool(args, 'history')) {
+          if (section === undefined) throw new ValidationError('Geçmiş için bir bölüm (section) ver.');
+          return profileHistoryText(profileSection(section), company.profileHistory(section), (id) => company.nameOf(id));
+        }
+        return profileText(company.profile(), section === undefined ? undefined : profileSection(section));
+      },
+    },
+    {
+      name: 'integrationsList',
+      description: 'Read the integration registry, read-only: every connector the office has, its status (connected, denied — connected but the desk’s session has none of its tools —, needs_auth, pending, failed, closed, unknown), on which desks it is open or shut and why, and what the coordinator noted (capabilities, what the owner must do, cost). It calls no connector. status or employee narrow it.',
+      inputSchema: object({ status: { type: 'string', enum: [...INTEGRATION_STATUSES] }, employee: s('Only what this person’s desk reports (id or name).') }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
+        const status = optStr(args, 'status');
+        if (status !== undefined && !(INTEGRATION_STATUSES as readonly string[]).includes(status)) throw new ValidationError(`durum (status) ${INTEGRATION_STATUSES.slice(0, -1).join(', ')} ya da ${INTEGRATION_STATUSES.at(-1)} olmalı.`);
+        const who = optStr(args, 'employee');
+        const list = o.integrations.list({ status: status as IntegrationStatus | undefined, employee: who === undefined ? undefined : findPerson(who).id });
+        return integrationsText(list, status !== undefined || who !== undefined);
+      },
     },
     {
       name: 'memorySearch',
@@ -592,12 +628,44 @@ export function officeTools(o: {
       name: 'goalSet',
       description:
         'Open, change or close a goal (coordinator) — the lasting aims above the plans, taken from the company mission: a title, why it serves the mission, and a measurable definition of done. Without goalId it opens a new one; with goalId it changes it (status done or dropped closes it, active reopens it). Keep few goals active.',
-      inputSchema: object({ goalId: s('The goal to change; omit to open a new one.'), title: s('Goal title.'), why: s('Why it matters to the mission.'), done: strings('When it counts as reached, one measurable item each.'), status: { type: 'string', enum: ['active', 'done', 'dropped'] }, note: s('A note, e.g. why it was closed.') }),
+      inputSchema: object({
+        goalId: s('The goal to change; omit to open a new one.'), title: s('Goal title.'), why: s('Why it matters to the mission.'), done: strings('When it counts as reached, one measurable item each.'),
+        status: { type: 'string', enum: ['active', 'done', 'dropped'] }, note: s('A note, e.g. why it was closed.'),
+        kpis: {
+          type: 'array',
+          maxItems: 8,
+          description: `The goal's KPIs, the whole list (replaces it; [] clears it; omit to keep them): each a name, a target number, direction atLeast or atMost, a unit (%, gün, sipariş …), the source — manual (read by hand), capability (from a connection) or office (one of the office's own metrics: ${Object.keys(KPI_OFFICE_METRICS).join(', ')}; its unit comes with it) — and how often it is read.`,
+          items: {
+            type: 'object',
+            properties: {
+              name: s('KPI name.'), target: { type: 'number', description: 'Target value (a % is 0–100).' }, direction: { type: 'string', enum: [...KPI_DIRECTIONS] }, unit: s('Unit; not needed for source office.'),
+              source: { type: 'string', enum: [...KPI_SOURCES] }, metric: { type: 'string', enum: Object.keys(KPI_OFFICE_METRICS), description: 'Only for source office.' }, cadence: { type: 'string', enum: [...KPI_CADENCES] },
+            },
+            required: ['name', 'target', 'direction', 'source', 'cadence'],
+          },
+        },
+      }),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const goal = company.goalSet(employee.id, { goalId: optStr(args, 'goalId'), title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, status: optStr(args, 'status'), note: optStr(args, 'note') });
+        const goal = company.goalSet(employee.id, { goalId: optStr(args, 'goalId'), title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, kpis: args.kpis, status: optStr(args, 'status'), note: optStr(args, 'note') });
         if (!optStr(args, 'goalId')) return `Hedef açıldı (${goal.id}): “${goal.title}”. Planlarını planPropose ile goalId vererek başlat.`;
         return `Hedef güncellendi: “${goal.title}” (${goal.status}).`;
+      },
+    },
+    {
+      name: 'performanceRead',
+      description:
+        'Read how the work went, from the office’s own log (coordinator or team lead): per person and per plan the work tasks done and open, the first-pass approval rate, the average review rounds to approval, the average cost and time per task, blocks, parks and overdue; and the Claude usage reconciled to every turn. With employee or plan: that one and its tasks. days: only the last days.',
+      inputSchema: object({ employee: s('Employee id or name.'), plan: s('Plan id.'), days: integer('Only the last days.', 1, 365) }),
+      kinds: LEADS,
+      run: (_ctx, args) => {
+        if (!o.performance) throw new ConflictError('Bu ofiste performans okuması yok.');
+        const days = num(args, 'days');
+        if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new ValidationError('days 1 ile 365 arasında bir tam sayı olmalı.');
+        const who = optStr(args, 'employee');
+        const planId = optStr(args, 'plan');
+        if (planId !== undefined && !plans().some((p) => p.id === planId)) throw new NotFoundError(`Plan bulunamadı: ${planId}`);
+        return formatPerformance(o.performance.report({ days }), { employee: who === undefined ? undefined : findPerson(who).id, plan: planId, days });
       },
     },
     {
@@ -612,7 +680,8 @@ export function officeTools(o: {
         return goals
           .map((g) => {
             const own = plansOf(g.id).map((p) => `   - ${p.title} [${p.status}]`).join('\n');
-            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${own ? `\n${own}` : ''}`;
+            const kpis = g.kpis.length ? `\n   KPI: ${g.kpis.map(kpiText).join('; ')}` : '';
+            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${kpis}${own ? `\n${own}` : ''}`;
           })
           .join('\n');
       },
@@ -660,6 +729,84 @@ export function officeTools(o: {
       run: ({ employee }, args) => {
         company.updateBrief(employee.id, str(args, 'text'));
         return 'Şirket özeti güncellendi ve bütün masalara dağıtıldı.';
+      },
+    },
+    {
+      name: 'profileUpdate',
+      description: `Write one section of the company profile (coordinator): the fields given replace theirs, null or an empty value removes one, the others stay; every change is a new version. assumed (required) is about the fields given in this call only: true when you filled them in without the owner saying so, false when they are the owner's word — give an assumed field again with assumed: false once the owner confirms it; the other fields keep their mark. The brief is not changed. Sections and fields (name[] = a list of texts): ${profileFieldsHelp()}.`,
+      inputSchema: object(
+        {
+          section: { type: 'string', enum: [...PROFILE_SECTIONS], description: 'The section.' },
+          fields: { type: 'object', description: 'Field → text, list of texts, or null to remove.' },
+          assumed: { type: 'boolean', description: 'The fields given here: true = your assumption, false = the owner said so.' },
+        },
+        ['section', 'fields', 'assumed'],
+      ),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        const before = company.profile().version;
+        const entry = company.profileUpdate(employee.id, { section: args.section, fields: args.fields, assumed: args.assumed });
+        const label = PROFILE_SPEC[entry.section].label;
+        if (entry.version <= before) return `Değişiklik yok: ${label} (sürüm ${entry.version}) zaten böyle.`;
+        return entry.assumed
+          ? `Profil güncellendi: ${label} (sürüm ${entry.version}; varsayım: ${entry.assumedFields.join(', ')}). Sahibi doğrulayınca bu alanları assumed: false ile yeniden yaz.`
+          : `Profil güncellendi: ${label} (sürüm ${entry.version}).`;
+      },
+    },
+    {
+      name: 'integrationRegister',
+      description: `Record a connector in the integration registry by hand (coordinator): one the sessions do not show (an adapter or a CLI, give kind), or notes on one they do — capabilities, what the owner must do (authNeeded), cost, a note — or close it (closed: true; the registry marks it, B9 will shut it in sessions). Fields given are written, the others kept. Kinds: ${INTEGRATION_KINDS.join(', ')}.`,
+      inputSchema: object(
+        {
+          name: s('Connector name as the sessions report it (e.g. "claude.ai Gmail") or your own.'), kind: { type: 'string', enum: [...INTEGRATION_KINDS] }, capabilities: strings('What it can do, e.g. email.read, social.publish.'),
+          authNeeded: s('What the owner must do to make it work.'), costNote: s('What it costs.'), note: s('A note.'), closed: { type: 'boolean', description: 'Closed: not to be used.' },
+        },
+        ['name'],
+      ),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
+        const i = o.integrations.register(employee.id, { name: args.name, kind: args.kind, capabilities: args.capabilities, authNeeded: args.authNeeded, costNote: args.costNote, note: args.note, closed: args.closed });
+        return `Kayıt güncellendi: ${i.name} [${INTEGRATION_STATUS_LABELS[i.status]}].`;
+      },
+    },
+    {
+      name: 'onboardingStart',
+      description: 'Start the onboarding (coordinator) when the owner tells what the company does: their sentence goes into the profile as their word and the dialog opens; the reply is the guide to follow.',
+      inputSchema: object({ description: s('The owner’s own sentence about what the company does.') }, ['description']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        company.onboardingStart(employee.id, str(args, 'description'));
+        return `Onboarding başladı: iş tarifi profile sahibinin sözü olarak yazıldı (identity.summary).\n\n${onboardingGuideText()}`;
+      },
+    },
+    {
+      name: 'onboardingNext',
+      description: 'The next onboarding questions to ask the owner in one message (coordinator): at most five, required first, your guesses to confirm; and the questions asked twice without an answer, to fill by assumption. A round counts once the owner replied after it; until then this gives the same round again and records nothing. optional: true brings the optional questions once the required are in.',
+      inputSchema: object({ optional: { type: 'boolean', description: 'Also the optional questions (once the required are in).' } }),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        return nextText(company.onboardingNext(employee.id, { optional: bool(args, 'optional') }));
+      },
+    },
+    {
+      name: 'onboardingRead',
+      description: 'Where the onboarding stands (coordinator), recording nothing: the questions answered, assumed and open, the round still waiting for the owner or the one that would come next, and what to fill by assumption. Use it to look again, e.g. after your session restarted.',
+      inputSchema: object({ optional: { type: 'boolean', description: 'Show the optional questions that would come (once the required are in).' } }),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => nextText(company.onboardingPeek(employee.id, { optional: bool(args, 'optional') }), 'read'),
+    },
+    {
+      name: 'onboardingFinish',
+      description: 'End the onboarding (coordinator) once no required question is open: answered by the owner or filled by assumption (marked). The reply counts the assumptions to tell the owner.',
+      inputSchema: object({}),
+      kinds: COORDINATOR,
+      run: ({ employee }) => {
+        const view = company.onboardingFinish(employee.id);
+        const req = view.questions.filter((v) => v.required);
+        const assumed = req.filter((v) => v.state === 'assumed').map((v) => v.id);
+        const owners = req.length - assumed.length;
+        return `Onboarding bitti: zorunlu ${req.length} sorunun ${ofThem(owners)} sahibinden${assumed.length ? `, ${ofThem(assumed.length)} varsayım (${assumed.join(', ')}). Varsayımları sahibine kısaca bildir; doğrularsa profileUpdate(…, assumed: false).` : '.'}`;
       },
     },
     {

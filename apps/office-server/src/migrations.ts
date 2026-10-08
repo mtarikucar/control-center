@@ -364,4 +364,80 @@ export const MIGRATIONS: Migration[] = [
     up: `ALTER TABLE tasks ADD COLUMN nudged_at INTEGER;`,
     down: `ALTER TABLE tasks DROP COLUMN nudged_at;`,
   },
+  {
+    // integration/core-1: B16 entered the merge order before B2, so the goal KPIs keep 12 and the profile takes 13.
+    version: 12,
+    name: 'goal KPIs',
+    // Goals from before: no KPIs.
+    up: `ALTER TABLE goals ADD COLUMN kpis TEXT NOT NULL DEFAULT '[]';`,
+    down: `ALTER TABLE goals DROP COLUMN kpis;`,
+  },
+  {
+    // feat/company-profile wrote this as 12; it is 13 here (after the goal KPIs, see above).
+    version: 13,
+    name: 'company profile: sections, one row per version',
+    // Append-only: a section's current state is its row with the highest version; the version is company-wide.
+    // assumed_fields: which fields are assumptions; assumed: any of them is.
+    up: `
+      CREATE TABLE IF NOT EXISTS company_profile (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL UNIQUE,
+        section TEXT NOT NULL,
+        json TEXT NOT NULL,
+        assumed INTEGER NOT NULL,
+        assumed_fields TEXT NOT NULL DEFAULT '[]',
+        by TEXT NOT NULL,
+        ts INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS company_profile_section ON company_profile (section, version);`,
+    down: `
+      DROP INDEX IF EXISTS company_profile_section;
+      DROP TABLE IF EXISTS company_profile;`,
+  },
+  {
+    // v15 is kept for B3 (the integration registry), spec 2026-10-08-onboarding-design §4.
+    version: 14,
+    name: 'onboarding: the owner\'s sentence and the rounds of questions',
+    // One onboarding runs at a time; finished ones stay. A round is the block of questions asked in one message;
+    // seq: the event that announced it — the owner's reply after it is what makes it count as asked.
+    up: `
+      CREATE TABLE IF NOT EXISTS onboarding (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_by TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS onboarding_rounds (
+        onboarding_id TEXT NOT NULL,
+        round INTEGER NOT NULL,
+        questions TEXT NOT NULL,
+        asked_at INTEGER NOT NULL,
+        seq INTEGER NOT NULL,
+        PRIMARY KEY (onboarding_id, round)
+      );`,
+    down: `
+      DROP TABLE IF EXISTS onboarding_rounds;
+      DROP TABLE IF EXISTS onboarding;`,
+  },
+  {
+    version: 15,
+    name: 'integration registry: what the coordinator records by hand',
+    // What each desk's session reports is not copied here: it is read from the session.started events.
+    up: `
+      CREATE TABLE IF NOT EXISTS integrations (
+        name TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        closed INTEGER NOT NULL DEFAULT 0,
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        auth_needed TEXT,
+        cost_note TEXT,
+        note TEXT,
+        registered_by TEXT NOT NULL,
+        registered_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );`,
+    down: `DROP TABLE IF EXISTS integrations;`,
+  },
 ];

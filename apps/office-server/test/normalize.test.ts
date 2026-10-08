@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { TOOL_OUTPUT_LIMIT, normalize, truncate } from '../src/claude/normalize.ts';
+import { TOOL_OUTPUT_LIMIT, mcpToolPrefix, normalize, truncate } from '../src/claude/normalize.ts';
 
 // Shapes copied from a real `claude -p --output-format stream-json --verbose` run (2026-10-06), trimmed.
 const INIT = {
@@ -57,12 +58,32 @@ describe('normalize', () => {
       {
         type: 'session.started',
         model: 'claude-haiku-4-5-20251001',
+        // This trimmed init lists no tools: every server has none in it.
         mcp: [
-          { name: 'office', status: 'connected' },
-          { name: 'claude.ai Gmail', status: 'needs-auth' },
+          { name: 'office', status: 'connected', tools: 0 },
+          { name: 'claude.ai Gmail', status: 'needs-auth', tools: 0 },
         ],
       },
     ]);
+  });
+
+  it('review focus (Kerem, round 1): counts each server’s tools in the session — a deny in the desk’s settings leaves the server connected with none', () => {
+    // A real init (claude 2.1.293; Selin's K3, the desk's .claude/settings.json denying Gmail, Jeeta and Higgsfield).
+    const init = JSON.parse(readFileSync(new URL('./fixtures/init-mcp-deny.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    const [event] = normalize(init);
+    expect(event?.type).toBe('session.started');
+    const of = (name: string) => (event as { mcp: Array<{ name: string; status: string; tools?: number }> }).mcp.find((m) => m.name === name);
+    expect(of('claude.ai Gmail')).toEqual({ name: 'claude.ai Gmail', status: 'connected', tools: 0 });
+    expect(of('claude.ai Notion')).toEqual({ name: 'claude.ai Notion', status: 'connected', tools: 46 });
+    expect(of('claude.ai Claude Docs')).toMatchObject({ tools: 8 });
+    expect(of('plugin:playwright:playwright')).toMatchObject({ status: 'connected', tools: 25 });
+    expect(of('plugin:design:figma')).toMatchObject({ status: 'needs-auth', tools: 0 });
+    // Server names become tool prefixes as the CLI writes them.
+    expect(['claude.ai Gmail', 'claude.ai Google Calendar', 'plugin:playwright:playwright', 'cad'].map(mcpToolPrefix)).toEqual([
+      'mcp__claude_ai_Gmail__', 'mcp__claude_ai_Google_Calendar__', 'mcp__plugin_playwright_playwright__', 'mcp__cad__',
+    ]);
+    // An init without a tool list says nothing about tools.
+    expect(normalize({ type: 'system', subtype: 'init', model: 'm', mcp_servers: [{ name: 'office', status: 'connected' }] })).toEqual([{ type: 'session.started', model: 'm', mcp: [{ name: 'office', status: 'connected' }] }]);
   });
 
   it('maps tool_use, text and drops thinking blocks', () => {
