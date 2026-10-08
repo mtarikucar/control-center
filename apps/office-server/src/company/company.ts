@@ -913,11 +913,14 @@ export class Company {
     if (free) {
       // Full autonomy: the revision goes on at once, as the coordinator's.
       // A finished plan stays finished until it gets new work (a task reopens it): an empty "approved" would look running forever.
-      const status = current.status === 'done' && this.#d.tasks.openInPlan(planId) === 0 ? 'done' : 'approved';
+      // A stream still to do is work too: a revision that adds one starts the plan again.
+      const status = current.status === 'done' && this.#d.tasks.openInPlan(planId) === 0 && this.#streamsDone(planId, streams) ? 'done' : 'approved';
       const plan = this.#d.plans.update(planId, { ...merged, method, streams, version: current.version + 1, status, approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
       this.#d.plans.clearApproved(planId);
       this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
-      return plan;
+      // Dropping the last unfinished stream leaves nothing to do: the plan finishes as when its last task closes.
+      if (status === 'approved' && streams.length > 0) this.#maybeFinishPlan(planId);
+      return this.#d.plans.get(planId);
     }
     // A revision of an approved (or finished) plan is a new proposal: it waits for the owner again (rule B, big change).
     // Rule B: the approved version is kept until the owner decides on the revision (only the first revision saves it).
@@ -1486,6 +1489,8 @@ export class Company {
     if (plan.status !== 'approved' || this.#d.tasks.openInPlan(planId) > 0) return;
     // A live routine is open work too: its plan runs while the routine does (spec §4.4).
     if (this.#d.schedules?.list({ planId, statuses: ['active', 'paused'], limit: 1 }).length) return;
+    // So is a stream not done yet (management cycle §3.4): the next stream's tasks may not be opened yet.
+    if (!this.#streamsDone(planId, plan.streams ?? [])) return;
     const done = this.#d.plans.update(planId, { status: 'done' });
     const desk = this.#planDesk(done);
     this.#d.notices.add(
@@ -1494,6 +1499,13 @@ export class Company {
       `“${plan.title}” planının açık görevi kalmadı. İş bittiyse planRetro ile değerlendir (ne iyi gitti, ne takıldı, ne değişecek; her şirkete yarayacak bir yöntem önerin varsa methodSuggestion), şirkete özgü dersi playbookUpdate ile el kitabına yaz ve reportToOwner ile sahibine kısaca raporla. Sürüyorsa bu plana yeni görev açabilirsin (plan yeniden açılır).`,
     );
     this.#emit(desk, { type: 'plan.changed', change: 'done', plan: done });
+  }
+
+  /** Every one of these streams of the plan is done by its tasks (true for none). */
+  #streamsDone(planId: string, streams: readonly PlanStream[]): boolean {
+    if (streams.length === 0) return true;
+    const tasks = this.#d.tasks.list({ planId, limit: 100_000 });
+    return streams.every((x) => streamStatus(tasks.filter((t) => t.streamId === x.id)) === 'done');
   }
 
   /** The coordinator opens a plan's tasks as the work unfolds: a new task on a plan whose tasks had all finished. */
