@@ -2,24 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { streamStatus, type Employee, type TaskStatus } from '@cc/shared';
 import { checkStreams } from '../src/company/streams.ts';
 
-const ada = { id: 'e-ada', name: 'Ada' } as Employee;
-const can = { id: 'e-can', name: 'Can' } as Employee;
-/** The office's lookup: by id or by name; null for no one. */
-const person = (who: string): Employee | null => [ada, can].find((e) => e.id === who || e.name.toLocaleLowerCase('tr') === who.toLocaleLowerCase('tr').trim()) ?? null;
+const ada = { id: 'e-ada', name: 'Ada', lifecycle: 'idle' } as Employee;
+const can = { id: 'e-can', name: 'Can', lifecycle: 'idle' } as Employee;
+const eda = { id: 'e-eda', name: 'Eda', lifecycle: 'archived' } as Employee;
+/** The office's lookup: by id or by name; someone let go only by id (as the company gives them); null for no one. */
+const person = (who: string): Employee | null =>
+  [ada, can].find((e) => e.id === who || e.name.toLocaleLowerCase('tr') === who.toLocaleLowerCase('tr').trim()) ?? (who === eda.id ? eda : null);
 const check = (value: unknown) => checkStreams(value, person);
 
 describe('stream status (derived from its tasks, never stored)', () => {
   const of = (...statuses: TaskStatus[]) => streamStatus(statuses.map((status) => ({ status })));
 
-  it('planned with no tasks, or only waiting and parked ones', () => {
+  it('planned with no tasks, only waiting and parked ones, or only cancelled ones', () => {
     expect(of()).toBe('planned');
     expect(of('waiting', 'parked')).toBe('planned');
+    expect(of('cancelled')).toBe('planned');
+    expect(of('cancelled', 'waiting')).toBe('planned');
   });
 
-  it('done when it has tasks and every one is done or cancelled', () => {
+  it('done when every task is closed and at least one is done', () => {
     expect(of('done')).toBe('done');
     expect(of('done', 'cancelled')).toBe('done');
-    expect(of('cancelled')).toBe('done');
   });
 
   it('blocked when any task is blocked, before active', () => {
@@ -27,9 +30,11 @@ describe('stream status (derived from its tasks, never stored)', () => {
     expect(of('in_progress', 'blocked', 'done')).toBe('blocked');
   });
 
-  it('active when any task is in progress or in review', () => {
+  it('active when work started and some is still open: a task done, in progress or in review', () => {
     expect(of('waiting', 'in_progress')).toBe('active');
     expect(of('done', 'review')).toBe('active');
+    expect(of('done', 'waiting')).toBe('active');
+    expect(of('done', 'parked', 'cancelled')).toBe('active');
   });
 });
 
@@ -69,6 +74,10 @@ describe('checkStreams', () => {
     expect(() => check([{ id: 'api', title: 'API' }])).toThrow(/“api” akışının sahibi \(owner\) boş olamaz/);
     expect(() => check([{ id: 'api', title: 'API', owner: 'Zeynep' }])).toThrow(/“api” akışının sahibi bulunamadı: Zeynep/);
     expect(() => check([{ id: 'api', title: 'API', owner: 'alınacak:  ' }])).toThrow(/alınacak: <rol>/);
+  });
+
+  it('refuses an owner who was let go, saying so and asking for a new owner', () => {
+    expect(() => check([{ id: 'api', title: 'API', owner: eda.id }])).toThrow(/“api” akışının sahibi Eda işten ayrıldı; akışa yeni bir sahip ver/);
   });
 
   it('refuses dependencies outside the plan, on itself, or that are not a list of ids', () => {

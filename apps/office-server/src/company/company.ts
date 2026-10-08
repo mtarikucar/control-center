@@ -1457,9 +1457,9 @@ export class Company {
     };
   }
 
-  /** A plan's streams as given, with their owners looked up by id or name. */
+  /** A plan's streams as given, with their owners looked up by id or name (by id also someone let go: a stream they owned needs a new owner). */
   #streams(value: unknown): PlanStream[] {
-    return checkStreams(value, (who) => this.#d.roster.byIdOrName(who));
+    return checkStreams(value, (who) => this.#d.roster.byIdOrName(who) ?? this.#person(who));
   }
 
   /** A revision may change any stream but not drop one that tasks belong to: they would point at nothing. */

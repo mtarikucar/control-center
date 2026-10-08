@@ -10,8 +10,9 @@ const OWNER_HELP = 'ofisteki bir çalışanın adı ya da kimliği (officeStatus
 
 /**
  * A plan's streams as the coordinator gave them, checked: each a short lowercase slug unique in the plan, a title, an
- * owner — someone in the office, stored by id (`person` is the office's lookup by id or name, null for no one), or
- * `alınacak: <rol>` — and the ids of the plan's streams it waits for, with no cycle. Absent: none.
+ * owner — someone at work in the office, stored by id (`person` is the office's lookup by id or name, null for no one;
+ * it may give someone let go, who is refused as such), or `alınacak: <rol>` — and the ids of the plan's streams it
+ * waits for, with no cycle. Absent: none.
  */
 export function checkStreams(value: unknown, person: (who: string) => Employee | null): PlanStream[] {
   if (value === undefined || value === null) return [];
@@ -58,6 +59,7 @@ function ownerOf(id: string, given: string, person: (who: string) => Employee | 
   }
   const found = person(text);
   if (!found) throw new ValidationError(`“${id}” akışının sahibi bulunamadı: ${text}. Sahip ${OWNER_HELP} olmalı.`);
+  if (found.lifecycle === 'archived') throw new ValidationError(`“${id}” akışının sahibi ${found.name} işten ayrıldı; akışa yeni bir sahip ver: ${OWNER_HELP}.`);
   return found.id;
 }
 

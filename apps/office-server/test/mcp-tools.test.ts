@@ -298,6 +298,24 @@ describe('office tools — task difficulty', () => {
     expect(props('taskCreate')).toHaveProperty('streamId');
   });
 
+  it('planRevise says whether the plan waits for the owner, runs, or is finished until it gets new work', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'P', goal: 'g', approach: 'a' });
+    expect(await t.call(c, 'planRevise', { planId: plan.id, days: 1 })).toMatch(/sürüm 2, sahibinin onayını bekliyor/);
+    t.budget.setConstitution({ autonomy: 'free' });
+    expect(await t.call(c, 'planRevise', { planId: plan.id, days: 2 })).toMatch(/sürüm 3, sürüyor/);
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'tek iş', planId: plan.id });
+    t.company.start(task.id);
+    t.company.finish(ada.id, task.id, { summary: 'tamam', outputs: [], learned: '' });
+    expect(t.plans.get(plan.id).status).toBe('done');
+    const reply = await t.call(c, 'planRevise', { planId: plan.id, days: 3 });
+    expect(t.plans.get(plan.id).status).toBe('done');
+    expect(reply).not.toMatch(/onay/);
+    expect(reply).toMatch(/sürüm 4\. Plan bitmiş sayılıyor; bu plana görev açınca yeniden başlar/);
+  });
+
   it('taskFinish takes evidence and says how many lines a hand-in needs', async () => {
     const t = make();
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });

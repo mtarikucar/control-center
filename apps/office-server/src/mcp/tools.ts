@@ -635,7 +635,12 @@ export function officeTools(o: {
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
         const plan = company.revise(employee.id, str(args, 'planId'), { title: optStr(args, 'title'), goal: optStr(args, 'goal'), approach: optStr(args, 'approach'), method: args.method, streams: args.streams, people: optStr(args, 'people'), steps: list(args, 'steps'), quotaPct: num(args, 'quotaPct'), usd: num(args, 'usd'), days: num(args, 'days'), risks: optStr(args, 'risks') });
-        return `${plan.status === 'approved' ? `Plan güncellendi: sürüm ${plan.version}, sürüyor.` : `Plan güncellendi: sürüm ${plan.version}, sahibinin onayını bekliyor.`}${streamsLine(plan)}`;
+        // Under full autonomy a finished plan with no open work stays finished (spec §6.2): it does not wait for anyone.
+        const state =
+          plan.status === 'draft' ? `sürüm ${plan.version}, sahibinin onayını bekliyor.`
+          : plan.status === 'done' ? `sürüm ${plan.version}. Plan bitmiş sayılıyor; bu plana görev açınca yeniden başlar.`
+          : `sürüm ${plan.version}, sürüyor.`;
+        return `Plan güncellendi: ${state}${streamsLine(plan)}`;
       },
     },
     {

@@ -283,12 +283,16 @@ export interface PlanStreamView extends PlanStream {
   status: StreamStatus;
 }
 
-/** A stream's status from its tasks: done (it has tasks, all done or cancelled), blocked (any blocked), active (any in progress or in review), planned otherwise. */
+/**
+ * A stream's status from its tasks: blocked (any blocked); done (every task closed, at least one done); active (work
+ * started — a task done, in progress or in review — and some still open); planned otherwise (no tasks, none started,
+ * or every one cancelled).
+ */
 export function streamStatus(tasks: ReadonlyArray<Pick<Task, 'status'>>): StreamStatus {
-  if (tasks.length > 0 && tasks.every((t) => t.status === 'done' || t.status === 'cancelled')) return 'done';
   if (tasks.some((t) => t.status === 'blocked')) return 'blocked';
-  if (tasks.some((t) => t.status === 'in_progress' || t.status === 'review')) return 'active';
-  return 'planned';
+  const started = tasks.some((t) => t.status === 'done' || t.status === 'in_progress' || t.status === 'review');
+  if (tasks.every((t) => t.status === 'done' || t.status === 'cancelled')) return tasks.some((t) => t.status === 'done') ? 'done' : 'planned';
+  return started ? 'active' : 'planned';
 }
 
 export interface Plan {

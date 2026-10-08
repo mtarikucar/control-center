@@ -84,6 +84,16 @@ describe('plan streams', () => {
     expect(revised.streams?.map((s) => [s.id, s.title, s.owner])).toEqual([['api', 'API ve veri', t.can.id], ['ui', 'Arayüz', 'alınacak: tasarımcı']]);
   });
 
+  it('a revision that resends the owner of a stream who was let go says they left and the stream needs a new owner', () => {
+    const t = make();
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: STREAMS });
+    t.roster.update(t.ada.id, { lifecycle: 'archived' });
+    const same = t.plans.get(plan.id).streams!;
+    expect(() => t.company.revise(t.coordinator.id, plan.id, { streams: same })).toThrow(/“api” akışının sahibi Ada işten ayrıldı; akışa yeni bir sahip ver/);
+    expect(t.company.revise(t.coordinator.id, plan.id, { days: 2 }).streams?.[0]?.owner).toBe(t.ada.id);
+    expect(t.company.revise(t.coordinator.id, plan.id, { streams: [{ ...same[0]!, owner: 'Can' }, same[1]!] }).streams?.[0]?.owner).toBe(t.can.id);
+  });
+
   it('taskCreate links a task to a stream of its plan', () => {
     const t = make();
     const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: STREAMS });
