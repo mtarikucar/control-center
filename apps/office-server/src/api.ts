@@ -78,7 +78,9 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
   // Each plan's streams with the status their tasks give them (management cycle §3.4): derived here, never stored.
   const service = d.company.service;
-  const plans = d.company.plans.list().map((p): PlanView => ({ ...p, streams: p.streams?.length ? service.planStreams(p.id) : [] }));
+  const all = d.company.plans.list();
+  const streams = service.streamsOf(all);
+  const plans = all.map((p): PlanView => ({ ...p, streams: streams.get(p.id) ?? [] }));
   return {
     ...base, tasks: [...open, ...closed], plans, budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
     goals: d.company.service.goals(), paused: d.company.service.paused(), schedules: d.company.service.schedules(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),

@@ -226,9 +226,19 @@ describe('company data', () => {
     expect(d.plans.p2?.streams).toBeUndefined();
   });
 
-  it('a stream’s status is the server’s: a stream task’s change or a plan with streams asks for a fresh snapshot, other tasks and plans do not', () => {
-    expect(needsRefresh(stored({ type: 'task.changed', change: 'finished', task: task({ streamId: 'api', status: 'done' }) }))).toBe(true);
-    expect(needsRefresh(stored({ type: 'task.changed', change: 'finished', task: task({ status: 'done' }) }))).toBe(false);
+  it('a stream’s status is the server’s: a stream task’s change of status or of stream, or one the page did not have, asks for a fresh snapshot; a plan with streams too; nothing else does', () => {
+    const before = applySnapshot(EMPTY_DATA, snapshot({ tasks: [task({ streamId: 'api', status: 'in_progress' }), task({ id: 't2' })] }));
+    // Its status changed, or it moved to another stream: the stream's status may have.
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'finished', task: task({ streamId: 'api', status: 'done' }) }), before)).toBe(true);
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'updated', task: task({ streamId: 'ui', status: 'in_progress' }) }), before)).toBe(true);
+    // New to the page (created, or an old one it never had), in a stream.
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'created', task: task({ id: 't9', streamId: 'api' }) }), before)).toBe(true);
+    // The same status in the same stream (a note, a reassignment, a reminder): no.
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'updated', task: task({ streamId: 'api', status: 'in_progress', note: 'yarısı bitti' }) }), before)).toBe(false);
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'assigned', task: task({ streamId: 'api', status: 'in_progress', assignee: 'e2' }) }), before)).toBe(false);
+    // Out of a stream, or never in one.
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'updated', task: task({ streamId: null, status: 'in_progress' }) }), before)).toBe(true);
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'finished', task: task({ id: 't2', status: 'done' }) }), before)).toBe(false);
     expect(needsRefresh(stored({ type: 'plan.changed', change: 'revised', plan: plan({ streams: [{ id: 'api', title: 'API', owner: 'e1', dependsOn: [] }] }) }))).toBe(true);
     expect(needsRefresh(stored({ type: 'plan.changed', change: 'approved', plan: plan({ streams: [] }) }))).toBe(false);
   });
@@ -351,6 +361,23 @@ describe('the scheduler', () => {
     d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 1 }), 'http');
     expect(d.managementRev).toBe(rev + 2);
     d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 2 }), 'live');
+    expect(d.managementRev).toBe(rev + 3);
+  });
+
+  it('a lost board, the coordinator’s cycleClose and the end of each of its turns move managementRev too (the open card follows); nobody else’s turn does', () => {
+    const coordinator = employee({ id: 'k', kind: 'coordinator', name: 'Koordinatör' });
+    let d = applySnapshot(EMPTY_DATA, snapshot({ employees: [coordinator, employee()] }), 'live');
+    const rev = d.managementRev;
+    d = applyEvent(d, stored({ type: 'management.cycle.lost', startedAt: 5, reason: 'Pano koordinatöre ulaşmadı' }, 'k'));
+    expect(d.managementRev).toBe(rev + 1);
+    d = applyEvent(d, stored({ type: 'tool.started', toolUseId: 'u1', name: 'mcp__office__cycleClose', input: {} }, 'k'));
+    expect(d.managementRev).toBe(rev + 2);
+    d = applyEvent(d, stored({ type: 'tool.started', toolUseId: 'u2', name: 'mcp__office__officeStatus', input: {} }, 'k'));
+    expect(d.managementRev).toBe(rev + 2);
+    d = applyEvent(d, stored({ type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd: 0.1, numTurns: 1, queuedTurns: 1, sessionUsage: null, sessionCostUsd: 0.1 }, 'k'));
+    expect(d.managementRev).toBe(rev + 3);
+    d = applyEvent(d, stored({ type: 'turn.finished', ok: true, subtype: 'success', usage, costUsd: 0.1, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0.1 }, 'e1'));
+    d = applyEvent(d, stored({ type: 'tool.started', toolUseId: 'u3', name: 'mcp__office__cycleClose', input: {} }, 'e1'));
     expect(d.managementRev).toBe(rev + 3);
   });
 

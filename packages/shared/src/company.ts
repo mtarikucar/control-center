@@ -367,8 +367,8 @@ export interface ManagementCycleRecord extends CycleCloseWords {
   /** The event's seq. */
   seq: number;
   startedAt: number;
-  /** When it was recorded: the end of the turn that carried the board. */
-  endedAt: number;
+  /** When the turn that carried the board ended; null: not known (the office stopped before the coordinator did anything in it). */
+  endedAt: number | null;
   /** Closed with cycleClose; false: the turn ended without it (“kapanmadı”). */
   closed: boolean;
   triggers: CycleTrigger[];

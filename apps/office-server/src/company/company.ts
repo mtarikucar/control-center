@@ -960,8 +960,21 @@ export class Company {
   /** A plan's streams with the status their tasks give them (management cycle §3.4). */
   planStreams(planId: string): PlanStreamView[] {
     const plan = this.#d.plans.get(planId);
-    const tasks = this.#d.tasks.list({ planId });
-    return (plan.streams ?? []).map((s) => ({ ...s, status: streamStatus(tasks.filter((t) => t.streamId === s.id)) }));
+    return this.streamsOf([plan]).get(plan.id) ?? [];
+  }
+
+  /** These plans' streams, each with the status its tasks give it, from one read of their tasks (the snapshot's plans). */
+  streamsOf(plans: readonly Plan[]): Map<string, PlanStreamView[]> {
+    const withStreams = plans.filter((p) => (p.streams?.length ?? 0) > 0);
+    // Keyed plan/stream: a plan id is a UUID and a stream id a slug, neither has a slash.
+    const statuses = new Map<string, Array<Pick<Task, 'status'>>>();
+    for (const t of this.#d.tasks.streamTaskStatuses(withStreams.map((p) => p.id))) {
+      const key = `${t.planId}/${t.streamId}`;
+      const list = statuses.get(key);
+      if (list) list.push(t);
+      else statuses.set(key, [t]);
+    }
+    return new Map(withStreams.map((p) => [p.id, (p.streams ?? []).map((s) => ({ ...s, status: streamStatus(statuses.get(`${p.id}/${s.id}`) ?? []) }))]));
   }
 
   /** A plan waits for the owner or is under way. */

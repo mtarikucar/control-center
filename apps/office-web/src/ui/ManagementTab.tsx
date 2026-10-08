@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { CycleCloseWords, CycleTrigger, ModelAlias } from '@cc/shared';
+import { saysNoChange, type CycleCloseWords, type CycleTrigger, type ModelAlias } from '@cc/shared';
 import { formatCost, formatDuration, formatWhenTR } from './format.ts';
 import { modelName, triggerText } from './labels.ts';
 import { useManagement } from './useManagement.ts';
@@ -19,13 +19,14 @@ function useNow(ms: number, on: boolean): number {
   return now;
 }
 
-/** “değişiklik yok, çünkü …” as the coordinator wrote it (cycleClose requires the words). */
-const noChange = (reasoning: string) => (reasoning.toLocaleLowerCase('tr').includes('değişiklik yok') ? reasoning : `Değişiklik yok — ${reasoning}`);
+/** “değişiklik yok, çünkü …” as the coordinator wrote it, in any spelling (cycleClose requires the words, by the same check). */
+const noChange = (reasoning: string) => (saysNoChange(reasoning) ? reasoning : `Değişiklik yok — ${reasoning}`);
 
 interface CycleCardProps {
   state: 'open' | 'closed' | 'unclosed';
   startedAt: number;
-  durationMs: number;
+  /** null: not known (the office stopped before the coordinator did anything in the cycle). */
+  durationMs: number | null;
   model: ModelAlias | null;
   costUsd: number | null;
   triggers: CycleTrigger[];
@@ -65,7 +66,7 @@ function CycleCard({ state, startedAt, durationMs, model, costUsd, triggers, wor
     <article className={`cycle-card ${state}`} aria-label={`Yönetim turu ${when}`}>
       <header className="cycle-head">
         <time dateTime={new Date(startedAt).toISOString()}>{when}</time>
-        <span className="muted">{formatDuration(durationMs)}</span>
+        <span className="muted">{durationMs === null ? 'süre bilinmiyor' : formatDuration(durationMs)}</span>
         {model && <span className="badge model">{modelName(model)}</span>}
         {state === 'open' && <span className="badge cycle-open">sürüyor</span>}
         {state === 'unclosed' && <span className="badge cycle-unclosed">kapanmadı</span>}
@@ -135,7 +136,7 @@ export function ManagementTab() {
               <CycleCard state="open" startedAt={log.open.startedAt} durationMs={now - log.open.startedAt} model={log.open.model} costUsd={log.open.costUsd} triggers={log.open.triggers} words={log.open.close} now={now} />
             )}
             {cycles.map((c) => (
-              <CycleCard key={c.seq} state={c.closed ? 'closed' : 'unclosed'} startedAt={c.startedAt} durationMs={c.endedAt - c.startedAt} model={c.model} costUsd={c.costUsd} triggers={c.triggers} words={c.closed ? c : null} now={now} />
+              <CycleCard key={c.seq} state={c.closed ? 'closed' : 'unclosed'} startedAt={c.startedAt} durationMs={c.endedAt === null ? null : c.endedAt - c.startedAt} model={c.model} costUsd={c.costUsd} triggers={c.triggers} words={c.closed ? c : null} now={now} />
             ))}
           </div>
         </>

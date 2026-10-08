@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, normalizeConstitution, type BudgetSummary, type Constitution, type CycleTrigger, type CycleTriggerKind, type ManagementCycleRecord, type ManagementLog, type ModelAlias, type OfficeEvent, type StoredEvent, type Task, type TaskStatus } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, normalizeConstitution, saysNoChange, type BudgetSummary, type Constitution, type CycleTrigger, type CycleTriggerKind, type ManagementCycleRecord, type ManagementLog, type ModelAlias, type OfficeEvent, type StoredEvent, type Task, type TaskStatus } from '@cc/shared';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -33,7 +33,7 @@ const KEY = { lastStart: 'cycle.lastStartAt', pending: 'cycle.pending', open: 'c
 const PLAN_TR: Partial<Record<string, string>> = { approved: 'onaylandı', declined: 'onaylanmadı', kept: 'revizyonu onaylanmadı', done: 'bitti', stopped: 'sahibince durduruldu' };
 
 export interface CycleDeps {
-  events: Pick<EventStore, 'append' | 'subscribe' | 'since'>;
+  events: Pick<EventStore, 'append' | 'subscribe' | 'since' | 'lastTs'>;
   state: CompanyStateStore;
   company: Pick<Company, 'coordinator' | 'paused' | 'goals' | 'nameOf'>;
   roster: Pick<Roster, 'get'>;
@@ -84,6 +84,10 @@ export interface CycleOpening {
 const WATCHED = new Set<OfficeEvent['type']>(['task.changed', 'plan.changed', 'goal.changed', 'company.paused', 'budget.changed']);
 /** Lifecycles in which the cycle's turn is gone: it will not go on. */
 const TURN_GONE = new Set<string>(['interrupted', 'error', 'stopped', 'archived', 'in_terminal']);
+/** What the coordinator's session itself logs while it works: the end of a cycle the stopped office left open is the last of these. */
+const SESSION_WORK: OfficeEvent['type'][] = ['message.assistant', 'tool.started', 'tool.finished', 'turn.finished'];
+/** Why a board is lost (the engine reports only that no session read it). */
+const LOST_REASON = 'Pano koordinatöre ulaşmadı: oturum okuyamadı; tetikleri bir sonraki tura kaldı.';
 /** A reason beyond “değişiklik yok” (and “çünkü”) has at least this many letters. */
 const REASON_LETTERS = 5;
 
@@ -155,8 +159,12 @@ export class ManagementCycle {
     for (const t of this.#d.tasks.list({ statuses: OPEN_STATUSES, limit: 100_000 })) this.#holders.set(t.id, { assignee: t.assignee, status: t.status });
     this.#constitution = normalizeConstitution(this.#d.budget?.constitution());
     this.#reserve = this.#d.budget?.reserveActive() ?? false;
-    // A cycle the stopped office left open: its turn ended with that run.
-    if (this.#open()) this.ended();
+    // A cycle the stopped office left open: its turn ended with that run, at the coordinator's last work in it (not now).
+    const left = this.#open();
+    if (left) {
+      const c = this.#d.company.coordinator();
+      this.ended(c ? this.#d.events.lastTs(c.id, left.startedAt, SESSION_WORK) : null);
+    }
     if (this.#d.company.coordinator() && this.#openWork()) this.#push({ kind: 'start', at: now, note: '', seq: null });
     const off = this.#d.events.subscribe((e) => this.#onEvent(e));
     if (this.#d.clock) {
@@ -241,6 +249,8 @@ export class ManagementCycle {
       this.#saveOpen(null);
       this.#d.state.set(KEY.lastStart, o.since > 0 ? String(o.since) : null);
       if (o.unclosedWarning) this.#d.state.set(KEY.unclosed, 'true');
+      // The owner's page shows the cycle going on until it hears it is not.
+      this.#d.events.append(this.#d.company.coordinator()?.id ?? null, { type: 'management.cycle.lost', startedAt: o.at, reason: LOST_REASON });
     }
     const kept = this.#pending();
     const back = o.triggers.filter((t) => t.kind !== 'heartbeat' && !kept.some((x) => same(x, t)));
@@ -249,16 +259,17 @@ export class ManagementCycle {
 
   /**
    * The turn that carried the board is over: the cycle is recorded — closed with cycleClose's words, or not closed (once;
-   * the next board warns) — with what its turn cost.
+   * the next board warns) — with what its turn cost and when it ended (`endedAt`: now, unless the caller knows better;
+   * null when no one does).
    */
-  ended(): void {
+  ended(endedAt: number | null = this.#now()): void {
     const open = this.#open();
     if (!open) return;
     this.#saveOpen(null);
     this.#resultIn = false;
     if (!open.close) this.#d.state.set(KEY.unclosed, 'true');
     this.#d.events.append(this.#d.company.coordinator()?.id ?? null, {
-      type: 'management.cycle', closed: open.close !== null, startedAt: open.startedAt, triggers: open.triggers, ...(open.close ?? { changes: [], reasoning: '', next: null }), costUsd: open.costUsd,
+      type: 'management.cycle', closed: open.close !== null, startedAt: open.startedAt, endedAt, triggers: open.triggers, ...(open.close ?? { changes: [], reasoning: '', next: null }), costUsd: open.costUsd,
       model: open.model ?? null,
     });
   }
@@ -279,7 +290,7 @@ export class ManagementCycle {
     if (changes.length === 0) {
       const folded = fold(reasoning);
       const why = folded.replace('degisiklik yok', '').replace(/\bcunku\b/g, '').replace(/[^\p{L}\p{N}]/gu, '');
-      if (!folded.includes('degisiklik yok') || why.length < REASON_LETTERS) {
+      if (!saysNoChange(reasoning) || why.length < REASON_LETTERS) {
         throw new ValidationError('Değişiklik yoksa gerekçeyi “değişiklik yok, çünkü …” diye yaz ve nedenini söyle (ör. “değişiklik yok, çünkü iki akış da planda yürüyor”).');
       }
     }
@@ -300,7 +311,8 @@ export class ManagementCycle {
         const ev = e.event;
         if (ev.type !== 'management.cycle') return [];
         const { closed, startedAt, triggers, changes, reasoning, next, costUsd, model } = ev;
-        return [{ seq: e.seq, startedAt, endedAt: e.ts, closed, triggers, changes, reasoning, next, costUsd, model }];
+        // An older office's record has no end of its own: it was logged when its turn ended.
+        return [{ seq: e.seq, startedAt, endedAt: ev.endedAt === undefined ? e.ts : ev.endedAt, closed, triggers, changes, reasoning, next, costUsd, model }];
       });
     return {
       generatedAt: this.#now(),

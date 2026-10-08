@@ -91,15 +91,22 @@ export type OfficeEvent =
    */
   | { type: 'management.cycle.started'; triggers: CycleTrigger[]; since: number; unclosedWarning: boolean }
   /**
+   * The board of the cycle that started at `startedAt` never reached the coordinator (no session could read it): no
+   * cycle is going on, and its triggers wait for the next one. Not a cycle, so not in the log.
+   */
+  | { type: 'management.cycle.lost'; startedAt: number; reason: string }
+  /**
    * A management cycle's record (§3.3), logged when the turn that carried the board ends: closed with cycleClose (its
    * changes, reasoning and what to look at next) or not closed (the turn ended without it). `costUsd`: what the turn's
    * results cost (null: none came — a restart in the middle records what was known); `model`: the model the cycle was
-   * routed to (null until the model routing).
+   * routed to (null until the model routing). `endedAt`: when its turn ended — at a restart, the coordinator's last work
+   * in it (null: none after the board, so not known); absent from an older office's records, whose logged time is it.
    */
   | {
       type: 'management.cycle';
       closed: boolean;
       startedAt: number;
+      endedAt?: number | null;
       triggers: CycleTrigger[];
       changes: string[];
       reasoning: string;

@@ -1,4 +1,8 @@
+import { fold } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
+
+// One folding for the office and the owner's page (in @cc/shared): matching in code, the cycle log's “değişiklik yok”.
+export { fold };
 
 export function clean(value: string | undefined, label: string, max: number, required: boolean): string {
   const text = (value ?? '').trim();
@@ -14,10 +18,6 @@ export function lines(items: string[] | undefined, label: string, maxItems: numb
   return out;
 }
 
-/** Turkish-aware case and diacritic folding for matching in code ("İSTANBUL", "istanbul", "Türkçe" ≈ "turkce"). */
-export function fold(s: string): string {
-  return s.toLocaleLowerCase('tr').normalize('NFD').replace(/\p{M}/gu, '').replace(/ı/g, 'i');
-}
 
 export function words(s: string): string[] {
   return fold(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(0, 8);

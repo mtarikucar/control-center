@@ -153,6 +153,15 @@ export class TaskStore {
     return rows.map(taskFromRow);
   }
 
+  /** The status of every task in a stream of these plans (management cycle §3.4): many plans' streams in one read. */
+  streamTaskStatuses(planIds: readonly string[]): Array<{ planId: string; streamId: string; status: TaskStatus }> {
+    if (planIds.length === 0) return [];
+    const rows = this.#db
+      .prepare(`SELECT plan_id, stream_id, status FROM tasks WHERE stream_id IS NOT NULL AND plan_id IN (${planIds.map(() => '?').join(', ')})`)
+      .all(...planIds) as unknown as Array<{ plan_id: string; stream_id: string; status: TaskStatus }>;
+    return rows.map((r) => ({ planId: r.plan_id, streamId: r.stream_id, status: r.status }));
+  }
+
   /** A reset reminder takes its time with it: every change that sets `nudged` false clears `nudgedAt` too. */
   update(id: string, patch: TaskPatch): Task {
     const next = { ...this.get(id), ...patch };

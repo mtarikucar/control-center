@@ -121,6 +121,22 @@ function withStreamStatus(plan: Plan, known: PlanView | undefined, tasks: Record
   return { ...rest, streams: streams.map((x) => ({ ...x, status: before.get(x.id) ?? streamStatus(all.filter((t) => t.streamId === x.id)) })) };
 }
 
+/** The office tool that closes a management cycle, as the session names it (`mcp__office__cycleClose`). */
+const isCycleClose = (name: string) => name === 'cycleClose' || name.endsWith('__cycleClose');
+
+/**
+ * Events after which the management log reads differently (management cycle §3.3): a cycle starts, is recorded or its
+ * board is lost; and, for the cycle going on, the coordinator's cycleClose (its words) and each of its turn's results
+ * (its cost so far).
+ */
+function movesManagementLog(d: OfficeData, s: StoredEvent): boolean {
+  const t = s.event.type;
+  if (t === 'management.cycle.started' || t === 'management.cycle' || t === 'management.cycle.lost') return true;
+  if (t !== 'turn.finished' && t !== 'tool.started') return false;
+  if (!s.employeeId || d.views[s.employeeId]?.employee.kind !== 'coordinator') return false;
+  return s.event.type === 'turn.finished' || (s.event.type === 'tool.started' && isCycleClose(s.event.name));
+}
+
 /** Events after which an agenda may read differently (spec §6.1). */
 const AGENDA_EVENTS = new Set(['task.changed', 'plan.changed', 'schedule.changed', 'lifecycle.changed', 'budget.changed', 'company.paused', 'clock.jumped']);
 
@@ -150,7 +166,7 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'company.paused') next.paused = ev.paused;
   if (ev.type === 'schedule.changed') next.schedules = { ...d.schedules, [ev.schedule.id]: ev.schedule };
   if (AGENDA_EVENTS.has(ev.type)) next.agendaRev = d.agendaRev + 1;
-  if (ev.type === 'management.cycle.started' || ev.type === 'management.cycle') next.managementRev = d.managementRev + 1;
+  if (movesManagementLog(d, s)) next.managementRev = d.managementRev + 1;
   if (ev.type === 'task.changed' && ev.change === 'created' && ev.task.requester !== 'owner' && ev.task.requester !== ev.task.assignee) {
     next.pings = { ...d.pings, [ev.task.assignee]: { text: `Yeni iş: ${ev.task.title}`, at: s.ts } };
   }
@@ -222,12 +238,18 @@ export function mergeEvents(view: EmployeeView, loaded: StoredEvent[]): Employee
 
 /**
  * Events that change what only the snapshot carries: employee fields (who exists, lastError, limitResetsAt) and a
- * stream's status (derived on the server from all its tasks, the page has only the latest closed ones).
+ * stream's status (derived on the server from all its tasks; the page has only the latest closed ones). A stream's
+ * status depends only on its tasks' statuses and which tasks are in it: a task's change refreshes when it is or was in a
+ * stream and its status or its stream changed, or the page did not have it (`before`: the page before the event).
  */
-export function needsRefresh(s: StoredEvent): boolean {
+export function needsRefresh(s: StoredEvent, before?: OfficeData): boolean {
   const ev = s.event;
   const t = ev.type;
-  if (t === 'task.changed') return Boolean(ev.task.streamId);
+  if (t === 'task.changed') {
+    const was = before?.tasks[ev.task.id];
+    if (!ev.task.streamId && !was?.streamId) return false;
+    return !was || was.status !== ev.task.status || was.streamId !== ev.task.streamId || was.planId !== ev.task.planId;
+  }
   if (t === 'plan.changed') return (ev.plan.streams?.length ?? 0) > 0;
   return t === 'employee.hired' || t === 'employee.fired' || t === 'lifecycle.changed' || t === 'role.changed';
 }

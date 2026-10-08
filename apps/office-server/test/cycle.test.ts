@@ -595,7 +595,7 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     t.endTurn(t.coord.id, 0.5);
     await expect(close({ changes: [], reasoning: NO_CHANGE })).rejects.toThrow('Açık bir yönetim turu yok');
     expect(t.records()).toEqual([
-      { type: 'management.cycle', closed: true, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.7, model: 'fable' },
+      { type: 'management.cycle', closed: true, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.7, model: 'fable' },
     ]);
     expect(t.started()).toEqual([{ type: 'management.cycle.started', triggers: [{ kind: 'start', at: T0, note: '', seq: null }], since: 0, unclosedWarning: false }]);
   });
@@ -606,7 +606,7 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     const x = t.task(ada.id, 'Yaz');
     t.boot();
     t.endTurn(t.coord.id, 0.42);
-    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42, model: 'fable' }]);
+    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42, model: 'fable' }]);
     t.advance(30 * MIN);
     expect(t.started()).toHaveLength(1);
     t.finish(ada.id, x.id);
@@ -652,6 +652,29 @@ describe('management cycle — the dispatcher’s edges', () => {
     expect(t.started()[2]!.since).toBe(t.started()[1]!.since);
     expect(again.text).toContain('Can “Çiz” görevinde takıldı.');
     expect(t.notices.pending(t.coord.id)).toEqual([]);
+  });
+
+  it('a lost board leaves no cycle going on: the log has none open, and a management.cycle.lost event says which board and why — once', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    const x = t.task(ada.id, 'Yaz');
+    t.boot();
+    await t.closeCycle();
+    t.advance(30 * SEC);
+    t.finish(ada.id, x.id);
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.started()).toHaveLength(2);
+    const open = t.cycle().log().open!;
+    expect(open).not.toBeNull();
+    const board = t.toCoordinator().at(-1)!;
+    board.onLost!();
+    expect(t.cycle().log().open).toBeNull();
+    const lostEvents = () => t.log().filter((e) => e.event.type === 'management.cycle.lost');
+    expect(lostEvents().map((e) => [e.employeeId, e.event])).toEqual([[t.coord.id, { type: 'management.cycle.lost', startedAt: open.startedAt, reason: expect.stringContaining('ulaşmadı') }]]);
+    // A lost board is no cycle: nothing is recorded from it, and the engine saying so again logs nothing more.
+    board.onLost!();
+    expect(lostEvents()).toHaveLength(1);
+    expect(t.records()).toHaveLength(1);
   });
 
   it('a board that cannot be built never stops the office: the cycle still opens, says so, and the error is logged', async () => {
@@ -802,6 +825,31 @@ describe('management cycle — a restart (§5)', () => {
     expect(t.started()).toHaveLength(2);
     expect(t.started()[1]!.unclosedWarning).toBe(true);
     expect(t.records()).toHaveLength(1);
+  });
+
+  it('a cycle the stopped office left open ends, in its record, at the coordinator’s last work in it — not at the restart; with no work after the board its end is not known', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    t.task(ada.id, 'Yaz');
+    t.boot();
+    t.advance(4 * MIN);
+    t.result(t.coord.id, 0.1, { queuedTurns: 1 });
+    const lastWork = t.now();
+    // The office is down for hours; it comes back with the coordinator interrupted (engine.recover logs that at the restart).
+    t.advance(3 * HOUR, 5 * MIN);
+    const stop = () => t.restart(() => {
+      t.inTurn.delete(t.coord.id);
+      t.setLifecycle(t.coord.id, 'interrupted');
+    });
+    stop();
+    expect(t.records().map((r) => [r.closed, r.startedAt, r.endedAt])).toEqual([[false, T0, lastWork]]);
+    // The restart's cycle: the board goes out and the office stops again before the coordinator does anything.
+    t.setLifecycle(t.coord.id, 'idle');
+    t.settle();
+    expect(t.started()).toHaveLength(2);
+    t.advance(HOUR, 5 * MIN);
+    stop();
+    expect(t.records()[1]).toMatchObject({ closed: false, endedAt: null });
   });
 
   it('a cycle closed but still in its turn when the office stops is recorded at the restart: closed, with the cost known', async () => {

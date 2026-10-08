@@ -80,6 +80,15 @@ export class EventStore {
     return row ? toStored(row) : null;
   }
 
+  /** When this employee's last event of these types was logged at or after `ts`; null: none. */
+  lastTs(employeeId: string, ts: number, types: readonly OfficeEventType[]): number | null {
+    if (types.length === 0) return null;
+    const row = this.#db
+      .prepare(`SELECT MAX(ts) AS t FROM events WHERE employee_id = ? AND ts >= ? AND type IN (${types.map(() => '?').join(', ')})`)
+      .get(employeeId, ts, ...types) as unknown as { t: number | null };
+    return row.t ?? null;
+  }
+
   lastSeq(): number {
     const row = this.#db.prepare('SELECT MAX(seq) AS s FROM events').get() as unknown as { s: number | null };
     return row.s ?? 0;

@@ -1,6 +1,6 @@
 import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
@@ -400,6 +400,7 @@ describe('company API', () => {
     });
     expect(unclosed.seq).toBeGreaterThan(closed.seq);
     expect(closed.endedAt).toBeGreaterThanOrEqual(closed.startedAt);
+    expect(closed.endedAt).toBeLessThanOrEqual(Date.now());
     // cycleClose said, the turn not over yet: the open cycle carries its words.
     t.cycle.close(c.id, { changes: [], reasoning: 'değişiklik yok, çünkü Can teslim etti, inceleme sürüyor' });
     expect((await call(t.port, 'GET', '/api/management')).body.open.close).toEqual({ changes: [], reasoning: 'değişiklik yok, çünkü Can teslim etti, inceleme sürüyor', next: null });
@@ -408,9 +409,15 @@ describe('company API', () => {
     expect(after.body.open).toBeNull();
     expect(after.body.cycles.map((x: { closed: boolean; startedAt: number }) => [x.closed, x.startedAt])).toEqual([[true, third.at], [false, second.at]]);
     for (const bad of ['0', '201', '1.5', 'abc']) expect((await call(t.port, 'GET', `/api/management?limit=${bad}`)).status).toBe(400);
+    // An older office's record has no end of its own: its logged time is its end. One whose end is not known says so.
+    const old = t.events.append(c.id, { type: 'management.cycle', closed: true, startedAt: 1000, triggers: [], changes: [], reasoning: 'değişiklik yok, çünkü eski', next: null, costUsd: null, model: null });
+    t.events.append(c.id, { type: 'management.cycle', closed: false, startedAt: 2000, endedAt: null, triggers: [], changes: [], reasoning: '', next: null, costUsd: null, model: null });
+    const [unknown, older] = (await call(t.port, 'GET', '/api/management?limit=2')).body.cycles;
+    expect([unknown.startedAt, unknown.endedAt]).toEqual([2000, null]);
+    expect([older.startedAt, older.endedAt]).toEqual([1000, old.ts]);
   });
 
-  it('the snapshot gives each plan’s streams with the status their tasks give them (management cycle §3.4)', async () => {
+  it('the snapshot gives each plan’s streams with the status their tasks give them (management cycle §3.4), from one read of their tasks', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();
     const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
@@ -422,7 +429,18 @@ describe('company API', () => {
     t.company.approve(plan.id);
     const task = t.company.createTask(c.id, { assignee: ada.id, title: 'Uç noktalar', planId: plan.id, streamId: 'api' });
     t.company.start(task.id);
+    // A finished plan's stream: done, its task among the closed ones.
+    const old = t.company.propose(c.id, { method: METHOD, title: 'Eski', goal: 'g', approach: 'a', streams: [{ id: 'not', title: 'Notlar', owner: 'Ada', dependsOn: [] }] });
+    t.company.approve(old.id);
+    const note = t.company.createTask(c.id, { assignee: ada.id, title: 'Not', planId: old.id, streamId: 'not' });
+    t.company.start(note.id);
+    t.company.finish(ada.id, note.id, { summary: 'bitti', outputs: [], learned: '' });
+    const reads = vi.spyOn(t.tasks, 'list');
     const office = await call(t.port, 'GET', '/api/office');
+    // No task read per plan: the streams' tasks of every plan come in one.
+    expect(reads.mock.calls.filter(([o]) => o?.planId !== undefined)).toEqual([]);
+    reads.mockRestore();
+    expect(office.body.plans.find((p: { id: string }) => p.id === old.id)).toMatchObject({ status: 'done', streams: [{ id: 'not', status: 'done' }] });
     const site = office.body.plans.find((p: { id: string }) => p.id === plan.id);
     expect(site.streams).toEqual([
       { id: 'api', title: 'API', owner: ada.id, dependsOn: [], status: 'active' },

@@ -94,6 +94,22 @@ describe('EventStore', () => {
     expect(s.lastAt('company.paused', 999)).toBeNull();
   });
 
+  it('says when someone last logged one of some types at or after a time (null: none)', () => {
+    let now = 1000;
+    const s = store(() => now);
+    s.append('k', { type: 'message.assistant', text: 'önce' });
+    now = 2000;
+    s.append('k', { type: 'tool.started', toolUseId: 't', name: 'x', input: {} });
+    now = 3000;
+    s.append('k', { type: 'lifecycle.changed', from: 'working', to: 'interrupted', reason: 'ofis kapanırken iş sürüyordu' });
+    s.append('a', { type: 'message.assistant', text: 'başkası' });
+    const work = ['message.assistant', 'tool.started', 'tool.finished', 'turn.finished'] as const;
+    expect(s.lastTs('k', 1500, work)).toBe(2000);
+    expect(s.lastTs('k', 0, ['message.assistant'])).toBe(1000);
+    expect(s.lastTs('k', 2500, work)).toBeNull();
+    expect(s.lastTs('k', 0, [])).toBeNull();
+  });
+
   it('finds the last change of one task at or before a time', () => {
     let clock = 1000;
     const s = store(() => clock);

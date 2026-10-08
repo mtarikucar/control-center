@@ -66,6 +66,8 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
       loadMissingHistory(get);
       return;
     }
+    // Whether the event needs a fresh snapshot depends on what the page had before it (a task's previous status).
+    const before = get();
     set((s) => applyEvent(s, m.event));
     // A report arriving in the panel the owner has open is read as it arrives.
     const open = get().selectedId;
@@ -73,7 +75,7 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
       const { [open]: _read, ...rest } = get().unseenReports;
       set({ unseenReports: rest });
     }
-    if (needsRefresh(m.event)) {
+    if (needsRefresh(m.event, before)) {
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => void get().refresh(), 150);
     }

@@ -89,6 +89,26 @@ describe('ManagementTab', () => {
     expect(screen.getByText(/3 tur/).textContent).toContain('1 kapanmadı');
   });
 
+  it('a cycle whose end is not known (the office stopped before the coordinator did anything) says so instead of a duration', async () => {
+    vi.mocked(api.management).mockResolvedValueOnce({ generatedAt: NOW, open: null, cycles: [{ ...log().cycles[2]!, endedAt: null }] });
+    render(<ManagementTab />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows()[0]!.textContent).toContain('süre bilinmiyor');
+    expect(rows()[0]!.textContent).not.toContain('dk');
+  });
+
+  it('“değişiklik yok” in any spelling is shown as written; a reason without it is marked as no change', async () => {
+    const base = log().cycles[1]!;
+    vi.mocked(api.management).mockResolvedValueOnce({ generatedAt: NOW, open: null, cycles: [
+      { ...base, seq: 3, reasoning: 'Degisiklik yok, cunku plan yuruyor' },
+      { ...base, seq: 2, reasoning: 'DEĞİŞİKLİK YOK, çünkü Ada bitirmek üzere' },
+      { ...base, seq: 1, reasoning: 'iki akış da yürüyor' },
+    ] });
+    render(<ManagementTab />);
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    expect(rows().map((r) => r.querySelector('.cycle-nochange')?.textContent)).toEqual(['Degisiklik yok, cunku plan yuruyor', 'DEĞİŞİKLİK YOK, çünkü Ada bitirmek üzere', 'Değişiklik yok — iki akış da yürüyor']);
+  });
+
   it('reads the log again when a cycle starts or is recorded', async () => {
     render(<ManagementTab />);
     await waitFor(() => expect(api.management).toHaveBeenCalledTimes(1));
