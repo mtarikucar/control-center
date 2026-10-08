@@ -12,6 +12,15 @@ Kod yazmak, düzeltmek, otomasyon, entegrasyon, betik.
 6. Bağımsız doğrulama: gerçek davranış (komut, ekran, istek) bir kez uçtan uca denenir.
 7. Kabul ve sahibinin yayın kararı: birleştirme, yayına alma, gönderme sahibine sorulur.
 
+**Paralel geliştirme.** İş parçalara bölünebiliyorsa:
+
+- Önce ortak arayüzü ya da sözleşmeyi (fonksiyon imzaları, veri biçimi, API) sabitle; parçalar ona göre yazılır.
+- Ortak numaralı kaynakları baştan paylaştır: veritabanı göç numaraları, portlar, hangi dosyanın ya da modülün kimde
+  olduğu; böylece paralel dallar çakışmaz.
+- Her geliştirici kendi dalında (gerekirse ayrı bir git worktree'de) çalışır.
+- İncelenmiş dallar tek bir entegrasyon dalında toplanır; bütün test takımı orada bir kez çalıştırılır.
+- Bir geliştiricinin sırası darboğaz olduysa ve iş bu çizgilerde bölünüyorsa doğru adım ikinci bir geliştirici almaktır.
+
 ## Roller
 
 - Geliştirici: yapar, test yazar, kanıtı toplar.
@@ -37,6 +46,8 @@ Kod yazmak, düzeltmek, otomasyon, entegrasyon, betik.
 - Testi koddan sonra yazmak (hiç kırmızı görülmemiş test bir şey kanıtlamaz).
 - Kapsamı genişletmek: istenmeyen yeniden düzenleme, ilgisiz düzeltmeler.
 - Yayına almayı, birleştirmeyi sahibine sormadan yapmak.
+- Bölünebilen işi tek geliştiriciye zincir gibi yüklemek; ya da ortak numaraları paylaştırmadan paralel dal açıp
+  birleştirirken çakışmak.
 
 ## Model önerisi
 

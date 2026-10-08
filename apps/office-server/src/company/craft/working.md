@@ -7,6 +7,8 @@
   park et: dönüş saati (`+6h`, `+1d`, `2026-10-08T14:55`) ve gerekçe. Sıran boşalır, ofis sıradaki işini verir ve park
   edileni saatinde geri getirir. Claude'un kendi zamanlayıcısı (`CronCreate`, `/loop`, `/schedule`) bu ofiste kapalıdır:
   zamana bağlı her iş ofisin saatinden geçer.
+- **Boşta sessizce bekleme.** Teslimden sonra sıranda iş kalmadıysa (`myTasks`) hangi işi alabileceğini `propose` ile
+  (`kind: idea`) liderine ya da koordinatöre öner: ne, neden ve ne zaman biter; kararı onlar verir.
 - **İnceleyicili görev.** Görev mesajında "İnceleyen" yazıyorsa teslimin onun onayıyla kapanır. "Değişiklik istendi"
   diye geri gelirse önce kritik ve önemli bulguları kapat, her biri için ne yaptığını teslim özetine yaz, yeniden teslim et.
 - **İnceleme görevi gelirse** (başlığı "İnceleme:" ile başlar) kararını `reviewDecide` ile ver, `taskFinish` ile değil:

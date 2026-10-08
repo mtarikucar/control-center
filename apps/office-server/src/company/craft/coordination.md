@@ -15,7 +15,9 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
 5. **Döngü.** İnceleme bulguları önem sırasıyla gelir: kritik, önemli, küçük. Kritik ve önemli kapanmadan iş geçmez.
    Bir iş üç turda geçemiyorsa yaklaşımı değiştir (başka kişi, başka model, işi böl) ya da sahibine götür.
 6. **Ölçek ve maliyet.** İşin gerektirdiği ekip ve model (gerekirse işe al); işe uygun zorluk; pahalı aşamaları bilerek
-   planla, kota payını tahmine yaz.
+   planla, kota payını tahmine yaz. **İşe almanın iki ölçütü var:** eksik bir uzmanlık (o işi bilen kimse yoksa) ve
+   darboğaz (bir kişinin sırası uzarken iş bölünebiliyorsa aynı rolden ikinci birini al). İş bölünemiyorsa nedenini plan
+   kartına yaz.
 7. **Geri alınamaz işler sahibinden geçer.** Yayın, dışarıya gönderim, ödeme, canlıya alma, silme: önce sahibinin onayı.
 8. **Değerlendirme.** Plan bitince `planRetro`: ne iyi gitti, ne takıldı, bir dahaki sefere ne değişecek. Şirkete özgü
    dersi `playbookUpdate` ile el kitabına yaz; her şirkete yarayacak bir yöntem önerin varsa `methodSuggestion` olarak ekle.
@@ -24,5 +26,9 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
     `dueAt` (son tarih); bekleyen işi `taskPark` ile park etmek; tekrarlayan işi `scheduleCreate` ile rutin yapmak.
     Rutinler kota yer: gereksiz rutin kurma, anayasanın izin verdiğinden sık kurma. `agendaRead` kimin ne zaman boş
     olduğunu söyler; iş dağıtmadan önce bak.
+11. **İş gücünü yönet.** Planı zincir gibi değil paralel akışlar gibi kur: önce ortak kararı ya da arayüzü netleştir,
+    ortak kaynakları (dosyalar, numaralar, tablolar) baştan paylaştır, sonra parçaları aynı anda yürüt. Biri çalışırken
+    boştakilere bağımsız iş bul: sonraki adımların tasarımı, açık soruların araştırması, test, ölçüm, belge. Bir kişi
+    ancak gerçekten değerli iş kalmadığı için boşta kalsın; `agendaRead` kimin ne zaman boş olduğunu gösterir.
 
 Ekip lideri bunları kendi ekibinin ölçeğinde uygular.

@@ -91,6 +91,43 @@ describe('the coordination craft (ships with the office)', () => {
     expect(officeGuide('coordinator')).toContain(pmText());
   });
 
+  it('W1–W3: the coordinator hires for a missing skill or a bottleneck, keeps idle people on independent work, and re-plans when the limits change', () => {
+    const flat = (text: string) => text.replace(/\s+/g, ' ');
+    const core = flat(coordinationText());
+    expect(core).toContain(
+      '6. **Ölçek ve maliyet.** İşin gerektirdiği ekip ve model (gerekirse işe al); işe uygun zorluk; pahalı aşamaları bilerek planla, kota payını tahmine yaz. **İşe almanın iki ölçütü var:** eksik bir uzmanlık (o işi bilen kimse yoksa) ve darboğaz (bir kişinin sırası uzarken iş bölünebiliyorsa aynı rolden ikinci birini al). İş bölünemiyorsa nedenini plan kartına yaz.',
+    );
+    const workforce =
+      '11. **İş gücünü yönet.** Planı zincir gibi değil paralel akışlar gibi kur: önce ortak kararı ya da arayüzü netleştir, ortak kaynakları (dosyalar, numaralar, tablolar) baştan paylaştır, sonra parçaları aynı anda yürüt. Biri çalışırken boştakilere bağımsız iş bul: sonraki adımların tasarımı, açık soruların araştırması, test, ölçüm, belge. Bir kişi ancak gerçekten değerli iş kalmadığı için boşta kalsın; `agendaRead` kimin ne zaman boş olduğunu gösterir.';
+    expect(core).toContain(workforce);
+    expect(core.indexOf('10. **Zamanı ofise bırak.**')).toBeLessThan(core.indexOf(workforce));
+    expect(core.indexOf(workforce)).toBeLessThan(core.indexOf('Ekip lideri bunları kendi ekibinin ölçeğinde uygular.'));
+    const pm = flat(pmText());
+    const replan =
+      '- **Kısıtlar değişince yeniden planla.** Sahibi kota sınırını ya da anayasayı değiştirirse, yeni bilgi ya da bir teslim gelirse süren planları gözden geçir: hızlandır (paralel akış, yeni kişi) ya da yavaşlat; kararını kısa raporla.';
+    expect(pm).toContain(replan);
+    expect(pm.indexOf('**Kendini kısıtlama.**')).toBeLessThan(pm.indexOf(replan));
+    expect(pm.indexOf(replan)).toBeLessThan(pm.indexOf('**Sahibinin sözü önce gelir.**'));
+    // The pulse's list of what it tells the coordinator names the new notice too.
+    expect(pm).toContain('aktif hedefler sürerken biri uzun süredir işsizken');
+  });
+
+  it('W4: the software method says how to run development in parallel; everyone’s guide says not to wait silently with no work', () => {
+    const flat = (text: string) => text.replace(/\s+/g, ' ');
+    const software = flat(methodText('software'));
+    const parallel =
+      '**Paralel geliştirme.** İş parçalara bölünebiliyorsa: - Önce ortak arayüzü ya da sözleşmeyi (fonksiyon imzaları, veri biçimi, API) sabitle; parçalar ona göre yazılır. - Ortak numaralı kaynakları baştan paylaştır: veritabanı göç numaraları, portlar, hangi dosyanın ya da modülün kimde olduğu; böylece paralel dallar çakışmaz. - Her geliştirici kendi dalında (gerekirse ayrı bir git worktree\'de) çalışır. - İncelenmiş dallar tek bir entegrasyon dalında toplanır; bütün test takımı orada bir kez çalıştırılır. - Bir geliştiricinin sırası darboğaz olduysa ve iş bu çizgilerde bölünüyorsa doğru adım ikinci bir geliştirici almaktır.';
+    expect(software).toContain(parallel);
+    // Within the stages, before the roles: the method's headings keep their order (the first test above).
+    expect(software.indexOf(parallel)).toBeGreaterThan(software.indexOf('## Aşamalar'));
+    expect(software.indexOf(parallel)).toBeLessThan(software.indexOf('## Roller'));
+    expect(software).toContain('- Bölünebilen işi tek geliştiriciye zincir gibi yüklemek; ya da ortak numaraları paylaştırmadan paralel dal açıp birleştirirken çakışmak.');
+    const working = flat(workingText());
+    expect(working).toContain(
+      '- **Boşta sessizce bekleme.** Teslimden sonra sıranda iş kalmadıysa (`myTasks`) hangi işi alabileceğini `propose` ile (`kind: idea`) liderine ya da koordinatöre öner: ne, neden ve ne zaman biter; kararı onlar verir.',
+    );
+  });
+
   it('the coordinator’s guide says it is the project manager and how autonomy works; leads and members do not get it', () => {
     expect(pmText()).toContain('goalSet');
     expect(pmText()).toContain('restUntil');
