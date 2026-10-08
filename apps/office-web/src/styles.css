@@ -128,15 +128,13 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .dialog .field label { font-size: 13px; color: var(--muted); }
 .dialog input, .dialog textarea, .dialog select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
 
-/* Room for the figures as the bar narrows: the meters drop their reset time (still in their tooltip), then their
-   track; below that the bar wraps and the panel starts under its second row. */
+/* Room for the figures as the bar narrows: below 1600 px the meters keep their value only (the reset time is in their
+   tooltip), so both badges still fit at 1440; below 1400 px the bar wraps, with the panel under its second row. */
 @media (max-width: 1600px) {
   .topbar { gap: 12px; }
-  .meter-reset { display: none; }
-  .meter-track { width: 56px; }
+  .meter-reset, .meter-track { display: none; }
 }
-@media (max-width: 1400px) { .meter-track { display: none; } }
-@media (max-width: 1240px) {
+@media (max-width: 1400px) {
   .topbar { flex-wrap: wrap; row-gap: 8px; }
   .panel { top: 124px; }
 }
