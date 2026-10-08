@@ -15,7 +15,8 @@ Kapsam notun §2'si; aşağıdakiler nottan bilinçli sapmalar ya da notun bıra
 - **Göç v20**, dal main'den. `db.test.ts`'in “boşluksuz” testi yalnız ayrılmış numaraların (16–19) eksik olmasına izin
   verecek biçimde güncellendi. **Canlıya alma sırası:** v16–v19 (B6, B7, B5, B26) canlıya girmeden bu dal canlıya
   girmemeli; `migrateUp` yalnız en büyük uygulanmış sürümden büyük göçleri çalıştırır, sıra bozulursa v16–v19 sessizce
-  atlanır.
+  atlanır. `fix/migration-name-guard` (Elif, f5be0a4) canlıdaysa atlanmaz: v20 sırasız girerse ofis açılmaz ve
+  atlanacak göçü adıyla söyler (`MigrationOrderError`; denendi: v15 + v20 uygulanmış veritabanında v16–v19'lu kod).
 - **İnceleme ve devir teslimleri dizinde** (not §3.3 dışarıda bırakıyordu). Gerekçe: görevin bitti tanımı
   “`memorySearch` mevcut çağrıları aynı sonuç sınıfını versin”; bugünkü arama bunları buluyor (canlı kopyada 60 bitmiş
   görevin 37'si inceleme) ve gerçek bir sorgu (“6b475116 inceleme Kerem bulgu”) tam bunu arıyor. Etiketleri
