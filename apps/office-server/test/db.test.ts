@@ -32,6 +32,27 @@ describe('migrations', () => {
     expect(tables(db)).toEqual(V15_TABLES);
   });
 
+  it('review (Kerem): the applied migrations keep the names the live database has (checkApplied compares them; renaming one stops the office)', () => {
+    // From the live database (VACUUM INTO copy, 2026-10-08, task 57b8d3f2): schema_migrations 1–15.
+    expect(MIGRATIONS.slice(0, 15).map((m) => `${m.version}:${m.name}`)).toEqual([
+      '1:core tables',
+      '2:company: roles, plans, tasks, notices',
+      '3:company memory: decisions, playbook, notes, employee files, task kind',
+      '4:budget: constitution, spending, task usage',
+      '5:proposals, approved plan snapshots',
+      '6:notice kinds and topics',
+      '7:task difficulty',
+      '8:coordination craft: plan method, task review',
+      '9:coordinator as project manager: goals, company state, a plan’s goal',
+      '10:office scheduler: task times, parked status, schedules',
+      '11:stall recovery: when a task was last reminded',
+      '12:goal KPIs',
+      '13:company profile: sections, one row per version',
+      "14:onboarding: the owner's sentence and the rounds of questions",
+      '15:integration registry: what the coordinator records by hand',
+    ]);
+  });
+
   it('numbers the migrations 1, 2, 3 … with no gap and no repeat (a merge that numbers two alike or skips one fails here)', () => {
     expect(MIGRATIONS.map((m) => m.version)).toEqual(MIGRATIONS.map((_, i) => i + 1));
   });

@@ -4,6 +4,8 @@ import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { migrateUp, openDb } from '../src/db.ts';
+import { MIGRATIONS } from '../src/migrations.ts';
 import { FAKE_CLAUDE, tempDir, until } from './helpers.ts';
 
 const MAIN = fileURLToPath(new URL('../src/main.ts', import.meta.url));
@@ -41,6 +43,33 @@ function call(port: number, method: string, path: string, body?: unknown): Promi
 }
 
 describe('office-server process', () => {
+  it('does not open on a database whose migrations are not the code’s: says which version, exits 1, frees the lock', async () => {
+    const dir = tempDir();
+    // B26 went live alone as 16 and v15 of the code is another migration under the same number.
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db);
+    db.prepare("UPDATE schema_migrations SET name = 'KPI readings' WHERE version = 15").run();
+    db.close();
+    const office = startOffice(dir);
+    expect(await office.exited).toBe(1);
+    expect(office.output()).toContain('office-server açılmadı: v15 canlıda “KPI readings”, kodda “integration registry: what the coordinator records by hand”: göç sırası bozuk.');
+    expect(office.output()).not.toMatch(/hazır: http/);
+    expect(existsSync(join(dir, 'office.lock'))).toBe(false);
+  });
+
+  it('review (Kerem): opens on a database ahead of the code (only the code went back) and says so in one line', async () => {
+    const dir = tempDir();
+    // Ahead: one version above the code's last, whatever that is (core-3 makes it 18, B26 19 …; task 37b8bbe7).
+    const above = Math.max(...MIGRATIONS.map((m) => m.version)) + 1;
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db);
+    db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, 1)').run(above, 'a migration of newer code');
+    db.close();
+    const office = startOffice(dir);
+    await until(() => /hazır: http:\/\/127\.0\.0\.1:\d+/.test(office.output()), 10_000);
+    expect(office.output()).toContain(`Uyarı: veritabanı koddan ileride: v${above} “a migration of newer code” bu kodda yok; göç çalıştırılmadı, ofis açılıyor.`);
+  });
+
   it('refuses a second office on the same data directory without touching the first', async () => {
     const dir = tempDir();
     const first = startOffice(dir);
