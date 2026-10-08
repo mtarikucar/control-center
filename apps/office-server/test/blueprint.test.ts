@@ -423,6 +423,30 @@ describe('Blueprint — reading it, and the closed mode checked by list only', (
     expect(blueprintText(t.blueprints.read(plan.id), t.plans.get(plan.id))).toContain('mcp__claude_ai_Gmail__send_email tanınmıyor: hiçbir oturumda ya da sözlükte görülmedi, kural bir şey kapatmıyor olabilir');
   });
 
+  it('review focus (task 8d67d8ba): a wildcard rule (mcp__server__*) closes the whole server as the CLI applies it — read like a server rule, never “unknown” for a known server', () => {
+    const t = make();
+    t.profile();
+    const c = t.coordinator.id;
+    const b = BP();
+    b.closedMode = { deny: ['mcp__claude_ai_Gmail__*', 'mcp__claude_ai_jeeta__*', 'mcp__claude_ai_Notion__*', 'mcp__claude_ai_Gmial__*'] };
+    const { plan } = t.blueprints.propose(c, b);
+    // The card warns only about the server no session and no vocabulary has seen.
+    expect(plan.risks).toContain('Kapalı kipte tanınmayan ad: mcp__claude_ai_Gmial__* — hiçbir oturumda ya da sözlükte görülmedi');
+    expect(plan.risks).not.toContain('mcp__claude_ai_Gmail__*');
+    t.company.approve(plan.id);
+    t.blueprints.apply(c, plan.id);
+    const ece = t.roster.list().find((e) => e.name === 'Ece')!;
+    const rules = () => t.blueprints.read(plan.id).closedMode.find((d) => d.name === 'Ece')!.rules.map((r) => [r.rule, r.check]);
+    expect(rules()).toEqual([
+      ['mcp__claude_ai_Gmail__*', 'no_session'], ['mcp__claude_ai_jeeta__*', 'no_session'], ['mcp__claude_ai_Notion__*', 'no_session'], ['mcp__claude_ai_Gmial__*', 'unknown'],
+    ]);
+    // Ece's session: Gmail denied by the desk (connected, no tools), jeeta with its tools, Notion not in it.
+    t.events.append(ece.id, { type: 'session.started', model: 'm', mcp: [{ name: 'claude.ai Gmail', status: 'connected', tools: 0, toolNames: [] }, { name: 'claude.ai jeeta', status: 'connected', tools: 2, toolNames: ['jeeta_list_team', 'jeeta_send_message'] }] });
+    expect(rules()).toEqual([
+      ['mcp__claude_ai_Gmail__*', 'verified'], ['mcp__claude_ai_jeeta__*', 'open'], ['mcp__claude_ai_Notion__*', 'not_connected'], ['mcp__claude_ai_Gmial__*', 'unknown'],
+    ]);
+  });
+
   it('the tools: blueprintPropose and blueprintApply for the coordinator, blueprintRead for leads; the API reads it', async () => {
     const t = make();
     t.profile();
