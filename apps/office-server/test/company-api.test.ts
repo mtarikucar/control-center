@@ -192,6 +192,22 @@ describe('company API', () => {
     expect((await call(t.port, 'GET', '/api/memory/notes')).body).toHaveLength(1);
   });
 
+  it('searches the whole memory for the owner at /api/memory/search, by kind and limit; refuses a bad request (B11)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const d = t.memory.recordDecision(c.id, { title: 'Ses aracı', chosen: 'ElevenLabs', reason: 'Türkçe' });
+    const n = t.memory.writeNote(c.id, { title: 'Seslendirme', text: 'ElevenLabs iyi' });
+    const all = await call(t.port, 'GET', `/api/memory/search?q=${encodeURIComponent('elevenlabs')}`);
+    expect(all.status).toBe(200);
+    expect(new Set(all.body.map((h: { kind: string; id: string }) => `${h.kind}:${h.id}`))).toEqual(new Set([`decision:${d.id}`, `note:${n.id}`]));
+    expect((await call(t.port, 'GET', '/api/memory/search?q=elevenlabs&kinds=note&limit=5')).body).toMatchObject([{ kind: 'note', title: 'Seslendirme' }]);
+    expect((await call(t.port, 'GET', `/api/memory/search?q=${encodeURIComponent('elevenlabs kurgu')}&limit=1`)).body).toMatchObject([{ partial: true, matched: 1 }]);
+    for (const bad of ['', '?q=', '?q=x&kinds=video', '?q=x&limit=0', '?q=x&limit=abc', '?q=x&limit=31']) {
+      expect((await call(t.port, 'GET', `/api/memory/search${bad}`)).status, bad).toBe(400);
+    }
+    expect(t.events.list({ limit: 5000 }).filter((e) => e.event.type === 'memory.searched').map((e) => e.employeeId)).toEqual([null, null, null]);
+  });
+
   it('shows the owner the performance report, all time or the last days', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();

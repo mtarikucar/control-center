@@ -22,18 +22,24 @@ const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
 const V13_TABLES = [...V10_TABLES, 'company_profile'].sort();
 const V14_TABLES = [...V13_TABLES, 'onboarding', 'onboarding_rounds'].sort();
 const V15_TABLES = [...V14_TABLES, 'integrations'].sort();
+const V20_TABLES = [...V15_TABLES, 'search_fts', 'search_fts_config', 'search_fts_data', 'search_fts_docsize', 'search_fts_idx', 'search_index'].sort();
+// Numbers held for branches not merged yet (company decision d63e5d27): v16 B6, v17 B7, v18 B5, v19 B26. Only these may
+// be missing; once one is merged it is simply present.
+const RESERVED = [16, 17, 18, 19];
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(15);
-    expect(tables(db)).toEqual(V15_TABLES);
+    expect(migrateUp(db)).toBe(20);
+    expect(tables(db)).toEqual(V20_TABLES);
   });
 
-  it('numbers the migrations 1, 2, 3 … with no gap and no repeat (a merge that numbers two alike or skips one fails here)', () => {
-    expect(MIGRATIONS.map((m) => m.version)).toEqual(MIGRATIONS.map((_, i) => i + 1));
+  it('numbers the migrations 1, 2, 3 … in order with no repeat, skipping only numbers held for other branches (a merge that numbers two alike or skips one fails here)', () => {
+    const versions = MIGRATIONS.map((m) => m.version);
+    const top = Math.max(...versions);
+    expect(versions).toEqual(Array.from({ length: top }, (_, i) => i + 1).filter((v) => versions.includes(v) || !RESERVED.includes(v)));
   });
 
   it('round-trips up → down → up', () => {
@@ -42,14 +48,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(15);
-    expect(tables(db)).toEqual(V15_TABLES);
+    expect(migrateUp(db)).toBe(20);
+    expect(tables(db)).toEqual(V20_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(20);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -306,7 +312,7 @@ describe('migrations', () => {
     const db = openDb(':memory:');
     migrateUp(db, upTo(14));
     db.prepare("INSERT INTO onboarding (id, description, status, started_by, started_at) VALUES ('o1', 'cümle', 'active', 'c', 1)").run();
-    migrateUp(db);
+    migrateUp(db, upTo(15));
     expect(appliedVersion(db)).toBe(15);
     expect(tables(db)).toEqual(V15_TABLES);
     expect(columns(db, 'integrations')).toEqual(['name', 'kind', 'closed', 'capabilities', 'auth_needed', 'cost_note', 'note', 'registered_by', 'registered_at', 'updated_at']);
@@ -316,6 +322,34 @@ describe('migrations', () => {
     expect(migrateDown(db, 14)).toBe(14);
     expect(tables(db)).toEqual(V14_TABLES);
     expect(db.prepare('SELECT COUNT(*) AS n FROM onboarding').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db, upTo(15))).toBe(15);
+  });
+
+  it('v20 adds the search index beside the tables it reads, empty (the office fills it on start); its triggers keep the full-text table in step; v20 down drops only it', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(15));
+    db.prepare("INSERT INTO notes (ts, by_id, title, text, tags, source, ft_title, ft_text, ft_tags) VALUES (1, 'a', 'Not', 'kota', '[]', NULL, 'not', 'kota', '')").run();
+    db.prepare("INSERT INTO decisions (id, ts, by_id, title, chosen, reason, alternatives) VALUES ('d1', 1, 'c', 'Karar', 'kota', 'r', '[]')").run();
+    db.prepare("INSERT INTO playbook (topic, version, text, by_id, reason, ts) VALUES ('Test', 1, 'kota', 'c', '', 1)").run();
+    db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p1', 1, 'identity', '{}', 0, 'c', 1)").run();
+    const sources = () => ['notes', 'decisions', 'playbook', 'company_profile'].map((x) => (db.prepare(`SELECT COUNT(*) AS n FROM ${x}`).get() as { n: number }).n);
+    expect(migrateUp(db)).toBe(20);
+    expect(tables(db)).toEqual(V20_TABLES);
+    expect(columns(db, 'search_index')).toEqual(['id', 'kind', 'ref', 'title', 'body', 'tags', 'ft_title', 'ft_body', 'ft_tags', 'ts']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM search_index').get()).toMatchObject({ n: 0 });
+    expect(sources()).toEqual([1, 1, 1, 1]);
+    const found = (word: string) => (db.prepare('SELECT rowid FROM search_fts WHERE search_fts MATCH ?').all(word) as unknown[]).length;
+    const add = db.prepare("INSERT INTO search_index (kind, ref, title, body, tags, ft_title, ft_body, ft_tags, ts) VALUES ('note', '1', 'Not', 'kota', '', 'not', 'kota', '', 1)");
+    add.run();
+    expect(found('kota')).toBe(1);
+    expect(() => add.run()).toThrow(/UNIQUE/);
+    db.prepare("UPDATE search_index SET body = 'arama', ft_body = 'arama' WHERE ref = '1'").run();
+    expect([found('kota'), found('arama')]).toEqual([0, 1]);
+    db.prepare("DELETE FROM search_index WHERE ref = '1'").run();
+    expect(found('arama')).toBe(0);
+    expect(migrateDown(db, 15)).toBe(15);
+    expect(tables(db)).toEqual(V15_TABLES);
+    expect(sources()).toEqual([1, 1, 1, 1]);
+    expect(migrateUp(db)).toBe(20);
   });
 });
