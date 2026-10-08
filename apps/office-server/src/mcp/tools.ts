@@ -2,7 +2,7 @@ import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, typ
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
-import { capabilityVocabulary, coverage, coverageBrief, coverageLines, unknownCapabilities } from '../company/capabilities.ts';
+import { capabilityVocabulary, coverage, coverageBrief, coverageLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
 import { listRoleTemplates, roleTemplate, templateRole } from '../company/role-templates.ts';
 import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
 import { nextText, ofThem } from '../company/onboarding.ts';
@@ -349,7 +349,7 @@ export function officeTools(o: {
     {
       name: 'capabilitiesRead',
       description:
-        'Read the capability model, read-only: without arguments the vocabulary — every capability the product knows, which go outward — and how the office has each (built in, or which connectors and on which desks they are open); with employee, the capabilities that person declares and how their desk has each; with task, what the task requires and how its assignee’s desk has each (with employee as well: on that person’s desk instead, to see who could do it). It calls no connector.',
+        'Read the capability model, read-only: without arguments the vocabulary — every capability the product knows, which go outward — and how the office has each (built in, or which connectors and on which desks they are open), then each connector’s tools no capability names (unclassified: no role gets them, the gate counts them outward); with employee, the capabilities that person declares and how their desk has each; with task, what the task requires and how its assignee’s desk has each (with employee as well: on that person’s desk instead, to see who could do it). It calls no connector.',
       inputSchema: object({ employee: s('Id or name.'), task: s('Task id.') }),
       kinds: EVERYONE,
       run: (_ctx, args) => {
@@ -373,6 +373,7 @@ export function officeTools(o: {
         return [
           `# Yetenek sözlüğü (${v.capabilities.length} yetenek, sürüm ${v.version}) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.`,
           ...coverageLines(coverage(registry, v.capabilities.map((c) => c.id)), false),
+          ...unclassifiedLines(registry),
         ].join('\n');
       },
     },

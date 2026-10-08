@@ -100,12 +100,17 @@ export function normalize(raw: unknown): OfficeEvent[] {
       const servers = Array.isArray(raw.mcp_servers) ? raw.mcp_servers.filter(isObj) : [];
       // The session's own tool list: a server the desk's settings deny stays connected but has none of its tools in it.
       const tools = Array.isArray(raw.tools) ? raw.tools.filter((t): t is string => typeof t === 'string') : null;
-      const count = (name: string) => tools!.filter((t) => t.startsWith(mcpToolPrefix(name))).length;
+      // Each server's tools, without its prefix (B7: the vocabulary tells which are its own).
+      const own = (name: string) => tools!.filter((t) => t.startsWith(mcpToolPrefix(name))).map((t) => t.slice(mcpToolPrefix(name).length));
       return [
         {
           type: 'session.started',
           model: str(raw.model),
-          mcp: servers.map((m) => (tools === null ? { name: str(m.name), status: str(m.status) } : { name: str(m.name), status: str(m.status), tools: count(str(m.name)) })),
+          mcp: servers.map((m) => {
+            if (tools === null) return { name: str(m.name), status: str(m.status) };
+            const toolNames = own(str(m.name));
+            return { name: str(m.name), status: str(m.status), tools: toolNames.length, toolNames };
+          }),
         },
       ];
     }

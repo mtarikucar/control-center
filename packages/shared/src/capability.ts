@@ -50,6 +50,21 @@ export interface CapabilityProvider {
   openOn: string[];
 }
 
+/**
+ * A connector's tools that no capability of the vocabulary names (B7, review round 1). The vocabulary is an allow-list:
+ * no role's capability ever opens these, and B9's gate counts them outward.
+ */
+export interface UnclassifiedTools {
+  server: string;
+  kind: IntegrationKind;
+  /** Its tools in the current desks' latest sessions: the names together, or the largest count when names are missing. */
+  tools: number;
+  /** The unclassified ones by full name, sorted; null when a session from before names leaves them unknown. */
+  unclassified: string[] | null;
+  /** How many at least: the names' count, or (names unknown) the session's count less the vocabulary's tools of it. */
+  atLeast: number;
+}
+
 export interface CapabilityCoverage {
   id: string;
   status: CoverageStatus;

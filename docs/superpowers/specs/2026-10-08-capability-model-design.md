@@ -6,6 +6,9 @@
   (`hire` + `capabilities[]`, yetenekler kayıtla eşlenir) ve D2 (sözlük ürünle gelir; yetenek → somut bağlayıcı araç
   adları; `employees.capabilities`, `tasks.requires`), §6.
 - Dal `feat/capability-model`, `feat/role-templates` (B6, 7808b8e) üstünde. **Göç v17** (v16 B6).
+- Sürüm 2 (inceleme turu 1, Kerem): sözlük bir **izin listesi**. Sözlükte sınıflandırılmamış bağlayıcı aracı dışa
+  dönük sayılır ve okumada görünür. Oturum açılışı araç adlarını taşır. Bilinen dışa dönük ve para harcayan araçlar
+  sözlüğe eklendi (§2, §2.1, §3.1, §5, §9).
 
 ## 1. Bugün ve kapsam
 
@@ -46,8 +49,9 @@ Dosya: `apps/office-server/src/company/craft/capabilities.json`.
 ```
 
 - `id`: `alan.eylem` (küçük harf).
-- `outward`: dışa dönük ve geri alınamaz iş (gönderim, yayın, ödeme, davet). B9'un kapısı bu alana bakacak; B7 yalnız
-  gösterir.
+- `outward`: şirketin dışında geri alınamaz bir etki: gönderim, yayın, arama, davet, silme, ödeme ya da harcama
+  (reklam bütçesi, kredi, ücretli çalıştırma). B9'un kapısı bu alana bakacak; B7 yalnız gösterir. Kuşkulu araç dışa
+  dönük sayılır.
 - `builtin`: Claude Code'un kendi araçları (`WebFetch`, `Read`, `Write` …). Bunlar her oturumda var; o yüzden yerleşik
   aracı olan yetenek her masada **açık** sayılır. Ofis bugün bunlardan hiçbirini kapatmıyor (`args.ts`
   `DISALLOWED_TOOLS` yalnız zamanlayıcılar). B9 bir rolden yerleşik araç kaldırırsa bu kural masanın araç listesine
@@ -62,7 +66,8 @@ Dosya yüklenirken denetlenir:
 - boş ad ya da özet,
 - `mcp__sunucu__araç` biçiminde olmayan bağlayıcı aracı.
 
-**İlk sözlük (sürüm 1, 16 yetenek)** — D2'nin listesi ve taslak ayrımı:
+**İlk sözlük (sürüm 1, 23 yetenek, 78 bağlayıcı aracı)** — D2'nin listesi, taslak ayrımı ve incelemede eklenen
+dışa dönük ya da para harcayan araçlar (son yedi satır):
 
 | id | Dışa dönük | Yerleşik | Bilinen bağlayıcılar (bu makinede bağlı olanlardan) |
 |---|---|---|---|
@@ -82,11 +87,42 @@ Dosya yüklenirken denetlenir:
 | `payments.read` | | | — (kayıttan) |
 | `payments.charge` | evet | | — (kayıttan) |
 | `ecommerce.orders` | | | — (kayıttan) |
+| `email.delete` | evet (silme) | | Gmail (çöpe atma, etiket silme) |
+| `messages.send` | evet | | jeeta (kişilere mesaj) |
+| `calls.make` | evet | | jeeta (arama) |
+| `ads.manage` | evet (reklam parası) | | jeeta (kampanya, durum, bütçe, strateji onayı) |
+| `web.publish` | evet | | Higgsfield (site yayını) |
+| `media.generate` | evet (kredi) | | Higgsfield (görsel, video, ses, 3B üretimi) |
+| `automation.run` | evet (ücretli) | | apify (`call-actor`) |
+
+`docs.write` Notion yorumunu da (`notion-create-comment`) içerir: şirketin kendi çalışma alanına yazılır.
 
 Araç adları canlı oturumun araç listesinden alındı (bağlı sunucular: Gmail 30, jeeta 46, Higgsfield 120, Notion 46,
-Google Calendar 9, apify 11, Claude Docs 8, Playwright 25 araç). Yetki bekleyen bağlayıcıların (Slack, HubSpot, Drive
+Google Calendar 9, apify 11, Claude Docs 8, Playwright 25 araç). Bu, sözlükteki araçların canlıda var olduğunu
+gösterir; canlıdaki araçların sözlükte olduğunu göstermez. Geri kalanlar sınıflandırılmamıştır (§2.1). Yetki bekleyen bağlayıcıların (Slack, HubSpot, Drive
 …) araç adları oturumda görünmediği için sözlükte yok. Onları ve sözlükte bağlayıcısı olmayan yetenekleri
 (`payments.*`, `ecommerce.orders`) şirket kendi kaydında bağlar: `integrationRegister(name, capabilities)`.
+
+### 2.1 Sözlük bir izin listesidir (inceleme turu 1)
+
+Sözlük, bilinen her bağlayıcı aracını sınıflandırmaz. Canlı oturumlarda yüzlerce araç var (Higgsfield 120, jeeta 46,
+Notion 46 …). Bu yüzden kural sözlükte olmayan araç için de konur:
+
+- **Sınıflandırılmış:** bir yetenek aracı adıyla sayıyor. Dışa dönüklüğü o yeteneğinkidir.
+- **Sınıflandırılmamış:** hiçbir yetenek saymıyor. Hiçbir rol yeteneğiyle bu aracı almaz. **B9 onu dışa dönük sayar
+  ve kapatır**; açılması için ya sözlüğe girer (ürün sürümü) ya da sahibi açıkça karar verir.
+- Ofisin kendi araçları (`mcp__office__…`) bağlayıcı değildir.
+- Claude Code'un yerleşik araçları (Bash, tarayıcı, dosya) B9'un diğer katmanlarının işidir (Y2–Y4).
+
+Bu kural kodda tek bir işlevdedir: `toolClass(ad)` → `office | builtin | classified (yetenek, dışa dönük mü) |
+unclassified (dışa dönük)`. B9 bunu çağırır, kendi listesini tutmaz. B9'un sözleşmesi şu: bir rolün oturumunda açık
+kalan bağlayıcı araçları, rolün yeteneklerinin araçlarıdır. Rolde olmayan yeteneklerin dışa dönük araçları ve bütün
+sınıflandırılmamış araçlar kapanır.
+
+Sınıflandırılmamış araçlar görünürdür. `capabilitiesRead` (argümansız) sözlüğün ardından sunucu başına sayıyı ve ilk
+altı adı yazar, `GET /api/capabilities` aynısını `unclassified` alanında verir. Kaynak, güncel masaların son oturum
+açılışlarındaki araç adlarıdır (§3.1). Adı olmayan eski bir oturumda yalnız bir alt sınır bilinir: oturumdaki araç
+sayısı eksi sözlüğün o sunucuya ait araç sayısı. Okuma bunu "en az N" diye yazar.
 
 Taslak yetenekleri (`email.draft`, `social.draft`) dışa dönük değil. Onay akışında çalışan taslak yazar, gönderimi
 sahibi onaylar (B9'un 4. katmanı). B6 şablonları değişmedi: dışa dönük rollerin şablonu `email.send`/`social.publish`
@@ -115,6 +151,17 @@ Bundan sonra şablonların yetenekleri de sözlükte olmak zorunda: `parseRoleTe
 
 **B3 kaydı `integrationRegister(capabilities)` bugünkü gibi her metni kabul eder** (B3 davranışı değişmez). Sözlükte
 olmayan bir kimlik yazılırsa cevap bunu ve eşleşmede kullanılmayacağını söyler.
+
+### 3.1 Oturum açılışı araç adlarını taşır (B3'e ek, inceleme turu 1)
+
+`session.started.mcp[]` artık sunucu başına araç sayısının (`tools`, B3) yanında araç adlarını da taşır:
+`toolNames`, sunucu öneki olmadan (`claude.ai Notion` → `notion-search`, …). B3 kaydının masa satırı bunları tam adla
+verir (`IntegrationDesk.toolNames`, eski oturumda `null`). Sınıflandırma okumada yapılır, olaya yazılmaz; sözlük
+sonradan değişse de eski oturumlar doğru sınıflanır.
+
+Boyut: Selin'in gerçek `init`'inde 123 bağlayıcı aracı var; kısa adlar ortalama 17 karakter, JSON'da yaklaşık 2,6 KB.
+Canlı ofiste deny'sız bir masada 337 araç var (K4'teki sayılar), yani oturum açılışı başına yaklaşık 7 KB. Bugün 75
+oturum açılışı kayıtlı. Gerekirse eski oturumların adları düşürülebilir; okuma o durumda alt sınıra döner.
 
 ## 4. Eşleme: yetenek ↔ B3 kaydı
 
@@ -165,7 +212,7 @@ Sınırlar:
 
 ```
 capabilitiesRead(employee?, task?)   herkes        salt okunur
-  –                                  sözlük + ofisteki karşılığı
+  –                                  sözlük + ofisteki karşılığı + sınıflandırılmamış araçlar (§2.1)
   employee                           o kişinin yetenekleri ve masasındaki karşılığı
   task                               görevin istedikleri ve atananın masasındaki karşılığı
   task + employee                    görevin istedikleri o kişinin masasında (kime verilir?)
@@ -174,7 +221,7 @@ editRoleCard(…, capabilities?)       koordinatör
 taskCreate(…, requires?)             liderler      cevap: atananın masasında karşılığı
 taskPass(…, requires?)               herkes        aynı
 taskAssign                           liderler      görev yetenek istiyorsa cevap yeni atananın karşılığını söyler
-GET /api/capabilities[?employee=id]  sahibi        { version, capabilities: Capability[], coverage: CapabilityCoverage[] }
+GET /api/capabilities[?employee=id]  sahibi        { version, capabilities, coverage, unclassified: UnclassifiedTools[] }
 POST /api/employees {…, capabilities?}  sahibi
 ```
 
@@ -205,7 +252,10 @@ ALTER TABLE tasks ADD COLUMN requires TEXT;          -- JSON liste; NULL = istem
   - görev (`requires` kaydı, mesaj ve `myTasks` satırı, bilinmeyen);
   - eşleme: her durum, sözlük ve kayıt yolu, kapalı kayıt, `denied` masa, işten çıkarılan masa, yerleşik araç,
     ofis okuması;
-  - araç cevapları, API, göç v17.
+  - araç cevapları, API, göç v17;
+  - izin listesi (tur 1): `toolClass` dört sınıfı ve incelemede sayılan araçlar; gerçek `init` örneğiyle
+    (`fixtures/init-mcp-deny.json`) sunucu başına sınıflandırılmamış araçlar; masaların birleşimi; adı olmayan eski
+    oturumda alt sınır; deny edilen sunucu ve ofis sunucusu listede yok; okuma ve API.
 - **Eski davranış:**
   - yeteneksiz işe alma ve görev aynı (satır, cevap, mesaj);
   - eski şemalı veritabanı (ekonomi raporu testi);
@@ -216,4 +266,17 @@ ALTER TABLE tasks ADD COLUMN requires TEXT;          -- JSON liste; NULL = istem
   önekinin bir kayıt adıyla eşleşmesi ve şablon yeteneklerinin canlı masalardaki karşılığı.
 - **K3** (`integrations.real.test.ts` genişletilir, `OFFICE_SMOKE=1`, stub sunucular + `LOCKED_ARGS`): gerçek
   `init` → kayıt → eşleme. Açık stub'a kaydedilen yetenek `open`, masa ayarıyla deny edilen stub'ınki `shut`
-  (`closedBy: desk`). Süreç `init`'te öldürülür.
+  (`closedBy: desk`). Açık stub'ın tek aracı (`ping`) sözlükte yok, gerçek oturumun araç listesinden
+  "sınıflandırılmamış" çıkar. Süreç `init`'te öldürülür.
+
+## 8. Değişiklik günlüğü
+
+- **Sürüm 2 (inceleme turu 1, Kerem, [önemli]).** Bulgu: not `outward`'ı B9 kapısının girdisi diye konumluyordu ama
+  sözlükte olmayan araç için kural yoktu ve bilinen birçok dışa dönük ya da para harcayan araç sözlükte değildi.
+  Senaryo: B9 "rolde olmayan outward araçları kapat" diye kurulursa `jeeta_send_message`, `jeeta_reallocate_budget`
+  ve `publish_website` açık kalırdı. Düzeltme:
+  - sözlük izin listesi, sınıflandırılmamış araç dışa dönük ve kapalı (§2.1, `toolClass`);
+  - oturum açılışı araç adlarını taşır (§3.1);
+  - sınıflandırılmamış araçlar okumada ve API'de (§2.1, §5);
+  - incelemede sayılan araçlar sözlükte, yedi yeni yetenek, `outward` tanımı genişledi (§2);
+  - testler (§7) ve K3.

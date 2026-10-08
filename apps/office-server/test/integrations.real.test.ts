@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { sessionArgs } from '../src/claude/args.ts';
 import { normalize } from '../src/claude/normalize.ts';
-import { coverage } from '../src/company/capabilities.ts';
+import { coverage, unclassifiedTools } from '../src/company/capabilities.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
@@ -96,5 +96,10 @@ describe.skipIf(!enabled)('the integration registry with the real claude CLI (re
     console.log(`GERÇEK INIT → YETENEK: email.read ${read!.status}, email.send ${send!.status} (${send!.providers.map((p) => `${p.name} ${p.desk?.status}/${p.desk?.closedBy}`).join(', ')})`);
     expect(read).toMatchObject({ status: 'open', providers: [expect.objectContaining({ name: 'probe_open', via: ['registry'], desk: expect.objectContaining({ open: true }) })] });
     expect(send).toMatchObject({ status: 'shut', providers: [expect.objectContaining({ name: 'probe_shut', via: ['registry'], desk: expect.objectContaining({ status: 'denied', closedBy: 'desk' }) })] });
+    // B7 (review, Kerem round 1): the open stub's one tool is in no capability of the vocabulary — unclassified, from the
+    // real session's own tool list; the denied stub has no tools there.
+    const unclassified = unclassifiedTools(registry.list());
+    console.log(`GERÇEK INIT → SINIFLANDIRILMAMIŞ: ${unclassified.map((u) => `${u.server} ${u.atLeast} (${(u.unclassified ?? []).join(', ')})`).join('; ')}`);
+    expect(unclassified).toEqual([{ server: 'probe_open', kind: 'local_mcp', tools: 1, unclassified: ['mcp__probe_open__ping'], atLeast: 1 }]);
   }, 120_000);
 });

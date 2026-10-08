@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import {
   COVERAGE_STATUS_LABELS, INTEGRATION_KIND_LABELS, INTEGRATION_STATUS_LABELS,
   type Capability, type CapabilityCoverage, type CapabilityProvider, type CapabilityVocabulary, type CoverageStatus, type Integration, type IntegrationDesk,
+  type UnclassifiedTools,
 } from '@cc/shared';
 import { mcpToolPrefix } from '../claude/normalize.ts';
 import { NotFoundError, ValidationError } from '../errors.ts';
@@ -155,4 +156,62 @@ export function coverageBrief(list: CapabilityCoverage[], lead: string, anyway =
   const lacking = list.some((c) => c.status === 'shut' || c.status === 'missing');
   const hint = lacking ? `${anyway ? `${anyway}; açık` : 'Açık'} olmayanlar için sahibinden yetki iste (propose). ` : '';
   return `${lead}: ${short}. ${hint}Ayrıntı: capabilitiesRead.`;
+}
+
+/**
+ * What a tool is, by its name (spec §2, review round 1). The vocabulary is an allow-list: a connector's tool is
+ * classified only if a capability names it; any other is unclassified and counts as outward — no capability of a role
+ * opens it, and B9's gate closes it unless the vocabulary or the owner says otherwise. Claude Code's own tools are
+ * B9's other layers' business (shell, browser, files); the office's own are not connectors.
+ */
+export type ToolClass = { kind: 'office' } | { kind: 'builtin' } | { kind: 'classified'; capability: string; outward: boolean } | { kind: 'unclassified'; outward: true };
+
+let byTool: Map<string, Capability> | null = null;
+
+export function toolClass(name: string): ToolClass {
+  if (name.startsWith(mcpToolPrefix('office'))) return { kind: 'office' };
+  if (!name.startsWith('mcp__')) return { kind: 'builtin' };
+  byTool ??= new Map(capabilityVocabulary().capabilities.flatMap((c) => c.tools.map((t) => [t, c] as const)));
+  const c = byTool.get(name);
+  return c ? { kind: 'classified', capability: c.id, outward: c.outward } : { kind: 'unclassified', outward: true };
+}
+
+/**
+ * Per connector, its tools in the current desks' latest sessions that no capability names: by name where the sessions
+ * carry names, else a lower bound from the count. A desk whose session has none of its tools adds nothing; the office's
+ * own server is never listed. Most first.
+ */
+export function unclassifiedTools(integrations: Integration[]): UnclassifiedTools[] {
+  const out: UnclassifiedTools[] = [];
+  for (const i of integrations) {
+    if (i.kind === 'office') continue;
+    const desks = i.desks.filter((d) => (d.tools ?? 0) > 0);
+    if (desks.length === 0) continue;
+    const named = desks.every((d) => d.toolNames !== null);
+    const names = [...new Set(desks.flatMap((d) => d.toolNames ?? []))].sort();
+    const unclassified = names.filter((n) => toolClass(n).kind === 'unclassified');
+    const known = capabilityVocabulary().capabilities.flatMap((c) => c.tools).filter((t) => t.startsWith(mcpToolPrefix(i.name))).length;
+    const tools = named ? names.length : Math.max(...desks.map((d) => d.tools ?? 0));
+    const atLeast = named ? unclassified.length : Math.max(unclassified.length, tools - known);
+    if (atLeast === 0) continue;
+    out.push({ server: i.name, kind: i.kind, tools, unclassified: named ? unclassified : null, atLeast });
+  }
+  return out.sort((a, b) => b.atLeast - a.atLeast || a.server.localeCompare(b.server, 'tr'));
+}
+
+/** The section capabilitiesRead ends with: each connector's unclassified tools (the first six by name). */
+export function unclassifiedLines(integrations: Integration[]): string[] {
+  const reported = integrations.some((i) => i.kind !== 'office' && i.desks.some((d) => (d.tools ?? 0) > 0));
+  if (!reported) return ['', '## Sınıflandırılmamış bağlayıcı araçları: henüz hiçbir oturum araç bildirmedi.'];
+  const list = unclassifiedTools(integrations);
+  if (list.length === 0) return ['', '## Sınıflandırılmamış bağlayıcı araçları: yok.'];
+  const shown = (u: UnclassifiedTools) => {
+    const short = u.unclassified!.map((t) => t.slice(mcpToolPrefix(u.server).length));
+    return `${short.slice(0, 6).join(', ')}${short.length > 6 ? `, … +${short.length - 6}` : ''}`;
+  };
+  return [
+    '',
+    '## Sınıflandırılmamış bağlayıcı araçları — sözlük bir izin listesidir: bunlar hiçbir yeteneğe ait değil, hiçbir rolde açılmaz; B9 kapısı onları dışa dönük sayar.',
+    ...list.map((u) => (u.unclassified ? `• ${u.server}: ${u.atLeast} (${shown(u)})` : `• ${u.server}: en az ${u.atLeast} (araç adları eski bir oturumdan; sayı = oturumdaki araç − sözlükteki)`)),
+  ];
 }

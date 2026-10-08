@@ -32,6 +32,8 @@ export interface IntegrationDesk {
   raw: string;
   /** How many of its tools the session has; null for a session from before tool counts (then only the server state is known). */
   tools: number | null;
+  /** Those tools by full name (`mcp__server__tool`); null for a session from before names (B7). */
+  toolNames: string[] | null;
   /** When that session opened. */
   seenAt: number;
   /** Usable there: connected with tools in the session (or a count not known), and not closed in the registry. */

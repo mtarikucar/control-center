@@ -1,12 +1,13 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../src/migrations.ts';
 import type { Employee, Integration, IntegrationDesk } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
-import { capability, capabilityIds, capabilityVocabulary, coverage, parseCapabilities } from '../src/company/capabilities.ts';
+import { capability, capabilityIds, capabilityVocabulary, coverage, parseCapabilities, toolClass, unclassifiedTools } from '../src/company/capabilities.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { listRoleTemplates, parseRoleTemplate } from '../src/company/role-templates.ts';
 import { TaskStore } from '../src/company/store.ts';
-import { mcpToolPrefix } from '../src/claude/normalize.ts';
+import { mcpToolPrefix, normalize } from '../src/claude/normalize.ts';
 import { migrateUp, openDb } from '../src/db.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
@@ -36,8 +37,12 @@ function make() {
     return tool.run({ employee: current }, args) as Promise<string>;
   };
   const coordinator = c.company.hireCoordinator();
-  const session = (who: Employee, mcp: Array<[string, string] | [string, string, number]>) =>
-    s.events.append(who.id, { type: 'session.started', model: 'm', mcp: mcp.map(([name, status, tools]) => (tools === undefined ? { name, status } : { name, status, tools })) });
+  /** A session's report: with a tool count when given, and the tools' names (without the server's prefix) when given too. */
+  const session = (who: Employee, mcp: Array<[string, string] | [string, string, number] | [string, string, number, string[]]>) =>
+    s.events.append(who.id, {
+      type: 'session.started', model: 'm',
+      mcp: mcp.map(([name, status, tools, toolNames]) => (tools === undefined ? { name, status } : toolNames === undefined ? { name, status, tools } : { name, status, tools, toolNames })),
+    });
   return { ...s, ...c, integrations, tools, call, coordinator, session };
 }
 
@@ -103,14 +108,17 @@ describe('Capability vocabulary — the file', () => {
     for (const [text, error] of bad) expect(() => parseCapabilities(text), String(error)).toThrow(error);
   });
 
-  it('the shipped vocabulary: sixteen capabilities, which go outward, which the session always has, the connectors named by their tools', () => {
+  it('the shipped vocabulary: twenty-three capabilities, which go outward, which the session always has, the connectors named by their tools', () => {
     const v = capabilityVocabulary();
     expect(v.version).toBe(1);
     expect(v.capabilities.map((c) => c.id)).toEqual([
       'docs.read', 'docs.write', 'web.fetch', 'email.read', 'email.draft', 'email.send', 'calendar.read', 'calendar.write',
       'social.read', 'social.draft', 'social.publish', 'crm.read', 'crm.write', 'payments.read', 'payments.charge', 'ecommerce.orders',
+      'email.delete', 'messages.send', 'calls.make', 'ads.manage', 'web.publish', 'media.generate', 'automation.run',
     ]);
-    expect(v.capabilities.filter((c) => c.outward).map((c) => c.id)).toEqual(['email.send', 'calendar.write', 'social.publish', 'payments.charge']);
+    expect(v.capabilities.filter((c) => c.outward).map((c) => c.id)).toEqual([
+      'email.send', 'calendar.write', 'social.publish', 'payments.charge', 'email.delete', 'messages.send', 'calls.make', 'ads.manage', 'web.publish', 'media.generate', 'automation.run',
+    ]);
     expect(Object.fromEntries(v.capabilities.filter((c) => c.builtin.length).map((c) => [c.id, c.builtin]))).toEqual({
       'docs.read': ['Read', 'Glob', 'Grep'], 'docs.write': ['Write', 'Edit'], 'web.fetch': ['WebFetch', 'WebSearch'],
     });
@@ -127,6 +135,17 @@ describe('Capability vocabulary — the file', () => {
     // No connector here handles payments or orders: the company records its own (integrationRegister).
     for (const id of ['payments.read', 'payments.charge', 'ecommerce.orders']) expect(capability(id).tools, id).toEqual([]);
     expect(() => capability('email.sending')).toThrow(/Bilinmeyen yetenek: email.sending/);
+    // Review, Kerem round 1: the outward and paying tools the first vocabulary left out.
+    const J = 'mcp__claude_ai_jeeta__';
+    const H = 'mcp__claude_ai_Higgsfield__';
+    expect(capability('messages.send').tools).toEqual([`${J}jeeta_send_message`]);
+    expect(capability('calls.make').tools).toEqual([`${J}jeeta_click_to_dial`]);
+    expect(capability('ads.manage').tools).toEqual(expect.arrayContaining([`${J}jeeta_reallocate_budget`, `${J}jeeta_create_campaign`, `${J}jeeta_set_campaign_status`, `${J}jeeta_approve_strategy_action`]));
+    expect(capability('web.publish').tools).toEqual([`${H}publish_website`, `${H}deploy_website`]);
+    expect(capability('media.generate').tools).toEqual(expect.arrayContaining([`${H}generate_image`, `${H}generate_video`, `${H}generate_audio`]));
+    expect(capability('email.delete').tools).toEqual(expect.arrayContaining(['mcp__claude_ai_Gmail__trash_message', 'mcp__claude_ai_Gmail__delete_label']));
+    expect(capability('automation.run').tools).toEqual(['mcp__claude_ai_apify__call-actor']);
+    expect(capability('docs.write').tools).toEqual(expect.arrayContaining(['mcp__claude_ai_Notion__notion-create-comment']));
   });
 
   it('every role template’s capabilities are in the vocabulary; a template asking for one that is not fails to load', () => {
@@ -144,6 +163,79 @@ describe('Capability vocabulary — the file', () => {
     expect(() => capabilityIds('email.read', 'Yetenekler')).toThrow(/Yetenekler metinlerden oluşan bir liste olmalı/);
     expect(() => capabilityIds([1], 'Gereken yetenekler')).toThrow(/Gereken yetenekler metinlerden oluşan bir liste olmalı/);
     expect(() => capabilityIds(['email.read', 'mail.send'], 'Yetenekler')).toThrow(/Bilinmeyen yetenek: mail.send\. Sözlük: docs.read, docs.write, web.fetch, email.read/);
+  });
+});
+
+const REAL_INIT = () => JSON.parse(readFileSync(new URL('./fixtures/init-mcp-deny.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+
+describe('Capabilities — the vocabulary is an allow-list (review, Kerem round 1)', () => {
+  it('every tool has a class: the office’s, built in, classified (its capability, outward or not) — or unclassified, which counts as outward', () => {
+    expect(toolClass('mcp__office__taskFinish')).toEqual({ kind: 'office' });
+    expect(toolClass('Bash')).toEqual({ kind: 'builtin' });
+    expect(toolClass('WebFetch')).toEqual({ kind: 'builtin' });
+    expect(toolClass('mcp__claude_ai_Gmail__get_message')).toEqual({ kind: 'classified', capability: 'email.read', outward: false });
+    expect(toolClass('mcp__claude_ai_Gmail__send_message')).toEqual({ kind: 'classified', capability: 'email.send', outward: true });
+    // Not in the vocabulary: no capability of a role ever opens it, and the gate treats it as outward.
+    expect(toolClass('mcp__claude_ai_jeeta__jeeta_list_team')).toEqual({ kind: 'unclassified', outward: true });
+    expect(toolClass('mcp__blender__execute_blender_code')).toEqual({ kind: 'unclassified', outward: true });
+    // The tools the review named: each is now in a capability, outward unless it only writes the company’s own notes.
+    const named = [
+      'mcp__claude_ai_jeeta__jeeta_send_message', 'mcp__claude_ai_jeeta__jeeta_reallocate_budget', 'mcp__claude_ai_jeeta__jeeta_click_to_dial', 'mcp__claude_ai_jeeta__jeeta_create_campaign',
+      'mcp__claude_ai_jeeta__jeeta_set_campaign_status', 'mcp__claude_ai_jeeta__jeeta_approve_strategy_action', 'mcp__claude_ai_Higgsfield__publish_website', 'mcp__claude_ai_Higgsfield__deploy_website',
+      'mcp__claude_ai_Higgsfield__generate_image', 'mcp__claude_ai_Gmail__trash_message', 'mcp__claude_ai_Gmail__delete_label', 'mcp__claude_ai_apify__call-actor',
+    ];
+    for (const tool of named) expect(toolClass(tool), tool).toMatchObject({ kind: 'classified', outward: true });
+    expect(toolClass('mcp__claude_ai_Notion__notion-create-comment')).toEqual({ kind: 'classified', capability: 'docs.write', outward: false });
+  });
+
+  it('review focus: a real session’s tools not in the vocabulary show as unclassified, per connector; a classified tool never does', () => {
+    const t = make();
+    const ada = t.company.hire(t.coordinator.id, { name: 'Ada', role: 'r' });
+    // A real init (claude 2.1.293; Gmail, jeeta and Higgsfield denied on that desk, so none of their tools).
+    t.events.append(ada.id, normalize(REAL_INIT())[0]!);
+    const list = unclassifiedTools(t.integrations.list());
+    const of = (server: string) => list.find((u) => u.server === server);
+    // Google Calendar's nine are all in the vocabulary; the denied ones have no tools in the session.
+    for (const server of ['claude.ai Google Calendar', 'claude.ai Gmail', 'claude.ai jeeta', 'claude.ai Higgsfield']) expect(of(server), server).toBeUndefined();
+    expect(of('blender')).toMatchObject({ kind: 'local_mcp', tools: 9, unclassified: expect.arrayContaining(['mcp__blender__execute_blender_code']), atLeast: 9 });
+    expect(of('blender')!.unclassified).toHaveLength(9);
+    const notion = of('claude.ai Notion')!;
+    expect(notion.tools).toBe(46);
+    expect(notion.unclassified).toContain('mcp__claude_ai_Notion__notion-move-pages');
+    expect(notion.unclassified).not.toContain('mcp__claude_ai_Notion__notion-search');
+    expect(notion.atLeast).toBe(notion.unclassified!.length);
+    for (const u of list) for (const tool of u.unclassified ?? []) expect(toolClass(tool), tool).toEqual({ kind: 'unclassified', outward: true });
+    // Most first.
+    expect(list.map((u) => u.atLeast)).toEqual([...list.map((u) => u.atLeast)].sort((a, b) => b - a));
+  });
+
+  it('review focus: names from every current desk’s latest session together; a session from before names gives a lower bound; the office’s own server is never listed', () => {
+    const t = make();
+    const c = t.coordinator.id;
+    const ada = t.company.hire(c, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(c, { name: 'Can', role: 'r' });
+    t.session(ada, [['office', 'connected', 2, ['taskFinish', 'myTasks']], ['claude.ai jeeta', 'connected', 2, ['jeeta_list_team', 'jeeta_send_message']], ['claude.ai Higgsfield', 'connected', 120]]);
+    t.session(can, [['claude.ai jeeta', 'connected', 2, ['jeeta_list_team', 'jeeta_get_workspace_info']], ['blender', 'connected', 0, []]]);
+    const list = unclassifiedTools(t.integrations.list());
+    expect(list.find((u) => u.server === 'claude.ai jeeta')).toEqual({
+      server: 'claude.ai jeeta', kind: 'claude_ai', tools: 3, unclassified: ['mcp__claude_ai_jeeta__jeeta_get_workspace_info', 'mcp__claude_ai_jeeta__jeeta_list_team'], atLeast: 2,
+    });
+    const known = capabilityVocabulary().capabilities.flatMap((x) => x.tools).filter((x) => x.startsWith('mcp__claude_ai_Higgsfield__')).length;
+    expect(list.find((u) => u.server === 'claude.ai Higgsfield')).toEqual({ server: 'claude.ai Higgsfield', kind: 'claude_ai', tools: 120, unclassified: null, atLeast: 120 - known });
+    expect(list.map((u) => u.server)).not.toContain('office');
+    // A desk that denies a server has none of its tools: nothing to list.
+    expect(list.map((u) => u.server)).not.toContain('blender');
+  });
+
+  it('capabilitiesRead and the API show them after the vocabulary', async () => {
+    const t = make();
+    const ada = t.company.hire(t.coordinator.id, { name: 'Ada', role: 'r' });
+    expect(await t.call(ada, 'capabilitiesRead')).toContain('\n## Sınıflandırılmamış bağlayıcı araçları: henüz hiçbir oturum araç bildirmedi.');
+    t.session(ada, [['claude.ai jeeta', 'connected', 9, ['jeeta_list_team', 'jeeta_send_message', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7']], ['claude.ai Higgsfield', 'connected', 120]]);
+    const read = await t.call(ada, 'capabilitiesRead');
+    expect(read).toContain('\n## Sınıflandırılmamış bağlayıcı araçları — sözlük bir izin listesidir: bunlar hiçbir yeteneğe ait değil, hiçbir rolde açılmaz; B9 kapısı onları dışa dönük sayar.');
+    expect(read).toContain('• claude.ai jeeta: 8 (a1, a2, a3, a4, a5, a6, … +2)');
+    expect(read).toContain('• claude.ai Higgsfield: en az 108 (araç adları eski bir oturumdan; sayı = oturumdaki araç − sözlükteki)');
   });
 });
 
@@ -289,7 +381,7 @@ describe('Capabilities — matched with the integration registry', () => {
 
   it('the order: open before manual before shut before unseen before missing', () => {
     const desk = (employeeId: string, open: boolean): IntegrationDesk => ({
-      employeeId, name: employeeId, deskIndex: 0, status: open ? 'connected' : 'needs_auth', raw: open ? 'connected' : 'needs-auth', tools: open ? 3 : null, seenAt: 1, open, closedBy: open ? null : 'server',
+      employeeId, name: employeeId, deskIndex: 0, status: open ? 'connected' : 'needs_auth', raw: open ? 'connected' : 'needs-auth', tools: open ? 3 : null, toolNames: null, seenAt: 1, open, closedBy: open ? null : 'server',
     });
     const integration = (name: string, kind: Integration['kind'], desks: IntegrationDesk[], capabilities: string[] = []): Integration => ({
       name, kind, status: desks.some((d) => d.open) ? 'connected' : desks.length ? 'needs_auth' : 'unknown', registryClosed: false, desks, capabilities,
@@ -328,7 +420,7 @@ describe('Capabilities — reading them, and the tools that take them', () => {
       return text;
     };
     const all = await read(t.ada);
-    expect(all).toContain('# Yetenek sözlüğü (16 yetenek, sürüm 1) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
+    expect(all).toContain('# Yetenek sözlüğü (23 yetenek, sürüm 1) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
     expect(all).toContain('• email.read — E-posta okuma [açık] claude.ai Gmail: açık: Ada');
     expect(all).toContain('• web.fetch — Web’den okuma [açık] yerleşik: WebFetch, WebSearch');
     expect(all).toContain('• payments.read — Ödeme kayıtlarını okuma [elle kayıtlı] iyzico-cli: elle kayıtlı (komut satırı), oturumlarda görünmez');
