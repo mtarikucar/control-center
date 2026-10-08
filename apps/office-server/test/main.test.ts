@@ -4,6 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DecisionStore, NoteStore } from '../src/company/memory-store.ts';
 import { migrateUp, openDb } from '../src/db.ts';
 import { MIGRATIONS } from '../src/migrations.ts';
 import { FAKE_CLAUDE, tempDir, until } from './helpers.ts';
@@ -93,6 +94,26 @@ describe('office-server process', () => {
     first.child.kill('SIGINT');
     expect(await first.exited).toBe(0);
     expect(existsSync(join(dir, 'office.lock'))).toBe(false);
+  }, 30_000);
+
+  it('fills the search index on start from a database written before it, and keeps it filled as the office writes (B11)', async () => {
+    const dir = tempDir();
+    // An office database from before v20: a note and a decision, written with no search index.
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db, MIGRATIONS.filter((m) => m.version <= 15));
+    new NoteStore(db).create({ by: 'a', title: 'Seslendirme', text: 'ElevenLabs Türkçe iyi.', tags: [], source: null });
+    const decision = new DecisionStore(db).create({ by: 'c', title: 'Ses aracı', chosen: 'ElevenLabs', reason: 'Türkçe', alternatives: [], planId: null, reverts: null });
+    db.close();
+    const office = startOffice(dir);
+    await until(() => /hazır: http:\/\/127\.0\.0\.1:\d+/.test(office.output()), 10_000);
+    const port = Number(/hazır: http:\/\/127\.0\.0\.1:(\d+)/.exec(office.output())?.[1]);
+    const found: Array<{ kind: string; title: string }> = await call(port, 'GET', '/api/memory/search?q=elevenlabs');
+    expect(found.map((h) => h.kind).sort()).toEqual(['decision', 'note']);
+    // The owner reverts the decision: the record it writes is in the index at once.
+    await call(port, 'POST', `/api/decisions/${decision.id}/revert`);
+    expect(await call(port, 'GET', `/api/memory/search?q=${encodeURIComponent('geri alındı')}`)).toMatchObject([{ kind: 'decision', title: 'Geri alındı: Ses aracı' }]);
+    office.child.kill('SIGINT');
+    expect(await office.exited).toBe(0);
   }, 30_000);
 
   it('serves the office tools only to a valid token', async () => {

@@ -37,6 +37,24 @@ export function parseUntil(value: string, now: number, o: { maxDays: number; lab
   return at;
 }
 
+/**
+ * A point in the past to search from (memorySearch `since`, B11): `7d` (or `+7d`) = that many days ago, or a local date
+ * `2026-10-01` = its midnight.
+ */
+export function parseSince(value: string, now: number): number {
+  const text = (value ?? '').trim();
+  const forms = 'since gün sayısı (7d) ya da yerel tarih (2026-10-01) olmalı';
+  const rel = /^\+?(\d+)\s*[dD]$/.exec(text);
+  const abs = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (rel && Number(rel[1]) >= 1) return now - Number(rel[1]) * DAY;
+  if (abs) {
+    const [y, mo, d] = abs.slice(1).map(Number) as [number, number, number];
+    const date = new Date(y, mo - 1, d);
+    if (date.getFullYear() === y && date.getMonth() === mo - 1 && date.getDate() === d) return date.getTime();
+  }
+  throw new ValidationError(`${forms}.`);
+}
+
 /** "bugün 14:55", "yarın 09:00", "12 Eki 14:55", "3 Oca 2027 08:30" — local time, relative to `now`. */
 export function formatWhen(ms: number, now: number): string {
   const d = new Date(ms);

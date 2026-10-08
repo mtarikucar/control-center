@@ -21,6 +21,7 @@ import { ProfileStore } from './company/profile-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
+import { SearchIndex } from './company/search.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
 import { KpiReadings } from './company/kpi-readings.ts';
 import { loadConfig } from './config.ts';
@@ -69,7 +70,11 @@ const engine = new Engine({
   cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
   modelPolicyEnabled: () => budget.constitution().modelPolicyEnabled,
 });
-const tasks = new TaskStore(db);
+// The memory search's one index (B11): every store that writes what it holds is given it; filled from those tables on
+// the first start after v20 and whenever it is behind them.
+const searchIndex = new SearchIndex(db);
+searchIndex.rebuildIfStale();
+const tasks = new TaskStore(db, Date.now, searchIndex);
 const plans = new PlanStore(db);
 const notices = new NoticeStore(db);
 const schedules = new ScheduleStore(db);
@@ -77,14 +82,15 @@ const proposals = new ProposalStore(db);
 const goals = new GoalStore(db);
 const state = new CompanyStateStore(db);
 const memory = new Memory({
-  roster, events, notices, tasks, plans, dataDir: config.dataDir,
-  decisions: new DecisionStore(db), playbook: new PlaybookStore(db), notes: new NoteStore(db), employeeNotes: new EmployeeNoteStore(db),
+  roster, events, notices, tasks, plans, dataDir: config.dataDir, index: searchIndex,
+  decisions: new DecisionStore(db, Date.now, searchIndex), playbook: new PlaybookStore(db, Date.now, searchIndex), notes: new NoteStore(db, Date.now, searchIndex),
+  employeeNotes: new EmployeeNoteStore(db),
 });
 const budget = new Budget({
   constitution: new ConstitutionStore(db), spend: new SpendStore(db), tasks, plans, roster, events, notices, quota, deskCount: config.deskCount,
 });
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db), onboarding: new OnboardingStore(db) });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db, Date.now, searchIndex), onboarding: new OnboardingStore(db) });
 const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, budget });
 // The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
 const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });

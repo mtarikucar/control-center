@@ -32,14 +32,17 @@ describe.skipIf(!enabled)('core 3 with the real claude CLI (coordinator on haiku
     const tokens = new TokenRegistry();
     let url = '';
     const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['claude', ...LOCKED_ARGS, '--mcp-config', STUB_CONFIG], mcp: { url: () => url, tokens } });
-    const tasks = new TaskStore(s.db);
+    // B11: the memory search's index, given to every store that writes what it holds (as main.ts).
+    const { SearchIndex } = await import('../src/company/search.ts');
+    const index = new SearchIndex(s.db);
+    const tasks = new TaskStore(s.db, Date.now, index);
     const plans = new PlanStore(s.db);
     const notices = new NoticeStore(s.db);
     const schedules = new ScheduleStore(s.db);
     const characters = () => ['coder', 'manager'];
     const { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } = await import('../src/company/memory-store.ts');
     const { Memory } = await import('../src/company/memory.ts');
-    const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, decisions: new DecisionStore(s.db), playbook: new PlaybookStore(s.db), notes: new NoteStore(s.db), employeeNotes: new EmployeeNoteStore(s.db) });
+    const memory = new Memory({ roster: s.roster, events: s.events, notices, tasks, plans, dataDir: s.dataDir, index, decisions: new DecisionStore(s.db, Date.now, index), playbook: new PlaybookStore(s.db, Date.now, index), notes: new NoteStore(s.db, Date.now, index), employeeNotes: new EmployeeNoteStore(s.db) });
     const { Budget } = await import('../src/company/budget.ts');
     const { ConstitutionStore, SpendStore } = await import('../src/company/budget-store.ts');
     const quota = new QuotaTracker(s.db, s.events);
@@ -49,7 +52,7 @@ describe.skipIf(!enabled)('core 3 with the real claude CLI (coordinator on haiku
     const company = new Company({
       roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => engine.hire(i), characters, memory, reload: (id) => engine.reload(id),
       constitution: () => budget.constitution(), proposals, goals: new GoalStore(s.db), state: new CompanyStateStore(s.db), schedules,
-      profile: new ProfileStore(s.db), onboarding: new OnboardingStore(s.db),
+      profile: new ProfileStore(s.db, Date.now, index), onboarding: new OnboardingStore(s.db),
     });
     const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
     const blueprints = new Blueprints({ company, roster: s.roster, tasks, plans, schedules, memory, store: new BlueprintStore(s.db), integrations, constitution: () => budget.constitution() });
