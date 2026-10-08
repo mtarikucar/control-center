@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appliedVersion, migrateDown, migrateUp, openDb, type Db } from '../src/db.ts';
+import { aheadOfCode, appliedVersion, migrateDown, migrateUp, openDb, type Db } from '../src/db.ts';
 import { MIGRATIONS, type Migration } from '../src/migrations.ts';
 
 // The real case (task 57b8d3f2): B26's branch numbers its migration 16 and is to become 19 after core-3, whose B6
@@ -34,10 +34,33 @@ describe('migrations: an applied version must be the code’s migration of that 
     expect(() => migrateUp(db, [...MIGRATIONS, B26_AS_16])).toThrow('v16 canlıda “role templates: which one an employee was hired from”, kodda “KPI readings”: göç sırası bozuk.');
   });
 
-  it('an applied version the code does not have (the code went back without migrateDown) stops it too', () => {
+  it('review (Kerem): a database ahead of the code — only the code went back after core-3, the merge notes’ way — opens; nothing runs and the versions above are named', () => {
     const db = openDb(':memory:');
-    migrateUp(db, [...MIGRATIONS, B26_AS_16]);
-    expect(() => migrateUp(db)).toThrow('v16 canlıda “KPI readings”, kodda yok: göç sırası bozuk.');
+    migrateUp(db, [...MIGRATIONS, B6_16, B7_17, B5_18]);
+    const before = applied(db);
+    expect(migrateUp(db)).toBe(18);
+    expect(applied(db)).toEqual(before);
+    expect(aheadOfCode(db)).toEqual([
+      { version: 16, name: 'role templates: which one an employee was hired from' },
+      { version: 17, name: 'capabilities' },
+      { version: 18, name: 'blueprint' },
+    ]);
+    // A database the code knows whole is not ahead.
+    expect(aheadOfCode(db, [...MIGRATIONS, B6_16, B7_17, B5_18])).toEqual([]);
+  });
+
+  it('a database ahead of the code is not migrated down by it: it does not know the downs above, and going below them would leave them on top', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, [...MIGRATIONS, B6_16, B7_17, B5_18]);
+    expect(() => migrateDown(db, 14)).toThrow('Veritabanı koddan ileride (v16, v17, v18 bu kodda yok): bu kod geri göç yapamaz; geri almayı o göçleri bilen kodla yap.');
+    expect(appliedVersion(db)).toBe(18);
+    expect(applied(db)).toContain('15:integration registry: what the coordinator records by hand');
+  });
+
+  it('ahead is only above the code: a version within the code’s range with another name still stops it', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, [...MIGRATIONS, B26_AS_16, B7_17]);
+    expect(() => migrateUp(db, [...MIGRATIONS, B6_16])).toThrow('v16 canlıda “KPI readings”, kodda “role templates: which one an employee was hired from”: göç sırası bozuk.');
   });
 
   it('a migration of the code below the last applied one that was never applied — the one the runner would skip — stops it', () => {

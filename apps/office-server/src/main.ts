@@ -21,7 +21,7 @@ import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
 import { loadConfig } from './config.ts';
-import { migrateUp, openDb } from './db.ts';
+import { aheadOfCode, migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
 import { Engine } from './engine.ts';
 import { EventStore } from './event-store.ts';
@@ -50,6 +50,11 @@ try {
   db.close();
   releaseLock();
   process.exit(1);
+}
+// Ahead of the code (only the code went back, the merge notes' way): the office opens on it and says so.
+const ahead = aheadOfCode(db);
+if (ahead.length > 0) {
+  console.warn(`Uyarı: veritabanı koddan ileride: ${ahead.map((a) => `v${a.version} “${a.name}”`).join(', ')} bu kodda yok; göç çalıştırılmadı, ofis açılıyor.`);
 }
 const events = new EventStore(db);
 const roster = new Roster(db, config.deskCount, Date.now, (slug) => existsSync(deskDir(config.dataDir, slug)));

@@ -44,16 +44,27 @@ function call(port: number, method: string, path: string, body?: unknown): Promi
 describe('office-server process', () => {
   it('does not open on a database whose migrations are not the code’s: says which version, exits 1, frees the lock', async () => {
     const dir = tempDir();
-    // B26 went live alone as 16 and the code went back to main (1–15) without migrateDown.
+    // B26 went live alone as 16 and v15 of the code is another migration under the same number.
     const db = openDb(join(dir, 'office.db'));
     migrateUp(db);
-    db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (16, ?, 1)').run('KPI readings');
+    db.prepare("UPDATE schema_migrations SET name = 'KPI readings' WHERE version = 15").run();
     db.close();
     const office = startOffice(dir);
     expect(await office.exited).toBe(1);
-    expect(office.output()).toContain('office-server açılmadı: v16 canlıda “KPI readings”, kodda yok: göç sırası bozuk.');
+    expect(office.output()).toContain('office-server açılmadı: v15 canlıda “KPI readings”, kodda “integration registry: what the coordinator records by hand”: göç sırası bozuk.');
     expect(office.output()).not.toMatch(/hazır: http/);
     expect(existsSync(join(dir, 'office.lock'))).toBe(false);
+  });
+
+  it('review (Kerem): opens on a database ahead of the code (only the code went back) and says so in one line', async () => {
+    const dir = tempDir();
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db);
+    db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (16, 'role templates: which one an employee was hired from', 1)").run();
+    db.close();
+    const office = startOffice(dir);
+    await until(() => /hazır: http:\/\/127\.0\.0\.1:\d+/.test(office.output()), 10_000);
+    expect(office.output()).toContain('Uyarı: veritabanı koddan ileride: v16 “role templates: which one an employee was hired from” bu kodda yok; göç çalıştırılmadı, ofis açılıyor.');
   });
 
   it('refuses a second office on the same data directory without touching the first', async () => {

@@ -5,6 +5,11 @@ export interface Migration {
   down: string;
 }
 
+/**
+ * Append only. Never renumber or rename a migration that has run anywhere: checkApplied (db.ts) compares each applied
+ * (version, name) of the database with these, and an office whose name differs does not open (db.test.ts keeps the
+ * live names of 1–15).
+ */
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
