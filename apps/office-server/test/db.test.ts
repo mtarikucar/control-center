@@ -38,8 +38,9 @@ describe('migrations', () => {
   });
 
   it('review (Kerem): the applied migrations keep the names the live database has (checkApplied compares them; renaming one stops the office)', () => {
-    // From the live database (VACUUM INTO copy, 2026-10-08, task 57b8d3f2): schema_migrations 1–15.
-    expect(MIGRATIONS.slice(0, 15).map((m) => `${m.version}:${m.name}`)).toEqual([
+    // From the live database (VACUUM INTO copy, 2026-10-08, task 57b8d3f2): schema_migrations 1–15; 16 since the management
+    // cycle went live (read-only, 2026-10-08 evening, task 3bf20e5c).
+    expect(MIGRATIONS.slice(0, 16).map((m) => `${m.version}:${m.name}`)).toEqual([
       '1:core tables',
       '2:company: roles, plans, tasks, notices',
       '3:company memory: decisions, playbook, notes, employee files, task kind',
@@ -55,6 +56,7 @@ describe('migrations', () => {
       '13:company profile: sections, one row per version',
       "14:onboarding: the owner's sentence and the rounds of questions",
       '15:integration registry: what the coordinator records by hand',
+      '16:living plans: a plan’s streams, a task’s stream',
     ]);
   });
 
