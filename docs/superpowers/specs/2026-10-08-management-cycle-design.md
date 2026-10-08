@@ -54,7 +54,8 @@ Tur şu olaylardan biri olunca açılır (yakın olaylar tek turda toplanır):
 - **Hedef ve açık iş yokken:** kalp atışı seyrekleşir: anayasanın `pulseHours` aralığında bir tur (0 = hiç); koordinatör
   `restUntil` ile dinlenirken bu tur gelmez, dinlenme bitince bir tur açılır (2026-10-08 kararı: ofis kendi kendine
   hiç uyanmayan bir duruma düşmemeli).
-- **Kota payı devredeyken:** yalnız olaylar tur açar, kalp atışı yok (sahibinin payı korunur).
+- **Kota payı devredeyken:** yalnız olaylar tur açar, kalp atışı yok (sahibinin payı korunur); dinlenmenin bitişi bir
+  olay sayılır ve tur açar.
 - Sahibinin mesajı tur açmaz, doğrudan koordinatöre gider (bugünkü gibi); ama sonraki tur o mesajdan sonraki durumu görür.
 
 ### 3.2 Pano (girdi)
@@ -102,6 +103,10 @@ streams: [{ id, title, owner (çalışan ya da "alınacak: <rol>"), dependsOn: [
 - Pano akışları gerçekle karşılaştırır: sahibi boşta olan aktif akış, sahibi olmayan akış, tek kişide toplanmış
   bağımlı akışlar, bitmiş ama kapanmamış akış.
 - Ajanda ve Görevler ekranı akışı gösterir (görev kartında akış adı).
+- Hedefin kapanışı planlarını kapatır (2026-10-08 deneme bulgusu): koordinatör bir hedefi `done` ya da `dropped`
+  yapınca o hedefin süren planları `done` (hedef bittiyse) ya da `stopped` olur, taslakları `stopped`; görevi hiç
+  açılmamış akışlar böylece planı açık tutmaz. Planlarda açık iş (açık görev ya da süren rutin) varsa kapanış reddedilir
+  ve hangi planda ne kaldığı söylenir. Görevsiz kalmış ama ona bağlı akışları başlamış bir akış panoda uyarı olur.
 
 ### 3.5 Model yönlendirmesi
 
