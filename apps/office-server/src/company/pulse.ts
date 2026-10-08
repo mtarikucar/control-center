@@ -7,8 +7,8 @@ import type { NoticeTopic } from './notices.ts';
 import { OPEN_STATUSES, type NoticeStore, type PlanStore, type TaskStore } from './store.ts';
 
 const HOUR = 60 * 60_000;
-/** An approved plan that has not had a single task this long after it started is not running: it stalled. */
-const EMPTY_PLAN_GRACE_MS = 10 * 60_000;
+/** An approved plan that has not had a single task this long after it started is not running: it stalled (the board says so too). */
+export const EMPTY_PLAN_GRACE_MS = 10 * 60_000;
 
 export interface PulseDeps {
   company: Company;
@@ -26,7 +26,8 @@ export interface PulseDeps {
  * The office watches the project so the coordinator does not have to (spec §6.3): code, no model. It leaves the
  * coordinator a decision notice only when one is due — a goal with no running plan, people idle while goals are active,
  * or neither goals nor work — and never twice for the same state (markers in the database survive a restart). The
- * dispatcher delivers the notices by its own rules: never interrupting, waking a sleeping coordinator.
+ * dispatcher delivers the notices by its own rules: never interrupting, waking a sleeping coordinator. An office with
+ * the management cycle does not run it: the same facts are sections of the board (management cycle §3.6).
  */
 export class Pulse {
   readonly #d: PulseDeps;

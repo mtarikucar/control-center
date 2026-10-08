@@ -71,6 +71,7 @@ const budget = new Budget({
 });
 const characters = manifestCharacters(config.assetsDir);
 const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db), onboarding: new OnboardingStore(db) });
+// The project's pulse (spec §6.3): the dispatcher runs it only without the management cycle; here its facts are the board's (§3.6).
 const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, budget });
 // The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
 const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });

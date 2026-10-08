@@ -10,6 +10,7 @@ import { PROPOSAL_TR, type Company } from './company.ts';
 import type { CompanyStateStore } from './goal-store.ts';
 import { officeMetrics } from './office-metrics.ts';
 import type { ProposalStore } from './proposal-store.ts';
+import { EMPTY_PLAN_GRACE_MS } from './pulse.ts';
 import { OPEN_STATUSES, type PlanStore, type TaskStore } from './store.ts';
 import { MAX_STREAMS } from './streams.ts';
 import { formatStamp, formatWhen } from './time.ts';
@@ -51,7 +52,9 @@ export interface Board {
 }
 
 const UNCLOSED = 'UYARI: Önceki tur cycleClose ile kapanmadı. Bu turu cycleClose ile kapat; değişiklik yoksa nedenini yaz (“değişiklik yok, çünkü …”).';
-const NO_GOAL = 'Aktif hedef yok: şirket özetindeki misyona bakıp sıradaki hedefi aç (goalSet) ve ilk planını başlat (planPropose, goalId ile).';
+/** No active goal (the pulse's “no goal” notice, management cycle §3.6): `idle` — no open task and no running plan either. */
+const noGoal = (idle: boolean) =>
+  `Aktif hedef yok${idle ? ' ve açık iş yok' : ''}: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını hemen başlat (planPropose, goalId ile).`;
 const NO_PLAN = 'süren planı yok — planPropose ile goalId vererek başlat ya da goalSet ile kapat';
 
 /**
@@ -95,6 +98,8 @@ const CHANGE_TYPES: OfficeEventType[] = ['task.changed', 'plan.changed', 'goal.c
  * (the owner's agenda changes, a task moved, a role) comes with the board as a note.
  */
 export const BOARD_COVERS: ReadonlySet<string> = new Set(['task.finished', 'review.approved', 'review.changes', 'task.overdue', 'plan.done', 'proposal.to_owner']);
+/** How much of a job title the idle list shows. */
+const ROLE_CHARS = 24;
 /** A due date this close is a risk. */
 const DUE_SOON_MS = DAY;
 
@@ -347,12 +352,18 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     };
 
     /**
-     * Where the plan's structure and the office disagree (spec §3.4), the most actionable first so a cap keeps them: a
-     * stream with no usable owner (to hire, let go, cannot take work), then one whose owner is idle, then the next
-     * stream's missing tasks and a plan whose streams are all done, then streams piled on one person.
+     * Where the plan's structure and the office disagree (spec §3.4), the most actionable first so a cap keeps them: an
+     * approved plan that never got a task, a stream with no usable owner (to hire, let go, cannot take work), then one
+     * whose owner is idle, then the next stream's missing tasks and a plan whose streams are all done, then streams
+     * piled on one person.
      */
     const comparisons = (p: Plan, streams: readonly PlanStreamView[], tasks: readonly Task[]): string[] => {
       const flags: Array<{ rank: number; text: string }> = [];
+      // Approved and never a single task after the grace: the plan stalled (the pulse's “goal idle”, §3.6).
+      const approvedAt = p.approvedAt ?? p.updatedAt;
+      if (p.status === 'approved' && tasks.length === 0 && now - approvedAt >= EMPTY_PLAN_GRACE_MS) {
+        flags.push({ rank: 0, text: `onaylı ama hiç görevi açılmadı (onay ${ago(approvedAt)}) — görevlerini taskCreate ile aç ya da yerine yeni plan öner` });
+      }
       const status = new Map(streams.map((x) => [x.id, x.status]));
       const hasWork = (id: string) => tasks.some((t) => t.streamId === id && t.kind !== 'review' && t.status !== 'cancelled');
       for (const x of streams) {
@@ -409,6 +420,15 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       return lines;
     };
 
+    /** No active goal: whether any work is open, and the coordinator's rest (restUntil) while it lasts. */
+    const noGoalLine = (): string => {
+      const idle = open.length === 0 && live.length === 0;
+      const until = d.state.restUntil();
+      if (until <= now) return noGoal(idle);
+      const why = d.state.get('restReason');
+      return `Aktif hedef yok${idle ? ' ve açık iş yok' : ''}; dinlenme kararın sürüyor (bitiş ${when(until)})${why ? `: “${clip(why, L.noteChars)}”` : ''}. Değerli bir iş çıkarsa hedefi aç (goalSet); yeni hedef dinlenmeyi bitirir.`;
+    };
+
     const goalsAndPlans = (): string[] => {
       const entries: Array<{ plan: Plan | null; lead: string }> = [];
       for (const g of goals) {
@@ -417,7 +437,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
         for (const p of own) entries.push({ plan: p, lead: `Hedef ${title(g)} → plan` });
       }
       for (const p of live.filter((x) => !x.goalId || !goals.some((g) => g.id === x.goalId))) entries.push({ plan: p, lead: 'Hedefsiz plan' });
-      const lines = goals.length === 0 ? [`- ${NO_GOAL}`] : [];
+      const lines = goals.length === 0 ? [`- ${noGoalLine()}`] : [];
       let blocks = 0;
       for (const { plan, lead } of entries.slice(0, ENTRIES)) {
         if (!plan) lines.push(`- ${lead}`);
@@ -472,7 +492,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const longIdle = summary.constitution.idleCapacityHours * HOUR;
       const group = (label: string, items: string[], max: number) => (items.length ? [`- ${label} (${items.length}): ${cap(items, max, 'kişi').join('; ')}`] : []);
       return [
-        ...group('Boşta', b.idle.map((p) => `${p.name} — ${span(now - p.since)}${idleMarks(p, longIdle)}`), L.names),
+        ...group('Boşta', b.idle.map((p) => `${p.name}${p.title ? ` (${clip(p.title, ROLE_CHARS)})` : ''} — ${span(now - p.since)}${idleMarks(p, longIdle)}`), L.names),
         ...group('İş alamıyor', b.unavailable.map((p) => unavailable(byId.get(p.id)!)), L.names),
         ...group('Elinde iş, başında değil', b.holding.map((p) => holding(p.id, p.why)), L.details),
         ...group('İşte', b.atWork.map((p) => atWork(p.id)), L.details),

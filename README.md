@@ -72,7 +72,8 @@ saatleri ve hangi işin hangi modelde koşacağı.
   koordinatörün her tür için kendi modelinde olduğu günü main'de kaydedilmiş mesaj ve olaylarla karşılaştırır).
   - `digestEnabled` — **notlar ve özet:** karar gerektiren notlar (plan onayı, takılma, öneri…) hemen bir tur açar;
     yalnız bilgi olanlar (teslimler, rol değişikliği…) bir sonraki tura biner ya da **özet saatlerinde**
-    (`digestHours`, varsayılan 9 ve 17) tek turda gelir. Günlük rapor hatırlatması son özetle gelir.
+    (`digestHours`, varsayılan 9 ve 17) tek turda gelir. Günlük rapor hatırlatması son özetle gelir. Koordinatöre
+    bilgiler yönetim panosuyla gelir; onun için özet yalnız günlük rapor içindir.
   - `modelPolicyEnabled` — **model ipuçları:** açıkken çalışanların model ipuçları uygulanır (görev zorluğunun modeli,
     görevler arasında kendi modeli); kapalıyken herkes kendi modelinde çalışır (koordinatörün tur modelleri yine
     uygulanır). Model değişiminde süreç kapanıp `--resume --model` ile yeniden açılır (hafıza sürer). Daha güçlü modele
@@ -120,10 +121,14 @@ Koordinatör projenin proje yöneticisidir; proje sizin her adımı söylemenizi
 - **Tam serbest (varsayılan):** koordinatör planlarını sizi beklemeden başlatır; kartta "Koordinatör başlattı" yazar.
   Anayasa'da **Tam serbest** kapatılırsa her plan yine sizin onayınızı bekler. Satın almalar, geri alınamaz işler ve
   bütçe sınırları her durumda sizdedir.
-- **Nabız:** ofisin kodu projeyi izler (model kullanmaz) ve koordinatörü yalnız karar gerektiğinde uyandırır: bir plan
-  bitince (değerlendirme), bir hedefin süren planı kalmayınca, hedefler sürerken biri "Boşta kapasite uyarısı" saatinden
-  (varsayılan 2) uzun süredir işsizken (her boşlukta bir kez, hepsi tek notta), hiç hedef ve iş yokken (en fazla "Nabız
-  aralığı" saatte bir). Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp dinlenir.
+- **Yönetim turu:** ofisin kodu projeyi izler (model kullanmaz). İşin şekli değişince (teslim, inceleme kararı, biri
+  boşa çıktı, plan ya da hedef durumu, kısıt, takılma) ve iş açıkken en geç 45 dakikada bir koordinatöre tek metinlik
+  bir yönetim panosu gider; koordinatör planı gerçekle karşılaştırır, gerekeni değiştirir ve turu `cycleClose` ile
+  gerekçesiyle kapatır. Eski nabız notları panonun bölümleridir: süren planı olmayan hedef, hiç görevi açılmamış onaylı
+  plan, "Boşta kapasite uyarısı" saatinden (varsayılan 2) uzun süredir işsiz olanlar ("uzun süredir" işaretiyle), hiç
+  hedef ve iş olmaması. Hedef ve açık iş yokken tur yalnız bir olayla açılır ("Nabız aralığı" yalnız yönetim turu
+  olmayan bir ofiste geçerlidir). Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp
+  dinlenir; pano dinlenmeyi ve gerekçesini gösterir.
 - **Anayasa değişince:** Anayasa sekmesinden bir sınırı değiştirdiğinizde koordinatör neyin değiştiğini eski → yeni
   olarak tek notta duyar (kota payınız "Ofisin kota sınırı %75 → %60" diye) ve süren planlarını yeni sınırlara göre
   gözden geçirir.

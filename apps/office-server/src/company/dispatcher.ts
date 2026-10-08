@@ -34,7 +34,10 @@ export interface DispatcherDeps {
   now?: () => number;
   /** How often the reserve is re-checked and everyone swept again (the quota resets on its own clock). */
   tickMs?: number;
-  /** The project's pulse (spec §6.3), run on each tick. */
+  /**
+   * The project's pulse (spec §6.3), run on each tick — only without a management cycle: with one its notices (a goal
+   * with no running plan, idle capacity, no goal) are sections of the board (management cycle §3.6).
+   */
   pulse?: { check(): unknown };
   /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
   clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: () => void): void };
@@ -67,8 +70,8 @@ export const ESCALATE_MS = 2 * 60 * 60_000;
  * handed in) ride along on those turns, or come together in one digest at the constitution's digest hours; the
  * coordinator's daily report reminder comes with the day's last digest. Never interrupts: it waits for the employee
  * to be idle (v1 rule: only the owner interrupts). With a management cycle wired, a due cycle is the coordinator's next
- * turn (the board and its decisions in one message), its information is the board's, and its decisions wait for a
- * cycle on its way.
+ * turn (the board and its decisions in one message), its information is the board's, its decisions wait for a cycle on
+ * its way, and the pulse is not run (its facts are the board's).
  */
 export class Dispatcher {
   readonly #d: DispatcherDeps;
@@ -125,7 +128,7 @@ export class Dispatcher {
     };
   }
 
-  /** One office tick: the reserve, the report reminder (digest off), the pulse, a sweep. */
+  /** One office tick: the reserve, the report reminder (digest off), the pulse (no cycle wired), a sweep. */
   tick(): void {
     this.#d.budget?.checkReserve();
     if (!this.#rules().digestEnabled) this.#remindReport();
@@ -133,8 +136,12 @@ export class Dispatcher {
     this.#scheduleSweep();
   }
 
-  /** The office looks at the project; a failing pulse never stops the office (the next tick looks again). */
+  /**
+   * The office looks at the project; a failing pulse never stops the office (the next tick looks again). With a
+   * management cycle the board says what the pulse would (§3.6): the pulse is not run, and its notices never come.
+   */
   #pulse(): void {
+    if (this.#d.cycle) return;
     try {
       this.#d.pulse?.check();
     } catch {

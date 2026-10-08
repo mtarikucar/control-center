@@ -56,7 +56,7 @@ describe('board — shape', () => {
       [
         'Yönetim panosu · 8 Eki 2026 09:00 · ilk tur',
         '## 1. Ne değişti (son turdan beri)\n- yok',
-        '## 2. Hedefler ve planlar\n- Aktif hedef yok: şirket özetindeki misyona bakıp sıradaki hedefi aç (goalSet) ve ilk planını başlat (planPropose, goalId ile).',
+        '## 2. Hedefler ve planlar\n- Aktif hedef yok ve açık iş yok: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını hemen başlat (planPropose, goalId ile).',
         '## 3. İnsanlar\n- yok: ekipte koordinatörden başka kimse yok',
         '## 4. Zincirler ve kritik yol\n- yok',
         '## 5. Riskler\n- yok',
@@ -374,6 +374,7 @@ describe('board — 2. Hedefler ve planlar', () => {
         '  ! tek kişide 2 açık akış (Ada): ui, test — bağımlı: ui → test',
         '- Hedef “Satış”: süren planı yok — planPropose ile goalId vererek başlat ya da goalSet ile kapat',
         '- Hedefsiz plan “Bakım” (sürüyor; görevi yok)',
+        '  ! onaylı ama hiç görevi açılmadı (onay 1 sa 29 dk önce) — görevlerini taskCreate ile aç ya da yerine yeni plan öner',
       ].join('\n'),
     );
   });
@@ -916,7 +917,7 @@ describe('board — a realistic office', () => {
 - Hedef “Satış ortaklıkları”: süren planı yok — planPropose ile goalId vererek başlat ya da goalSet ile kapat
 
 ## 3. İnsanlar (5 kişi: 1 işte, 2 elinde iş, 1 boşta, 1 iş alamıyor)
-- Boşta (1): Ada — 10 dk
+- Boşta (1): Ada (Yazılımcı) — 10 dk
 - İş alamıyor (1): Mert — limit doldu, açılış 13:00, elinde 1 iş
 - Elinde iş, başında değil (2): Ece — sırada “Ana sayfa tasarımı”; Bora — sırada “Uçtan uca testler” (“Ana sayfa tasarımı” bitince)
 - İşte (1): Can — “Ödeme entegrasyonu” 09:10 → ~10:30 (takıldı)
@@ -940,5 +941,63 @@ describe('board — a realistic office', () => {
 - Sende (1): fikir “Test verisini otomatik üret” (Bora, 10 dk önce)`);
     expect(b.text.length).toBeGreaterThan(2000);
     expect(b.text.length).toBeLessThan(4000);
+  });
+});
+
+describe('board — what the pulse used to say (management cycle §3.6)', () => {
+  const NO_GOAL_LINE =
+    '- Aktif hedef yok ve açık iş yok: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını hemen başlat (planPropose, goalId ile).';
+
+  it('the idle with their title, the longest first; “uzun süredir” from idleCapacityHours, as the idle-capacity notice named them', () => {
+    const t = make();
+    t.person('Ada', { title: 'Geliştirici' });
+    t.advance(30 * MIN);
+    t.person('Can');
+    t.advance(2 * HOUR);
+    expect(t.section(t.board().text, 3).split('\n')[1]).toBe('- Boşta (2): Ada (Geliştirici) — 2 sa 30 dk (uzun süredir); Can — 2 sa (yeni, uzun süredir)');
+  });
+
+  it('an approved plan that never got a task: after the grace a comparison line says so and what to do; a plan waiting for the owner has none', () => {
+    const t = make();
+    const g = t.goal('Lansman');
+    t.plan('Site', { goalId: g.id });
+    t.advance(9 * MIN);
+    expect(t.section(t.board().text, 2)).not.toContain('  !');
+    t.advance(16 * MIN);
+    expect(t.section(t.board().text, 2)).toBe(
+      [
+        '## 2. Hedefler ve planlar',
+        '- Hedef “Lansman” → plan “Site” (sürüyor; görevi yok)',
+        '  ! onaylı ama hiç görevi açılmadı (onay 25 dk önce) — görevlerini taskCreate ile aç ya da yerine yeni plan öner',
+      ].join('\n'),
+    );
+    t.budget.setConstitution({ autonomy: 'plans' });
+    const s = t.goal('Satış');
+    t.plan('Teklifler', { goalId: s.id });
+    t.advance(HOUR);
+    expect(t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'))).toEqual([
+      '  ! onaylı ama hiç görevi açılmadı (onay 1 sa 25 dk önce) — görevlerini taskCreate ile aç ya da yerine yeni plan öner',
+    ]);
+  });
+
+  it('no active goal: whether any work is open, and the coordinator’s rest with its reason until it ends', () => {
+    const t = make();
+    const line = () => t.section(t.board().text, 2).split('\n')[1];
+    expect(line()).toBe(NO_GOAL_LINE);
+    t.company.restUntil(t.coordinator.id, 24, 'Sahibinin cevabı bekleniyor');
+    expect(line()).toBe(
+      '- Aktif hedef yok ve açık iş yok; dinlenme kararın sürüyor (bitiş yarın 09:00): “Sahibinin cevabı bekleniyor”. Değerli bir iş çıkarsa hedefi aç (goalSet); yeni hedef dinlenmeyi bitirir.',
+    );
+    t.advance(24 * HOUR);
+    expect(line()).toBe(NO_GOAL_LINE);
+    const ada = t.person('Ada');
+    t.task(ada.id, 'Sahibinin işi');
+    expect(line()).toBe('- Aktif hedef yok: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını hemen başlat (planPropose, goalId ile).');
+  });
+
+  it('a plan running without a goal is open work too', () => {
+    const t = make();
+    t.plan('Bakım');
+    expect(t.section(t.board().text, 2).split('\n')[1]).toMatch(/^- Aktif hedef yok: /);
   });
 });

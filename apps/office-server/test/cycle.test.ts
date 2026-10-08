@@ -5,6 +5,7 @@ import { buildBoard } from '../src/company/board.ts';
 import { Clock } from '../src/company/clock.ts';
 import { CYCLE_WINDOW_MS, HEARTBEAT_MS, ManagementCycle } from '../src/company/cycle.ts';
 import { Dispatcher, NOTICES_PREFIX, RENUDGE_MS, type DispatchEngine } from '../src/company/dispatcher.ts';
+import { Pulse } from '../src/company/pulse.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -34,7 +35,7 @@ const NO_CHANGE = 'değişiklik yok, çünkü iş planda yürüyor';
 type Started = Extract<OfficeEvent, { type: 'management.cycle.started' }>;
 type CycleRecord = Extract<OfficeEvent, { type: 'management.cycle' }>;
 
-function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFails?: boolean } = {}) {
+function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFails?: boolean; pulse?: boolean } = {}) {
   let clock = T0;
   const now = () => clock;
   const s = setup(12, now);
@@ -42,8 +43,8 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
   cleanups.push(f.cleanup, s.cleanup);
   const c = companyFor(s, f, undefined, now);
   c.budget.setConstitution({ idleSleepMinutes: 0, autonomy: o.autonomy ?? 'free' });
-  const person = (name: string, p: { kind?: EmployeeKind; team?: string } = {}) => {
-    const e = s.roster.create({ name, role: 'r', title: '', kind: p.kind, team: p.team });
+  const person = (name: string, p: { kind?: EmployeeKind; team?: string; title?: string } = {}) => {
+    const e = s.roster.create({ name, role: 'r', title: p.title ?? '', kind: p.kind, team: p.team });
     return s.roster.update(e.id, { lifecycle: 'idle' });
   };
   const coord = o.coordinator === false ? null : person('Koordinatör', { kind: 'coordinator' });
@@ -113,6 +114,8 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
     const dispatcher = new Dispatcher({
       events: s.events, roster: s.roster, tasks: c.tasks, notices: c.notices, plans: c.plans, company: c.company, engine, budget: c.budget, now,
       defer: (fn) => void deferred.push(fn), clock: officeClock, cycle,
+      // As main.ts wires it: the pulse beside the cycle.
+      pulse: o.pulse ? new Pulse({ company: c.company, roster: s.roster, goals: c.goals, state: c.state, plans: c.plans, tasks: c.tasks, notices: c.notices, budget: c.budget, now }) : undefined,
     });
     const tools = officeTools({
       company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder'], memory: c.memory, budget: c.budget, plans: () => c.plans.list(), agenda, cycle,
@@ -129,11 +132,11 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
     between?.();
     boot();
   };
-  /** Time passes; the office clock runs every 30 s, as its jobs would. */
-  const advance = (ms: number) => {
+  /** Time passes; the office clock runs every 30 s, as its jobs would (or every `step`, for a long stretch). */
+  const advance = (ms: number, step = 30 * SEC) => {
     const end = clock + ms;
     while (clock < end) {
-      clock = Math.min(end, clock + 30 * SEC);
+      clock = Math.min(end, clock + step);
       office!.clock.runNow();
       settle();
     }
@@ -830,7 +833,78 @@ describe('management cycle — a restart (§5)', () => {
   });
 });
 
+describe('management cycle — the pulse’s facts are the board’s (§3.6)', () => {
+  /** Every notice the pulse ever left, delivered or not. */
+  const pulseNotices = (t: ReturnType<typeof make>) => t.db.prepare("SELECT topic FROM notices WHERE topic LIKE 'pulse.%'").all();
+
+  it('with a cycle wired the pulse leaves no notice — a goal with no running plan, an approved plan with no task, someone idle for hours, no goal and no work — and the board says each', async () => {
+    const t = make({ pulse: true });
+    t.person('Ada', { title: 'Geliştirici' });
+    const g = t.goal();
+    t.boot();
+    // The office starts with work open (an active goal): its board has the goal without a plan.
+    expect(t.boards()).toHaveLength(1);
+    expect(t.boards()[0]!.text).toContain('- Hedef “Lansman”: süren planı yok — planPropose ile goalId vererek başlat ya da goalSet ile kapat');
+    await t.closeCycle();
+    // The coordinator starts a plan and opens no task: the heartbeat's board says so.
+    await t.call(t.coord, 'planPropose', { title: 'Site', goal: 'g', approach: 'a', method: METHOD, goalId: g.id });
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(t.boards()[1]!.text).toContain('  ! onaylı ama hiç görevi açılmadı (onay 45 dk önce) — görevlerini taskCreate ile aç ya da yerine yeni plan öner');
+    await t.closeCycle();
+    // Ada has had no work for longer than idleCapacityHours (2): marked on the board, with her title.
+    t.advance(HEARTBEAT_MS);
+    await t.closeCycle();
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(4);
+    expect(t.boards()[3]!.text).toContain('- Boşta (1): Ada (Geliştirici) — 2 sa 15 dk (uzun süredir)');
+    await t.closeCycle();
+    // The owner stops the goal: no goal and no work, on the board of the cycle that follows.
+    t.company.stopGoal(g.id);
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.boards()).toHaveLength(5);
+    expect(t.boards()[4]!.text).toContain('- Aktif hedef yok ve açık iş yok: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla)');
+    await t.closeCycle();
+    // Hours on (past pulseHours): no work, so no heartbeat — and still no notice from the pulse.
+    t.advance(7 * 60 * MIN);
+    expect(t.boards()).toHaveLength(5);
+    expect(pulseNotices(t)).toEqual([]);
+    for (const m of t.toCoordinator()) expect(m.text).not.toMatch(/Boşta kapasite|hedefinin süren planı yok|Aktif hedef yok ve açık iş yok\. /);
+  });
+
+  it('the tick’s other work goes on with a cycle wired: the daily report reminder still comes (digest off)', async () => {
+    const t = make({ pulse: true });
+    const ada = t.person('Ada');
+    const x = t.task(ada.id, 'Yaz');
+    t.boot();
+    await t.closeCycle();
+    t.advance(MIN);
+    t.finish(ada.id, x.id);
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    await t.closeCycle();
+    // A day after the coordinator's hire, with work done since: the reminder (the clock runs every 10 minutes here).
+    t.advance(24 * 60 * MIN, 10 * MIN);
+    expect(t.toCoordinator().filter((m) => m.text.includes('Günlük özet zamanı'))).toHaveLength(1);
+    expect(pulseNotices(t)).toEqual([]);
+  });
+});
+
 describe('management cycle — no service, no change', () => {
+  it('a dispatcher with the pulse and without a cycle service is as before: the pulse’s notice goes to the coordinator', () => {
+    const t = make();
+    t.goal();
+    const deferred: Array<() => void> = [];
+    const sent: string[] = [];
+    const engine: DispatchEngine = { ready: () => true, send: (_id, text) => void sent.push(text), fire: async () => undefined, sleep: async () => undefined, wake: () => undefined };
+    const pulse = new Pulse({ company: t.company, roster: t.roster, goals: t.goals, state: t.state, plans: t.plans, tasks: t.tasks, notices: t.notices, budget: t.budget, now: t.now });
+    const stop = new Dispatcher({ events: t.events, roster: t.roster, tasks: t.tasks, notices: t.notices, plans: t.plans, company: t.company, engine, budget: t.budget, pulse, now: t.now, defer: (fn) => void deferred.push(fn), tickMs: 3_600_000 }).start();
+    cleanups.push(stop);
+    for (const fn of deferred.splice(0)) fn();
+    expect(sent).toEqual([
+      'Ofisten notlar:\n- “Lansman” hedefinin süren planı yok. Sıradaki planı planPropose ile goalId vererek başlat ya da hedefe ulaşıldıysa / vazgeçtiysen goalSet ile kapat (status: done ya da dropped).',
+    ]);
+  });
+
   it('a dispatcher without a cycle service is as before: the coordinator’s information goes at once (digest off)', () => {
     const t = make();
     const deferred: Array<() => void> = [];
