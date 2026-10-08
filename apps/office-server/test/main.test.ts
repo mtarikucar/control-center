@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { migrateUp, openDb } from '../src/db.ts';
+import { MIGRATIONS } from '../src/migrations.ts';
 import { FAKE_CLAUDE, tempDir, until } from './helpers.ts';
 
 const MAIN = fileURLToPath(new URL('../src/main.ts', import.meta.url));
@@ -58,13 +59,15 @@ describe('office-server process', () => {
 
   it('review (Kerem): opens on a database ahead of the code (only the code went back) and says so in one line', async () => {
     const dir = tempDir();
+    // Ahead: one version above the code's last, whatever that is (core-3 makes it 18, B26 19 …; task 37b8bbe7).
+    const above = Math.max(...MIGRATIONS.map((m) => m.version)) + 1;
     const db = openDb(join(dir, 'office.db'));
     migrateUp(db);
-    db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (16, 'role templates: which one an employee was hired from', 1)").run();
+    db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, 1)').run(above, 'a migration of newer code');
     db.close();
     const office = startOffice(dir);
     await until(() => /hazır: http:\/\/127\.0\.0\.1:\d+/.test(office.output()), 10_000);
-    expect(office.output()).toContain('Uyarı: veritabanı koddan ileride: v16 “role templates: which one an employee was hired from” bu kodda yok; göç çalıştırılmadı, ofis açılıyor.');
+    expect(office.output()).toContain(`Uyarı: veritabanı koddan ileride: v${above} “a migration of newer code” bu kodda yok; göç çalıştırılmadı, ofis açılıyor.`);
   });
 
   it('refuses a second office on the same data directory without touching the first', async () => {
