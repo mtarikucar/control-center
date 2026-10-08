@@ -212,6 +212,11 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
     t.approvals.decide(once.id, true, { via: 'page' });
     expect((await t.gate.check(t.ada.id, office)).decision).toBe('allow');
     expect((await t.gate.check(t.ada.id, office)).decision).toBe('deny');
+    // Even an approved task-wide approval of the office itself, written straight to the store (a request never makes
+    // one), does not pass it (mutation R4).
+    const stray = t.store.create({ employeeId: t.ada.id, taskId: task.id, kind: 'self', tool: office.tool_name, target: 'browser_navigate /', fingerprint: 'x', summary: 's', scope: 'task' });
+    t.store.decide(stray.id, { approve: true, decidedBy: OWNER, decidedVia: 'page', note: null, at: Date.now(), expiresAt: Date.now() + 3_600_000 });
+    expect((await t.gate.check(t.ada.id, office)).decision).toBe('deny');
   });
 
   it('a line with two held parts passes only when both are approved, and uses both', async () => {

@@ -281,6 +281,8 @@ describe('gate policy (K1) — review round 1 (Kerem, minor): an interpreter wri
     [`python3 - <<'EOF'\np='hooks/gate.mjs'; s=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nEOF`, 'pass', WT],
     [`python3 -c "print(open('hooks/gate.mjs').read())"`, 'pass', SRV],
     [`python3 -c "open('/tmp/x.txt','w').write('x')"`, 'pass', SRV],
+    // Reading a protected file and writing elsewhere: the read is not a write (mutation I3).
+    [`python3 -c "s=open('hooks/gate.mjs').read(); open('/tmp/x.txt','w').write(s)"`, 'pass', SRV],
     // Raw sockets to the office's port.
     ["exec 3<>/dev/tcp/127.0.0.1/4319; printf 'POST /api/approvals/x/approve HTTP/1.0\\r\\n\\r\\n' >&3", 'self'],
     ['nc 127.0.0.1 4319 < req.txt', 'self'],
@@ -327,6 +329,14 @@ describe('gate policy (K1) — review round 1 (Kerem, minor): an interpreter wri
     ['rm -rf *', 'pass'],
     ['rm -rf *', 'self', SRV],
   ]);
+});
+
+describe('gate policy (K1) — a line the reader cannot follow (mutation X1)', () => {
+  it('an error inside the classification holds the call as unreadable; it never throws to the office', () => {
+    const broken = testContext({ toplevel: () => { throw new Error('git yok'); } });
+    const v = classifyCall('Bash', { command: 'git checkout feat/x' }, REPO, broken);
+    expect(v.parts).toEqual([{ kind: 'other', target: 'okunamayan komut', why: expect.stringContaining('git yok') }]);
+  });
 });
 
 describe('gate policy (K1) — targets and fingerprints (§4 madde 4)', () => {
