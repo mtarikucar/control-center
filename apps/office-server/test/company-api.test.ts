@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
+import { ManagementCycle } from '../src/company/cycle.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { officeMetrics } from '../src/company/office-metrics.ts';
 import { performanceReport } from '../src/performance.ts';
@@ -28,11 +29,13 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   const performance = { report: (r: { days?: number } = {}) => performanceReport(s.db, { since: r.days ? Date.now() - r.days * 86_400_000 : null }) };
   const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
   const metrics = { report: () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks, state: c.state }, Date.now()) };
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, metrics, integrations, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
+  // The management cycle as main.ts builds it, but with a fixed board and no office clock: the tests open and end cycles.
+  const cycle = new ManagementCycle({ events: s.events, state: c.state, company: c.company, roster: s.roster, tasks: c.tasks, budget: c.budget, board: () => ({ text: 'Yönetim panosu', kickoff: false }) });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, metrics, integrations, management: cycle, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine, cycle };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -359,6 +362,74 @@ describe('company API', () => {
     const agenda = await call(t.port, 'GET', '/api/agenda');
     expect(agenda.status).toBe(200);
     expect(agenda.body.employees.find((e: { name: string }) => e.name === 'Ada').entries[0]).toMatchObject({ kind: 'queued', title: 'İş' });
+  });
+
+  it('serves the management log (management cycle §3.3): the cycle open now, then the recorded ones newest first — closed or not, with triggers, words, cost and model; `limit` keeps the newest', async () => {
+    const t = await start();
+    const stopCycle = t.cycle.start();
+    cleanups.push(stopCycle);
+    const c = t.company.hireCoordinator();
+    const empty = await call(t.port, 'GET', '/api/management');
+    expect(empty.status).toBe(200);
+    expect(empty.body).toMatchObject({ open: null, cycles: [] });
+    expect(empty.body.generatedAt).toBeGreaterThan(Date.now() - 60_000);
+    // One closed with its words, after a result that cost something; one whose turn ended without cycleClose.
+    t.cycle.trigger('stuck', '“Giriş” takıldı (Ada)');
+    const first = t.cycle.opening();
+    t.cycle.started(first, 'opus');
+    t.events.append(c.id, { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0.42, numTurns: 1, queuedTurns: 1, sessionUsage: null, sessionCostUsd: 0 });
+    t.cycle.close(c.id, { changes: ['Giriş işini Can’a verdim'], reasoning: 'Ada takıldı, Can boştaydı.', next: 'Can’ın teslimine bak' });
+    t.cycle.ended();
+    const second = t.cycle.opening();
+    t.cycle.started(second, 'sonnet');
+    t.cycle.ended();
+    // The third is still going: the board went out, its turn has not ended.
+    t.cycle.trigger('delivery', '“Kayıt” (Can)');
+    const third = t.cycle.opening();
+    t.cycle.started(third, 'opus');
+    const log = await call(t.port, 'GET', '/api/management');
+    expect(log.status).toBe(200);
+    expect(log.body.open).toEqual({ startedAt: third.at, triggers: third.triggers, model: 'opus', costUsd: null, close: null });
+    expect(log.body.open.triggers).toMatchObject([{ kind: 'delivery', note: '“Kayıt” (Can)' }]);
+    expect(log.body.cycles).toHaveLength(2);
+    const [unclosed, closed] = log.body.cycles;
+    expect(unclosed).toMatchObject({ closed: false, startedAt: second.at, triggers: [{ kind: 'heartbeat' }], changes: [], reasoning: '', next: null, costUsd: null, model: 'sonnet' });
+    expect(closed).toMatchObject({
+      closed: true, startedAt: first.at, triggers: [{ kind: 'stuck', note: '“Giriş” takıldı (Ada)' }], changes: ['Giriş işini Can’a verdim'], reasoning: 'Ada takıldı, Can boştaydı.',
+      next: 'Can’ın teslimine bak', costUsd: 0.42, model: 'opus',
+    });
+    expect(unclosed.seq).toBeGreaterThan(closed.seq);
+    expect(closed.endedAt).toBeGreaterThanOrEqual(closed.startedAt);
+    // cycleClose said, the turn not over yet: the open cycle carries its words.
+    t.cycle.close(c.id, { changes: [], reasoning: 'değişiklik yok, çünkü Can teslim etti, inceleme sürüyor' });
+    expect((await call(t.port, 'GET', '/api/management')).body.open.close).toEqual({ changes: [], reasoning: 'değişiklik yok, çünkü Can teslim etti, inceleme sürüyor', next: null });
+    t.cycle.ended();
+    const after = await call(t.port, 'GET', '/api/management?limit=2');
+    expect(after.body.open).toBeNull();
+    expect(after.body.cycles.map((x: { closed: boolean; startedAt: number }) => [x.closed, x.startedAt])).toEqual([[true, third.at], [false, second.at]]);
+    for (const bad of ['0', '201', '1.5', 'abc']) expect((await call(t.port, 'GET', `/api/management?limit=${bad}`)).status).toBe(400);
+  });
+
+  it('the snapshot gives each plan’s streams with the status their tasks give them (management cycle §3.4)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const plan = t.company.propose(c.id, { method: METHOD, title: 'Site', goal: 'g', approach: 'a', streams: [
+      { id: 'api', title: 'API', owner: 'Ada', dependsOn: [] },
+      { id: 'ui', title: 'Arayüz', owner: 'alınacak: tasarımcı', dependsOn: ['api'] },
+    ] });
+    t.company.propose(c.id, { method: METHOD, title: 'Akışsız', goal: 'g', approach: 'a' });
+    t.company.approve(plan.id);
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'Uç noktalar', planId: plan.id, streamId: 'api' });
+    t.company.start(task.id);
+    const office = await call(t.port, 'GET', '/api/office');
+    const site = office.body.plans.find((p: { id: string }) => p.id === plan.id);
+    expect(site.streams).toEqual([
+      { id: 'api', title: 'API', owner: ada.id, dependsOn: [], status: 'active' },
+      { id: 'ui', title: 'Arayüz', owner: 'alınacak: tasarımcı', dependsOn: ['api'], status: 'planned' },
+    ]);
+    expect(office.body.plans.find((p: { title: string }) => p.title === 'Akışsız').streams).toEqual([]);
+    expect(office.body.tasks.find((x: { id: string }) => x.id === task.id).streamId).toBe('api');
   });
 
   it('serves the office metrics for the top bar', async () => {

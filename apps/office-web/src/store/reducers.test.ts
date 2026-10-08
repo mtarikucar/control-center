@@ -195,7 +195,7 @@ describe('company data', () => {
   });
 
   it('takes plans and tasks from the snapshot, and keeps them current from events', () => {
-    let d = applySnapshot(EMPTY_DATA, snapshot({ tasks: [task()], plans: [plan()] }));
+    let d = applySnapshot(EMPTY_DATA, snapshot({ tasks: [task()], plans: [{ ...plan(), streams: [] }] }));
     expect(d.tasks.t1?.status).toBe('waiting');
     expect(d.plans.p1?.status).toBe('draft');
     d = applyEvent(d, stored({ type: 'plan.changed', change: 'approved', plan: plan({ status: 'approved' }) }));

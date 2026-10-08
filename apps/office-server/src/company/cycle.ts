@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, normalizeConstitution, type BudgetSummary, type Constitution, type CycleTrigger, type CycleTriggerKind, type ModelAlias, type OfficeEvent, type StoredEvent, type Task, type TaskStatus } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, MODEL_ALIASES, OWNER, normalizeConstitution, type BudgetSummary, type Constitution, type CycleTrigger, type CycleTriggerKind, type ManagementCycleRecord, type ManagementLog, type ModelAlias, type OfficeEvent, type StoredEvent, type Task, type TaskStatus } from '@cc/shared';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -16,6 +16,9 @@ const HOUR = 60 * MIN;
 export const CYCLE_WINDOW_MS = 2 * MIN;
 /** While work is open a cycle comes at least this often, events or not (§3.1, “kalp atışı”). */
 export const HEARTBEAT_MS = 45 * MIN;
+/** The management log's length when none is asked for, and the most it gives (§3.3, the owner's Yönetim tab). */
+export const LOG_DEFAULT = 50;
+export const LOG_MAX = 200;
 /** How often the office clock looks whether a cycle is due. */
 export const CYCLE_CHECK_MS = 30_000;
 /** Triggers listed for one cycle; more are not (the board reads the log either way). */
@@ -30,7 +33,7 @@ const KEY = { lastStart: 'cycle.lastStartAt', pending: 'cycle.pending', open: 'c
 const PLAN_TR: Partial<Record<string, string>> = { approved: 'onaylandı', declined: 'onaylanmadı', kept: 'revizyonu onaylanmadı', done: 'bitti', stopped: 'sahibince durduruldu' };
 
 export interface CycleDeps {
-  events: Pick<EventStore, 'append' | 'subscribe'>;
+  events: Pick<EventStore, 'append' | 'subscribe' | 'since'>;
   state: CompanyStateStore;
   company: Pick<Company, 'coordinator' | 'paused' | 'goals' | 'nameOf'>;
   roster: Pick<Roster, 'get'>;
@@ -282,6 +285,28 @@ export class ManagementCycle {
     }
     this.#saveOpen({ ...open, close: { changes, reasoning, next } });
     return { changes };
+  }
+
+  /**
+   * The management log for the owner (§3.3, the Yönetim tab): the cycle open now — the board went out, its turn has not
+   * ended — and the last `limit` recorded (management.cycle events), newest first.
+   */
+  log(limit: number = LOG_DEFAULT): ManagementLog {
+    const open = this.#open();
+    const cycles = this.#d.events
+      .since(0, ['management.cycle'], Math.min(Math.max(1, limit), LOG_MAX))
+      .reverse()
+      .flatMap((e): ManagementCycleRecord[] => {
+        const ev = e.event;
+        if (ev.type !== 'management.cycle') return [];
+        const { closed, startedAt, triggers, changes, reasoning, next, costUsd, model } = ev;
+        return [{ seq: e.seq, startedAt, endedAt: e.ts, closed, triggers, changes, reasoning, next, costUsd, model }];
+      });
+    return {
+      generatedAt: this.#now(),
+      open: open ? { startedAt: open.startedAt, triggers: open.triggers, model: open.model ?? null, costUsd: open.costUsd, close: open.close } : null,
+      cycles,
+    };
   }
 
   /** A trigger the office saw without an event of its own (someone still at a task after the reminder). */

@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { OWNER, type AgendaReport, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
+import { OWNER, type AgendaReport, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type PlanView, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { coordinatorHint } from './model-policy.ts';
 import type { Company } from './company/company.ts';
+import { LOG_DEFAULT, LOG_MAX, type ManagementCycle } from './company/cycle.ts';
 import type { Memory } from './company/memory.ts';
 import type { ProposalStore } from './company/proposal-store.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
@@ -33,6 +34,8 @@ export interface ApiDeps {
     /** The top bar's three figures: busy, delivered in the last day, stuck. */
     metrics?: { report(): OfficeMetrics };
     integrations?: IntegrationRegistry;
+    /** The coordinator's management cycle: its log for the owner's Yönetim tab (management cycle §3.3). */
+    management?: Pick<ManagementCycle, 'log'>;
   };
 }
 
@@ -73,8 +76,11 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   if (!d.company) return base;
   const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked', 'parked'] });
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
+  // Each plan's streams with the status their tasks give them (management cycle §3.4): derived here, never stored.
+  const service = d.company.service;
+  const plans = d.company.plans.list().map((p): PlanView => ({ ...p, streams: p.streams?.length ? service.planStreams(p.id) : [] }));
   return {
-    ...base, tasks: [...open, ...closed], plans: d.company.plans.list(), budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
+    ...base, tasks: [...open, ...closed], plans, budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
     goals: d.company.service.goals(), paused: d.company.service.paused(), schedules: d.company.service.schedules(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),
   };
 }
@@ -213,6 +219,13 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       return sendJson(res, 200, d.company.performance.report({ days }));
     }
     if (method === 'GET' && url.pathname === '/api/metrics' && d.company.metrics) return sendJson(res, 200, d.company.metrics.report());
+    // The management log (management cycle §3.3): the cycle open now and the last `limit` recorded, newest first.
+    if (method === 'GET' && url.pathname === '/api/management' && d.company.management) {
+      const raw = url.searchParams.get('limit');
+      const limit = raw === null ? LOG_DEFAULT : Number(raw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > LOG_MAX) throw new ValidationError(`limit 1 ile ${LOG_MAX} arasında bir tam sayı olmalı.`);
+      return sendJson(res, 200, d.company.management.log(limit));
+    }
     if (method === 'GET' && url.pathname === '/api/budget/spend') return sendJson(res, 200, budget.spending(url.searchParams.get('planId') ?? undefined));
     if (method === 'POST' && url.pathname === '/api/constitution') {
       const body = await readJson(req);

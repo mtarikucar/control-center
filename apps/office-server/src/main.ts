@@ -95,7 +95,7 @@ const api = createApi(
   {
     engine, roster, events, quota,
     mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, cycle }) },
-    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations },
+    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, management: cycle },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );

@@ -1,5 +1,5 @@
 import type { BudgetSummary, Spend } from './budget.ts';
-import type { ClockStatus, CycleTrigger, Goal, GoalChange, Plan, PlanChange, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
+import type { ClockStatus, CycleTrigger, Goal, GoalChange, Plan, PlanChange, PlanView, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Integration } from './integration.ts';
 import type { Decision } from './memory.ts';
@@ -140,7 +140,8 @@ export interface OfficeSnapshot {
   lastSeq: number;
   /** Open tasks and the most recent finished ones (absent from servers without the company layer). */
   tasks?: Task[];
-  plans?: Plan[];
+  /** Every plan, its streams with their status (management cycle §3.4). */
+  plans?: PlanView[];
   proposals?: Proposal[];
   /** The constitution, the reserve and the money (absent from servers without the company layer). */
   budget?: BudgetSummary;

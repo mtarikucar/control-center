@@ -1,3 +1,5 @@
+import type { ModelAlias } from './employee.ts';
+
 export const TASK_STATUSES = ['waiting', 'in_progress', 'review', 'blocked', 'parked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
@@ -325,6 +327,9 @@ export interface Plan {
   approvedAt: number | null;
 }
 
+/** A plan as the owner's page receives it in the snapshot: each of its streams with the status its tasks give it. */
+export type PlanView = Omit<Plan, 'streams'> & { streams?: PlanStreamView[] };
+
 /** `in_review`: handed in, waiting for its reviewer. `reviewed`: a review task was decided. `parked`: set aside until a time. `returned`: its time came. */
 export type TaskChange = 'created' | 'assigned' | 'started' | 'updated' | 'finished' | 'reprioritized' | 'in_review' | 'reviewed' | 'parked' | 'returned';
 /** `reopened`: a done plan got a new task. `kept`: the owner declined a revision; the plan goes on as approved. `stopped`: by the owner. */
@@ -347,4 +352,46 @@ export interface CycleTrigger {
   note: string;
   /** The logged event behind it; null when there is none (the heartbeat, the start, a stall the office saw). */
   seq: number | null;
+}
+
+/** What cycleClose said (management cycle §3.3): the plan changes made, why, and what to look at next. */
+export interface CycleCloseWords {
+  changes: string[];
+  /** With no change, “değişiklik yok, çünkü …”. */
+  reasoning: string;
+  next: string | null;
+}
+
+/** A recorded management cycle (a `management.cycle` event), as the owner's Yönetim tab reads it (§3.3). */
+export interface ManagementCycleRecord extends CycleCloseWords {
+  /** The event's seq. */
+  seq: number;
+  startedAt: number;
+  /** When it was recorded: the end of the turn that carried the board. */
+  endedAt: number;
+  /** Closed with cycleClose; false: the turn ended without it (“kapanmadı”). */
+  closed: boolean;
+  triggers: CycleTrigger[];
+  /** What the cycle's turn cost (null: no result came). */
+  costUsd: number | null;
+  /** The model it ran on (null: not known). */
+  model: ModelAlias | null;
+}
+
+/** The cycle the coordinator is in: the board went out, its turn has not ended. */
+export interface OpenManagementCycle {
+  startedAt: number;
+  triggers: CycleTrigger[];
+  model: ModelAlias | null;
+  /** What its turn's results cost so far (null: none yet). */
+  costUsd: number | null;
+  /** cycleClose's words when the coordinator already closed it (recorded when the turn ends); null: not yet. */
+  close: CycleCloseWords | null;
+}
+
+/** The management log (§3.3): the cycle open now, if any, and the last ones recorded, newest first. */
+export interface ManagementLog {
+  generatedAt: number;
+  open: OpenManagementCycle | null;
+  cycles: ManagementCycleRecord[];
 }
