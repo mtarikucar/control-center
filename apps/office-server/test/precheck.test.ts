@@ -144,6 +144,9 @@ describe('Capability precheck — an outward capability the role does not declar
     expect(t.tasks.get(send.id)).toMatchObject({ status: 'blocked', note: `${HOLD_NOTE} Efe için rolde yok: email.send (dışa dönük; rolün yeteneklerinde değil). Yetenek rolüne eklenince görev kendiliğinden sıraya döner.` });
     expect(t.notices.pending(t.coordinator.id).at(-1)?.text).toBe('“Müşteriye yaz” görevi (Efe) bloklandı: email.send, Efe adlı çalışanın rolünde yok (dışa dönük yetenek). editRoleCard ile rolüne ekle ya da görevi bu yeteneği olana ver (taskAssign).');
     expect(t.needs()).toEqual([]);
+    // While the role lacks it, a sweep keeps the task held.
+    t.precheck.release();
+    expect(t.tasks.get(send.id).status).toBe('blocked');
     // The coordinator adds it to Efe's role: the next sweep lets the task go.
     t.company.editRoleCard(t.coordinator.id, t.efe.id, { capabilities: ['email.send'] } as never);
     t.precheck.release();
