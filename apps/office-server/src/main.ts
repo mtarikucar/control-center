@@ -118,6 +118,7 @@ api.server.listen(config.port, config.host, () => {
   mcpUrl = `http://${config.host}:${port}/mcp`;
   engine.recover();
   // After recover (a cycle the stopped office left open is closed as not closed), before the clock's first run.
+  // The order is load-bearing: the cycle's start reads clock.lastRunAt as the previous run's (the rest-end seeding).
   stopCycle = cycle.start();
   stopDispatcher = dispatcher.start();
   stopClock = clock.start();
