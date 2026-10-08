@@ -84,7 +84,14 @@ export type OfficeEvent =
   /** A session could not run on the model a hint asked for; it goes on on `from` and the turn's messages are sent again. */
   | { type: 'model.switch.failed'; from: string; to: string; reason: string }
   | { type: 'proposal.changed'; change: ProposalChange; proposal: Proposal }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  /**
+   * A request to an owner endpoint that did not come the page's way (no Origin, no valid nonce, no browser fetch
+   * metadata): refused, or let through and marked. Detection only: a process of the same user can forge every header.
+   */
+  | { type: 'owner.request.flagged'; mark: OwnerRequestMark; outcome: 'rejected' | 'accepted'; method: string; path: string; userAgent: string };
+
+export type OwnerRequestMark = 'owner-endpoint, origin-less' | 'owner-endpoint, nonce-less' | 'owner-endpoint, no fetch metadata';
 
 export type OfficeEventType = OfficeEvent['type'];
 

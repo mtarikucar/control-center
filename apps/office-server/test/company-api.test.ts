@@ -10,6 +10,7 @@ import { performanceReport } from '../src/performance.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine, readArgv } from './engine-helpers.ts';
+import { pageHeaders } from './owner-helpers.ts';
 import { setup, until } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
@@ -35,9 +36,11 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine };
 }
 
-function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
+/** A change goes as the office page sends it (pageHeaders). */
+async function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
+  const page = method === 'GET' ? {} : await pageHeaders(port);
   return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: method === 'POST' ? { 'content-type': 'application/json' } : {} }, (res) => {
+    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: { ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...page } }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : null }));

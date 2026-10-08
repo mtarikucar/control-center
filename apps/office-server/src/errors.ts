@@ -3,6 +3,12 @@ export class ValidationError extends Error {
 }
 export class ForbiddenError extends Error {
   readonly status = 403;
+  /** Machine-readable reason the page can act on (e.g. fetch a fresh nonce and try again). */
+  readonly code: string | undefined;
+  constructor(message?: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
 }
 export class NotFoundError extends Error {
   readonly status = 404;

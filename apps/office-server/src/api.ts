@@ -14,6 +14,7 @@ import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
+import { OwnerGuard } from './owner-guard.ts';
 import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
 import type { Roster } from './roster.ts';
@@ -44,6 +45,8 @@ export interface ApiOptions {
   webDir?: string;
   /** Models + manifest served under /assets3d/. */
   assetsDir?: string;
+  /** How long a nonce of the page stays good (default OWNER_NONCE_TTL_MS). */
+  ownerNonceTtlMs?: number;
 }
 
 export interface Api {
@@ -127,7 +130,7 @@ function sendEmpty(res: ServerResponse, status: number): void {
   res.end();
 }
 
-async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Server, req: IncomingMessage, res: ServerResponse): Promise<void> {
   checkRequest(req, portOf(server), opts.allowedOrigins, opts.allowedHosts);
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -138,6 +141,9 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (out.body === undefined) return sendEmpty(res, out.status);
     return sendJson(res, out.status, out.body);
   }
+  // The owner's endpoints: anything under /api/ that changes something (the MCP tools above have their own tokens).
+  if (method === 'GET' && url.pathname === '/api/owner/nonce') return sendJson(res, 200, guard.issue(req, url.pathname));
+  if (method !== 'GET' && method !== 'HEAD' && url.pathname.startsWith('/api/')) guard.check(req, url.pathname);
   if (method === 'POST' && !(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new UnsupportedMediaTypeError('İstek gövdesi application/json olmalı.');
   }
@@ -318,9 +324,11 @@ function attach(d: ApiDeps, ws: WebSocket, after: number): void {
 }
 
 export function createApi(d: ApiDeps, opts: ApiOptions): Api {
+  const guard = new OwnerGuard({ events: d.events, ttlMs: opts.ownerNonceTtlMs });
   const server = createServer((req, res) => {
-    route(d, opts, server, req, res).catch((err: unknown) => {
-      sendJson(res, statusOf(err), { error: err instanceof Error ? err.message : String(err) });
+    route(d, opts, guard, server, req, res).catch((err: unknown) => {
+      const code = err instanceof ForbiddenError ? err.code : undefined;
+      sendJson(res, statusOf(err), { error: err instanceof Error ? err.message : String(err), ...(code ? { code } : {}) });
     });
   });
   const wss = new WebSocketServer({ noServer: true });
