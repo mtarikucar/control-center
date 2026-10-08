@@ -5,7 +5,7 @@ import { CompanyStateStore } from './goal-store.ts';
 import { DecisionStore, NoteStore, PlaybookStore } from './memory-store.ts';
 import { ProfileStore } from './profile-store.ts';
 import { TaskStore } from './store.ts';
-import { fold, snippetOf, words } from './text.ts';
+import { fold, snippetOf } from './text.ts';
 
 /** Raise it when what goes into the index changes: the office rebuilds the index on its next start. */
 export const SEARCH_VERSION = 1;
@@ -38,10 +38,21 @@ export interface SearchOptions {
   since?: number;
 }
 
-/** The query's words as the index matches them: folded, at most 8, each once. */
-export function queryWords(query: string): string[] {
-  return [...new Set(words(query))];
+/** A code like C5-1 or B9a-2: letters and digits joined by hyphens. It is one word, searched as the phrase of its parts. */
+const CODE = /^(?=.*\p{L})(?=.*\d)[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)+$/u;
+
+/** A text's tokens, folded: a code kept whole, any other hyphenated word in its parts. */
+export function tokens(text: string): string[] {
+  return (fold(text).match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) ?? []).flatMap((t) => (CODE.test(t) ? [t] : t.split('-')));
 }
+
+/** The query's words as the index matches them: folded, each once, at most 8; a code (C5-1) is one word. */
+export function queryWords(query: string): string[] {
+  return [...new Set(tokens(query))].slice(0, 8);
+}
+
+/** A word as FTS5 matches it: a prefix ("kanca"*), or a code as the exact phrase of its parts ("c5 1": not C5-10). */
+const ftsTerm = (w: string) => (w.includes('-') ? `"${w.split('-').join(' ')}"` : `"${w}"*`);
 
 /** A `kinds` list from a tool or the API: each one of MEMORY_KINDS; none (or an empty list) = every kind. */
 export function memoryKinds(value: unknown): MemoryKind[] | undefined {
@@ -216,7 +227,7 @@ export class SearchIndex {
   search(query: string, o: SearchOptions): { hits: MemoryHit[]; mode: 'and' | 'or' | 'none' } {
     const ws = queryWords(query);
     if (ws.length === 0) return { hits: [], mode: 'none' };
-    const terms = ws.map((w) => `"${w}"*`);
+    const terms = ws.map(ftsTerm);
     const where: string[] = [];
     const params: Array<string | number> = [];
     if (o.kinds?.length) {
