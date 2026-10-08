@@ -144,6 +144,13 @@ describe('ConstitutionTab', () => {
     expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ defaultTaskMinutes: 30, minScheduleMinutes: 120, maxSchedules: 5 }));
   });
 
+  it('says what the pulse interval and the idle-capacity hours do under the management cycle', () => {
+    render(<ConstitutionTab />);
+    expect(screen.getByText('Hiç hedef ve iş yokken koordinatöre bu aralıkla yönetim turu açılır (dinlenirken açılmaz, dinlenme bitince bir tur açılır); 0 = hiç.')).toBeTruthy();
+    expect(screen.getByText('Bu kadar saattir işi olmayan çalışanlar yönetim panosunda “uzun süredir” diye işaretlenir; 0 = hiç.')).toBeTruthy();
+    expect(screen.queryByText(/en çok bu sıklıkla hatırlatılır|her boşlukta bir kez/)).toBeNull();
+  });
+
   it('edits the idle-capacity warning hours', async () => {
     render(<ConstitutionTab />);
     const field = screen.getByLabelText('Boşta kapasite uyarısı (saat)') as HTMLInputElement;

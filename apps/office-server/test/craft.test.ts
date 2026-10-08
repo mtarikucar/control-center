@@ -179,7 +179,7 @@ describe('the coordination craft (ships with the office)', () => {
     const questions =
       '- **Her turda sor.** Boşta kim var ve neden ("uzun süredir" işaretli olana bağımsız iş ver ya da ekibin fazla olduğunu gerekçesiyle yaz)? Bir zincir tek kişide mi birikiyor? Kritik yol kısalabilir mi (paralel akış, işi bölmek, yeni kişi)? Bir kısıt değişti mi (anayasa, kota, sahibinin payı)? Sahibinden beklenen bir karar var mı (gerekirse `reportToOwner` ile hatırlat)?';
     const kickoff =
-      '- **Başlangıç turu, yönetim turu.** Hedef yokken, bir hedefin süren planı yokken ya da hiç plan sürmezken sahibi yazınca başlangıç turundasın: işin dünyasını öğrenmeye, akışları ve ekibi kurmaya zaman ayır (yukarıdaki adımlar), sonra planı akışlarıyla öner. Yönetim turunda kısa ve kararlı ol: tabloyu oku, karar ver, turu kapat.';
+      '- **Başlangıç turu, yönetim turu.** Hedef yokken ya da bir hedefin süren planı yokken gelen pano başlangıç turudur; hiç plan sürmezken sahibinin mesajı da öyle. Bu turda işin dünyasını öğrenmeye, akışları ve ekibi kurmaya zaman ayır (yukarıdaki adımlar), sonra planı akışlarıyla öner. Yönetim turunda kısa ve kararlı ol: tabloyu oku, karar ver, turu kapat.';
     const streams =
       '- **Plan akışlarla yaşar.** Planın paralel akışlarını `planPropose`\'ta `streams` ile yaz: her akışın sahibi ve beklediği akışlar. Gerçek değişince planı da değiştir: akış eklemek, sahibini değiştirmek, bağımlılığı düzeltmek ya da akışı bölmek `planRevise` ile olur.';
     expect(pm).toContain(streams);
