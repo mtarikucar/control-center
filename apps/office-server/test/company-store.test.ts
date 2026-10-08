@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { migrateUp, openDb } from '../src/db.ts';
+import { MIGRATIONS } from '../src/migrations.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore, type NewTask } from '../src/company/store.ts';
 
 function stores() {
@@ -197,6 +198,15 @@ describe('streams (v16)', () => {
     expect(tasks.get(loose.id).streamId).toBeNull();
     expect(tasks.update(linked.id, { status: 'in_progress' }).streamId).toBe('api');
     expect(tasks.list({ planId: 'p1' }).map((t) => t.streamId)).toEqual(['api', null]);
+  });
+
+  it('a task in no stream is written as before v16, so a database from before still takes one (the column only when set, as B7’s requires)', () => {
+    // Kerem's management cycle review, item 3; the integration on the new main keeps it (task 3bf20e5c).
+    const db = openDb(':memory:');
+    migrateUp(db, MIGRATIONS.filter((m) => m.version <= 15));
+    const tasks = new TaskStore(db);
+    const old = tasks.create(task({ planId: 'p1' }));
+    expect(tasks.get(old.id)).toMatchObject({ planId: 'p1', streamId: null, requires: [] });
   });
 
   it('PlanStore says whether any plan has one of the given statuses, however many newer plans there are', () => {
