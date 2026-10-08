@@ -3,7 +3,7 @@ import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
 import { applyText, blueprintText, type Blueprints } from '../company/blueprint.ts';
-import { capabilityVocabulary, coverage, coverageBrief, coverageLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
+import { capabilityVocabulary, coverage, coverageBrief, coverageLines, knownConnectorLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
 import { listRoleTemplates, roleTemplate, templateRole } from '../company/role-templates.ts';
 import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
 import { nextText, ofThem } from '../company/onboarding.ts';
@@ -382,6 +382,7 @@ export function officeTools(o: {
         return [
           `# Yetenek sözlüğü (${v.capabilities.length} yetenek, sürüm ${v.version}) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.`,
           ...coverageLines(coverage(registry, v.capabilities.map((c) => c.id)), false),
+          ...knownConnectorLines(),
           ...unclassifiedLines(registry),
         ].join('\n');
       },

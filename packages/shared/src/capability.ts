@@ -19,9 +19,23 @@ export interface Capability {
   tools: string[];
 }
 
+/**
+ * A connector the product knows by name only: sessions report it, but no tool of it is classified (it was never
+ * authorised here, so no session listed its tools). Its rule in a closed mode is known; each of its tools counts as
+ * outward — the vocabulary stays an allow-list.
+ */
+export interface KnownConnector {
+  /** As sessions report it, e.g. `claude.ai Slack`. */
+  name: string;
+  /** Where the name was seen and why its tools are not classified. */
+  source: string;
+}
+
 export interface CapabilityVocabulary {
   version: number;
   capabilities: Capability[];
+  /** Connectors known by name only (absent in the file: none). */
+  knownConnectors: KnownConnector[];
 }
 
 /**
