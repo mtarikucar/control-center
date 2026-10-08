@@ -6,6 +6,7 @@ import { WebSocket } from 'ws';
 import { createApi } from '../src/api.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { fakeEngine } from './engine-helpers.ts';
+import { pageHeaders } from './owner-helpers.ts';
 import { setup, until, waitFor } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
@@ -29,10 +30,12 @@ interface Reply {
   body: any;
 }
 
-function call(port: number, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string> } = {}): Promise<Reply> {
+/** A change goes as the office page sends it (pageHeaders); `opts.headers` override, e.g. a foreign Origin or Host. */
+async function call(port: number, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string> } = {}): Promise<Reply> {
+  const page = method === 'GET' ? {} : await pageHeaders(port);
   return new Promise((resolve, reject) => {
     const payload = opts.body === undefined ? undefined : JSON.stringify(opts.body);
-    const headers: Record<string, string> = { ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...opts.headers };
+    const headers: Record<string, string> = { ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...page, ...opts.headers };
     const req = httpRequest({ host: '127.0.0.1', port, method, path, headers }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
