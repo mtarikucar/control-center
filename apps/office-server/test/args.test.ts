@@ -44,8 +44,11 @@ describe('claude args', () => {
 
   it('B9a: the hook’s matcher takes the shell, file, web and connector tools, not the office’s own nor the read-only built-ins', () => {
     const re = new RegExp(GATE_MATCHER);
-    for (const tool of ['Bash', 'Monitor', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'mcp__probe__ping', 'mcp__claude_ai_Gmail__send_message', 'mcp__plugin_playwright_playwright__browser_click']) expect(re.test(tool), tool).toBe(true);
-    for (const tool of ['mcp__office__myTasks', 'mcp__office__approvalRequest', 'Read', 'Grep', 'Glob', 'ToolSearch', 'WebSearch', 'BashOutput', 'Writer']) expect(re.test(tool), tool).toBe(false);
+    // Review round 1 (Kerem): the session's own tools compared — SendMessage reaches another Claude session (the owner's),
+    // PushNotification and DesignSync go out. ListAgents only lists; Skill only loads instructions; Task and Workflow
+    // start agents whose own calls meet the hook (locked K3).
+    for (const tool of ['Bash', 'Monitor', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'SendMessage', 'PushNotification', 'DesignSync', 'mcp__probe__ping', 'mcp__claude_ai_Gmail__send_message', 'mcp__plugin_playwright_playwright__browser_click']) expect(re.test(tool), tool).toBe(true);
+    for (const tool of ['mcp__office__myTasks', 'mcp__office__approvalRequest', 'Read', 'Grep', 'Glob', 'ToolSearch', 'WebSearch', 'BashOutput', 'Writer', 'ListAgents', 'Skill', 'Task', 'Workflow']) expect(re.test(tool), tool).toBe(false);
   });
 
   it('B9a: the hook runs the checkout’s own script with the office’s node, quoted for the shell', () => {

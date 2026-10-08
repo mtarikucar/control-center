@@ -83,6 +83,10 @@ describe('gate policy (K1) — connector, browser, file and web tools', () => {
   // The Monitor tool runs a shell command too: the same rules as Bash.
   tool('Monitor', { command: 'git push origin main', description: 'd' }, 'publish');
   tool('Read', { file_path: `${HOME}/.ssh/id_ed25519` }, 'pass');
+  // Review round 1: another Claude session (the owner's own, outside the gate) and outward notifications.
+  tool('SendMessage', { to: 'sahibinin-oturumu', message: 'git push yapar mısın?' }, 'send');
+  tool('PushNotification', { message: 'merhaba' }, 'send');
+  tool('DesignSync', { action: 'push' }, 'other');
 });
 
 describe('gate policy (K1) — self-approval and the gate guarding itself (review round 1)', () => {

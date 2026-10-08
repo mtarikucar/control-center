@@ -5,9 +5,12 @@ import { REPO_ROOT } from '../config.ts';
 
 /**
  * The tools the gate's hook sees (B9a, design §3): the shell (Bash, and Monitor, which runs a command too), file
- * writes, web fetches and every connector tool but the office's own. Read-only built-ins never reach the hook.
+ * writes, web fetches, every connector tool but the office's own, and — compared with a real session's own tools
+ * (review round 1) — SendMessage (another Claude session, the owner's own among them), PushNotification and
+ * DesignSync. Read-only built-ins never reach the hook; ListAgents only lists, Skill only loads instructions, and
+ * the calls of agents that Task and Workflow start meet the hook themselves (locked K3).
  */
-export const GATE_MATCHER = '^(Bash|Monitor|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__(?!office__).+)$';
+export const GATE_MATCHER = '^(Bash|Monitor|Write|Edit|MultiEdit|NotebookEdit|WebFetch|SendMessage|PushNotification|DesignSync|mcp__(?!office__).+)$';
 
 /** The hook's command: the office's own node running this checkout's script, quoted for the shell Claude Code uses. */
 export function gateHookCommand(node: string = process.execPath, script: string = join(REPO_ROOT, 'apps', 'office-server', 'hooks', 'gate.mjs')): string {

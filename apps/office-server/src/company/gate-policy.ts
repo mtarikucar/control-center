@@ -1337,6 +1337,11 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
     return done(why ? [{ kind: 'self', target: `${tool} ${path}`, why: `korunan yola yazar: ${why}` }] : []);
   }
   if (tool === 'WebFetch') return done(typeof o.url === 'string' ? httpParts('WebFetch', [{ method: 'GET', url: o.url }], ctx) : []);
+  // Another Claude session — the owner's interactive one among them — is outside the gate: a message to it can ask it
+  // to do what the gate holds here (review round 1). Notifications and design sync go out.
+  if (tool === 'SendMessage') return done([{ kind: 'send', target: mcpTarget('SendMessage', input), why: 'başka bir Claude oturumuna mesaj gönderir (o oturum ofis kapısının dışında)' }]);
+  if (tool === 'PushNotification') return done([{ kind: 'send', target: 'PushNotification', why: 'dışarıya bildirim gönderir' }]);
+  if (tool === 'DesignSync') return done([{ kind: 'other', target: 'DesignSync', why: 'tasarımı dışarıyla eşitler' }]);
   if (!tool.startsWith('mcp__')) return done([]);
   const cut = tool.indexOf('__', 5);
   const server = cut === -1 ? tool.slice(5) : tool.slice(5, cut);
