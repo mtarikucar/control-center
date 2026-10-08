@@ -43,7 +43,7 @@ const HANDOVER_DONE = [
   'İşe yarayacak dosyalar teslimin outputs listesinde',
 ];
 const SELF_REVIEW = 'Bir işi yapan kendi işinin inceleyicisi olamaz; başka birini seç.';
-const PROPOSAL_TR: Record<ProposalKind, string> = { need: 'ihtiyaç', purchase: 'satın alma', idea: 'fikir', objection: 'itiraz' };
+export const PROPOSAL_TR: Record<ProposalKind, string> = { need: 'ihtiyaç', purchase: 'satın alma', idea: 'fikir', objection: 'itiraz' };
 /** What a routine's new status is called in its event. */
 const SCHEDULE_CHANGE: Record<ScheduleStatus, ScheduleChange> = { active: 'resumed', paused: 'paused', stopped: 'stopped' };
 
