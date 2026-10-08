@@ -61,15 +61,23 @@ describe('the coordination craft (ships with the office)', () => {
     expect(pmText()).toContain('taskPark');
   });
 
-  it('B1–B2: the coordinator does not brake itself — the office sets the limits — and a direction or vision sends it to discovery', () => {
+  it('B1–B2: the coordinator does not brake itself — the office sets the limits — and a direction sends it to understand the work’s own world before building a team', () => {
     const flat = (text: string) => text.replace(/\s+/g, ' ');
     const pm = flat(pmText());
     expect(pm).toContain(
       '**Kendini kısıtlama.** Misyon için gereken her işi başlat, gereken kişiyi işe al, gereken modeli kullan. Sınırları ofis koyar (anayasa, sahibinin kota payı, sahibinin onayı gereken geri alınamaz işler); onların altında kendi kendine fren yapma, işi bekletme, "sonra" deme.',
     );
-    expect(pm).toContain(
-      '**Yön ve vizyon gelince keşfe çık.** Sahibi bir yön ya da ürün vizyonu verirse onu hemen işe çevir: `reportToOwner` ile sahibine en önemli bir-iki netleştirici soruyu sor ama cevabı beklemeden çalış; bir keşif planı aç — kimin için (kullanıcılar, pazar, rakipler), ne gerekiyor (roller; gerekirse işe al), hangi bağlantılar ve araçlar (entegrasyonlar, sosyal medya, ödeme, veri), hangi mimari (bellek, RAG, ajanlar, değerlendirme), nasıl para kazanır; bulduklarını hedeflere ve planlara dök, sahibine kısa raporla.',
-    );
+    expect(pm).toContain('**Yön gelince işi önce anla, sonra ekibi kur.** Sahibi bir iş, yön ya da ürün fikri verirse onu hemen işe çevir:');
+    expect(pm).toContain('**Ne istendiğini netleştir.** İş ne, kimin için, başarı neye benzer? Bilmediğin en önemli bir-iki şeyi `reportToOwner` ile sahibine sor; cevabı beklemeden, varsayımını yazarak ilerle.');
+    expect(pm).toContain('**Bu işin dünyasını kaynaktan öğren, varsayma.** Bu alanda iyi bir işletme gün gün ne yapar: hangi işler, hangi kurallar ve yükümlülükler, hangi riskler, hangi bilgi ve araçlar var? Kendi bildiğin kalıba sığdırma; listeyi işin kendisinden çıkar.');
+    expect(pm).toContain('**İşi akışlara böl.**');
+    expect(pm).toContain('**Uzmanlığa göre kişi al.**');
+    expect(pm).toContain('**Ekibin neye ihtiyacı olduğunu işten çıkar.**');
+    expect(pm).toContain('**Öğrendiğini şirkete yaz.**');
+    // The guide is the same for every company: no field-specific examples that pull every firm towards software.
+    for (const text of [pmText(), coordinationText(), workingText()]) {
+      for (const word of ['RAG', 'sosyal medya', 'entegrasyon']) expect(flat(text)).not.toContain(word);
+    }
     expect(pm).not.toContain('iş icat etme');
     expect(pm).not.toContain('az hedef tut');
     expect(pm).toContain('Hedef sayısını işin gerektirdiği kadar tut; ulaşılanı `status: done`, vazgeçileni `dropped` ile kapat.');
