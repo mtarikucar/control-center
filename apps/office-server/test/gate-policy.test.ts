@@ -198,6 +198,36 @@ describe('gate policy (K1) — indirection, substitution, here-documents (the pa
   ]);
 });
 
+describe('gate policy (K1) — the script a line runs, what mktemp gives, loop values (the 2151 live calls, K4)', () => {
+  const db = `${DATA}/office.db`;
+  rows([
+    // A script given the live database: held unless the script (read from the disk, or written by this very line) says read-only.
+    [`node /tmp/k/db.mjs ${db}`, 'self'],
+    [`cat > /tmp/k/db.mjs <<'EOF'\nimport { DatabaseSync } from 'node:sqlite';\nconst db = new DatabaseSync(process.argv[2], { readOnly: true });\nEOF\nnode /tmp/k/db.mjs ${db}`, 'pass'],
+    [`cat > /tmp/k/db.mjs <<'EOF'\nimport { DatabaseSync } from 'node:sqlite';\nnew DatabaseSync(process.argv[2]).exec('DELETE FROM approvals');\nEOF\nnode /tmp/k/db.mjs ${db}`, 'self'],
+    [`node /tmp/k/copy.mjs /tmp/k/office.db`, 'pass'],
+    // An edit script that only carries the text office.db (no database code) does not open it.
+    [`python3 - <<'EOF'\np='test/x.test.ts'; s=open(p).read()\ns=s.replace("a", "sqlite -readonly ${db}")\nopen(p,'w').write(s)\nEOF`, 'pass'],
+    [`python3 - <<'EOF'\nimport sqlite3\nsqlite3.connect('${db}').execute('DELETE FROM approvals')\nEOF`, 'self'],
+    // Strings in an edit script are text; they run only when the code starts commands or speaks HTTP.
+    [`python3 - <<'EOF'\ns = "git push origin main"\nt = "method: 'POST'"\nEOF`, 'pass'],
+    [`python3 - <<'EOF'\nimport subprocess\nsubprocess.run("git push origin main", shell=True)\nEOF`, 'publish'],
+    [`python3 - <<'EOF'\nimport requests\nrequests.post('https://api.x.io/hook', json={})\nEOF`, 'send'],
+    // mktemp: a new name in the temp folder.
+    ['D=$(mktemp -d /tmp/kx.XXXX) && rm -rf "$D"', 'pass'],
+    ['D=$(mktemp -d) && cd "$D" && git checkout -b x && pnpm install', 'pass'],
+    ['D=$(mktemp -d -p ~/Projects) && rm -rf "$D"', 'delete'],
+    // Loop values in one folder: a name in that folder.
+    ['for f in a.md b.md; do perl -pi -e "s/x/y/" "$f"; done', 'pass'],
+    ['for f in a.md b.md; do perl -pi -e "s/x/y/" "$f"; done', 'self', REPO],
+    ['for w in /tmp/a /tmp/b; do rm -rf "$w"; done', 'pass'],
+    ['for w in /tmp/a ~/Documents/b; do rm -rf "$w"; done', 'delete'],
+    // A script written and run in the same line, its arguments as $1, $2 (Kerem's stress runner, live seq 3946).
+    [`cat > /tmp/k/s.sh <<'EOF'\nOUT=$2\nrm -rf "$OUT"; mkdir -p "$OUT"\nEOF\nbash /tmp/k/s.sh ~/x /tmp/k/out`, 'pass'],
+    [`cat > /tmp/k/s.sh <<'EOF'\nOUT=$2\nrm -rf "$OUT"\nEOF\nbash /tmp/k/s.sh /tmp/x ~/Documents`, 'delete'],
+  ]);
+});
+
 describe('gate policy (K1) — targets and fingerprints (§4 madde 4)', () => {
   const first = (v: ReturnType<typeof classifyCall>) => v.parts[0]!;
   it('a coarse target: the command word and the remote or host, a resolved path, a tool and its first target field', () => {
@@ -270,10 +300,12 @@ describe('gate policy (K2 data) — the 217 live Bash calls that cd into the liv
 });
 
 /**
- * The live calls the gate holds, and why (filled from the run, each read by hand):
- * - 688 Kerem: a script given the live office.db with no read-only mark in the command (the design's own count).
+ * The live calls the gate holds among the whole ones: none. The design's prototype held 688 (Kerem: `node db3.mjs
+ * ~/.control-center/office.db`, no read-only mark in the command); the same line writes db3.mjs from a here-document
+ * with `{ readOnly: true }`, and the gate reads that script before it runs it, so it passes. A script it cannot read,
+ * or one without the mark, is still held (K1 rows "the script a line runs").
  */
-const HELD_LIVE: Array<[number, string, string]> = [[688, 'Kerem', 'self node /home/tarik/.control-center/office.db']];
+const HELD_LIVE: Array<[number, string, string]> = [];
 
 /**
  * Lines the log cut short (8 of 217). Three end inside a quote, so they cannot be read and are held unread (the real

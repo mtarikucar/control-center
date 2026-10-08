@@ -6,7 +6,8 @@
  */
 
 /** One piece of a word: plain text, a variable to look up, or something only known at run time. */
-export type WordPart = { lit: string } | { var: string } | { dyn: true };
+/** `sub`: the command a $(…) or `…` runs (what it prints stands there), for the few whose output can be told (mktemp). */
+export type WordPart = { lit: string } | { var: string; def?: string } | { dyn: true; sub?: string };
 
 export interface ShellWord {
   parts: WordPart[];
@@ -37,8 +38,11 @@ export type ShellNode =
   | { type: 'close' }
   /** A command or process substitution ($(…), `…`, <(…), >(…)): its own line, run before the command it sits in. */
   | { type: 'sub'; body: string }
-  /** `for NAME in …`: NAME is only known at run time. */
-  | { type: 'loopvar'; name: string };
+  /** `for NAME in …`: NAME takes each of the words in turn (null: the positional parameters). Its body ends at `loopend`. */
+  | { type: 'loopvar'; name: string; values: ShellWord[] | null }
+  /** `while` / `until`: a loop whose body ends at `loopend` too (kept so a `for` around it finds its own end). */
+  | { type: 'loopstart' }
+  | { type: 'loopend' };
 
 export class ShellSyntaxError extends Error {}
 
@@ -300,7 +304,7 @@ class Lexer {
       if (j >= s.length) throw new ShellSyntaxError('kapanmayan ters tırnak');
       this.#i = j + 1;
       subs.push(body);
-      parts.push({ dyn: true });
+      parts.push({ dyn: true, sub: body });
       return true;
     }
     const next = s[this.#i + 1] ?? '';
@@ -312,16 +316,19 @@ class Lexer {
     }
     if (next === '(') {
       this.#i += 1;
-      subs.push(this.#balanced('(', ')'));
-      parts.push({ dyn: true });
+      const body = this.#balanced('(', ')');
+      subs.push(body);
+      parts.push({ dyn: true, sub: body });
       return true;
     }
     if (next === '{') {
       this.#i += 1;
       const inner = this.#balanced('{', '}');
-      // ${NAME}, and ${NAME:-word} / ${NAME:=word}: NAME's value when it is known (the word only stands in when it is unset).
-      const name = /^([A-Za-z_][A-Za-z0-9_]*)(?:$|:?[-=])/.exec(inner);
-      parts.push(name ? { var: name[1]! } : { dyn: true });
+      // ${NAME}, and ${NAME:-word} / ${NAME:=word}: NAME's value, or the word when NAME is unset (a plain word only).
+      // ${NAME:?message} stops the line when NAME is unset: NAME's value either way.
+      const name = /^([A-Za-z_][A-Za-z0-9_]*)(?:$|:?[-=](.*)$|:?\?.*$)/s.exec(inner);
+      const def = name?.[2];
+      parts.push(name ? (def !== undefined && /^[^$`"'\\]*$/.test(def) ? { var: name[1]!, def } : def === undefined ? { var: name[1]! } : { dyn: true }) : { dyn: true });
       return true;
     }
     const name = /^[A-Za-z_][A-Za-z0-9_]*/.exec(s.slice(this.#i + 1));
@@ -330,7 +337,13 @@ class Lexer {
       parts.push({ var: name[0] });
       return true;
     }
-    if (/^[0-9@*#?$!-]$/.test(next)) {
+    if (/^[0-9]$/.test(next)) {
+      // A positional parameter: known when a script is run with arguments the line gives.
+      this.#i += 2;
+      parts.push({ var: next });
+      return true;
+    }
+    if (/^[@*#?$!-]$/.test(next)) {
       this.#i += 2;
       parts.push({ dyn: true });
       return true;
@@ -428,8 +441,12 @@ export function parseShell(line: string): ShellNode[] {
     const w = token.word!;
     const text = literal(w);
     if (words.length === 0) {
-      // Reserved words that lead a command do not change what it does.
-      if (text !== null && !w.quoted && RESERVED_LEAD.has(text)) continue;
+      // Reserved words that lead a command do not change what it does; loops are marked so their bodies can be told.
+      if (text !== null && !w.quoted && RESERVED_LEAD.has(text)) {
+        if (text === 'while' || text === 'until') out.push({ type: 'loopstart' });
+        if (text === 'done') out.push({ type: 'loopend' });
+        continue;
+      }
       if (text === '[[' && !w.quoted) {
         skipUntil = ']]';
         continue;
@@ -440,12 +457,17 @@ export function parseShell(line: string): ShellNode[] {
       }
       if (text === 'for' && !w.quoted) {
         const name = tokens[k + 1]?.token.word ? literal(tokens[k + 1]!.token.word!) : null;
-        if (name) out.push({ type: 'loopvar', name });
-        // Skip up to the separator before `do`.
-        while (k + 1 < tokens.length && !(tokens[k + 1]!.token.kind === 'op' && [';', '\n'].includes(tokens[k + 1]!.token.op!))) {
+        // Up to the separator before `do`: the words after `in` are the values.
+        const values: ShellWord[] = [];
+        let listed = false;
+        for (k += 1; k + 1 < tokens.length && !(tokens[k + 1]!.token.kind === 'op' && [';', '\n'].includes(tokens[k + 1]!.token.op!)); ) {
           k += 1;
           pendingSubs.push(...tokens[k]!.subs);
+          const word = tokens[k]!.token.word;
+          if (word && !listed && literal(word) === 'in') listed = true;
+          else if (word && listed) values.push(word);
         }
+        if (name) out.push({ type: 'loopvar', name, values: listed ? values : null });
         continue;
       }
       if (text === 'case' && !w.quoted) {

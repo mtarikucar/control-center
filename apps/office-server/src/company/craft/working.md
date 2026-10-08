@@ -7,6 +7,10 @@
   park et: dönüş saati (`+6h`, `+1d`, `2026-10-08T14:55`) ve gerekçe. Sıran boşalır, ofis sıradaki işini verir ve park
   edileni saatinde geri getirir. Claude'un kendi zamanlayıcısı (`CronCreate`, `/loop`, `/schedule`) bu ofiste kapalıdır:
   zamana bağlı her iş ofisin saatinden geçer.
+- **Kapıya takılırsan** ("OFİS KAPISI: …"): yayın, gönderim, ödeme, silme, tarayıcı işi ya da ofisin kendisine dokunan
+  bir çağrı sahibinin onayını bekler. `approvalRequest` ile iste (summary: neden gerektiği); onay gelince aynı çağrıyı
+  tekrarla; beklerken başka işin yoksa görevi `taskPark` ile park et. Kapıyı dolanmaya çalışma: kapı kazara ve sıradan
+  yolları kapatır, aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz; sahibi onayı yalnız ofis sayfasından sayılır.
 - **Boşta sessizce bekleme.** Teslimden sonra sıranda iş kalmadıysa (`myTasks`) hangi işi alabileceğini `propose` ile
   (`kind: idea`) liderine ya da koordinatöre öner: ne, neden ve ne zaman biter; kararı onlar verir.
 - **İnceleyicili görev.** Görev mesajında "İnceleyen" yazıyorsa teslimin onun onayıyla kapanır. "Değişiklik istendi"

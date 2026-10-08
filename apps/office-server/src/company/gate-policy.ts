@@ -157,10 +157,29 @@ function expand(w: ShellWord, st: ShellState, ctx: GateContext, env?: Map<string
     else if ('var' in part) {
       const name = part.var;
       const known = env?.has(name) ? env.get(name) : st.vars.has(name) ? st.vars.get(name) : name === 'HOME' ? ctx.home : name === 'PWD' ? st.cwd : name === 'TMPDIR' ? (ctx.tmpDirs[ctx.tmpDirs.length - 1] ?? null) : null;
-      out += known ?? DYN;
-    } else out += DYN;
+      // ${NAME:-word} with NAME not set in this line: the word (a variable exported in an earlier call is not seen; §8).
+      const def = 'def' in part && part.def !== undefined && !(env?.has(name) || st.vars.has(name)) ? part.def.replace(/^~(?=\/|$)/, ctx.home) : undefined;
+      out += known ?? def ?? DYN;
+    } else out += part.sub ? (tempOf(part.sub, ctx) ?? DYN) : DYN;
   }
   return out;
+}
+
+/** What `mktemp` prints is known up to its last part: a new name in its folder (-p, a template's folder, or the temp folder). */
+function tempOf(sub: string, ctx: GateContext): string | null {
+  const words = sub.trim().split(/\s+/);
+  if (words[0] !== 'mktemp') return null;
+  let dir: string | null = null;
+  let template: string | null = null;
+  for (let i = 1; i < words.length; i += 1) {
+    const w = words[i]!;
+    if (w === '-p' || w === '--tmpdir') dir = words[++i] ?? null;
+    else if (w.startsWith('--tmpdir=')) dir = w.slice(9);
+    else if (!w.startsWith('-')) template = w;
+  }
+  const base = template?.includes('/') ? posix.dirname(template) : (dir ?? ctx.tmpDirs[ctx.tmpDirs.length - 1] ?? '/tmp');
+  if (/[$`"']/.test(base) || !base.startsWith('/')) return null;
+  return `${posix.resolve(base.replace(/^~(?=\/|$)/, ctx.home))}/${DYN}`;
 }
 
 const textOf = (w: ShellWord | undefined, st: ShellState, ctx: GateContext) => (w ? expand(w, st, ctx) : '');
@@ -178,11 +197,14 @@ function pathOf(w: ShellWord, st: ShellState, ctx: GateContext): { path: string;
     const path = resolve(t);
     return path ? { path, partial: false } : null;
   }
-  // Known only in its last part (a glob, $(basename …), run-$1.txt): its folder is. Unknown from its start: nothing is.
-  if (t.startsWith(DYN) || t.indexOf('/', at) !== -1) return null;
+  // Known only in its last part (a glob, $(basename …), run-$1.txt): its folder is. Known up to a folder that can hold
+  // nothing protected ("$D/out.txt" with D=/tmp/<mktemp>): that folder is. Unknown from its start: nothing is.
+  if (t.startsWith(DYN)) return null;
   const slash = t.lastIndexOf('/', at);
   const path = resolve(slash === -1 ? '.' : t.slice(0, slash) || '/');
-  return path ? { path, partial: true } : null;
+  if (!path) return null;
+  if (t.indexOf('/', at) !== -1 && protectedWhy(path, ctx, true)) return null;
+  return { path, partial: true };
 }
 
 const flag = (t: string) => t.startsWith('-') && t.length > 1;
@@ -320,10 +342,25 @@ interface Run {
   ctx: GateContext;
   parts: GatePart[];
   depth: number;
+  /** Files the line itself writes from a here-document (cat > f <<EOF): what a later `node f` or `bash f` reads. */
+  written: Map<string, string>;
 }
 
 function add(run: Run, part: GatePart): void {
   if (!run.parts.some((p) => p.kind === part.kind && p.target === part.target)) run.parts.push(part);
+}
+
+/**
+ * A loop variable over literal words: when they all lie in one folder, it is "a name in that folder" (known up to its
+ * last part); else, or over anything known only at run time, unknown.
+ */
+function loopValue(values: ShellWord[] | null, st: ShellState, ctx: GateContext): string | null {
+  if (!values || values.length === 0) return null;
+  const texts = values.map((w) => expand(w, st, ctx));
+  if (texts.some((t) => t.includes(DYN))) return null;
+  if (texts.every((t) => t === texts[0])) return texts[0]!;
+  const dirs = new Set(texts.map((t) => (t.includes('/') ? posix.dirname(t) : '.')));
+  return dirs.size === 1 ? `${[...dirs][0]}/${DYN}` : null;
 }
 
 /** Classifies a shell line in a state (changed in place: cd, assignments); every held part goes to run.parts. */
@@ -340,13 +377,44 @@ function shellLine(line: string, st: ShellState, run: Run): void {
     add(run, { kind: 'other', target: `okunamayan komut: ${line.replace(/\s+/g, ' ').slice(0, 60)}`, why: `komut okunamadı (${err.message})` });
     return;
   }
+  walk(nodes, st, run);
+}
+
+/** The body of a loop: the nodes up to its own `loopend` (loops inside it keep theirs). */
+function loopBody(nodes: ShellNode[], from: number): number {
+  let depth = 1;
+  for (let i = from; i < nodes.length; i += 1) {
+    const type = nodes[i]!.type;
+    if (type === 'loopvar' || type === 'loopstart') depth += 1;
+    if (type === 'loopend' && --depth === 0) return i;
+  }
+  return nodes.length;
+}
+
+function walk(nodes: ShellNode[], st: ShellState, run: Run): void {
   const saved: ShellState[] = [];
-  for (const node of nodes) {
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i]!;
     if (node.type === 'open') saved.push(copyState(st));
     else if (node.type === 'close') {
       const back = saved.pop();
       if (back) Object.assign(st, back);
-    } else if (node.type === 'loopvar') st.vars.set(node.name, null);
+    } else if (node.type === 'loopvar') {
+      // A loop over words known now runs its body once per word; otherwise once, the variable known as far as it can be.
+      const end = loopBody(nodes, i + 1);
+      const body = nodes.slice(i + 1, end);
+      const values = node.values?.map((w) => expand(w, st, run.ctx)) ?? null;
+      if (values && values.length > 0 && values.length <= 32 && values.every((v) => !v.includes(DYN))) {
+        for (const v of values) {
+          st.vars.set(node.name, v);
+          walk(body, st, run);
+        }
+      } else {
+        st.vars.set(node.name, loopValue(node.values, st, run.ctx));
+        walk(body, st, run);
+      }
+      i = end;
+    } else if (node.type === 'loopstart' || node.type === 'loopend') continue;
     else if (node.type === 'sub') shellLine(node.body, copyState(st), { ...run, depth: run.depth + 1, parts: run.parts });
     else command(node.words, node.assigns, node.redirects, st, run);
   }
@@ -356,17 +424,20 @@ function command(words: ShellWord[], assigns: ShellAssign[], redirects: Array<{ 
   const { ctx } = run;
   const env = new Map<string, string | null>();
   for (const a of assigns) {
+    // A value known only in part (/tmp/<mktemp>) is kept as such: its known part still says where it is.
     const value = expand(a.value, st, ctx);
-    const v = value.includes(DYN) ? null : value;
-    if (words.length === 0) st.vars.set(a.name, v);
-    else env.set(a.name, v);
+    if (words.length === 0) st.vars.set(a.name, value);
+    else env.set(a.name, value);
   }
   // Redirections write files whatever the command is.
+  const body = redirects.find((r) => r.op === '<<' && r.body !== undefined)?.body;
   for (const r of redirects) {
     if (!['>', '>>', '>|', '&>', '&>>', '<>', '>&'].includes(r.op) || !r.target) continue;
     const t = textOf(r.target, st, ctx);
     if (/^\/dev\/(null|stdout|stderr|tty|fd\/\d+)$/.test(t)) continue;
     writeTarget(run, '>', r.target, st);
+    const at = pathOf(r.target, st, ctx);
+    if (body !== undefined && at && !at.partial) run.written.set(at.path, body);
   }
   if (words.length === 0) return;
   simple(words, env, redirects, st, run);
@@ -482,8 +553,10 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
     if (!target) st.cwd = ctx.home;
     else if (textOf(target, st, ctx) === '-') st.cwd = null;
     else {
+      // A folder known up to its last part (cd "$(mktemp -d)"): the shell is somewhere inside its known folder — enough
+      // when that folder can hold nothing protected; otherwise unknown.
       const at = pathOf(target, st, ctx);
-      st.cwd = at && !at.partial ? at.path : null;
+      st.cwd = !at ? null : !at.partial ? at.path : protectedWhy(at.path, ctx, true) ? null : `${at.path}/${DYN}`;
     }
     return;
   }
@@ -513,7 +586,7 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
   if (cmd === 'source' || cmd === '.') {
     const at = words[1] ? pathOf(words[1], st, ctx) : null;
     for (const [k, v] of env) st.vars.set(k, v);
-    const text = at && !at.partial ? ctx.readScript(at.path) : null;
+    const text = at && !at.partial ? scriptText(run, at.path) : null;
     if (text === null) add(run, { kind: 'other', target: `${cmd} ${shown(args[0] ?? '')}`, why: 'içeriği okunamayan bir betiği yürütür' });
     else shellLine(text, st, { ...run, depth: run.depth + 1 });
     return;
@@ -559,6 +632,11 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
   fileWrites(name, words, env, st, run);
 }
 
+/** A script's text: written earlier in the same line from a here-document, else as it stands on the disk. */
+function scriptText(run: Run, path: string): string | null {
+  return run.written.get(path) ?? run.ctx.readScript(path);
+}
+
 function shellIndirect(name: string, words: ShellWord[], redirects: Array<{ op: string; target: ShellWord | null; body?: string }>, st: ShellState, run: Run): void {
   const { ctx } = run;
   const t = texts(words, st, ctx);
@@ -576,9 +654,14 @@ function shellIndirect(name: string, words: ShellWord[], redirects: Array<{ op: 
   }
   if (i < words.length) {
     const at = pathOf(words[i]!, st, ctx);
-    const text = at && !at.partial ? ctx.readScript(at.path) : null;
+    const text = at && !at.partial ? scriptText(run, at.path) : null;
     if (text === null) add(run, { kind: 'other', target: `${name} ${shown(t[i]!)}`, why: 'içeriği okunamayan bir betiği yürütür' });
-    else shellLine(text, copyState(st), deeper);
+    else {
+      // The script sees its arguments as $1, $2 …
+      const inner = copyState(st);
+      t.slice(i + 1, i + 10).forEach((arg, k) => inner.vars.set(String(k + 1), arg));
+      shellLine(text, inner, deeper);
+    }
     return;
   }
   // No script and no -c: the commands come on stdin.
@@ -586,19 +669,57 @@ function shellIndirect(name: string, words: ShellWord[], redirects: Array<{ op: 
   if (here) return shellLine(here.body ?? textOf(here.target!, st, ctx), copyState(st), deeper);
   const from = redirects.find((r) => r.op === '<' && r.target);
   const at = from ? pathOf(from.target!, st, ctx) : null;
-  const text = at && !at.partial ? ctx.readScript(at.path) : null;
+  const text = at && !at.partial ? scriptText(run, at.path) : null;
   if (text !== null) return shellLine(text, copyState(st), deeper);
   add(run, { kind: 'other', target: `${name} (stdin)`, why: 'girdisinden gelen, okunamayan komutları yürütür' });
 }
 
-/** -c / -e code and here-documents of node, python …: the live database without a read-only mark, HTTP writes, shell-outs. */
+/**
+ * Code that opens a database, in the interpreter's own language (a mention of office.db elsewhere — a string an edit
+ * script writes into a test — is only text).
+ */
+const DB_ACCESS: Record<string, RegExp> = {
+  python: /^\s*(import|from)\s+sqlite3\b|sqlite3\.connect\(/m,
+  node: /node:sqlite|DatabaseSync\(|better-sqlite3|openDb\(|\/db\.ts['"]/,
+  other: /sqlite|DBI->connect|\.connect\(/i,
+};
+const dbAccess = (name: string, code: string) => (DB_ACCESS[name.startsWith('python') ? 'python' : ['node', 'deno', 'bun', 'tsx', 'ts-node'].includes(name) ? 'node' : 'other']!).test(code);
+/** Code that starts commands: only then do its string literals run as commands. */
+const SPAWNS = /subprocess|os\.system|os\.popen|Popen|child_process|exec(File)?Sync|spawn(Sync)?\(|\bsystem\(/;
+/** Code that talks HTTP. */
+const HTTP = /import\s+(requests|httpx|urllib|http\.client)|from\s+(requests|httpx|urllib|http\.client)|\bfetch\(|https?\.request\(|axios/;
+
+/**
+ * node, python …: the live database without a read-only mark (in the line, the -c/-e code, a here-document, or the
+ * script it runs — written in the same line or read from the disk); code that sends over HTTP; code that starts commands.
+ */
 function interpreter(name: string, words: ShellWord[], redirects: Array<{ op: string; target: ShellWord | null; body?: string }>, st: ShellState, run: Run): void {
   const { ctx } = run;
   const t = texts(words, st, ctx);
   const codes: string[] = [];
+  let script: string | null = null;
+  const valued = new Set(['-r', '--require', '--import', '--input-type', '-m', '-W', '-X', '--loader', '--experimental-loader']);
   for (let i = 1; i < t.length; i += 1) {
-    if (['-c', '-e', '--eval', '-p', '--print', '-E'].includes(t[i]!) || (name === 'perl' && /^-\w*e$/.test(t[i]!))) codes.push(t[i + 1] ?? '');
-    if (name === 'deno' && t[i] === 'eval') codes.push(t[i + 1] ?? '');
+    if (['-c', '-e', '--eval', '-p', '--print', '-E'].includes(t[i]!) || (name === 'perl' && /^-\w*e$/.test(t[i]!))) {
+      codes.push(t[++i] ?? '');
+      continue;
+    }
+    if (name === 'deno' && t[i] === 'eval') {
+      codes.push(t[++i] ?? '');
+      continue;
+    }
+    if (valued.has(t[i]!)) {
+      i += 1;
+      continue;
+    }
+    if (flag(t[i]!) || t[i] === '-') continue;
+    if (name === 'deno' && t[i] === 'run') continue;
+    // The first operand is the script; the rest are its arguments.
+    if (codes.length === 0 && script === null) {
+      const at = pathOf(words[i]!, st, ctx);
+      script = at && !at.partial ? scriptText(run, at.path) : null;
+    }
+    break;
   }
   for (const r of redirects) {
     if (r.op === '<<' && r.body !== undefined) codes.push(r.body);
@@ -606,27 +727,30 @@ function interpreter(name: string, words: ShellWord[], redirects: Array<{ op: st
   }
   // perl -i edits files in place, like sed -i.
   if (name === 'perl' && t.slice(1).some((a) => /^-\w*i/.test(a))) {
-    const files = words.slice(1).filter((w, k) => !flag(t[k + 1]!) && !codes.includes(t[k + 1]!));
+    const files = words.slice(1).filter((_, k) => !flag(t[k + 1]!) && !codes.includes(t[k + 1]!));
     for (const f of files) writeTarget(run, 'perl -i', f, st);
   }
-  const all = [...t, ...codes].join('\n');
-  // The live database: any mention, in the arguments or the code, unless the text marks it read-only.
-  if (/office\.db/.test(all) && !RO_MARK.test(all)) {
-    const live = `${ctx.dataDir}/office.db`;
-    const mentions = [...all.matchAll(/[^\s'"`(),;]*office\.db[^\s'"`(),;]*/g)].map((m) => m[0]);
-    const atLive = mentions.some((m) => {
-      if (m.startsWith('/') || m.startsWith('~')) return posix.resolve(m.replace(/^~/, ctx.home)).startsWith(live);
-      // A bare name or a joined path: it may well be the live one.
-      return !m.startsWith('./') || (st.cwd !== null && posix.resolve(st.cwd, m).startsWith(live));
-    });
-    if (atLive) add(run, { kind: 'self', target: `${name} ${live}`, why: 'canlı veritabanına salt-okunur işareti olmadan erişir' });
-  }
-  for (const code of codes) {
-    if (/\b(requests|httpx)\.(post|put|patch|delete)\(|\bmethod\s*[:=]\s*['"](POST|PUT|PATCH|DELETE)['"]|urlopen\([^)]*data\s*=/i.test(code)) {
+  const live = `${ctx.dataDir}/office.db`;
+  const mentions = (text: string) => [...text.matchAll(/[^\s'"`(),;]*office\.db[^\s'"`(),;]*/g)].map((m) => m[0]);
+  const isLive = (m: string) => {
+    if (m.startsWith('/') || m.startsWith('~')) return posix.resolve(m.replace(/^~/, ctx.home)).startsWith(live);
+    // A bare name or a joined path: it may well be the live one.
+    return !m.startsWith('./') || (st.cwd !== null && posix.resolve(st.cwd, m).startsWith(live));
+  };
+  const named = [
+    ...mentions(t.slice(1).filter((a) => !codes.includes(a)).join(' ')),
+    ...codes.filter((c) => dbAccess(name, c)).flatMap(mentions),
+    ...(script !== null && dbAccess(name, script) ? mentions(script) : []),
+  ];
+  const text = [t.join(' '), ...codes, script ?? ''].join('\n');
+  if (named.some(isLive) && !RO_MARK.test(text)) add(run, { kind: 'self', target: `${name} ${live}`, why: 'canlı veritabanına salt-okunur işareti olmadan erişir' });
+  for (const code of [...codes, ...(script !== null ? [script] : [])]) {
+    if (HTTP.test(code) && /\b(requests|httpx)\.(post|put|patch|delete)\(|\bmethod\s*[:=]\s*['"](POST|PUT|PATCH|DELETE)['"]|urlopen\([^)]*data\s*=/i.test(code)) {
       const url = /https?:\/\/[^\s'"`]+/.exec(code)?.[0];
       const held = url ? httpParts(name, [{ method: 'POST', url }], ctx) : [{ kind: 'send' as const, target: `${name} ?`, why: KIND_WHY.send }];
       for (const p of held) add(run, p);
     }
+    if (!SPAWNS.test(code)) continue;
     for (const m of code.matchAll(/(['"`])((?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh)\s[^'"`]*)\1/g)) {
       shellLine(m[2]!, copyState(st), { ...run, depth: run.depth + 1 });
     }
@@ -657,8 +781,9 @@ function git(words: ShellWord[], env: Map<string, string | null>, st: ShellState
   const fromEnv = (key: string) => (env.has(key) ? env.get(key)! : st.vars.has(key) ? st.vars.get(key)! : undefined);
   const envWorkTree = fromEnv('GIT_WORK_TREE');
   const envGitDir = fromEnv('GIT_DIR');
-  if (workTree === undefined && envWorkTree !== undefined) workTree = envWorkTree === null ? null : posix.resolve(st.cwd ?? '/', envWorkTree.replace(/^~/, ctx.home));
-  if (gitDir === undefined && envGitDir !== undefined) gitDir = envGitDir === null ? null : posix.resolve(st.cwd ?? '/', envGitDir.replace(/^~/, ctx.home));
+  const envPath = (v: string | null) => (v === null || v.includes(DYN) ? null : posix.resolve(st.cwd ?? '/', v.replace(/^~/, ctx.home)));
+  if (workTree === undefined && envWorkTree !== undefined) workTree = envPath(envWorkTree);
+  if (gitDir === undefined && envGitDir !== undefined) gitDir = envPath(envGitDir);
   const UNKNOWN = '\u0000unknown';
   let top: string | null;
   if (workTree !== undefined) top = workTree === null ? UNKNOWN : under(workTree, ctx.repoRoot) ? ctx.repoRoot : ctx.toplevel(workTree);
@@ -963,7 +1088,7 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
   const o = input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
   const start = typeof cwd === 'string' && cwd.startsWith('/') ? posix.resolve(cwd) : ctx.deskDir;
   if (tool === 'Bash' || tool === 'Monitor') {
-    const run: Run = { ctx, parts: [], depth: 0 };
+    const run: Run = { ctx, parts: [], depth: 0, written: new Map() };
     shellLine(typeof o.command === 'string' ? o.command : '', { cwd: start, vars: new Map(), dirs: [] }, run);
     return done(run.parts);
   }
