@@ -92,6 +92,21 @@ describe('pilot K3 — the bounds are fixed in the test (K1)', () => {
     expect(argv.map(({ args }) => after(args, '--model'))).toEqual(argv.map(() => [PILOT_MODEL]));
   });
 
+  it('the owner’s reserve as live (ownerReservePct 0, the brief’s “sınır %100”): the account at 84% of its week sleeps no member', async () => {
+    const o = await pilotOffice({ claude: [process.execPath, FAKE_CLAUDE], env: { ...process.env, FAKE_CLAUDE_STATE: tempDir('pilot-fake-') } });
+    offices.push(o);
+    expect(o.budget.constitution().ownerReservePct).toBe(0);
+    const c = o.company.hireCoordinator();
+    const m = o.company.hire(c.id, { name: 'Yazar', role: 'r' });
+    await until(() => o.roster.get(m.id).lifecycle === 'idle');
+    // What run 5 got from the real CLI's first turn (2026-10-09), then the dispatcher's sweep.
+    o.events.append(c.id, { type: 'quota.updated', status: 'allowed_warning', fiveHour: { utilization: 0.03, resetsAt: o.now() + 3_600_000 }, sevenDay: { utilization: 0.84, resetsAt: o.now() + 86_400_000 }, limitResetsAt: null });
+    o.clock.runNow();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(o.budget.reserveActive()).toBe(false);
+    expect(o.roster.get(m.id).lifecycle).toBe('idle');
+  });
+
   it('a throwaway data directory, never the live office’s', async () => {
     const o = await pilotOffice({ claude: [process.execPath, FAKE_CLAUDE], env: { ...process.env, FAKE_CLAUDE_STATE: tempDir('pilot-fake-') } });
     offices.push(o);

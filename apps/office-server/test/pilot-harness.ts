@@ -148,7 +148,9 @@ export async function pilotOffice(o: { claude?: string[]; env?: NodeJS.ProcessEn
   });
   const quota = new QuotaTracker(s.db, s.events);
   const constitution = new ConstitutionStore(s.db);
-  constitution.set({ autonomy: o.autonomy ?? 'plans', coordinatorModels: { kickoff: PILOT_MODEL, cycle: PILOT_MODEL, routine: PILOT_MODEL } });
+  // The owner's reserve as the live office has it (ownerReservePct 0; the brief's "sınır %100"): the default 25 sleeps every
+  // member once the real account passes 75% of its week (run 5: 84%). The run's own ceiling is COST_CAP_USD.
+  constitution.set({ autonomy: o.autonomy ?? 'plans', coordinatorModels: { kickoff: PILOT_MODEL, cycle: PILOT_MODEL, routine: PILOT_MODEL }, ownerReservePct: 0 });
   const budget = new Budget({ constitution, spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8, now });
   const characters = () => ['coder', 'designer', 'manager'];
   // Every hire runs on the pilot's model, whatever the blueprint or a template says.
