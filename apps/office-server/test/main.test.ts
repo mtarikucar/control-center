@@ -4,6 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { migrateUp, openDb } from '../src/db.ts';
 import { FAKE_CLAUDE, tempDir, until } from './helpers.ts';
 
 const MAIN = fileURLToPath(new URL('../src/main.ts', import.meta.url));
@@ -41,6 +42,20 @@ function call(port: number, method: string, path: string, body?: unknown): Promi
 }
 
 describe('office-server process', () => {
+  it('does not open on a database whose migrations are not the code’s: says which version, exits 1, frees the lock', async () => {
+    const dir = tempDir();
+    // B26 went live alone as 16 and the code went back to main (1–15) without migrateDown.
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db);
+    db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (16, ?, 1)').run('KPI readings');
+    db.close();
+    const office = startOffice(dir);
+    expect(await office.exited).toBe(1);
+    expect(office.output()).toContain('office-server açılmadı: v16 canlıda “KPI readings”, kodda yok: göç sırası bozuk.');
+    expect(office.output()).not.toMatch(/hazır: http/);
+    expect(existsSync(join(dir, 'office.lock'))).toBe(false);
+  });
+
   it('refuses a second office on the same data directory without touching the first', async () => {
     const dir = tempDir();
     const first = startOffice(dir);

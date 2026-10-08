@@ -42,7 +42,15 @@ try {
 }
 
 const db = openDb(join(config.dataDir, 'office.db'));
-migrateUp(db);
+try {
+  migrateUp(db);
+} catch (err) {
+  // A database whose migrations are not the code's (or a migration that failed): the office does not open on it.
+  console.error(`office-server açılmadı: ${err instanceof Error ? err.message : String(err)} Veritabanına dokunmadan önce göç numaralarını ve birleştirme notunu kontrol et.`);
+  db.close();
+  releaseLock();
+  process.exit(1);
+}
 const events = new EventStore(db);
 const roster = new Roster(db, config.deskCount, Date.now, (slug) => existsSync(deskDir(config.dataDir, slug)));
 const quota = new QuotaTracker(db, events);
