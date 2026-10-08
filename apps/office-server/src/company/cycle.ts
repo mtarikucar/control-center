@@ -11,6 +11,7 @@ import { OPEN_STATUSES, type TaskStore } from './store.ts';
 import { clean, fold, lines } from './text.ts';
 
 const MIN = 60_000;
+const HOUR = 60 * MIN;
 /** Triggers within this long of the first one waiting go into the same cycle (§3.1, “toplama penceresi”). */
 export const CYCLE_WINDOW_MS = 2 * MIN;
 /** While work is open a cycle comes at least this often, events or not (§3.1, “kalp atışı”). */
@@ -20,8 +21,11 @@ export const CYCLE_CHECK_MS = 30_000;
 /** Triggers listed for one cycle; more are not (the board reads the log either way). */
 const MAX_TRIGGERS = 50;
 
-/** What lasts across a restart (company_state): the last start, the triggers waiting, the cycle open, an unclosed one. */
-const KEY = { lastStart: 'cycle.lastStartAt', pending: 'cycle.pending', open: 'cycle.open', unclosed: 'cycle.unclosed' } as const;
+/**
+ * What lasts across a restart (company_state): the last start, the triggers waiting, the cycle open, an unclosed one, and
+ * the end of the last rest already turned into a trigger.
+ */
+const KEY = { lastStart: 'cycle.lastStartAt', pending: 'cycle.pending', open: 'cycle.open', unclosed: 'cycle.unclosed', restEnded: 'cycle.restEndedAt' } as const;
 
 const PLAN_TR: Partial<Record<string, string>> = { approved: 'onaylandı', declined: 'onaylanmadı', kept: 'revizyonu onaylanmadı', done: 'bitti', stopped: 'sahibince durduruldu' };
 
@@ -106,9 +110,11 @@ function parse<T>(raw: string | null, fallback: T): T {
  * The coordinator's management cycle (spec 2026-10-08-management-cycle-design §3.1, §3.3, §5): the office watches the
  * event log and says when a cycle is due — the work changed (a hand-in, a review decision, someone left with no work, a
  * plan's or a goal's status, a constraint, a stall), at the latest every HEARTBEAT_MS while work is open, once when the
- * office starts with work open. Triggers close together go into one cycle (CYCLE_WINDOW_MS from the first). Nothing the
- * coordinator does itself is a trigger: what is logged under its desk (but for what the owner or the office logs there)
- * and whatever happens inside its own tool calls (`acting`). Nothing while the company is paused, no heartbeat in the
+ * office starts with work open; with no goal and no open work every pulseHours (0: never), but not while the
+ * coordinator rests (restUntil), and once when its rest ends. Triggers close together go into one cycle
+ * (CYCLE_WINDOW_MS from the first). Nothing the coordinator does itself is a trigger: what is logged under its desk (but
+ * for what the owner or the office logs there) and whatever happens inside its own tool calls (`acting`). Nothing while
+ * the company is paused (what waits comes with the resume), no heartbeat in the
  * owner's reserve, nothing without a coordinator. The dispatcher delivers a due cycle and says so (`started`); cycleClose
  * (`close`) gives the cycle its words; when the turn ends (`ended`) the cycle is recorded with the turn's cost — closed,
  * or not closed and the next board warns. What it needs to survive a restart is kept in company_state.
@@ -126,6 +132,8 @@ export class ManagementCycle {
   #reserve = false;
   /** The last moment the office had no open work: the heartbeat counts from it or from the last cycle, the later. */
   #quietAt = 0;
+  /** The last moment the office had open work (or started): the idle heartbeat counts from it, the last cycle or a rest's end, the latest. */
+  #workAt = 0;
   /** The cycle turn's last result came with nothing queued: the coordinator's next step says whether the engine ended the turn. */
   #resultIn = false;
   #running = false;
@@ -139,6 +147,7 @@ export class ManagementCycle {
     this.#running = true;
     const now = this.#now();
     this.#quietAt = now;
+    this.#workAt = now;
     this.#holders.clear();
     for (const t of this.#d.tasks.list({ statuses: OPEN_STATUSES, limit: 100_000 })) this.#holders.set(t.id, { assignee: t.assignee, status: t.status });
     this.#constitution = normalizeConstitution(this.#d.budget?.constitution());
@@ -411,17 +420,35 @@ export class ManagementCycle {
     }
   }
 
-  /** The clock's look: the heartbeat's quiet time, and a cycle that became due. */
+  /** The clock's look: the heartbeats' times, a rest that ended, and a cycle that became due. */
   #tick(): void {
     if (!this.#running) return;
-    if (!this.#openWork()) this.#quietAt = this.#now();
+    const now = this.#now();
+    if (this.#openWork()) this.#workAt = now;
+    else this.#quietAt = now;
+    this.#restEnd(now);
     if (this.due()) this.#notify();
   }
 
+  /**
+   * While work is open, HEARTBEAT_MS after the last cycle; with no goal and no open work, pulseHours after it (0: never)
+   * and never while the coordinator rests. Never in the owner's reserve.
+   */
   #heartbeatDue(now: number): boolean {
     if (this.#d.budget?.reserveActive()) return false;
-    if (!this.#openWork()) return false;
-    return now - Math.max(this.#lastStart(), this.#quietAt) >= HEARTBEAT_MS;
+    if (this.#openWork()) return now - Math.max(this.#lastStart(), this.#quietAt) >= HEARTBEAT_MS;
+    const hours = (this.#d.budget?.constitution() ?? DEFAULT_CONSTITUTION).pulseHours;
+    const rest = this.#d.state.restUntil();
+    if (hours <= 0 || now < rest) return false;
+    return now - Math.max(this.#lastStart(), this.#workAt, rest) >= hours * HOUR;
+  }
+
+  /** The coordinator's rest ran out (a new goal ends it without one): one cycle, once per rest, across restarts too. */
+  #restEnd(now: number): void {
+    const until = this.#d.state.restUntil();
+    if (until <= 0 || now < until || this.#d.state.get(KEY.restEnded) === String(until)) return;
+    this.#d.state.set(KEY.restEnded, String(until));
+    if (this.#d.company.coordinator()) this.#push({ kind: 'rest', at: now, note: 'dinlenme bitti', seq: null });
   }
 
   /** An active goal or an open task. */

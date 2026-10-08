@@ -126,9 +126,9 @@ Koordinatör projenin proje yöneticisidir; proje sizin her adımı söylemenizi
   bir yönetim panosu gider; koordinatör planı gerçekle karşılaştırır, gerekeni değiştirir ve turu `cycleClose` ile
   gerekçesiyle kapatır. Eski nabız notları panonun bölümleridir: süren planı olmayan hedef, hiç görevi açılmamış onaylı
   plan, "Boşta kapasite uyarısı" saatinden (varsayılan 2) uzun süredir işsiz olanlar ("uzun süredir" işaretiyle), hiç
-  hedef ve iş olmaması. Hedef ve açık iş yokken tur yalnız bir olayla açılır ("Nabız aralığı" yalnız yönetim turu
-  olmayan bir ofiste geçerlidir). Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp
-  dinlenir; pano dinlenmeyi ve gerekçesini gösterir.
+  hedef ve iş olmaması. Hedef ve açık iş yokken de tur "Nabız aralığı" saatte bir açılır (varsayılan 6; 0 kapalı).
+  Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp dinlenir: dinlenme sürerken bu tur
+  açılmaz, dinlenme bitince bir tur açılır; pano dinlenmeyi ve gerekçesini gösterir.
 - **Anayasa değişince:** Anayasa sekmesinden bir sınırı değiştirdiğinizde koordinatör neyin değiştiğini eski → yeni
   olarak tek notta duyar (kota payınız "Ofisin kota sınırı %75 → %60" diye) ve süren planlarını yeni sınırlara göre
   gözden geçirir.

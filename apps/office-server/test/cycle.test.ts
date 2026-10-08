@@ -28,6 +28,7 @@ afterEach(async () => {
 
 const SEC = 1000;
 const MIN = 60 * SEC;
+const HOUR = 60 * MIN;
 const T0 = new Date(2026, 9, 8, 9, 0).getTime();
 const ZERO = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
 const NO_CHANGE = 'değişiklik yok, çünkü iş planda yürüyor';
@@ -833,6 +834,76 @@ describe('management cycle — a restart (§5)', () => {
   });
 });
 
+describe('management cycle — the idle heartbeat: no goal and no work', () => {
+  it('an idle office gets a cycle every pulseHours (6 by default), never before; its board says there is no goal and no work', async () => {
+    const t = make();
+    t.boot();
+    t.advance(6 * HOUR - MIN);
+    expect(t.started()).toHaveLength(0);
+    t.advance(MIN + 30 * SEC);
+    expect(t.started()).toHaveLength(1);
+    expect(t.kinds(0)).toEqual(['heartbeat']);
+    expect(t.boards()[0]!.text).toContain('- Aktif hedef yok ve açık iş yok: ');
+    await t.closeCycle();
+    // The next one pulseHours after that cycle.
+    t.advance(6 * HOUR - MIN);
+    expect(t.started()).toHaveLength(1);
+    t.advance(MIN + 30 * SEC);
+    expect(t.started()).toHaveLength(2);
+    expect(t.kinds(1)).toEqual(['heartbeat']);
+  });
+
+  it('pulseHours 0: no idle heartbeat at all', () => {
+    const t = make();
+    t.budget.setConstitution({ pulseHours: 0 });
+    t.boot();
+    t.advance(13 * HOUR);
+    expect(t.started()).toHaveLength(0);
+  });
+
+  it('none while the coordinator rests (restUntil); one when the rest ends, once; then every pulseHours again', async () => {
+    const t = make();
+    t.boot();
+    t.advance(MIN);
+    await t.call(t.coord, 'restUntil', { hours: 10, reason: 'Sahibinin cevabı bekleniyor' });
+    // Past pulseHours, but resting.
+    t.advance(10 * HOUR - MIN);
+    expect(t.started()).toHaveLength(0);
+    t.advance(MIN + CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.started()).toHaveLength(1);
+    expect(t.kinds(0)).toEqual(['rest']);
+    expect(t.boards()[0]!.text).toContain('- Aktif hedef yok ve açık iş yok: ');
+    await t.closeCycle();
+    // The same rest ends once; the idle heartbeat counts from the cycle it brought.
+    t.advance(6 * HOUR - 5 * MIN);
+    expect(t.started()).toHaveLength(1);
+    t.advance(5 * MIN);
+    expect(t.started()).toHaveLength(2);
+    expect(t.kinds(1)).toEqual(['heartbeat']);
+  });
+
+  it('the rules hold: paused, nothing (the rest’s end waits for the resume); in the owner’s reserve, no idle heartbeat', async () => {
+    const t = make();
+    t.boot();
+    t.company.restUntil(t.coord.id, 2, 'bekleniyor');
+    t.company.pause();
+    t.advance(7 * HOUR);
+    expect(t.started()).toHaveLength(0);
+    t.company.resume();
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.started()).toHaveLength(1);
+    expect(t.kinds(0)).toEqual(['rest', 'constraint']);
+    await t.closeCycle();
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.9, resetsAt: t.now() + 20 * HOUR }, sevenDay: null, updatedAt: t.now() });
+    t.budget.checkReserve();
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.started()).toHaveLength(2);
+    await t.closeCycle();
+    t.advance(7 * HOUR);
+    expect(t.started()).toHaveLength(2);
+  });
+});
+
 describe('management cycle — the pulse’s facts are the board’s (§3.6)', () => {
   /** Every notice the pulse ever left, delivered or not. */
   const pulseNotices = (t: ReturnType<typeof make>) => t.db.prepare("SELECT topic FROM notices WHERE topic LIKE 'pulse.%'").all();
@@ -865,15 +936,20 @@ describe('management cycle — the pulse’s facts are the board’s (§3.6)', (
     expect(t.boards()).toHaveLength(5);
     expect(t.boards()[4]!.text).toContain('- Aktif hedef yok ve açık iş yok: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla)');
     await t.closeCycle();
-    // Hours on (past pulseHours): no work, so no heartbeat — and still no notice from the pulse.
-    t.advance(7 * 60 * MIN);
-    expect(t.boards()).toHaveLength(5);
+    // Hours on (past pulseHours): no work, so the idle heartbeat brings the board, never a notice from the pulse.
+    t.advance(7 * HOUR);
+    expect(t.boards()).toHaveLength(6);
+    expect(t.kinds(5)).toEqual(['heartbeat']);
+    expect(t.boards()[5]!.text).toContain('- Aktif hedef yok ve açık iş yok: ');
+    await t.closeCycle();
     expect(pulseNotices(t)).toEqual([]);
     for (const m of t.toCoordinator()) expect(m.text).not.toMatch(/Boşta kapasite|hedefinin süren planı yok|Aktif hedef yok ve açık iş yok\. /);
   });
 
   it('the tick’s other work goes on with a cycle wired: the daily report reminder still comes (digest off)', async () => {
     const t = make({ pulse: true });
+    // No idle heartbeat in the way: the day is only the reminder.
+    t.budget.setConstitution({ pulseHours: 0 });
     const ada = t.person('Ada');
     const x = t.task(ada.id, 'Yaz');
     t.boot();

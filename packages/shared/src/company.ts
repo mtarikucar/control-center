@@ -333,10 +333,10 @@ export type PlanChange = 'proposed' | 'revised' | 'approved' | 'declined' | 'don
 /**
  * Why the office opened a management cycle (management cycle §3.1): a hand-in, a review decision, someone left with no
  * work, a plan's or a goal's status, a constraint (the constitution, the owner's quota share, the owner resuming the
- * company), a stall (blocked, unanswered after the reminder, past its due date); the heartbeat while work is open; the
- * office's start with work open.
+ * company), a stall (blocked, unanswered after the reminder, past its due date); the heartbeat (while work is open, and
+ * every pulseHours with no goal and no work); the office's start with work open; the end of the coordinator's rest.
  */
-export const CYCLE_TRIGGER_KINDS = ['delivery', 'review', 'idle', 'plan', 'goal', 'constraint', 'stuck', 'heartbeat', 'start'] as const;
+export const CYCLE_TRIGGER_KINDS = ['delivery', 'review', 'idle', 'plan', 'goal', 'constraint', 'stuck', 'heartbeat', 'start', 'rest'] as const;
 export type CycleTriggerKind = (typeof CYCLE_TRIGGER_KINDS)[number];
 
 export interface CycleTrigger {

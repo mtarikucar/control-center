@@ -175,7 +175,7 @@ describe('the coordination craft (ships with the office)', () => {
   it('management cycle §3.7: what the cycle is for, what each one asks, a project start against a cycle; plans in streams; the pulse’s wake-up is gone', () => {
     const pm = flat(pmText());
     const cycle =
-      '- **Yönetim turu.** İşin şekli değişince (bir teslim, bir inceleme kararı, biri boşa çıktı, bir plan ya da hedef durumu, bir kısıt, bir takılma) ve iş açık oldukça düzenli aralıkla ofis sana yönetim panosunu gönderir: bütün tablo tek metinde. Panoyu oku, planları gerçekle karşılaştır, gerekeni değiştir (iş aç ya da yeniden dağıt, akışı böl ya da `planRevise` ile düzelt, işe al, park et, sahibine sor) ve turu `cycleClose` ile kapat: ne değiştirdin, neden; değişiklik yoksa "değişiklik yok, çünkü …". Ayrıntı gerekirse `agendaRead` ve `goalsRead` ile bak.';
+      '- **Yönetim turu.** İşin şekli değişince (bir teslim, bir inceleme kararı, biri boşa çıktı, bir plan ya da hedef durumu, bir kısıt, bir takılma) ve düzenli aralıkla (iş açıkken sık, hedef ve iş yokken seyrek) ofis sana yönetim panosunu gönderir: bütün tablo tek metinde. Panoyu oku, planları gerçekle karşılaştır, gerekeni değiştir (iş aç ya da yeniden dağıt, akışı böl ya da `planRevise` ile düzelt, işe al, park et, sahibine sor) ve turu `cycleClose` ile kapat: ne değiştirdin, neden; değişiklik yoksa "değişiklik yok, çünkü …". Ayrıntı gerekirse `agendaRead` ve `goalsRead` ile bak.';
     const questions =
       '- **Her turda sor.** Boşta kim var ve neden ("uzun süredir" işaretli olana bağımsız iş ver ya da ekibin fazla olduğunu gerekçesiyle yaz)? Bir zincir tek kişide mi birikiyor? Kritik yol kısalabilir mi (paralel akış, işi bölmek, yeni kişi)? Bir kısıt değişti mi (anayasa, kota, sahibinin payı)? Sahibinden beklenen bir karar var mı (gerekirse `reportToOwner` ile hatırlat)?';
     const kickoff =
@@ -186,7 +186,7 @@ describe('the coordination craft (ships with the office)', () => {
     expect(pm.indexOf('**Döngü.**')).toBeLessThan(pm.indexOf(streams));
     expect(pm.indexOf(streams)).toBeLessThan(pm.indexOf('**Serbestlik.**'));
     const own =
-      '- **Turu bekleme.** Misyonda yapılacak iş oldukça sıradakini kendin başlat. Misyonda gerçekten yapılacak iş kalmadıysa dinlen ve `restUntil` ile ne zamana kadar ve neden dinlendiğini yaz. Bir ölçüm penceresi ya da bekleme süresi varsa görevi park et (taskPark); kendi sıranı kilitleme.';
+      '- **Turu bekleme.** Misyonda yapılacak iş oldukça sıradakini kendin başlat. Misyonda gerçekten yapılacak iş kalmadıysa dinlen ve `restUntil` ile ne zamana kadar ve neden dinlendiğini yaz: dinlenirken hedef ve iş yokken gelen tur durur, dinlenme bitince bir tur gelir. Bir ölçüm penceresi ya da bekleme süresi varsa görevi park et (taskPark); kendi sıranı kilitleme.';
     for (const text of [cycle, questions, kickoff, own]) expect(pm).toContain(text);
     // In this order, after the steps a direction starts with (the project start points to them), before a stopped plan.
     const at = [cycle, questions, kickoff, own].map((x) => pm.indexOf(x));

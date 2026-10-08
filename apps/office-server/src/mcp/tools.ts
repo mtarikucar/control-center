@@ -724,7 +724,7 @@ export function officeTools(o: {
     },
     {
       name: 'restUntil',
-      description: 'Say there is nothing worth doing now (coordinator): for how many hours (1–168) and why. The office stops reminding you about having no goal until then; a new goal ends the rest. Never invent work to stay busy.',
+      description: 'Say there is nothing worth doing now (coordinator): for how many hours (1–168) and why. The office stops reminding you about having no goal until then and looks again when the rest ends; a new goal ends the rest. Never invent work to stay busy.',
       inputSchema: object({ hours: number('Hours to rest (1–168).'), reason: s('Why there is nothing worth doing now.') }, ['hours', 'reason']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
