@@ -4,6 +4,7 @@ export * from './employee.ts';
 export * from './events.ts';
 export * from './integration.ts';
 export * from './memory.ts';
+export * from './metrics.ts';
 export * from './onboarding.ts';
 export * from './profile.ts';
 export * from './proposal.ts';

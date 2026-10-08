@@ -3,7 +3,7 @@ import type { Employee, Usage } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
-import { formatPerformance, performanceReport } from '../src/performance.ts';
+import { deliveredSince, formatPerformance, performanceReport } from '../src/performance.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
@@ -168,6 +168,15 @@ describe('Performance — metrics from the log and the tasks', () => {
     expect(r.since).toBe(T0 + 6.5 * HOUR);
     expect(r.employees.find((e) => e.id === ada.id)).toMatchObject({ done: 2, open: 1, usd: 0.875, turns: 3, reviewed: 1, firstPassRate: 1, usdPerDone: 0.75, parks: 1, overdue: 2 });
     expect(r.total).toMatchObject({ turns: 5, usd: 3 });
+  });
+
+  it('deliveredSince reads the same done count and first-pass rate as the report, from the tasks alone', () => {
+    const { t, ada } = day();
+    for (const since of [0, T0 + 6.5 * HOUR, t.now()]) {
+      const group = performanceReport(t.db, { since, now: t.now() }).employees.find((e) => e.id === ada.id)!;
+      expect(deliveredSince(t.db, since)).toEqual({ done: group.done, firstPassRate: group.firstPassRate });
+    }
+    expect(deliveredSince(t.db, T0 + 6.5 * HOUR)).toEqual({ done: 2, firstPassRate: 1 });
   });
 });
 

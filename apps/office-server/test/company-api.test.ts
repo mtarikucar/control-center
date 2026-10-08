@@ -5,6 +5,7 @@ import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
+import { officeMetrics } from '../src/company/office-metrics.ts';
 import { performanceReport } from '../src/performance.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
@@ -26,7 +27,8 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   // Wired like main.ts: the performance report reads the same database.
   const performance = { report: (r: { days?: number } = {}) => performanceReport(s.db, { since: r.days ? Date.now() - r.days * 86_400_000 : null }) };
   const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, integrations, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
+  const metrics = { report: () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks }, Date.now()) };
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, metrics, integrations, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
@@ -336,5 +338,23 @@ describe('company API', () => {
     const agenda = await call(t.port, 'GET', '/api/agenda');
     expect(agenda.status).toBe(200);
     expect(agenda.body.employees.find((e: { name: string }) => e.name === 'Ada').entries[0]).toMatchObject({ kind: 'queued', title: 'İş' });
+  });
+
+  it('serves the office metrics for the top bar', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'İş' });
+    t.company.start(task.id);
+    t.company.update(ada.id, task.id, { blocked: true });
+    const metrics = await call(t.port, 'GET', '/api/metrics');
+    expect(metrics.status).toBe(200);
+    expect(metrics.body).toMatchObject({
+      busy: { busy: 1, total: 2, idle: [{ id: can.id, name: 'Can', title: '' }] },
+      delivered: { count: 0, firstPassRate: null, windowHours: 24 },
+      stuck: { count: 1, items: [{ taskId: task.id, title: 'İş', assignee: 'Ada', reason: 'blocked' }] },
+    });
+    expect(metrics.body.generatedAt).toBeGreaterThan(Date.now() - 60_000);
   });
 });

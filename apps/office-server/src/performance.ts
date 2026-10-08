@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { TaskResult, TaskStatus } from '@cc/shared';
+import type { ReviewDecision, TaskResult, TaskStatus } from '@cc/shared';
 import { replayTurns } from './turn-log.ts';
 
 /**
@@ -96,6 +96,40 @@ const OPEN: TaskStatus[] = ['waiting', 'in_progress', 'review', 'blocked', 'park
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 
+type ReviewRow = Pick<TaskRow, 'kind' | 'review_of' | 'result'>;
+
+/** Review decisions per reviewed task, in the order the reviews were opened (`rows` in created_at, rowid order). */
+function reviewDecisions(rows: readonly ReviewRow[]): Map<string, ReviewDecision[]> {
+  const decisions = new Map<string, ReviewDecision[]>();
+  for (const r of rows) {
+    if (r.kind !== 'review' || !r.review_of || !r.result) continue;
+    const decision = (JSON.parse(r.result) as TaskResult).review?.decision;
+    if (decision) decisions.set(r.review_of, [...(decisions.get(r.review_of) ?? []), decision]);
+  }
+  return decisions;
+}
+
+/** The first review decision approved it; null when never reviewed. */
+const firstPassOf = (decided: readonly ReviewDecision[]): boolean | null => (decided.length ? decided[0] === 'approve' : null);
+
+/** The share passed at the first review among the reviewed (null entries: never reviewed); null when none was. */
+function firstPassRate(firstPasses: ReadonlyArray<boolean | null>): number | null {
+  const reviewed = firstPasses.filter((p) => p !== null);
+  return reviewed.length ? reviewed.filter(Boolean).length / reviewed.length : null;
+}
+
+/**
+ * The office's work tasks done since `since` and their first-pass rate — what the report's groups count as `done` and
+ * `firstPassRate`, read from the tasks table alone (no replay of the log), for the top bar's figures.
+ */
+export function deliveredSince(db: DatabaseSync, since: number): { done: number; firstPassRate: number | null } {
+  const DONE = "SELECT id FROM tasks WHERE kind = 'work' AND status = 'done' AND finished_at >= ?";
+  const done = db.prepare(DONE).all(since) as unknown as Array<{ id: string }>;
+  const reviews = db.prepare(`SELECT kind, review_of, result FROM tasks WHERE kind = 'review' AND review_of IN (${DONE}) ORDER BY created_at, rowid`).all(since) as unknown as ReviewRow[];
+  const decisions = reviewDecisions(reviews);
+  return { done: done.length, firstPassRate: firstPassRate(done.map((t) => firstPassOf(decisions.get(t.id) ?? []))) };
+}
+
 export function performanceReport(db: DatabaseSync, o: { since?: number | null; now?: number } = {}): PerformanceReport {
   const since = o.since ?? null;
   const until = o.now ?? Date.now();
@@ -147,13 +181,7 @@ export function performanceReport(db: DatabaseSync, o: { since?: number | null; 
   const rows = db
     .prepare('SELECT id, title, kind, assignee, plan_id, status, round, park_count, overdue_notified, created_at, finished_at, due_at, review_of, result FROM tasks ORDER BY created_at, rowid')
     .all() as unknown as TaskRow[];
-  // Review decisions per reviewed task, in the order they were opened.
-  const decisions = new Map<string, Array<'approve' | 'changes'>>();
-  for (const r of rows) {
-    if (r.kind !== 'review' || !r.review_of || !r.result) continue;
-    const decision = (JSON.parse(r.result) as TaskResult).review?.decision;
-    if (decision) decisions.set(r.review_of, [...(decisions.get(r.review_of) ?? []), decision]);
-  }
+  const decisions = reviewDecisions(rows);
   const tasks: TaskMetrics[] = rows.map((r) => {
     const cost = perTask.get(r.id);
     const decided = decisions.get(r.id) ?? [];
@@ -163,7 +191,7 @@ export function performanceReport(db: DatabaseSync, o: { since?: number | null; 
       id: r.id, title: r.title, kind: r.kind, assignee: r.assignee, planId: r.plan_id, status: r.status,
       usd: cost?.usd ?? 0, tokens: cost?.tokens ?? 0, turns: cost?.turns ?? 0, rounds: r.round ?? 0,
       approvals: decided.filter((d) => d === 'approve').length, changes: decided.filter((d) => d === 'changes').length,
-      firstPass: decided.length ? decided[0] === 'approve' : null,
+      firstPass: firstPassOf(decided),
       leadHours: done ? (r.finished_at! - r.created_at) / HOUR : null,
       workHours: done && started !== undefined ? (r.finished_at! - started) / HOUR : null,
       parks: r.park_count ?? 0, blocks: blocks.get(r.id) ?? 0,
@@ -184,7 +212,7 @@ export function performanceReport(db: DatabaseSync, o: { since?: number | null; 
       done: done.length, open: live.length, ...spent,
       usdPerDone: mean(done.map((t) => t.usd)),
       reviewed: reviewed.length,
-      firstPassRate: reviewed.length ? reviewed.filter((t) => t.firstPass).length / reviewed.length : null,
+      firstPassRate: firstPassRate(done.map((t) => t.firstPass)),
       avgRounds: mean(reviewed.map((t) => t.rounds)),
       avgLeadHours: mean(done.map((t) => t.leadHours!)),
       avgWorkHours: mean(done.flatMap((t) => (t.workHours === null ? [] : [t.workHours]))),

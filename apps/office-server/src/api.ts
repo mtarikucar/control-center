@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { OWNER, type AgendaReport, type ClockStatus, type HireInput, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
+import { OWNER, type AgendaReport, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { MODEL_RANK } from './model-policy.ts';
 import type { Company } from './company/company.ts';
@@ -30,6 +30,8 @@ export interface ApiDeps {
   company?: {
     service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport };
     performance?: { report(o: { days?: number }): PerformanceReport };
+    /** The top bar's three figures: busy, delivered in the last day, stuck. */
+    metrics?: { report(): OfficeMetrics };
     integrations?: IntegrationRegistry;
   };
 }
@@ -210,6 +212,7 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new ValidationError('days 1 ile 365 arasında bir tam sayı olmalı.');
       return sendJson(res, 200, d.company.performance.report({ days }));
     }
+    if (method === 'GET' && url.pathname === '/api/metrics' && d.company.metrics) return sendJson(res, 200, d.company.metrics.report());
     if (method === 'GET' && url.pathname === '/api/budget/spend') return sendJson(res, 200, budget.spending(url.searchParams.get('planId') ?? undefined));
     if (method === 'POST' && url.pathname === '/api/constitution') {
       const body = await readJson(req);
