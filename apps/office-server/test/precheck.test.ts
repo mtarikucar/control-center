@@ -197,6 +197,18 @@ describe('Capability precheck — the dispatcher, and the switch', () => {
     expect(messages.some((m) => m.includes('## Görev: Gönder'))).toBe(false);
   });
 
+  it('review focus: the dispatcher’s own sweep lets a held task go once the capability is there, and hands it out (mutation D2)', async () => {
+    const t = make();
+    const dispatcher = new Dispatcher({ events: t.events, roster: t.roster, tasks: t.tasks, notices: t.notices, plans: t.plans, company: t.company, engine: t.f.engine, budget: t.budget, precheck: t.precheck, tickMs: 50 });
+    cleanups.unshift(dispatcher.start());
+    const send = t.task(t.ada, 'Gönder', ['email.send']);
+    await until(() => t.tasks.get(send.id).status === 'blocked', 8000);
+    // Ada's next session has Gmail with its tools; nobody calls release() — the dispatcher's tick does.
+    t.session(t.ada, [['office', 'connected', 1, ['myTasks']], ['claude.ai Gmail', 'connected', 2, ['send_message', 'get_message']]]);
+    await until(() => systemMessages(t.events.list({ limit: 5000 }), t.ada.id).some((m) => m.includes('## Görev: Gönder')), 8000);
+    expect(t.tasks.get(send.id)).toMatchObject({ status: 'in_progress', note: null });
+  });
+
   it('review focus: a precheck that says “held” but leaves the task waiting never spins the dispatcher (mutation P23)', async () => {
     const t = make();
     const stuck = { hold: () => true, release() {} };
