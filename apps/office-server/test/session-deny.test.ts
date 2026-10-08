@@ -110,6 +110,11 @@ describe('B9b — the list is made when a session starts', () => {
     const t = make();
     const ada = t.company.hire(t.coordinator.id, { name: 'Ada', role: 'r' });
     expect(await t.denied(ada.slug)).toContain(toolsOf('email.send')[0]);
+    // A title alone changes nothing the session closes: no restart (as before B9b).
+    await until(() => t.engine.ready(ada.id));
+    t.company.editRoleCard(t.coordinator.id, ada.id, { title: 'Yazar' });
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await readArgv(t.argvLog, 1)).filter((a) => a.cwd.endsWith(`/desks/${ada.slug}`))).toHaveLength(1);
     t.company.editRoleCard(t.coordinator.id, ada.id, { capabilities: ['email.send'] });
     expect(await t.denied(ada.slug, 2)).not.toContain(toolsOf('email.send')[0]);
   });
@@ -119,6 +124,10 @@ describe('B9b — the list is made when a session starts', () => {
     const ada = t.company.hire(t.coordinator.id, { name: 'Ada', role: 'r' });
     await until(() => t.engine.ready(ada.id) && t.engine.ready(t.coordinator.id));
     t.report(ada, [{ name: 'claude.ai Higgsfield', status: 'connected', toolNames: ['balance', 'generate_image'] }, { name: 'plugin:x:x', status: 'connected', toolNames: ['do_anything', 'do_more'] }]);
+    // A note alone changes nothing the sessions close: no restart.
+    await t.call(t.coordinator, 'integrationRegister', { name: 'claude.ai Higgsfield', note: 'görsel üretimi' });
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await readArgv(t.argvLog, 1)).filter((a) => a.cwd.endsWith(`/desks/${ada.slug}`))).toHaveLength(1);
     await t.call(t.coordinator, 'integrationRegister', { name: 'claude.ai Higgsfield', closed: true });
     expect(await t.denied(ada.slug, 2)).toContain('mcp__claude_ai_Higgsfield');
     expect(await t.denied(t.coordinator.slug, 2)).toContain('mcp__claude_ai_Higgsfield');
