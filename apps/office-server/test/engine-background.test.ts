@@ -273,6 +273,10 @@ describe('Engine — the cap on work held by background jobs alone', () => {
     t.release(e.sessionId, '.bg');
     const told = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.user', { after: first.seq, timeoutMs: 3000 });
     expect(told.event).toEqual({ type: 'message.user', text: CONTINUE_AFTER_CRASH, source: 'system' });
+    // The job died with that process: nothing runs any more, so the employee can be put to sleep again.
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: told.seq });
+    await until(() => t.engine.ready(e.id));
+    expect((await t.engine.sleep(e.id)).lifecycle).toBe('sleeping');
   });
 
   it('unless set, the cap is two hours', async () => {
