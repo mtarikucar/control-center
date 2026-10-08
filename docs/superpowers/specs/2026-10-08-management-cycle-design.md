@@ -1,7 +1,7 @@
 # Koordinatörün yönetim turu — tasarım
 
 - Tarih: 2026-10-08
-- Durum: taslak, sahibinin onayını bekliyor
+- Durum: sahibi onayladı (2026-10-08); uygulanıyor (dal feat/management-cycle)
 - Kapsam: koordinatörün çalışma biçimi (ürünün kendisi). Ofisin ürettiği içerikle ilgisi yok; her şirkette aynı çalışır.
 
 ## 1. Sorun
@@ -50,8 +50,10 @@ Tur şu olaylardan biri olunca açılır (yakın olaylar tek turda toplanır):
 | Kalp atışı | olay olmasa da iş açıkken en geç **45 dakikada** bir |
 
 - **Toplama penceresi:** ilk olaydan sonra 2 dakika beklenir; o arada gelenler aynı tura girer.
-- **Ne zaman açılmaz:** şirket duraklatılmışsa; koordinatör zaten bir turdaysa (bitince bekleyen olay varsa yeni tur);
-  hiç hedef ve açık iş yoksa kalp atışı yok (yalnız olaylar; "hedef yok" durumu panoda yazar).
+- **Ne zaman açılmaz:** şirket duraklatılmışsa; koordinatör zaten bir turdaysa (bitince bekleyen olay varsa yeni tur).
+- **Hedef ve açık iş yokken:** kalp atışı seyrekleşir: anayasanın `pulseHours` aralığında bir tur (0 = hiç); koordinatör
+  `restUntil` ile dinlenirken bu tur gelmez, dinlenme bitince bir tur açılır (2026-10-08 kararı: ofis kendi kendine
+  hiç uyanmayan bir duruma düşmemeli).
 - **Kota payı devredeyken:** yalnız olaylar tur açar, kalp atışı yok (sahibinin payı korunur).
 - Sahibinin mesajı tur açmaz, doğrudan koordinatöre gider (bugünkü gibi); ama sonraki tur o mesajdan sonraki durumu görür.
 
