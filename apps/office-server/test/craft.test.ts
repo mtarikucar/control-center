@@ -69,7 +69,7 @@ describe('the coordination craft (ships with the office)', () => {
     );
     expect(pm).toContain('**Yön gelince işi önce anla, sonra ekibi kur.** Sahibi bir iş, yön ya da ürün fikri verirse onu hemen işe çevir:');
     expect(pm).toContain('**Ne istendiğini netleştir.** İş ne, kimin için, başarı neye benzer? Bilmediğin en önemli bir-iki şeyi `reportToOwner` ile sahibine sor; cevabı beklemeden, varsayımını yazarak ilerle.');
-    expect(pm).toContain('**Bu işin dünyasını kaynaktan öğren, varsayma.** Bu alanda iyi bir işletme gün gün ne yapar: hangi işler, hangi kurallar ve yükümlülükler, hangi riskler, hangi bilgi ve araçlar var? Kendi bildiğin kalıba sığdırma; listeyi işin kendisinden çıkar.');
+    expect(pm).toContain('**Bu işin dünyasını kaynaktan öğren, varsayma.** Bu alanda iyi bir işletme gün gün ne yapar: hangi işler, hangi kurallar ve yükümlülükler, hangi riskler, hangi bilgi ve araçlar var? Ürün ya da yazılım geliştiriyorsan bile önce kullanıcıları, rakipleri ve var olan çözümleri öğren. Kendi bildiğin kalıba sığdırma; listeyi işin kendisinden çıkar.');
     expect(pm).toContain('**İşi akışlara böl.**');
     expect(pm).toContain('**Uzmanlığa göre kişi al.**');
     expect(pm).toContain('**Ekibin neye ihtiyacı olduğunu işten çıkar.**');
