@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BudgetSummary, Employee, Plan } from '@cc/shared';
+import type { BudgetSummary, Employee, PlanView } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 
@@ -16,7 +16,7 @@ const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
 vi.mock('../net/api.ts', () => ({ api: { budget: vi.fn(async () => summary()), setConstitution: vi.fn(async (p: object) => p) } }));
 const { api } = await import('../net/api.ts');
 
-const plan: Plan = {
+const plan: PlanView = {
   id: 'p1', title: 'Tanıtım videosu', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: 10, usd: 20, days: 3, risks: '',
   status: 'approved', version: 1, proposedBy: 'c', createdAt: 1, updatedAt: 1, approvedAt: 1,
 };

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Goal, Plan } from '@cc/shared';
+import type { Goal, PlanView } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { GoalsTab } from './GoalsTab.tsx';
 
@@ -8,7 +8,7 @@ vi.mock('../net/api.ts', () => ({ api: { stopGoal: vi.fn(async () => ({})) } }))
 const { api } = await import('../net/api.ts');
 
 const goal = (over: Partial<Goal> = {}): Goal => ({ id: 'g1', title: 'İlk müşteriler', why: 'Misyon', done: ['10 görüşme'], kpis: [], status: 'active', createdBy: 'c', createdAt: 1, closedAt: null, note: null, ...over });
-const plan = (over: Partial<Plan> = {}): Plan => ({
+const plan = (over: Partial<PlanView> = {}): PlanView => ({
   id: 'p1', title: 'Görüşmeler', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '', status: 'approved', version: 1,
   proposedBy: 'c', createdAt: 1, updatedAt: 1, approvedAt: 1, goalId: 'g1', approvedBy: 'coordinator', ...over,
 });

@@ -67,3 +67,13 @@ export function formatWhenTR(ms: number, now: number): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${year} ${time}`;
 }
 
+
+/** “<1 dk”, “4 dk”, “1 sa 5 dk”, “3 sa”: how long something took. */
+export function formatDuration(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return '<1 dk';
+  if (minutes < 60) return `${minutes} dk`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} sa ${rest} dk` : `${hours} sa`;
+}

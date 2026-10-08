@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { formatClock, formatCost, formatPercent, formatReset, formatTokens, formatWhenTR, summarizeToolInput, tokensOf } from './format.ts';
-import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
+import { formatClock, formatCost, formatDuration, formatPercent, formatReset, formatTokens, formatWhenTR, summarizeToolInput, tokensOf } from './format.ts';
+import { canResume, canStop, lifecycleLabel, limitNote, modelName, triggerText } from './labels.ts';
 
 describe('format', () => {
   it('formats tokens, cost and percent compactly', () => {
@@ -63,5 +63,12 @@ describe('labels', () => {
     expect(limitNote({ lifecycle: 'limited', limitResetsAt: null }, now)).toBeNull();
     expect(limitNote({ lifecycle: 'idle', limitResetsAt: at }, now)).toBeNull();
   });
-});
 
+  it('says how long a management cycle took, and what opened it in Turkish (management cycle §3.3)', () => {
+    expect([0, 59_000, 60_000, 4 * 60_000 + 59_000, 60 * 60_000, 65 * 60_000].map(formatDuration)).toEqual(['<1 dk', '<1 dk', '1 dk', '4 dk', '1 sa', '1 sa 5 dk']);
+    expect(triggerText({ kind: 'delivery', note: '“Giriş” (Ada)' })).toBe('Teslim: “Giriş” (Ada)');
+    expect(triggerText({ kind: 'heartbeat', note: '' })).toBe('Kalp atışı');
+    expect(triggerText({ kind: 'rest', note: 'dinlenme bitti' })).toBe('Dinlenme bitti');
+    expect(modelName('opus')).toBe('Opus');
+  });
+});

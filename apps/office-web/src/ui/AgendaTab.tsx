@@ -5,6 +5,7 @@ import { useOffice } from '../store/office.ts';
 import { AgendaTimeline } from './AgendaTimeline.tsx';
 import { formatClock, formatWhenTR } from './format.ts';
 import { AGENDA_KIND_LABELS, SCHEDULE_STATUS_LABELS } from './labels.ts';
+import { streamOf } from './streams.ts';
 import { useAgenda } from './useAgenda.ts';
 
 const HOUR = 3_600_000;
@@ -96,6 +97,8 @@ function AgendaRow({ entry, now }: { entry: AgendaEntry; now: number }) {
   const routineStatus = useOffice((s) => (scheduleId ? s.schedules[scheduleId]?.status : undefined)) ?? 'active';
   // The office refuses to park a hand-over (spec §6.3): no button that can only fail.
   const handover = useOffice((s) => (taskId ? s.tasks[taskId]?.kind === 'handover' : false));
+  // The stream of its plan the task belongs to (management cycle §3.4): a title, so the selector returns a string.
+  const stream = useOffice((s) => (taskId ? (streamOf(s.plans, s.tasks[taskId])?.title ?? null) : null));
   const { busy, error, run } = useOwnerAction();
   const [parking, setParking] = useState(false);
 
@@ -139,6 +142,7 @@ function AgendaRow({ entry, now }: { entry: AgendaEntry; now: number }) {
         <span className="agenda-badges">
           <span className={`badge kind-${kind}`}>{AGENDA_KIND_LABELS[kind]}</span>
           {entry.priority !== null && kind !== 'scheduled' && <span className="badge">P{entry.priority}</span>}
+          {stream && <span className="badge stream-tag">akış: {stream}</span>}
           {entry.overdue ? <span className="badge overdue">son tarih geçti</span> : entry.dueAt !== null && <span className="badge">son tarih {when(entry.dueAt, now)}</span>}
           {entry.basis && <span className="badge estimate">~{entry.basis}</span>}
           {entry.note && <span className="agenda-note">{entry.note}</span>}

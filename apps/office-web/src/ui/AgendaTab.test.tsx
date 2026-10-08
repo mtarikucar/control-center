@@ -37,7 +37,7 @@ const ada: Employee = {
   sessionId: 's', sessionStarted: true, lifecycle: 'idle', limitResetsAt: null, lastError: null, createdAt: 1,
 };
 
-beforeEach(() => useOffice.setState({ schedules: {}, paused: false, budget: null }));
+beforeEach(() => useOffice.setState({ schedules: {}, paused: false, budget: null, tasks: {}, plans: {} }));
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -92,6 +92,19 @@ describe('AgendaTab', () => {
     const parkedRow = within(screen.getByRole('region', { name: 'Koordinatör' })).getByText('Adım 1 penceresi').closest('li')!;
     fireEvent.click(within(parkedRow).getByRole('button', { name: 'Şimdi başlasın' }));
     expect((await within(parkedRow).findByRole('alert')).textContent).toBe('Bu görev ertelenmiş değil.');
+  });
+
+  it('management cycle §3.4: a row whose task is in one of its plan’s streams names the stream', async () => {
+    useOffice.setState({
+      agendaRev: 0, views: {},
+      tasks: { t2: { id: 't2', kind: 'work', planId: 'p1', streamId: 'gelir', title: 'Gelir araştırması', description: '', done: [], requester: 'owner', assignee: 'k', priority: 3, dependsOn: [], status: 'waiting', chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: null, finishedAt: null } },
+      plans: { p1: { id: 'p1', title: 'Gelir', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '', status: 'approved', version: 1, proposedBy: 'k', createdAt: 1, updatedAt: 1, approvedAt: 1, streams: [{ id: 'gelir', title: 'Gelir modeli', owner: 'k', dependsOn: [], status: 'planned' }] } },
+    });
+    render(<AgendaTab />);
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Koordinatör' })).toBeTruthy());
+    const k = screen.getByRole('region', { name: 'Koordinatör' });
+    expect(within(k).getByText('Gelir araştırması').closest('li')!.textContent).toContain('akış: Gelir modeli');
+    expect(within(k).getByText('İş paketi tasarımı').closest('li')!.textContent).not.toContain('akış');
   });
 
   it('switches to the timeline view', async () => {

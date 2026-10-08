@@ -1,4 +1,4 @@
-import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
+import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, ManagementLog, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -65,6 +65,8 @@ export const api = {
   closeTerminal: (id: string) => request<Employee>('DELETE', `${employee(id)}/terminal`),
   events: (id: string, tail = 500) => request<StoredEvent[]>('GET', `${employee(id)}/events?tail=${tail}`),
   agenda: () => request<AgendaReport>('GET', '/api/agenda'),
+  /** The coordinator's management log (management cycle §3.3): the cycle open now and the last `limit` recorded, newest first. */
+  management: (limit?: number) => request<ManagementLog>('GET', `/api/management${limit ? `?limit=${limit}` : ''}`),
   /** The top bar's figures: busy, delivered in the last day, stuck. */
   metrics: () => request<OfficeMetrics>('GET', '/api/metrics'),
   /** `until`: relative (`+6h`, `+1d`) or local `YYYY-MM-DDTHH:MM`. */

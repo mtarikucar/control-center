@@ -1,18 +1,18 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Plan } from '@cc/shared';
+import type { Plan, PlanView } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { PlanCard } from './PlanCard.tsx';
 
 vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})) } }));
 const { api } = await import('../net/api.ts');
 
-const plan = (over: Partial<Plan> = {}): Plan => ({
+const plan = (over: Partial<PlanView> = {}): PlanView => ({
   id: 'p1', title: 'Tanıtım videosu', goal: 'Ürünü tanıtmak', approach: 'Senaryo, çekim, kurgu', people: 'yazar + videocu', steps: ['senaryo', 'kurgu'],
   quotaPct: 10, usd: 25, days: 3, risks: 'kota', status: 'draft', version: 1, proposedBy: 'c', createdAt: 1, updatedAt: 1, approvedAt: null, ...over,
 });
 
-beforeEach(() => useOffice.setState({ plans: { p1: plan() } }));
+beforeEach(() => useOffice.setState({ plans: { p1: plan() }, tasks: {}, views: {} }));
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -63,6 +63,45 @@ describe('PlanCard', () => {
     expect(section.textContent).toContain('Taslak — yazar');
     expect(section.textContent).toContain('Editör — editör · incelemeli');
     expect(section.textContent).toContain('marka dili');
+  });
+
+  it('management cycle §3.4: shows the plan’s streams — owner, what each waits for, and the status its tasks give it', () => {
+    const streams = [
+      { id: 'api', title: 'API', owner: 'ada', dependsOn: [], status: 'done' as const },
+      { id: 'ui', title: 'Arayüz', owner: 'alınacak: tasarımcı', dependsOn: ['api'], status: 'blocked' as const },
+      { id: 'doc', title: 'Belgeler', owner: 'ada', dependsOn: ['api', 'ui'], status: 'planned' as const },
+    ];
+    const ada = { id: 'ada', slug: 'ada', name: 'Ada', role: 'r', model: 'haiku' as const, characterId: 'coder', title: '', team: '', kind: 'member' as const, reportsTo: null, deskIndex: 0, sessionId: 's', sessionStarted: true, lifecycle: 'idle' as const, limitResetsAt: null, lastError: null, createdAt: 1 };
+    useOffice.setState({ plans: { p1: plan({ status: 'approved', streams }) }, views: { ada: { employee: ada, events: [], openTools: {}, idleSince: null, eventsLoaded: true } } });
+    // The card's own plan is the feed's (no statuses): the page's copy, from the snapshot, has them.
+    const proposed: Plan = { ...plan({ status: 'approved' }), streams: streams.map(({ status: _s, ...x }) => x) };
+    render(<PlanCard plan={proposed} />);
+    const section = screen.getByRole('region', { name: 'Akışlar' });
+    const items = within(section).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    expect(items[0]!.textContent).toContain('API');
+    expect(items[0]!.textContent).toContain('Ada');
+    expect(within(items[0]!).getByText('Bitti').className).toContain('stream-done');
+    expect(items[1]!.textContent).toContain('alınacak: tasarımcı');
+    expect(items[1]!.textContent).toContain('önce: API');
+    expect(within(items[1]!).getByText('Takıldı').className).toContain('stream-blocked');
+    expect(items[2]!.textContent).toContain('önce: API, Arayüz');
+    expect(within(items[2]!).getByText('Planlı')).toBeTruthy();
+  });
+
+  it('a plan the page does not keep yet (only its event) takes its streams’ status from the tasks the page has; a plan without streams shows none', () => {
+    const streams = [{ id: 'api', title: 'API', owner: 'ada', dependsOn: [] }];
+    const proposed: Plan = { ...plan({ status: 'approved' }), streams };
+    useOffice.setState({
+      plans: {},
+      tasks: { t1: { id: 't1', kind: 'work', planId: 'p1', streamId: 'api', title: 'Uç', description: '', done: [], requester: 'c', assignee: 'ada', priority: 3, dependsOn: [], status: 'in_progress', chainDepth: 0, note: null, result: null, nudged: false, createdAt: 1, startedAt: 2, finishedAt: null } },
+    });
+    const { unmount } = render(<PlanCard plan={proposed} />);
+    expect(within(screen.getByRole('region', { name: 'Akışlar' })).getByText('Sürüyor')).toBeTruthy();
+    unmount();
+    useOffice.setState({ plans: { p1: plan() } });
+    render(<PlanCard plan={plan()} />);
+    expect(screen.queryByRole('region', { name: 'Akışlar' })).toBeNull();
   });
 
   it('a plan without a method shows no method section', () => {

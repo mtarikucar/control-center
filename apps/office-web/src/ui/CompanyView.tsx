@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { TASK_DIFFICULTY_LABELS, type Employee, type Task, type TaskStatus } from '@cc/shared';
+import { TASK_DIFFICULTY_LABELS, type Employee, type PlanView, type Task, type TaskStatus } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
@@ -7,14 +7,17 @@ import { AgendaTab } from './AgendaTab.tsx';
 import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 import { formatWhenTR } from './format.ts';
 import { GoalsTab } from './GoalsTab.tsx';
+import { ManagementTab } from './ManagementTab.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
+import { streamOf } from './streams.ts';
 
 const TABS = [
   ['org', 'Örgüt'],
   ['goals', 'Hedefler'],
   ['agenda', 'Ajanda'],
   ['tasks', 'Görevler'],
+  ['management', 'Yönetim'],
   ['proposals', 'Öneriler'],
   ['decisions', 'Kararlar'],
   ['playbook', 'El kitabı'],
@@ -85,6 +88,39 @@ function PersonCard({ e, current, onOpen }: { e: Employee; current: Task | undef
       <span className="muted">{lifecycleLabel(e.lifecycle)}</span>
       {current && <span className="org-task">şu an: {current.title}</span>}
     </button>
+  );
+}
+
+/** A task on the board: its title, its plan's stream (management cycle §3.4), who does it, and what holds it. */
+function TaskCard({ t, plans, nameOf }: { t: Task; plans: Record<string, PlanView>; nameOf: (id: string) => string }) {
+  const stream = streamOf(plans, t);
+  return (
+    <article className={`task-card ${t.status}`}>
+      <strong>{t.title}</strong>
+      {stream && (
+        <span className="badge stream-tag" title="Planın akışı">
+          akış: {stream.title}
+        </span>
+      )}
+      {t.difficulty && <span className={`badge difficulty ${t.difficulty}`}>{TASK_DIFFICULTY_LABELS[t.difficulty]}</span>}
+      {t.kind === 'review' && <span className="badge review">İnceleme</span>}
+      {t.status === 'parked' && (
+        <span className="badge parked" title={t.parkedReason ?? undefined}>
+          ertelendi · {t.notBefore ? formatWhenTR(t.notBefore, Date.now()) : '—'}
+        </span>
+      )}
+      <span className="muted">
+        {nameOf(t.assignee)} · P{t.priority}
+        {t.planId && plans[t.planId] ? ` · ${plans[t.planId]!.title}` : ''}
+      </span>
+      {t.reviewer && (
+        <span className="muted">
+          İnceleyen: {nameOf(t.reviewer)}
+          {(t.round ?? 0) > 0 ? ` · tur ${t.round}` : ''}
+        </span>
+      )}
+      {t.note && <span className="task-note">{t.note}</span>}
+    </article>
   );
 }
 
@@ -222,33 +258,15 @@ export function CompanyView() {
                       {TASK_STATUS_LABELS[status]} <span className="muted">{items.length}</span>
                     </h3>
                     {items.map((t) => (
-                      <article key={t.id} className={`task-card ${t.status}`}>
-                        <strong>{t.title}</strong>
-                        {t.difficulty && <span className={`badge difficulty ${t.difficulty}`}>{TASK_DIFFICULTY_LABELS[t.difficulty]}</span>}
-                        {t.kind === 'review' && <span className="badge review">İnceleme</span>}
-                        {t.status === 'parked' && (
-                          <span className="badge parked" title={t.parkedReason ?? undefined}>
-                            ertelendi · {t.notBefore ? formatWhenTR(t.notBefore, Date.now()) : '—'}
-                          </span>
-                        )}
-                        <span className="muted">
-                          {nameOf(t.assignee)} · P{t.priority}
-                          {t.planId && plans[t.planId] ? ` · ${plans[t.planId]!.title}` : ''}
-                        </span>
-                        {t.reviewer && (
-                          <span className="muted">
-                            İnceleyen: {nameOf(t.reviewer)}
-                            {(t.round ?? 0) > 0 ? ` · tur ${t.round}` : ''}
-                          </span>
-                        )}
-                        {t.note && <span className="task-note">{t.note}</span>}
-                      </article>
+                      <TaskCard key={t.id} t={t} plans={plans} nameOf={nameOf} />
                     ))}
                   </section>
                 );
               })}
             </div>
           </div>
+        ) : tab === 'management' ? (
+          <ManagementTab />
         ) : tab === 'proposals' ? (
           <ProposalsTab />
         ) : tab === 'decisions' ? (

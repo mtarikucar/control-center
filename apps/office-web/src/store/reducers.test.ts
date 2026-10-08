@@ -213,6 +213,26 @@ describe('company data', () => {
     expect(needsRefresh(stored({ type: 'role.changed', kind: 'coordinator', title: 'K', team: '' }))).toBe(true);
   });
 
+  it('management cycle §3.4: a plan’s streams keep the status the snapshot gave them through a plan.changed; a new stream takes it from the tasks the page has', () => {
+    const streams = [{ id: 'api', title: 'API', owner: 'e1', dependsOn: [] }, { id: 'ui', title: 'Arayüz', owner: 'alınacak: tasarımcı', dependsOn: ['api'] }];
+    let d = applySnapshot(EMPTY_DATA, snapshot({ tasks: [task({ streamId: 'ui', status: 'in_progress' })], plans: [{ ...plan({ status: 'approved' }), streams: [{ ...streams[0]!, status: 'done' }, { ...streams[1]!, status: 'active' }] }] }));
+    expect(d.plans.p1?.streams?.map((x) => x.status)).toEqual(['done', 'active']);
+    // The event's plan has no statuses: the known ones stay, a new stream's comes from the page's tasks.
+    d = applyEvent(d, stored({ type: 'plan.changed', change: 'revised', plan: plan({ status: 'approved', version: 2, streams: [...streams, { id: 'doc', title: 'Belgeler', owner: 'e1', dependsOn: [] }] }) }));
+    expect(d.plans.p1?.version).toBe(2);
+    expect(d.plans.p1?.streams?.map((x) => [x.id, x.status])).toEqual([['api', 'done'], ['ui', 'active'], ['doc', 'planned']]);
+    // A plan from before streams stays as it was.
+    d = applyEvent(d, stored({ type: 'plan.changed', change: 'proposed', plan: plan({ id: 'p2' }) }));
+    expect(d.plans.p2?.streams).toBeUndefined();
+  });
+
+  it('a stream’s status is the server’s: a stream task’s change or a plan with streams asks for a fresh snapshot, other tasks and plans do not', () => {
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'finished', task: task({ streamId: 'api', status: 'done' }) }))).toBe(true);
+    expect(needsRefresh(stored({ type: 'task.changed', change: 'finished', task: task({ status: 'done' }) }))).toBe(false);
+    expect(needsRefresh(stored({ type: 'plan.changed', change: 'revised', plan: plan({ streams: [{ id: 'api', title: 'API', owner: 'e1', dependsOn: [] }] }) }))).toBe(true);
+    expect(needsRefresh(stored({ type: 'plan.changed', change: 'approved', plan: plan({ streams: [] }) }))).toBe(false);
+  });
+
   it('a server without the company layer gives empty plans and tasks', () => {
     const d = applySnapshot(EMPTY_DATA, snapshot());
     expect(d.tasks).toEqual({});
@@ -316,6 +336,22 @@ describe('the scheduler', () => {
     expect(d.agendaRev).toBe(rev + 2);
     d = applyEvent(d, stored({ type: 'note.written', id: 1, title: 'n', tags: [] }, 'c', 12));
     expect(d.agendaRev).toBe(rev + 2);
+  });
+
+  it('management cycle §3.3: a cycle’s start and its record move managementRev (the Yönetim tab reads the log again), a live snapshot too — an HTTP one does not', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot(), 'live');
+    const rev = d.managementRev;
+    expect(rev).toBe(1);
+    d = applyEvent(d, stored({ type: 'management.cycle.started', triggers: [], since: 0, unclosedWarning: false }, 'c'));
+    expect(d.managementRev).toBe(rev + 1);
+    d = applyEvent(d, stored({ type: 'management.cycle', closed: true, startedAt: 1, triggers: [], changes: [], reasoning: 'değişiklik yok, çünkü x', next: null, costUsd: 0.2, model: 'opus' }, 'c'));
+    expect(d.managementRev).toBe(rev + 2);
+    d = applyEvent(d, stored({ type: 'turn.started' }, 'c'));
+    expect(d.managementRev).toBe(rev + 2);
+    d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 1 }), 'http');
+    expect(d.managementRev).toBe(rev + 2);
+    d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 2 }), 'live');
+    expect(d.managementRev).toBe(rev + 3);
   });
 
   it('a snapshot always moves agendaRev, even one that starts the office over', () => {

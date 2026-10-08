@@ -1,4 +1,4 @@
-import type { AgendaEntry, Employee, EmployeeKind, GoalStatus, Lifecycle, ModelAlias, PlanStatus, ProposalKind, ProposalStatus, ScheduleStatus, TaskStatus } from '@cc/shared';
+import type { AgendaEntry, CycleTrigger, CycleTriggerKind, Employee, EmployeeKind, GoalStatus, Lifecycle, ModelAlias, PlanStatus, ProposalKind, ProposalStatus, ScheduleStatus, StreamStatus, TaskStatus } from '@cc/shared';
 import { formatReset } from './format.ts';
 
 const LABELS: Record<Lifecycle, string> = {
@@ -31,6 +31,9 @@ export const MODEL_LABELS: Record<ModelAlias, string> = {
   haiku: 'Haiku — hızlı ve ucuz',
 };
 
+/** A model's family name alone: “Opus”. */
+export const modelName = (m: ModelAlias): string => MODEL_LABELS[m].split(' — ')[0] ?? m;
+
 export const KIND_LABELS: Record<EmployeeKind, string> = { coordinator: 'Koordinatör', lead: 'Ekip lideri', member: 'Çalışan' };
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
@@ -60,3 +63,27 @@ export const AGENDA_KIND_LABELS: Record<AgendaEntry['kind'], string> = {
   not_before: 'Başlangıç',
   scheduled: 'Rutin',
 };
+
+/** A plan stream's status (management cycle §3.4), in the board's words. */
+export const STREAM_STATUS_LABELS: Record<StreamStatus, string> = { planned: 'Planlı', active: 'Sürüyor', blocked: 'Takıldı', done: 'Bitti' };
+
+/** What opened a management cycle (management cycle §3.1). */
+export const CYCLE_TRIGGER_LABELS: Record<CycleTriggerKind, string> = {
+  delivery: 'Teslim',
+  review: 'İnceleme kararı',
+  idle: 'Boşa çıktı',
+  plan: 'Plan',
+  goal: 'Hedef',
+  constraint: 'Kısıt değişti',
+  stuck: 'Takılma',
+  heartbeat: 'Kalp atışı',
+  start: 'Ofis açıldı',
+  rest: 'Dinlenme bitti',
+};
+
+/** “Teslim: “Giriş” (Ada)”; the label alone when the note is empty or says the same. */
+export function triggerText(t: Pick<CycleTrigger, 'kind' | 'note'>): string {
+  const label = CYCLE_TRIGGER_LABELS[t.kind] ?? t.kind;
+  const note = t.note.trim();
+  return note && note.toLocaleLowerCase('tr') !== label.toLocaleLowerCase('tr') ? `${label}: ${note}` : label;
+}

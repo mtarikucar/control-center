@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Employee, Task } from '@cc/shared';
+import type { Employee, PlanView, Task } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { CompanyView } from './CompanyView.tsx';
 
@@ -8,6 +8,9 @@ vi.mock('../net/api.ts', () => ({
   api: {
     hireCoordinator: vi.fn(async () => ({ id: 'new' })), appointCoordinator: vi.fn(async () => ({})), events: vi.fn(async () => []),
     agenda: vi.fn(async () => ({ generatedAt: 0, horizonMs: 0, clock: { nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null }, employees: [] })),
+    management: vi.fn(async () => ({ generatedAt: Date.now(), open: null, cycles: [
+      { seq: 3, startedAt: Date.now() - 600_000, endedAt: Date.now() - 300_000, closed: true, model: 'opus', costUsd: 0.3, triggers: [{ kind: 'delivery', at: 1, note: '“Giriş” (Ada)', seq: 2 }], changes: ['Kayıt işini Can’a verdim'], reasoning: 'Can boştaydı.', next: null },
+    ] })),
   },
 }));
 const { api } = await import('../net/api.ts');
@@ -104,6 +107,29 @@ describe('CompanyView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Ajanda' }));
     await waitFor(() => expect(api.agenda).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: 'Zaman çizelgesi' })).toBeTruthy();
+  });
+
+  it('has a Yönetim tab with the coordinator’s management log', async () => {
+    office([person('koor', { kind: 'coordinator' })]);
+    render(<CompanyView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Yönetim' }));
+    await waitFor(() => expect(api.management).toHaveBeenCalled());
+    expect(await screen.findByText('Kayıt işini Can’a verdim')).toBeTruthy();
+    expect(screen.getByText('Teslim: “Giriş” (Ada)')).toBeTruthy();
+  });
+
+  it('management cycle §3.4: a task card names its plan’s stream', () => {
+    const plan: PlanView = {
+      id: 'p1', title: 'Site', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '', status: 'approved', version: 1, proposedBy: 'koor',
+      createdAt: 1, updatedAt: 1, approvedAt: 1, streams: [{ id: 'api', title: 'API', owner: 'ada', dependsOn: [], status: 'active' }],
+    };
+    office([person('ada', { name: 'Ada' })], [task('Uç noktalar', { planId: 'p1', streamId: 'api' }), task('Akışsız iş', { planId: 'p1' })]);
+    useOffice.setState({ plans: { p1: plan } });
+    render(<CompanyView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Görevler' }));
+    const card = screen.getByText('Uç noktalar').closest('article')!;
+    expect(within(card).getByText('akış: API')).toBeTruthy();
+    expect(screen.getByText('Akışsız iş').closest('article')!.textContent).not.toContain('akış');
   });
 
   it('opens an employee’s panel from the chart and closes', () => {

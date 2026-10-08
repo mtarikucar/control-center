@@ -1,4 +1,4 @@
-import { normalizeConstitution, type BudgetSummary, type ClockStatus, type Employee, type EmployeeUsage, type OfficeSnapshot, type Plan, type Proposal, type QuotaState, type Schedule, type StoredEvent, type Task, type Usage, type UsageTotals, type Goal } from '@cc/shared';
+import { normalizeConstitution, streamStatus, type BudgetSummary, type ClockStatus, type Employee, type EmployeeUsage, type OfficeSnapshot, type Plan, type PlanView, type Proposal, type QuotaState, type Schedule, type StoredEvent, type Task, type Usage, type UsageTotals, type Goal } from '@cc/shared';
 
 export const MAX_EVENTS = 500;
 
@@ -24,7 +24,8 @@ export interface OfficeData {
   synced: boolean;
   /** The company: every task the snapshot or the feed has shown (open ones and the latest closed). */
   tasks: Record<string, Task>;
-  plans: Record<string, Plan>;
+  /** Every plan, each stream with its status as the server last gave it (management cycle §3.4). */
+  plans: Record<string, PlanView>;
   /** Bumped by every memory change, so open memory tabs reload. */
   memoryRev: number;
   /** The constitution, the reserve and the money (null: an office without the company layer). */
@@ -44,9 +45,11 @@ export interface OfficeData {
   clock: ClockStatus | null;
   /** Bumped by everything that can change an agenda, so an open agenda fetches it again. */
   agendaRev: number;
+  /** Bumped by a management cycle's start and its record (and a live snapshot), so an open Yönetim tab reads the log again. */
+  managementRev: number;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false, schedules: {}, clock: null, agendaRev: 0 };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false, schedules: {}, clock: null, agendaRev: 0, managementRev: 0 };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 0, sideAnswers: 0 };
 
@@ -101,7 +104,21 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     clock: s.clock ?? null,
     // From `current`: a log that started over must still move it, or an open agenda would keep the old office.
     agendaRev: current.agendaRev + 1,
+    // A live snapshot opens the feed (a reconnect may have missed a cycle); an HTTP one comes while the feed runs.
+    managementRev: current.managementRev + (source === 'live' ? 1 : 0),
   };
+}
+
+/**
+ * A plan from the feed (its streams carry no status) as the page keeps it: each stream with the status the server last
+ * gave it, a new one with what the page's tasks say until the next snapshot brings the server's (needsRefresh).
+ */
+function withStreamStatus(plan: Plan, known: PlanView | undefined, tasks: Record<string, Task>): PlanView {
+  const { streams, ...rest } = plan;
+  if (!streams) return rest;
+  const before = new Map((known?.streams ?? []).map((x) => [x.id, x.status]));
+  const all = Object.values(tasks).filter((t) => t.planId === plan.id);
+  return { ...rest, streams: streams.map((x) => ({ ...x, status: before.get(x.id) ?? streamStatus(all.filter((t) => t.streamId === x.id)) })) };
 }
 
 /** Events after which an agenda may read differently (spec §6.1). */
@@ -124,7 +141,7 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   const next: OfficeData = { ...d, lastSeq: Math.max(d.lastSeq, s.seq), quota };
   // Company records are global: keep them whatever the page knows about the employee the event is filed under.
   if (ev.type === 'task.changed') next.tasks = { ...d.tasks, [ev.task.id]: ev.task };
-  if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: ev.plan };
+  if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: withStreamStatus(ev.plan, d.plans[ev.plan.id], d.tasks) };
   if (ev.type === 'decision.recorded' || ev.type === 'playbook.updated' || ev.type === 'note.written') next.memoryRev = d.memoryRev + 1;
   // Read as today's constitution: a replayed event may be an older office's (the coordinator's models under old keys).
   if (ev.type === 'budget.changed') next.budget = { ...ev.budget, constitution: normalizeConstitution(ev.budget.constitution) };
@@ -133,6 +150,7 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'company.paused') next.paused = ev.paused;
   if (ev.type === 'schedule.changed') next.schedules = { ...d.schedules, [ev.schedule.id]: ev.schedule };
   if (AGENDA_EVENTS.has(ev.type)) next.agendaRev = d.agendaRev + 1;
+  if (ev.type === 'management.cycle.started' || ev.type === 'management.cycle') next.managementRev = d.managementRev + 1;
   if (ev.type === 'task.changed' && ev.change === 'created' && ev.task.requester !== 'owner' && ev.task.requester !== ev.task.assignee) {
     next.pings = { ...d.pings, [ev.task.assignee]: { text: `Yeni iş: ${ev.task.title}`, at: s.ts } };
   }
@@ -202,9 +220,15 @@ export function mergeEvents(view: EmployeeView, loaded: StoredEvent[]): Employee
   return { ...view, events, openTools, idleSince, eventsLoaded: true };
 }
 
-/** Events that change employee fields only the snapshot carries (who exists, lastError, limitResetsAt). */
+/**
+ * Events that change what only the snapshot carries: employee fields (who exists, lastError, limitResetsAt) and a
+ * stream's status (derived on the server from all its tasks, the page has only the latest closed ones).
+ */
 export function needsRefresh(s: StoredEvent): boolean {
-  const t = s.event.type;
+  const ev = s.event;
+  const t = ev.type;
+  if (t === 'task.changed') return Boolean(ev.task.streamId);
+  if (t === 'plan.changed') return (ev.plan.streams?.length ?? 0) > 0;
   return t === 'employee.hired' || t === 'employee.fired' || t === 'lifecycle.changed' || t === 'role.changed';
 }
 
