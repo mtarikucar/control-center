@@ -69,6 +69,11 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
     };
     const blueprint = { ...pkg, tasks: [], closedMode: { deny: [...(pkg.closedMode?.deny ?? []), 'mcp__probe_shut'] } };
     const first = pkg.tasks.find((t) => t.key === 'icerik-takvimi-pastane') ?? pkg.tasks[0]!;
+    // Write and Edit are locked here: the package's file items become the same items as text in the evidence (run 2 showed
+    // the Editor rightly sending back a calendar that was not a file, and the Writer blocked).
+    const textDone = first.done.map((d) =>
+      d.replace(/^takvim\.csv'de 6 satır/, 'Kanıtta takvim.csv içeriği CSV metni olarak: 6 satır').replace(/^6 metin dosyası/, 'Kanıtta 6 gönderi metni'),
+    );
 
     const o: PilotOffice = await pilotOffice();
     const record: StepRecord[] = [];
@@ -210,7 +215,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
           await idle(m);
           await say(m, 'Tek kelimeyle "hazır" yaz. Araç kullanma.');
         }
-        await wait('her üyenin oturumu açıldı', () => members().every((m) => events(after).some((e) => e.employeeId === m.id && e.event.type === 'session.started')));
+        await wait('her üyenin oturumu açıldı ve turu bitti', () => members().every((m) => events(after).some((e) => e.employeeId === m.id && e.event.type === 'turn.finished')));
         for (const m of members()) {
           const s = events(after).find((e) => e.employeeId === m.id && e.event.type === 'session.started')!;
           const mcp = s.event.type === 'session.started' ? s.event.mcp : [];
@@ -243,13 +248,13 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         await say(coordinator, [
           `“${h1Plan.title}” planında (planId ${h1Plan.id}) taskCreate ile bir görev aç:`,
           `başlık: ${first.title}`,
-          `açıklama: ${first.description} Not: bu denemede dosya yazma araçları kapalı; takvimi ve metinleri kanıt satırlarına metin olarak yaz.`,
-          `bitti maddeleri: ${JSON.stringify(first.done)}`,
+          `açıklama: ${first.description} Not: bu denemede dosya yazma araçları kapalı; takvim ve metinler dosya değil, kanıt satırlarında metin olarak teslim edilir (her kanıt satırı en çok 1000 karakter).`,
+          `bitti maddeleri: ${JSON.stringify(textDone)}`,
           `atanan: ${writer.name}; inceleyen: ${editor.name}. Başka araç kullanma.`,
         ].join('\n'));
         await wait('görev açıldı', () => o.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'done'] }).some((t) => t.planId === h1Plan.id && t.kind === 'work'));
         const task = () => o.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked', 'done'] }).find((t) => t.planId === h1Plan.id && t.kind === 'work')!;
-        await wait('görev bitti (inceleme onayıyla) ya da 2 turu aştı', () => task().status === 'done' || (task().round ?? 0) > 2);
+        await wait('görev bitti (inceleme onayıyla), takıldı ya da 2 turu aştı', () => task().status === 'done' || task().status === 'blocked' || (task().round ?? 0) > 2);
         const t = task();
         const evidence = t.result?.evidence?.length ?? 0;
         checks.push(`görev ${t.status}, tur ${t.round}, atanan ${o.company.nameOf(t.assignee)}, inceleyen ${t.reviewer ? o.company.nameOf(t.reviewer) : '-'}, kanıt ${evidence} / bitti maddesi ${t.done.length}`);
