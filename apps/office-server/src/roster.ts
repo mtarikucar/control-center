@@ -37,6 +37,8 @@ interface Row {
   reports_to: string | null;
   template: string | null;
   template_version: number | null;
+  /** Absent in a database before v17. */
+  capabilities?: string | null;
 }
 
 function fromRow(r: Row): Employee {
@@ -59,14 +61,18 @@ function fromRow(r: Row): Employee {
     lastError: r.last_error,
     createdAt: r.created_at,
     template: r.template ? { id: r.template, version: r.template_version ?? 1 } : null,
+    capabilities: r.capabilities ? (JSON.parse(r.capabilities) as string[]) : [],
   };
 }
 
-/** What the roster writes for a hire: the input, and the template resolved by the company (never the raw id). */
-export type NewEmployee = HireInput & { templateRef?: TemplateRef | null };
+/**
+ * What the roster writes for a hire: the input, and what the company resolved — the template (never the raw id) and the
+ * capabilities checked against the vocabulary (never the raw list).
+ */
+export type NewEmployee = HireInput & { templateRef?: TemplateRef | null; capabilityIds?: string[] };
 
 export type EmployeePatch = Partial<
-  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model'>
+  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities'>
 >;
 
 export class Roster {
@@ -129,8 +135,10 @@ export class Roster {
       lastError: null,
       createdAt: this.#now(),
       template: input.templateRef ?? null,
+      capabilities: input.capabilityIds ?? [],
     };
-    // A free-text hire writes the row exactly as before templates (v16); the template columns only for a template hire.
+    // A free-text hire with no capabilities writes the row exactly as before templates (v16) and capabilities (v17);
+    // the template columns only for a template hire, the capabilities only when some are declared.
     const columns = ['id', 'slug', 'name', 'role', 'model', 'character_id', 'desk_index', 'session_id', 'session_started', 'lifecycle', 'limit_resets_at', 'last_error', 'created_at', 'title', 'team', 'kind', 'reports_to'];
     const values: Array<string | number | null> = [
       employee.id, employee.slug, employee.name, employee.role, employee.model, employee.characterId, employee.deskIndex, employee.sessionId, 0, employee.lifecycle, null, null,
@@ -139,6 +147,10 @@ export class Roster {
     if (employee.template) {
       columns.push('template', 'template_version');
       values.push(employee.template.id, employee.template.version);
+    }
+    if (employee.capabilities!.length > 0) {
+      columns.push('capabilities');
+      values.push(JSON.stringify(employee.capabilities));
     }
     this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
     return employee;
@@ -177,6 +189,10 @@ export class Roster {
            team = ?, kind = ?, reports_to = ?, model = ? WHERE id = ?`,
       )
       .run(next.lifecycle, next.sessionStarted ? 1 : 0, next.limitResetsAt, next.lastError, next.role, next.title, next.team, next.kind, next.reportsTo, next.model, id);
+    // Only when given: every other change leaves the v17 column alone (and works on a database before it).
+    if (patch.capabilities !== undefined) {
+      this.#db.prepare('UPDATE employees SET capabilities = ? WHERE id = ?').run(patch.capabilities.length ? JSON.stringify(patch.capabilities) : null, id);
+    }
     return next;
   }
 

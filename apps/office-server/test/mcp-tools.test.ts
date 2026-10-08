@@ -35,7 +35,7 @@ describe('office tools', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
     expect(names('member')).toEqual([
-      'askColleague', 'briefRead', 'decisionsRead', 'integrationsList', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'profileRead', 'propose', 'recordSpend', 'reviewDecide',
+      'askColleague', 'briefRead', 'capabilitiesRead', 'decisionsRead', 'integrationsList', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'profileRead', 'propose', 'recordSpend', 'reviewDecide',
       'taskFinish', 'taskPark', 'taskPass', 'taskUpdate',
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual([

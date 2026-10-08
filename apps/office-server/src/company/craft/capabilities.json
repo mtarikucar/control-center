@@ -1,0 +1,297 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "id": "docs.read",
+      "title": "Belge okuma",
+      "summary": "Masadaki dosyaları ve şirketin paylaşılan belgelerini okur.",
+      "outward": false,
+      "builtin": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
+      "tools": [
+        "mcp__claude_ai_Notion__notion-search",
+        "mcp__claude_ai_Notion__notion-fetch",
+        "mcp__claude_ai_Claude_Docs__read",
+        "mcp__claude_ai_Claude_Docs__query"
+      ]
+    },
+    {
+      "id": "docs.write",
+      "title": "Belge yazma",
+      "summary": "Masada dosya yazar; şirketin paylaşılan belgelerinde sayfa açar ve düzenler.",
+      "outward": false,
+      "builtin": [
+        "Write",
+        "Edit"
+      ],
+      "tools": [
+        "mcp__claude_ai_Notion__notion-create-pages",
+        "mcp__claude_ai_Notion__notion-update-page",
+        "mcp__claude_ai_Claude_Docs__create",
+        "mcp__claude_ai_Claude_Docs__batch",
+        "mcp__claude_ai_Claude_Docs__update",
+        "mcp__claude_ai_Notion__notion-create-comment"
+      ]
+    },
+    {
+      "id": "web.fetch",
+      "title": "Web’den okuma",
+      "summary": "Web sayfalarını arar, okur ve gezer; hiçbir şey göndermez.",
+      "outward": false,
+      "builtin": [
+        "WebFetch",
+        "WebSearch"
+      ],
+      "tools": [
+        "mcp__claude_ai_apify__apify--web-fetch",
+        "mcp__claude_ai_apify__apify--rag-web-browser",
+        "mcp__plugin_playwright_playwright__browser_navigate",
+        "mcp__plugin_playwright_playwright__browser_snapshot",
+        "mcp__plugin_playwright_playwright__browser_take_screenshot"
+      ]
+    },
+    {
+      "id": "email.read",
+      "title": "E-posta okuma",
+      "summary": "Gelen kutusunu, konuları, iletileri ve taslakları okur.",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Gmail__search_threads",
+        "mcp__claude_ai_Gmail__get_thread",
+        "mcp__claude_ai_Gmail__get_message",
+        "mcp__claude_ai_Gmail__list_labels",
+        "mcp__claude_ai_Gmail__list_drafts",
+        "mcp__claude_ai_Gmail__get_draft"
+      ]
+    },
+    {
+      "id": "email.draft",
+      "title": "E-posta taslağı",
+      "summary": "Gönderilmeyen taslak yazar ve düzenler; gönderimi sahibi onaylar.",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Gmail__create_draft",
+        "mcp__claude_ai_Gmail__update_draft",
+        "mcp__claude_ai_Gmail__delete_draft"
+      ]
+    },
+    {
+      "id": "email.send",
+      "title": "E-posta gönderme",
+      "summary": "Şirket adına e-posta gönderir, yanıtlar, iletir.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Gmail__send_message",
+        "mcp__claude_ai_Gmail__reply",
+        "mcp__claude_ai_Gmail__forward",
+        "mcp__claude_ai_jeeta__jeeta_send_email"
+      ]
+    },
+    {
+      "id": "calendar.read",
+      "title": "Takvim okuma",
+      "summary": "Takvimleri, etkinlikleri ve boş zamanları okur.",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Google_Calendar__list_calendars",
+        "mcp__claude_ai_Google_Calendar__list_events",
+        "mcp__claude_ai_Google_Calendar__get_event",
+        "mcp__claude_ai_Google_Calendar__search_events",
+        "mcp__claude_ai_Google_Calendar__suggest_time"
+      ]
+    },
+    {
+      "id": "calendar.write",
+      "title": "Takvime yazma",
+      "summary": "Etkinlik açar, değiştirir, siler ve davetlere cevap verir; katılımcılara davet gider.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Google_Calendar__create_event",
+        "mcp__claude_ai_Google_Calendar__update_event",
+        "mcp__claude_ai_Google_Calendar__delete_event",
+        "mcp__claude_ai_Google_Calendar__respond_to_event"
+      ]
+    },
+    {
+      "id": "social.read",
+      "title": "Sosyal medya okuma",
+      "summary": "Hesapları, planlanmış gönderileri ve içerik takvimini okur.",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_list_social_accounts",
+        "mcp__claude_ai_jeeta__jeeta_list_scheduled_posts",
+        "mcp__claude_ai_jeeta__jeeta_get_content_calendar",
+        "mcp__claude_ai_Higgsfield__tiktok_accounts",
+        "mcp__claude_ai_Higgsfield__tiktok_publish_status"
+      ]
+    },
+    {
+      "id": "social.draft",
+      "title": "Sosyal medya taslağı",
+      "summary": "Yayınlanmayan gönderi taslağı hazırlar; yayını sahibi onaylar.",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_draft_social_post"
+      ]
+    },
+    {
+      "id": "social.publish",
+      "title": "Sosyal medyada yayın",
+      "summary": "Gönderiyi yayınlar ya da yayına planlar.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_publish_social_post",
+        "mcp__claude_ai_jeeta__jeeta_schedule_social_post",
+        "mcp__claude_ai_Higgsfield__tiktok_prepare_publish"
+      ]
+    },
+    {
+      "id": "crm.read",
+      "title": "Müşteri kayıtlarını okuma",
+      "summary": "Müşteri adaylarını, kişileri, fırsatları ve konuşmaları okur.",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_search_leads",
+        "mcp__claude_ai_jeeta__jeeta_search_contacts",
+        "mcp__claude_ai_jeeta__jeeta_list_opportunities",
+        "mcp__claude_ai_jeeta__jeeta_get_funnel",
+        "mcp__claude_ai_jeeta__jeeta_list_conversations",
+        "mcp__claude_ai_jeeta__jeeta_read_conversation"
+      ]
+    },
+    {
+      "id": "crm.write",
+      "title": "Müşteri kayıtlarına yazma",
+      "summary": "Aday, kişi ve fırsat açar; not ekler, durum ve aşama değiştirir.",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_create_lead",
+        "mcp__claude_ai_jeeta__jeeta_update_lead",
+        "mcp__claude_ai_jeeta__jeeta_add_lead_note",
+        "mcp__claude_ai_jeeta__jeeta_set_lead_status",
+        "mcp__claude_ai_jeeta__jeeta_create_contact",
+        "mcp__claude_ai_jeeta__jeeta_create_opportunity",
+        "mcp__claude_ai_jeeta__jeeta_move_opportunity_stage"
+      ]
+    },
+    {
+      "id": "payments.read",
+      "title": "Ödeme kayıtlarını okuma",
+      "summary": "Tahsilatları, iadeleri ve bakiyeyi okur.",
+      "outward": false,
+      "builtin": [],
+      "tools": []
+    },
+    {
+      "id": "payments.charge",
+      "title": "Ödeme alma",
+      "summary": "Ödeme alır, iade yapar ya da para gönderir.",
+      "outward": true,
+      "builtin": [],
+      "tools": []
+    },
+    {
+      "id": "ecommerce.orders",
+      "title": "E-ticaret siparişleri",
+      "summary": "Mağazanın siparişlerini ve durumlarını okur.",
+      "outward": false,
+      "builtin": [],
+      "tools": []
+    },
+    {
+      "id": "email.delete",
+      "title": "E-posta silme",
+      "summary": "İletileri ve konuları çöpe atar, etiketleri siler.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Gmail__trash_message",
+        "mcp__claude_ai_Gmail__trash_thread",
+        "mcp__claude_ai_Gmail__delete_label"
+      ]
+    },
+    {
+      "id": "messages.send",
+      "title": "Mesaj gönderme",
+      "summary": "Kişilere SMS, WhatsApp ya da sosyal medya mesajı gönderir.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_send_message"
+      ]
+    },
+    {
+      "id": "calls.make",
+      "title": "Telefon araması",
+      "summary": "Bir kişiyi telefonla arar.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_click_to_dial"
+      ]
+    },
+    {
+      "id": "ads.manage",
+      "title": "Reklam yönetimi",
+      "summary": "Kampanya açar, durdurur, bütçeyi değiştirir ve pazarlama eylemlerini onaylar; reklam parası harcar.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_create_campaign",
+        "mcp__claude_ai_jeeta__jeeta_set_campaign_status",
+        "mcp__claude_ai_jeeta__jeeta_reallocate_budget",
+        "mcp__claude_ai_jeeta__jeeta_approve_strategy_action"
+      ]
+    },
+    {
+      "id": "web.publish",
+      "title": "Web’de yayın",
+      "summary": "Bir web sitesini herkese açık yayınlar ya da günceller.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Higgsfield__publish_website",
+        "mcp__claude_ai_Higgsfield__deploy_website"
+      ]
+    },
+    {
+      "id": "media.generate",
+      "title": "Görsel ve medya üretimi",
+      "summary": "Görsel, video, ses ya da 3B model üretir; her üretim kredi harcar.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_Higgsfield__generate_image",
+        "mcp__claude_ai_Higgsfield__generate_image_batch",
+        "mcp__claude_ai_Higgsfield__generate_video",
+        "mcp__claude_ai_Higgsfield__generate_video_batch",
+        "mcp__claude_ai_Higgsfield__generate_audio",
+        "mcp__claude_ai_Higgsfield__generate_audio_batch",
+        "mcp__claude_ai_Higgsfield__generate_3d"
+      ]
+    },
+    {
+      "id": "automation.run",
+      "title": "Ücretli otomasyon",
+      "summary": "Hazır bir otomasyonu (aktör) çalıştırır; çalıştırma başına ücret alınır.",
+      "outward": true,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_apify__call-actor"
+      ]
+    }
+  ]
+}

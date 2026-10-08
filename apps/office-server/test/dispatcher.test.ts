@@ -45,7 +45,16 @@ describe('Dispatcher', () => {
     expect(text).toContain('README.md var');
     expect(text).toContain('taskFinish');
     expect(text).toContain('evidence');
+    expect(text).not.toContain('Gereken yetenekler');
     expect(t.tasks.get(task.id).status).toBe('in_progress');
+  });
+
+  it('a task that requires capabilities names them in its message (B7)', async () => {
+    const t = make();
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    t.company.createTask(OWNER, { assignee: ada.id, title: 'Yanıtla', requires: ['email.read', 'email.send'] } as never);
+    const msg = await waitFor(t.events, (e) => e.employeeId === ada.id && e.event.type === 'message.user' && e.event.text.includes('## Görev: Yanıtla'));
+    expect((msg.event as { text: string }).text).toContain('\nGereken yetenekler: email.read, email.send (masandaki karşılığı: capabilitiesRead)\n');
   });
 
   it('review focus: an employee who stops without handing in gets exactly one reminder', async () => {

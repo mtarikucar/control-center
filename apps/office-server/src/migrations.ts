@@ -451,4 +451,15 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE employees DROP COLUMN template_version;
       ALTER TABLE employees DROP COLUMN template;`,
   },
+  {
+    version: 17,
+    name: 'capabilities: what an employee declares and a task requires',
+    // JSON lists; NULL for none — every row from before, and every one written with none (spec §6).
+    up: `
+      ALTER TABLE employees ADD COLUMN capabilities TEXT;
+      ALTER TABLE tasks ADD COLUMN requires TEXT;`,
+    down: `
+      ALTER TABLE tasks DROP COLUMN requires;
+      ALTER TABLE employees DROP COLUMN capabilities;`,
+  },
 ];

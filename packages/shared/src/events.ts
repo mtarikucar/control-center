@@ -25,7 +25,11 @@ export type OfficeEvent =
   | { type: 'employee.hired'; name: string }
   | { type: 'employee.fired' }
   /** `tools`: how many of the server's tools the session has (sessions from before carry none). */
-  | { type: 'session.started'; model: string; mcp: { name: string; status: string; tools?: number }[] }
+  /**
+   * `tools`: how many of the server's tools the session has; `toolNames` (B7): their names without the server's prefix.
+   * Both absent in sessions from before them.
+   */
+  | { type: 'session.started'; model: string; mcp: { name: string; status: string; tools?: number; toolNames?: string[] }[] }
   | { type: 'turn.started' }
   | {
       type: 'turn.finished';

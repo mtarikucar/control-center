@@ -60,8 +60,8 @@ describe('normalize', () => {
         model: 'claude-haiku-4-5-20251001',
         // This trimmed init lists no tools: every server has none in it.
         mcp: [
-          { name: 'office', status: 'connected', tools: 0 },
-          { name: 'claude.ai Gmail', status: 'needs-auth', tools: 0 },
+          { name: 'office', status: 'connected', tools: 0, toolNames: [] },
+          { name: 'claude.ai Gmail', status: 'needs-auth', tools: 0, toolNames: [] },
         ],
       },
     ]);
@@ -73,8 +73,13 @@ describe('normalize', () => {
     const [event] = normalize(init);
     expect(event?.type).toBe('session.started');
     const of = (name: string) => (event as { mcp: Array<{ name: string; status: string; tools?: number }> }).mcp.find((m) => m.name === name);
-    expect(of('claude.ai Gmail')).toEqual({ name: 'claude.ai Gmail', status: 'connected', tools: 0 });
-    expect(of('claude.ai Notion')).toEqual({ name: 'claude.ai Notion', status: 'connected', tools: 46 });
+    expect(of('claude.ai Gmail')).toEqual({ name: 'claude.ai Gmail', status: 'connected', tools: 0, toolNames: [] });
+    expect(of('claude.ai Notion')).toMatchObject({ name: 'claude.ai Notion', status: 'connected', tools: 46 });
+    // B7 (review, Kerem round 1): the names too, without the server's prefix, so the vocabulary can tell which are its.
+    const notion = (event as { mcp: Array<{ name: string; toolNames?: string[] }> }).mcp.find((m) => m.name === 'claude.ai Notion')!.toolNames!;
+    expect(notion).toHaveLength(46);
+    expect(notion).toEqual(expect.arrayContaining(['notion-search', 'notion-move-pages']));
+    expect(notion.every((n) => !n.startsWith('mcp__'))).toBe(true);
     expect(of('claude.ai Claude Docs')).toMatchObject({ tools: 8 });
     expect(of('plugin:playwright:playwright')).toMatchObject({ status: 'connected', tools: 25 });
     expect(of('plugin:design:figma')).toMatchObject({ status: 'needs-auth', tools: 0 });

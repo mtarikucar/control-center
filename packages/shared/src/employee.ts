@@ -44,6 +44,8 @@ export interface Employee {
   createdAt: number;
   /** The role template the employee was hired from, at that version; null when hired with free text (B6). */
   template?: TemplateRef | null;
+  /** The capabilities the role declares (B7), ids of the vocabulary; empty when none were declared. */
+  capabilities?: string[];
 }
 
 /** Which role template, at which version (spec 2026-10-08-role-templates-design §5). */
@@ -77,6 +79,8 @@ export interface HireInput {
   role: string;
   /** A role template's id (B6): the role text and the defaults come from it. */
   template?: string;
+  /** The capabilities the role declares (B7), the whole list: replaces a template's; none given, the template's (or none). */
+  capabilities?: string[];
   model?: ModelAlias;
   characterId?: string;
   title?: string;

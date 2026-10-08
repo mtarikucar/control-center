@@ -6,6 +6,7 @@ import type { Db } from '../db.ts';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
+import { mcpToolPrefix } from '../claude/normalize.ts';
 import { clean, lines } from './text.ts';
 
 /**
@@ -127,9 +128,9 @@ export class IntegrationRegistry {
   #observed(): { seen: Map<string, { first: number; last: number }>; desks: Map<string, IntegrationDesk[]> } {
     const rows = this.#db.prepare("SELECT employee_id, ts, payload FROM events WHERE type = 'session.started' ORDER BY seq").all() as unknown as Array<{ employee_id: string | null; ts: number; payload: string }>;
     const seen = new Map<string, { first: number; last: number }>();
-    const latest = new Map<string, { ts: number; mcp: Array<{ name: string; status: string; tools?: number }> }>();
+    const latest = new Map<string, { ts: number; mcp: Array<{ name: string; status: string; tools?: number; toolNames?: string[] }> }>();
     for (const row of rows) {
-      const mcp = (JSON.parse(row.payload) as { mcp?: Array<{ name: string; status: string; tools?: number }> }).mcp ?? [];
+      const mcp = (JSON.parse(row.payload) as { mcp?: Array<{ name: string; status: string; tools?: number; toolNames?: string[] }> }).mcp ?? [];
       for (const m of mcp) {
         const s = seen.get(m.name);
         seen.set(m.name, { first: s?.first ?? row.ts, last: row.ts });
@@ -144,7 +145,8 @@ export class IntegrationRegistry {
         // Connected but none of its tools in the session: the desk's settings deny it (Pilot 0's closed mode).
         const status: DeskConnection = m.status === 'connected' && m.tools === 0 ? 'denied' : (RAW[m.status] ?? 'unknown');
         const desk: IntegrationDesk = {
-          employeeId: e.id, name: e.name, deskIndex: e.deskIndex, status, raw: m.status, tools: m.tools ?? null, seenAt: session!.ts,
+          employeeId: e.id, name: e.name, deskIndex: e.deskIndex, status, raw: m.status, tools: m.tools ?? null,
+          toolNames: m.toolNames ? m.toolNames.map((t) => `${mcpToolPrefix(m.name)}${t}`) : null, seenAt: session!.ts,
           open: status === 'connected', closedBy: status === 'connected' ? null : status === 'denied' ? 'desk' : 'server',
         };
         desks.set(m.name, [...(desks.get(m.name) ?? []), desk]);
