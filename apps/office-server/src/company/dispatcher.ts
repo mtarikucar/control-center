@@ -36,6 +36,11 @@ export interface DispatcherDeps {
   kpis?: { measure(): unknown };
   /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
   clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: () => void): void };
+  /**
+   * The task message's related memory (B12): the section put under the definition of done, '' for none. Absent (the
+   * economy scenario, tests that do not care): no section.
+   */
+  related?: (task: Task) => string;
 }
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
@@ -376,13 +381,23 @@ export class Dispatcher {
     const returned = task.kind === 'work' && (task.round ?? 0) > 0 ? this.#returned(task) : '';
     const level = task.difficulty && this.#rules().difficultyModelsEnabled ? `\nZorluk: ${TASK_DIFFICULTY_LABELS[task.difficulty]}${model ? ` · Model: ${model}` : ''}` : '';
     const due = task.dueAt ? `\nSon tarih: ${formatWhen(task.dueAt, this.#now())}` : '';
+    const related = this.#related(task);
     return `## Görev: ${task.title}
 Görev no: ${task.id}${plan}
 İsteyen: ${this.#d.company.nameOf(task.requester)} · Öncelik: ${task.priority}${level}${due}${reviewer}${deps}${requires}${brief}
 
-${task.description || '(açıklama yok)'}${done}${returned}
+${task.description || '(açıklama yok)'}${done}${returned}${related}
 
 ${task.kind === 'review' ? REVIEW_CLOSING : WORK_CLOSING}`;
+  }
+
+  /** What the memory holds for the task (B12); a failing search costs the task nothing. */
+  #related(task: Task): string {
+    try {
+      return this.#d.related?.(task) ?? '';
+    } catch {
+      return '';
+    }
   }
 
   /** A task sent back by its reviewer: the findings of the last review go with it. */
