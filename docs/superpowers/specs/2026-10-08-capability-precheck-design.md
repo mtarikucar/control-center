@@ -35,7 +35,9 @@ Bu iş, **varsayılan kapalı** bir anayasa anahtarıyla (`capabilityPrecheckEna
 - Görev yetenek istemiyorsa (`requires` boş) hiçbir şey değişmez.
 
 **Ne zaman:** dağıtıcı bir çalışana sıradaki görevi verirken (`#consider`, `nextFor` sonrası). Bloklanan görev
-`waiting`'den `blocked`'a geçer ve sıradaki görev denenir. Notu `Yetenek ön-kontrolü:` ile başlar: hangi yetenek,
+`waiting`'den `blocked`'a geçer ve sıradaki görev denenir. Dağıtıcı bir taramada her görevi en fazla bir kez tutar. Durumunu
+değiştirmeyen bir tutma (bir hata ya da ileride değişen kod) aynı görevi yeniden getirse bile döngü durur ve görev
+o taramada dağıtılmaz; dağıtıcı eşzamanlı çalıştığı için aksi bütün ofisi dondururdu (mutasyon P23 bunu gösterdi). Notu `Yetenek ön-kontrolü:` ile başlar: hangi yetenek,
 hangi durumda, "yetenek açılınca görev kendiliğinden sıraya döner". Koordinatöre `task.blocked` notu gider.
 
 **Geri bırakma:** dağıtıcının her taramasında (saat ya da olay) bu notla bloklanmış görevler yeniden denetlenir:
