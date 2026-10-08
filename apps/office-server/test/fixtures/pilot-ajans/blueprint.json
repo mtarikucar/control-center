@@ -1,0 +1,275 @@
+{
+  "title": "Pilot ajans: altı müşterili sosyal medya ajansının ofisi (sentetik)",
+  "summary": "Sentetik pilot firma: üç kişilik bir sosyal medya ajansı, altı küçük işletme müşterisi (pastane, diş kliniği, yoga stüdyosu, kahve tezgâhı, butik otel, çiçekçi; hepsi uydurma). İş: her müşteri için haftalık içerik takvimi ve gönderi metinleri (6 gönderi/müşteri/hafta), görsel brief'leri, gelen kutusu özeti ve yanıt taslakları, haftalık ve aylık performans raporları. Yayın ve dışa gönderim yalnız kurucunun onayıyla ve kurucu tarafından yapılır; ofis taslak üretir, inceler, raporlar. Pilot 0 kapalı kipte koşar: bağlayıcılar kapalı, veriler masadaki sentetik dosyalardan; gerçek yayın yok.",
+  "brief": "Firma (sentetik): 'Kıyı Ajans'. Üç kişi: kurucu (yayın ve müşteri ilişkisi), bir tasarımcı (görseller, Canva), bir stajyer. Altı müşteri, hepsi küçük işletme, Instagram ve LinkedIn ağırlıklı; müşteri başına haftada 6 gönderi, ayda bir performans raporu. Sorunlar: takvimler geç kalıyor, marka dili müşteriden müşteriye kayıyor, gelen kutusu birikiyor, rapor elle yapılıyor. Kısıtlar: yayın ve e-posta gönderimi yalnız kurucuda; fiyat ve tarih sözü verilmez; müşteri verisi masada tutulmaz. Pilot 0: bütün bağlayıcılar kapalı, kaynaklar masadaki sentetik dosyalar (gelen-kutusu/*.md, takvim.csv, marka rehberleri el kitabında). Pilot 1 (sahibi kararıyla): Gmail okuma, Jeeta okuma, Notion açılır; yayın araçları kapalı kalır.",
+  "roles": [
+    {
+      "key": "icerik-yazari",
+      "name": "İçerik Yazarı",
+      "template": "icerik-yazari",
+      "title": "İçerik Yazarı",
+      "team": "İçerik",
+      "model": "sonnet",
+      "capabilities": [
+        "docs.read",
+        "docs.write",
+        "web.fetch",
+        "social.draft"
+      ],
+      "role": "Bu ajansta altı müşterinin haftalık takvimini ve gönderi metinlerini yazarsın (müşteri başına 6 gönderi). Her metin o müşterinin 'Marka dili — <müşteri>' el kitabı konusuna uyar, kanalın biçim ve karakter kurallarına uyar, bir görsel brief'i taşır; teslimde kaynak listesi yazarsın. Takvimi 'Takvim formatı' konusundaki CSV sütunlarıyla masaya yazarsın. Yayınlamazsın, zamanlamazsın: yayın yalnız kurucunun onayıyla ve kurucu tarafından yapılır."
+    },
+    {
+      "key": "editor",
+      "name": "Editör ve Marka Kontrolcüsü",
+      "template": "editor",
+      "title": "Editör ve Marka Kontrolcüsü",
+      "team": "Kalite",
+      "model": "opus",
+      "capabilities": [
+        "docs.read",
+        "web.fetch"
+      ],
+      "role": "Bu ajansta her içerik ve her müşteri yanıt taslağını ilgili 'Marka dili — <müşteri>' konusuna, brief'e ve 'Müşteri yanıt kuralları'na göre incelersin; kararını reviewDecide ile verirsin. Fiyat ya da tarih sözü içeren taslak, kaynağı olmayan iddia ve marka diline aykırı ton kritik bulgudur. Yayın kararı vermezsin; yayın kurucunun."
+    },
+    {
+      "key": "hesap-asistani",
+      "name": "Hesap Asistanı",
+      "template": "musteri-temsilcisi",
+      "title": "Hesap Asistanı",
+      "team": "Müşteri",
+      "model": "sonnet",
+      "capabilities": [
+        "docs.read",
+        "docs.write",
+        "email.read",
+        "email.draft",
+        "social.read",
+        "calendar.read"
+      ],
+      "role": "Bu ajansta müşteri hesaplarının asistanısın: gelen kutusunu sınıflar ve özetlersin, yanıt taslağı yazarsın (gönderim her zaman kurucuda; e-posta göndermezsin), haftalık ve aylık performans raporlarını 'Rapor şablonu' konusuna göre hazırlarsın, takvimi izlersin. Pilot 0'da gelen kutusu masadaki sentetik dosyalardır (gelen-kutusu/*.md); Pilot 1'de Gmail ve Jeeta yalnız okunur. Fiyat, tarih ve indirim sözü vermezsin; bunları kurucuya yükseltirsin."
+    }
+  ],
+  "playbook": [
+    {
+      "topic": "Yayın onay kuralı",
+      "text": "Yayın ve dışa gönderim (sosyal medya gönderisi, zamanlanmış gönderi, müşteriye e-posta, DM) yalnız kurucunun onay kaydıyla olur ve Pilot 0'da kurucu tarafından yapılır. Ofis taslak üretir, Editör inceler, koordinatör paketi kurucuya sunar (Pilot 0: propose ile öneri kartı; Pilot 1: approvalRequest ile onay kaydı). Onay kaydı olmadan hiçbir çalışan yayın, zamanlama ya da gönderim aracı çağırmaz; kapalı kipte bu araçlar zaten oturumda yoktur. Onaylanan metin değiştirilmeden yayınlanır; değişiklik gerekiyorsa yeni onay. Her yayın paketi: müşteri, kanal, tarih, metin, görsel brief'i, onay kaydı numarası."
+    },
+    {
+      "topic": "Müşteri yanıt kuralları",
+      "text": "Müşteriye giden her yanıt taslaktır; gönderim kurucuda. Yanıtta fiyat, indirim, teslim ya da yayın tarihi sözü verilmez; bu konular 'kurucu dönüş yapacak' denip kurucuya yükseltilir. Ton: kısa, nazik, markanın diliyle (ilgili 'Marka dili — <müşteri>' konusu); müşteri adıyla hitap, tek konu tek yanıt. Şikâyet, iptal ve hukuki konular aynı gün kurucuya yükseltilir, yanıt taslağı özür ve zaman bilgisiyle sınırlı kalır. Kişisel veri (telefon, adres, ödeme bilgisi) masaya kopyalanmaz; yanıtta tekrarlanmaz. Her yanıt taslağı Editör incelemesinden geçer."
+    },
+    {
+      "topic": "Rapor şablonu",
+      "text": "Haftalık müşteri raporu (her Pazartesi, müşteri başına bir bölüm): 1) Özet — üç cümle. 2) Yayın planı — planlanan/yayınlanan gönderi sayısı, zamanında hazır oranı. 3) Performans — kanal başına erişim, etkileşim, takipçi değişimi (Pilot 0: masadaki sentetik veri dosyasından; Pilot 1: Jeeta okuma); her sayının yanında kaynağı. 4) Gelen kutusu — gelen/yanıtlanan/yükseltilen sayısı. 5) Gelecek hafta — takvim özeti ve kurucudan beklenen onaylar. 6) Riskler ve sorular. Aylık rapor aynı başlıklarla, ayın 3. iş gününe kadar kurucuda; ek: KPI tablosu (hedeflerin KPI okumaları). Tahmin sayıya 'tahmin' yazılır; kaynağı olmayan sayı rapora girmez."
+    },
+    {
+      "topic": "Takvim formatı",
+      "text": "İçerik takvimi masada CSV: takvim.csv, sütunlar sırayla: musteri, tarih (YYYY-MM-DD), saat (HH:MM), kanal (instagram|linkedin|facebook), tur (gonderi|hikaye|reels|makale), amac (bir cümle), metin_dosyasi (masadaki yol), gorsel_brief (bir cümle), hashtagler (boşlukla ayrılmış, en çok 8), durum (taslak|incelemede|onayda|onayli|yayinlandi), onay_kaydi (öneri/onay no ya da boş). Müşteri başına haftada 6 satır. Pilot 1'de aynı sütunlar Notion veritabanına taşınır (Takvim formatı (Notion sütunları)); sütun adları değişmez."
+    },
+    {
+      "topic": "Marka dili — Pastane Ada (sentetik)",
+      "text": "Müşteri: Pastane Ada (sentetik) — uydurma bir mahalle pastanesi; gerçek bir işletmeyle ilgisi yoktur. Kanallar: Instagram (ağırlıklı; gönderi, hikâye, reels). Bu rehber İçerik Yazarı'nın her metinde, Editör'ün her incelemede baktığı tek kaynaktır; burada yazmayan bir kural için kurucuya sorulur, uydurulmaz.\n\nMarkanın özü: sabah fırından çıkan ürün, mahallenin tanıdık yüzü, ustanın eli. Pastane Ada büyük bir zincir gibi değil, kapısını her sabah aynı saatte açan komşu gibi konuşur.\n\n## Ton\n\n- Sıcak, samimi ve sakin; abartısız bir mahalle dili. Okur \"siz\" diye karşılanır, ama mesafeli değil: \"Bu sabah sizin için…\".\n- Kısa cümleler: bir cümle en çok 18 kelime. Paragraf en çok üç cümle.\n- Ünlem en çok bir tane, cümle sonunda; büyük harfle bağırma yok.\n- Duyulara hitap eder: koku, sıcaklık, çıtırlık, renk. Sıfat yığmak yerine tek doğru sıfat.\n- Usta ve ekip adıyla anılabilir (\"ustamız\"), ama kişi adı yazılmaz; kurucu izin verirse rol adıyla.\n\n## Yapılacaklar\n\n- Günün ürünü: ne zaman fırından çıktığı, malzemesinin hikâyesi (mevsim meyvesi, tereyağı, ekşi maya), nasıl saklanacağı.\n- Mahalle anları: sabah ilk müşteriler, okul çıkışı, pazar kahvaltısı; mekânın sesi ve ışığı.\n- Malzeme ve emek: hamurun dinlendiği saatler, elle yapılan işler; \"nasıl yapılıyor\" kısa anlatımı.\n- Mevsim ve özel gün: bayram kurabiyesi, yılbaşı çöreği; fiyat ve indirim olmadan, yalnız ürün ve hikâye.\n- Soru ile bitiş: haftada en az bir gönderi okura basit bir soru sorar (\"Siz çayın yanına hangisini seçerdiniz?\").\n- Emoji en çok 2 tane ve ürüne uygun (🥐, ☕); her cümlede değil.\n\n## Yapılmayacaklar\n\n- Fiyat, indirim, kampanya, \"1 alana 1 bedava\" yazmak: bunlar yalnız kurucunun kararıyla ve ayrı onayla olur.\n- Sağlık iddiası: \"glutensiz\", \"şekersiz\", \"diyet dostu\", \"sağlıklı\" ifadeleri kanıtı ve kurucu onayı olmadan yazılmaz.\n- Başka pastane ya da zincirle karşılaştırma, rakip adı.\n- Müşterinin yüzü, adı ya da yorumu izinsiz paylaşılmaz.\n- Stok sözü (\"her gün var\") ve teslim saati sözü verilmez; \"bu sabah fırından çıktı\" gibi bugüne ait ifade kullanılır.\n- Argo, alay, siyasi ya da tartışmalı gündem.\n\n## Kanal ve biçim\n\n- Instagram gönderi: en çok 2.200 karakter; ilk cümle kanca (ürün ya da an), ilk 125 karakterde ürün adı geçer. Önerilen uzunluk 300–700 karakter.\n- Hikâye: tek cümle, en çok 80 karakter; görsel ağırlıklı, yazı görselin üçte birini geçmez.\n- Reels alt yazısı: en çok 150 karakter; ilk 3 saniyede ürün görünür (görsel brief'e yazılır).\n- Her gönderi için görsel brief'i bir cümle: çekim açısı, ışık, sahnede ne var (\"Tezgâhta sıcak simit, sabah ışığı, yandan çekim\").\n- Haftalık dağılım: 4 gönderi + 1 reels + 1 hikâye serisi; en az biri \"nasıl yapılıyor\".\n\n## Hashtag kuralı\n\n- En çok 8 hashtag; metnin sonunda, tek satırda.\n- 3'ü sabit ve her gönderide: #PastaneAda #tazefırın #mahalle\n- Kalan en çok 5'i konuya göre: ürün (#ekşimaya, #simit), an (#pazarkahvaltısı), mevsim (#sonbahar).\n- Hashtag cümle içinde kullanılmaz; İngilizce hashtag yok.\n\n## Örnek cümleler\n\n- \"Bu sabah 7'de fırından çıktı: tereyağlı kruvasan, dışı çıtır, içi yumuşacık. 🥐\"\n- \"Ekşi mayamız 24 saat dinlendi; sabah sıcak ekmeğin kokusu sokağa taştı.\"\n- \"Pazar kahvaltınıza mahalleden bir dokunuş: zeytinli poğaça ve demli çay.\"\n- \"Ustamız hamuru elle katlıyor; her katın arasında biraz sabır var.\"\n- \"Siz çayın yanına hangisini seçerdiniz: simit mi, poğaça mı?\"\n\n## Yasaklı ifadeler\n\n- \"en iyi\", \"en lezzetli\", \"bir numara\" (kanıtsız üstünlük)\n- \"diyet\", \"şekersiz\", \"glutensiz\", \"sağlıklı\" (kanıtsız sağlık iddiası)\n- \"indirim\", \"kampanya\", \"bedava\", \"fırsat\" (fiyat ve kampanya kurucuda)\n- \"her gün taze garantili\", \"stoklar tükenmeden\" (söz ve baskı dili)"
+    },
+    {
+      "topic": "Marka dili — Diş Kliniği Mavi (sentetik)",
+      "text": "Müşteri: Diş Kliniği Mavi (sentetik) — uydurma bir semt diş kliniği; gerçek bir klinikle ilgisi yoktur. Kanallar: Instagram (gönderi, hikâye) ve LinkedIn (klinik ve ekip haberleri, kısa makale). Sağlıkla ilgili her metin bu rehbere ve kurucunun onayına bağlıdır; şüphede yazılmaz, sorulur.\n\nMarkanın özü: korkutmayan, sade ve güven veren bir klinik. Okur bilgilendirilir, ikna edilmeye ya da korkutulmaya çalışılmaz.\n\n## Ton\n\n- Güven veren, sade ve bilgilendirici; tıbbi jargon gerekirse bir cümleyle açıklanır.\n- \"Siz\" hitabı; sakin ve saygılı. Mizah yalnız hafif ve diş fırçası, ipi gibi gündelik konularda.\n- Her bilgi cümlesi genel bilgi olarak kurulur ve gerektiğinde \"hekiminize danışın\" ifadesiyle biter.\n- Korku dili yok: \"çürük kapınızda\" yerine \"düzenli kontrol, küçük sorunu küçükken yakalar\".\n\n## Yapılacaklar\n\n- Bakım ipuçları: fırçalama süresi, diş ipi, beslenme ve diş sağlığı; genel bilgi olarak.\n- Klinik günlüğü: sterilizasyon adımları, randevu öncesi hazırlık, bekleme salonu; hasta görünmeden.\n- Ekip tanıtımı: hekim ve asistanların rolü, uzmanlık alanı, mesleğe neden başladıkları (kişinin yazılı izniyle; Pilot 0'da rol adıyla).\n- Sık sorulan sorular: \"İlk muayenede ne olur?\", \"Çocuklar ne zaman başlar?\"; yanıt genel, kişiye özel tanı yok.\n- LinkedIn: klinik haberleri (yeni cihaz, eğitim), ekip gelişimi; 300–600 kelimelik makale ayda bir.\n\n## Yapılmayacaklar\n\n- Fiyat, kampanya, taksit, \"ücretsiz muayene\" duyurusu: kurucu ve klinik kararı, ayrı onay.\n- Öncesi–sonrası vaadi ya da görseli; hasta yüzü, ağzı, röntgeni izinsiz ve kimliği gizlenmeden paylaşılmaz.\n- Tedavi sonucu garantisi, süre sözü (\"tek seansta\"), başka klinikle karşılaştırma.\n- Kişiye özel tanı ya da tedavi önerisi; yorumlarda soru gelirse \"randevu ile hekiminiz değerlendirir\" yanıtı taslaklanır.\n- İlaç adı, marka adı ve reklam niteliği taşıyan ürün önerisi.\n\n## Kanal ve biçim\n\n- Instagram gönderi: en çok 1.500 karakter; ilk cümle soruyla ya da gündelik bir anla açılır. Önerilen 300–600 karakter.\n- Instagram hikâye: bilgi kartı, en çok 3 kare, kare başına bir cümle.\n- LinkedIn gönderi: 600–1.200 karakter; LinkedIn makale: 300–600 kelime, ara başlıklı, kaynak varsa sonda.\n- Görsel brief'i: illüstrasyon ya da nesne (fırça, diş ipi, klinik ortamı); insan ağzı ve hasta yok.\n- Haftalık dağılım: 4 Instagram gönderisi + 1 hikâye serisi + 1 LinkedIn gönderisi.\n\n## Hashtag kuralı\n\n- En çok 6 hashtag; metnin sonunda.\n- 2'si sabit: #DişKliniğiMavi #ağızvedişsağlığı\n- Kalan en çok 4'ü konuya göre (#dişipi, #çocukdişleri); tanı ya da tedavi adı hashtag olmaz.\n- LinkedIn'de en çok 3 hashtag.\n\n## Örnek cümleler\n\n- \"Dişlerinizi günde iki kez, ikişer dakika fırçalıyor musunuz? Kum saatiyle denemeye ne dersiniz?\"\n- \"Diş ipi, fırçanın ulaşamadığı aralıkları temizler; nasıl kullanılacağını bir sonraki kontrolünüzde hekiminize sorabilirsiniz.\"\n- \"Her alet kullanımdan sonra sterilizasyon odasında üç adımdan geçer. Bugün bu adımları anlattık.\"\n- \"Ekibimize yeni katılan hekimimiz çocuk diş sağlığıyla ilgileniyor; tanışmak için randevunuzda sorabilirsiniz.\"\n- \"Bu genel bir bilgidir; size özel değerlendirme için hekiminize danışın.\"\n\n## Yasaklı ifadeler\n\n- \"garanti\", \"kesin sonuç\", \"tek seansta\" (sonuç ve süre sözü)\n- \"ağrısız\", \"acısız\" (kanıtsız iddia)\n- \"en ucuz\", \"en iyi klinik\", \"uygun fiyat\" (fiyat ve karşılaştırma)\n- \"öncesi–sonrası\", \"mucize gülüş\" (vaat dili)"
+    },
+    {
+      "topic": "Marka dili — Yoga Stüdyosu Nefes (sentetik)",
+      "text": "Müşteri: Yoga Stüdyosu Nefes (sentetik) — uydurma bir semt yoga stüdyosu; gerçek bir stüdyoyla ilgisi yoktur. Kanal: Instagram (gönderi, hikâye, reels). Metinler davet eder, iddia etmez; beden ve sağlık konusunda her cümle bu rehbere uyar.\n\nMarkanın özü: herkese açık, acele etmeyen bir oda. Nefes, mükemmel duruşu değil, kendine ayrılan saati anlatır.\n\n## Ton\n\n- Sakin, davet eden, yumuşak; \"sen\" hitabı (\"Matını serdiğinde…\").\n- Kısa ve nefes alan cümleler; satır araları geniş, paragraf en çok iki cümle.\n- Emir kipi yerine davet: \"dene\", \"katıl\" yerine \"istersen birlikte deneyelim\".\n- Seviye ayrımı yapmaz; yeni başlayan da kendini davetli hisseder.\n- Emoji en çok 2 (🌿, 🧘); ünlem kullanılmaz.\n\n## Yapılacaklar\n\n- Ders programı: haftanın dersleri, saatleri ve hangi seviyeye uygun olduğu (fiyatsız).\n- Eğitmen notu: bir duruş ya da nefes tekniğinin kısa anlatımı, dikkat edilecek noktayla.\n- Nefes ipucu: 3–5 adımlı, herkesin evde yapabileceği basit bir çalışma; \"rahatsızlık hissedersen dur\" notuyla.\n- Stüdyo anı: sabah ışığı, matların dizilişi, ders sonrası çay; kişi yüzü izinsiz yok.\n- Topluluk: ayın teması, okur sorusuna genel yanıt.\n\n## Yapılmayacaklar\n\n- Tedavi ya da şifa iddiası: yoga bir hastalığı iyileştirir, ağrıyı geçirir, kilo verdirir denmez.\n- Fiyat, paket, kampanya, \"ilk ders bedava\": kurucu ve stüdyo kararı, ayrı onay.\n- Beden ölçüsü, kilo, \"ideal vücut\" dili; öncesi–sonrası görseli.\n- Zor duruşları yeni başlayana önermek; sakatlık riski olan hareket adım adım anlatılmaz.\n- Başka stüdyo ya da eğitmenle karşılaştırma.\n\n## Kanal ve biçim\n\n- Instagram gönderi: en çok 1.000 karakter; önerilen 250–500 karakter.\n- Hikâye: görsel ağırlıklı, kare başına en çok 60 karakter; ders saati hatırlatması hikâyede.\n- Reels alt yazısı: en çok 120 karakter; görsel brief'te hareketin yavaş çekimi ve sade arka plan.\n- Görsel brief'i: doğal ışık, sade renkler (yeşil, bej), mat ve bitki; yüzü görünen kişi yalnız izinli eğitmen.\n- Haftalık dağılım: 3 gönderi + 2 reels + 1 hikâye serisi (ders programı).\n\n## Hashtag kuralı\n\n- En çok 8 hashtag; metnin sonunda.\n- 3'ü sabit: #NefesYoga #nefes #yogastüdyosu\n- Kalan en çok 5'i konuya göre (#sabahyogası, #nefesçalışması); sağlık iddiası taşıyan hashtag yok (#bellağrısı gibi).\n\n## Örnek cümleler\n\n- \"Bu hafta sabah derslerinde omuzlara yer açıyoruz; matını serdiğinde nefesini fark etmen yeter. 🌿\"\n- \"Dört sayarak nefes al, dört sayarak ver. Rahatsızlık hissedersen dur ve normal nefesine dön.\"\n- \"Yeni başlıyorsan perşembe akşamı dersi senin için; acele yok, karşılaştırma yok.\"\n- \"Ders bitti, çay demlendi; odada hâlâ sessizlik var.\"\n- \"Bu ay temamız: yavaşlamak. Sen bu hafta neyi yavaşlattın?\"\n\n## Yasaklı ifadeler\n\n- \"iyileştirir\", \"şifa\", \"tedavi eder\", \"ağrıyı geçirir\" (sağlık iddiası)\n- \"kilo verdirir\", \"yağ yakar\", \"ideal vücut\" (beden dili)\n- \"bedava\", \"indirim\", \"son fırsat\" (fiyat ve baskı dili)\n- \"herkes yapabilir\" (zor duruşlar için güvensiz genelleme)"
+    },
+    {
+      "topic": "Marka dili — Kahve Tezgâhı Kıvılcım (sentetik)",
+      "text": "Müşteri: Kahve Tezgâhı Kıvılcım (sentetik) — uydurma, iskele yanında küçük bir kahve tezgâhı; gerçek bir işletmeyle ilgisi yoktur. Kanal: Instagram (gönderi, reels, hikâye). En kısa ve en enerjik dil bu müşteride; ama kısa olmak özensiz olmak değildir.\n\nMarkanın özü: işe giderken uğranan, adınızı bilen bir durak. Kahve ciddidir, dil hafiftir.\n\n## Ton\n\n- Enerjik, esprili, kısa; \"sen\" hitabı.\n- Bir gönderi en çok 4 kısa cümle; kelime oyunu serbest, ama anlaşılır.\n- Barista dili sade: \"çekirdek\", \"kavrum\", \"demleme\" gibi terimler bir cümleyle açılır.\n- Emoji en çok 2 (☕, ⚡); ünlem en çok bir.\n- Mizah kimseyi hedef almaz; rakip, müşteri ya da çalışanla dalga geçilmez.\n\n## Yapılacaklar\n\n- Günün kahvesi: çekirdeğin geldiği bölge (genel: \"Etiyopya'dan bir çekirdek\"), tadı (meyvemsi, çikolatamsı), nasıl demlendiği.\n- Barista notu: süt köpürtme, filtre oranı, evde deneme ipucu.\n- Tezgâh anı: sabah kuyruğu, iskelede ilk vapur, yağmurlu gün; yüz izinsiz yok.\n- Mevsim içeceği: içeriği ve hikâyesi; fiyatsız, \"bu hafta tezgâhta\".\n- Okurla oyun: \"Sabah kahveni bir kelimeyle anlat\" gibi kısa sorular.\n\n## Yapılmayacaklar\n\n- Fiyat, kampanya, sadakat kartı, \"ikincisi bedava\": kurucu kararı, ayrı onay.\n- Rakip kahveci ya da zincir adı, karşılaştırma.\n- Alkol içeren içecek ya da alkol çağrışımı (\"kahve kokteyli\" dahil).\n- Kafein ve sağlık iddiası (\"enerji verir\", \"metabolizmayı hızlandırır\").\n- Çalışma saati ve açılış sözü kurucu onayı olmadan (bir kez yanlış saat yazıldı, şikâyet geldi: saat yalnız kurucunun verdiği metinden).\n\n## Kanal ve biçim\n\n- Instagram gönderi: en çok 800 karakter; önerilen 150–400 karakter.\n- Reels alt yazısı: en çok 120 karakter; ilk 2 saniyede fincan ya da demleme anı (görsel brief'e yazılır).\n- Hikâye: anket ve soru çıkartması serbest; metin kare başına en çok 50 karakter.\n- Görsel brief'i: yakın çekim, buhar, sabah ışığı, ahşap tezgâh; marka renkleri turuncu ve koyu kahve.\n- Haftalık dağılım: 3 gönderi + 2 reels + 1 hikâye serisi.\n\n## Hashtag kuralı\n\n- En çok 8 hashtag; metnin sonunda.\n- 2'si sabit: #KıvılcımKahve #iskelekahvesi\n- Kalan en çok 6'sı konuya göre (#filtrekahve, #sabahkahvesi, #baristanotu).\n\n## Örnek cümleler\n\n- \"Bugün tezgâhta: Etiyopya'dan meyvemsi bir çekirdek. Filtrede, sabah vapurundan önce. ☕\"\n- \"Süt köpüğü sırrı: soğuk süt, temiz pitcher, sabırlı bilek.\"\n- \"Yağmur var, kuyruk kısa. Tam kahve havası.\"\n- \"Sabah kahveni tek kelimeyle anlat. Biz başlıyoruz: kıvılcım.\"\n- \"Evde filtre deneyecek misin? Su ile kahvenin oranı 15'e 1'den başlasın.\"\n\n## Yasaklı ifadeler\n\n- \"en iyi kahve\", \"şehrin bir numarası\" (kanıtsız üstünlük)\n- \"bedava\", \"indirim\", \"kampanya\" (fiyat ve kampanya kurucuda)\n- \"enerji patlaması\", \"metabolizma\" (sağlık ve kafein iddiası)\n- \"kokteyl\", \"shot\" (alkol çağrışımı)"
+    },
+    {
+      "topic": "Marka dili — Butik Otel Kıyı (sentetik)",
+      "text": "Müşteri: Butik Otel Kıyı (sentetik) — uydurma, deniz kıyısında on iki odalı bir butik otel; gerçek bir otelle ilgisi yoktur. Kanallar: Instagram (gönderi, hikâye) ve LinkedIn (otel ve ekip haberleri). Dil betimler ve davet eder; satış dili ve aciliyet yoktur.\n\nMarkanın özü: yavaş sabahlar, denize bakan pencere, yerel lezzet. Otel bir yer değil, bir hafta sonu ritmi gibi anlatılır.\n\n## Ton\n\n- Zarif, sakin, betimleyici; \"siz\" hitabı.\n- Cümleler orta uzunlukta ve akıcı; duyulara hitap eder (dalga sesi, sabah serinliği, zeytinyağı kokusu).\n- Abartı yok: \"muhteşem\", \"eşsiz\" yerine somut ayrıntı (\"pencereden ilk vapur görünür\").\n- Emoji en çok 1 (🌊) ya da hiç; ünlem kullanılmaz.\n- LinkedIn'de ton aynı ama bilgi ağırlıklı: ekip, sürdürülebilirlik, yerel üreticiler.\n\n## Yapılacaklar\n\n- Oda ve manzara: oda tipinin bir ayrıntısı, ışık, sabah ve akşam görüntüsü.\n- Yerel öneriler: yürüme mesafesinde koy, pazar günü, mevsim meyvesi; işletme adı vermeden genel tarif.\n- Kahvaltı ve mutfak: yerel üreticiden ürün, menünün mevsimle değişmesi (fiyatsız).\n- Mevsim: sonbaharda sakin hafta sonları, kışın şömine; tarih ve doluluk sözü vermeden.\n- Ekip: resepsiyon, mutfak, bahçe; rol adıyla ve izinle.\n\n## Yapılmayacaklar\n\n- Fiyat, doluluk, \"son oda\", kampanya, erken rezervasyon indirimi: kurucu ve otel kararı, ayrı onay.\n- Misafir yüzü, adı, yorumu ya da odası izinsiz paylaşılmaz; yorumlara yanıt taslağı kurucuya gider, ofis yayınlamaz.\n- Başka otel ya da platformla karşılaştırma, puan ve sıralama iddiası (\"bölgenin en iyisi\").\n- Tarih sözü: \"bu hafta sonu müsait\" gibi ifadeler yazılmaz; rezervasyon yönlendirmesi yalnız \"bize yazın\".\n- Hava ve deniz durumu için kesin söz (\"garantili güneş\").\n\n## Kanal ve biçim\n\n- Instagram gönderi: en çok 1.500 karakter; önerilen 300–800 karakter, bir betimleme paragrafı + bir davet cümlesi.\n- Hikâye: kare başına en çok 60 karakter; sabah ve gün batımı serisi.\n- LinkedIn gönderi: 200–400 kelime; otel haberi, ekip, yerel iş birliği; kaynak varsa sonda.\n- Görsel brief'i: geniş açı manzara, yumuşak sabah ışığı, sade renkler (beyaz, kum, deniz mavisi); misafir yok.\n- Haftalık dağılım: 4 Instagram gönderisi + 1 hikâye serisi + 1 LinkedIn gönderisi.\n\n## Hashtag kuralı\n\n- En çok 6 hashtag; metnin sonunda.\n- 2'si sabit: #ButikOtelKıyı #kıyıdabirhaftasonu\n- Kalan en çok 4'ü konuya göre (#sonbahartatili, #yerelkahvaltı); bölge ve şehir adı hashtag olmaz.\n- LinkedIn'de en çok 3 hashtag.\n\n## Örnek cümleler\n\n- \"Sabah perdeyi araladığınızda ilk vapur geçiyor; çayınız balkonda soğumadan.\"\n- \"Kahvaltı masamızdaki zeytinyağı, yolun yukarısındaki bahçelerden geliyor; menü mevsimle değişiyor.\"\n- \"Sonbaharda kıyı sakinleşir: kısa yürüyüşler, uzun akşamlar.\"\n- \"Mutfak ekibimiz bu hafta yerel üreticilerle buluştu; ilk ürünler kahvaltıda.\"\n- \"Bir hafta sonu için bize yazın; gerisini birlikte planlayalım.\"\n\n## Yasaklı ifadeler\n\n- \"en ucuz\", \"son oda\", \"kaçırmayın\", \"sınırlı kontenjan\" (fiyat ve aciliyet dili)\n- \"eşsiz\", \"muhteşem\", \"bölgenin en iyisi\" (kanıtsız üstünlük)\n- \"garantili güneş\", \"her zaman müsait\" (söz)\n- \"misafirimiz X\" (izinsiz kişi adı)"
+    },
+    {
+      "topic": "Marka dili — Çiçekçi Zeytin (sentetik)",
+      "text": "Müşteri: Çiçekçi Zeytin (sentetik) — uydurma, çarşı içinde küçük bir çiçekçi; gerçek bir işletmeyle ilgisi yoktur. Kanal: Instagram (gönderi, hikâye, reels). Görsel önde, metin kısa ve neşeli; söz yerine ipucu verir.\n\nMarkanın özü: haftanın çiçeği ve onu uzun yaşatmanın küçük sırları. Zeytin, çiçeği satan değil, çiçeği seven komşudur.\n\n## Ton\n\n- Neşeli, sıcak, kısa; \"sen\" hitabı.\n- Bir gönderi en çok 3 kısa cümle + bir ipucu satırı.\n- Renk ve koku dili; çiçeğin adı ve mevsimi doğru yazılır (emin değilsen genel ad: \"mevsim çiçekleri\").\n- Emoji en çok 2 (🌷, 🌿); ünlem en çok bir.\n\n## Yapılacaklar\n\n- Haftanın çiçeği: adı, rengi, mevsimi, vazoda ne kadar dayandığı (genel bilgi).\n- Bakım ipucu: suyu değiştirme, sapı çapraz kesme, güneşten koruma; 1–3 adım.\n- Özel gün hatırlatması: anneler günü, öğretmenler günü, yılbaşı; fiyatsız ve teslim sözü olmadan (\"önceden bize yazın\").\n- Atölye anı: buket hazırlığı, kurdele seçimi, sabah gelen çiçekler; kişi yüzü izinsiz yok.\n- Okurla: \"Bu hafta masana hangi renk?\" gibi kısa sorular.\n\n## Yapılmayacaklar\n\n- Fiyat, indirim, kampanya, \"ücretsiz teslimat\": kurucu kararı, ayrı onay.\n- Teslim süresi ve saat sözü (\"aynı gün teslim\", \"1 saatte kapında\").\n- Stok sözü (\"her gün var\", \"tükenmeden\").\n- Başka çiçekçi ya da platformla karşılaştırma.\n- Çiçek hakkında doğrulanmamış iddia (\"2 hafta solmaz\", \"evcil hayvana zararsız\" — kaynaksız yazılmaz).\n\n## Kanal ve biçim\n\n- Instagram gönderi: en çok 600 karakter; önerilen 150–350 karakter.\n- Hikâye: görsel ağırlıklı, kare başına en çok 40 karakter; bakım ipucu serisi.\n- Reels alt yazısı: en çok 100 karakter; görsel brief'te buket hazırlığının hızlandırılmış çekimi.\n- Görsel brief'i: üstten çekim, doğal ışık, sade zemin (ahşap, keten), çiçek kadrajın en az yarısı.\n- Haftalık dağılım: 3 gönderi + 2 reels + 1 hikâye serisi.\n\n## Hashtag kuralı\n\n- En çok 8 hashtag; metnin sonunda.\n- 3'ü sabit: #ÇiçekçiZeytin #haftanınçiçeği #çiçekbakımı\n- Kalan en çok 5'i konuya göre (#lale, #mevsimçiçekleri, #buket); özel günde günün hashtag'i (#anneler günü yerine #annelergünü).\n\n## Örnek cümleler\n\n- \"Haftanın çiçeği: lale. Vazoda sapları biraz uzar, sen de her gün suyunu tazele. 🌷\"\n- \"İpucu: sapı çapraz kes, çiçek suyu daha kolay içer.\"\n- \"Öğretmenler günü yaklaşıyor; buketini önceden bize yazarsan birlikte seçeriz.\"\n- \"Bu sabah atölyeye mevsim çiçekleri geldi; renkler tezgâhı aydınlattı.\"\n- \"Bu hafta masana hangi renk: sarı mı, mor mu?\"\n\n## Yasaklı ifadeler\n\n- \"aynı gün teslim\", \"1 saatte kapında\" (kanıtsız teslim sözü)\n- \"en taze\", \"en ucuz\", \"şehrin en iyisi\" (kanıtsız üstünlük)\n- \"indirim\", \"kampanya\", \"ücretsiz teslimat\" (fiyat ve kampanya kurucuda)\n- \"hiç solmaz\", \"haftalarca dayanır\" (doğrulanmamış iddia)"
+    }
+  ],
+  "goals": [
+    {
+      "key": "h1-haftalik-takvim",
+      "title": "Altı müşterinin haftalık takvimi ve gönderi metinleri her Cuma 17:00'ye kadar onaya hazır",
+      "why": "Ajansın vaadi zamanında ve markaya uygun içeriktir; geç kalan takvim müşteri kaybının ilk nedenidir. Kurucunun onay oranı içeriğin kalitesinin vekilidir (pilot-senaryosu §7 KÖ3, KÖ6).",
+      "done": [
+        "Üst üste 4 hafta altı müşterinin de takvimi ve metinleri Cuma 17:00'den önce 'onayda' durumunda",
+        "Zamanında hazır oranı 4 haftalık ortalamada en az %90",
+        "Kurucunun ilk sunumda onayladığı taslak oranı en az %70; ret nedenleri notlarda"
+      ],
+      "kpis": [
+        {
+          "name": "Zamanında hazır oranı",
+          "target": 90,
+          "direction": "atLeast",
+          "unit": "%",
+          "source": "manual",
+          "cadence": "weekly"
+        },
+        {
+          "name": "Kurucunun yayın onay oranı",
+          "target": 70,
+          "direction": "atLeast",
+          "unit": "%",
+          "source": "manual",
+          "cadence": "weekly"
+        },
+        {
+          "name": "İlk geçişte onay oranı",
+          "target": 70,
+          "direction": "atLeast",
+          "source": "office",
+          "metric": "firstPassRate",
+          "cadence": "weekly"
+        }
+      ]
+    },
+    {
+      "key": "h2-aylik-rapor",
+      "title": "Aylık raporlar ayın 3. iş gününe kadar kurucuda; haftalık raporlar her Pazartesi",
+      "why": "Rapor müşteriye gösterilen değerdir ve ajansın elle yaptığı en pahalı iştir; zamanında ve kaynaklı rapor pilotun ikinci vaadidir (pilot-senaryosu §7 KÖ11).",
+      "done": [
+        "İlk aylık rapor altı müşteri için ayın 3. iş günü bitmeden kurucuda ve Editör incelemesinden geçmiş",
+        "Haftalık raporların hepsi 'Rapor şablonu' konusuna uygun ve her sayının yanında kaynağı var",
+        "Rapor gecikmesi 0 gün"
+      ],
+      "kpis": [
+        {
+          "name": "Aylık rapor gecikmesi",
+          "target": 0,
+          "direction": "atMost",
+          "unit": "gün",
+          "source": "manual",
+          "cadence": "monthly"
+        },
+        {
+          "name": "Zamanında haftalık rapor oranı",
+          "target": 100,
+          "direction": "atLeast",
+          "unit": "%",
+          "source": "manual",
+          "cadence": "weekly"
+        }
+      ]
+    }
+  ],
+  "routines": [
+    {
+      "key": "haftalik-musteri-raporu",
+      "title": "Haftalık müşteri raporu",
+      "description": "Her Pazartesi 09:00: altı müşteri için geçen haftanın raporu 'Rapor şablonu' konusuna göre (Pilot 0: masadaki sentetik performans dosyasından; Pilot 1: Jeeta okuma). Her sayının yanında kaynağı; tahmin 'tahmin' diye işaretli. Rapor masaya dosya olarak teslim edilir, Editör inceler, koordinatör kurucuya iletir.",
+      "done": [
+        "Altı müşterinin her biri için şablonun 6 bölümü dolu",
+        "Her sayının yanında kaynak dosyası ya da 'tahmin' işareti var",
+        "Zamanında hazır oranı ve gelen kutusu sayıları hesaplanmış, KPI okuması için koordinatöre yazılmış",
+        "Fiyat, indirim ya da tarih sözü içermiyor"
+      ],
+      "role": "hesap-asistani",
+      "reviewer": "editor",
+      "cron": "0 9 * * 1",
+      "difficulty": "medium"
+    },
+    {
+      "key": "gelen-kutusu-ozeti",
+      "title": "Gelen kutusu özeti",
+      "description": "Hafta içi her gün 08:30: gelen kutusu (Pilot 0: gelen-kutusu/*.md sentetik dosyaları; Pilot 1: Gmail okuma) sınıflanır: yanıt gerektiren, bilgi, yükseltme (şikâyet, iptal, fiyat/tarih sorusu). Yanıt gerektirenler için taslak yazılır; 'Müşteri yanıt kuralları' uygulanır; gönderim kurucuda.",
+      "done": [
+        "Özet: kaç e-posta, kaçı yanıt gerektiriyor, kaçı yükseltildi (listesiyle)",
+        "Yanıt gerektiren her e-posta için bir taslak; taslaklarda fiyat, indirim, tarih sözü yok",
+        "Hiçbir e-posta gönderilmedi; yükseltmeler kurucu için tek listede"
+      ],
+      "role": "hesap-asistani",
+      "reviewer": "editor",
+      "cron": "30 8 * * 1-5",
+      "difficulty": "easy"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "musteri-arastirmasi-pastane",
+      "title": "Müşteri araştırması: Pastane Ada (sentetik)",
+      "description": "Pastane Ada için bir sayfalık araştırma: hedef kitle, ton, rakip hesaplar (en az 3, uydurma ya da genel kategori örnekleri; gerçek işletme adı kullanılmaz), son 20 gönderinin özeti (Pilot 0: masadaki gecmis-gonderiler/pastane-ada.md sentetik dosyasından), çelişkiler ve sorular. Kaynak listesi zorunlu; doğrulanamayan iddia 'doğrulanmadı' diye işaretlenir.",
+      "done": [
+        "Bir sayfa (≤ 600 kelime), her olgusal cümlenin yanında kaynak",
+        "En az 3 rakip/benzer hesap, her biri için ton ve sıklık notu",
+        "Son 20 gönderinin özeti: en çok etkileşim alan 3 konu",
+        "Çelişkiler ve kurucuya sorular ayrı başlıkta",
+        "Gerçek kişi ya da firma adı yok"
+      ],
+      "role": "icerik-yazari",
+      "reviewer": "editor",
+      "requires": [
+        "docs.read",
+        "docs.write",
+        "web.fetch"
+      ],
+      "difficulty": "medium",
+      "priority": 2
+    },
+    {
+      "key": "icerik-takvimi-pastane",
+      "title": "Haftalık içerik takvimi ve 6 gönderi metni: Pastane Ada (sentetik)",
+      "description": "Gelecek hafta için 6 gönderi: takvim.csv'ye 'Takvim formatı' sütunlarıyla 6 satır; her gönderi için metin dosyası ve görsel brief'i; 'Marka dili — Pastane Ada (sentetik)' konusuna uygun. Yayın yok; teslim 'onayda' durumunda kurucuya gider.",
+      "done": [
+        "takvim.csv'de 6 satır, bütün sütunlar dolu, tarih ve kanal dağılımı yazılı",
+        "6 metin dosyası, her biri kanal karakter sınırı içinde ve hashtag kuralına uygun (en çok 8)",
+        "Her metinde bir görsel brief'i (bir cümle)",
+        "Fiyat, indirim, sağlık iddiası yok; yasaklı ifadeler yok",
+        "Teslim özetinde kullanılan el kitabı konuları ve varsayımlar yazılı"
+      ],
+      "role": "icerik-yazari",
+      "reviewer": "editor",
+      "requires": [
+        "docs.read",
+        "docs.write"
+      ],
+      "difficulty": "medium",
+      "priority": 2
+    },
+    {
+      "key": "gelen-kutusu-ilk-ozet",
+      "title": "İlk gelen kutusu özeti ve 3 yanıt taslağı (sentetik gelen kutusu)",
+      "description": "Masadaki gelen-kutusu/*.md dosyaları (10–15 sentetik e-posta) sınıflanır; yanıt gerektiren en acil 3'ü için taslak yazılır; yükseltme listesi çıkarılır. 'Müşteri yanıt kuralları' uygulanır. Pilot 1'de aynı görev Gmail okuma yeteneğiyle açılır (requires: email.read, email.draft).",
+      "done": [
+        "Özet tablosu: her e-posta için sınıf (yanıt|bilgi|yükseltme) ve bir satır gerekçe",
+        "3 yanıt taslağı, her biri ≤ 120 kelime, fiyat/indirim/tarih sözü yok, müşterinin marka diliyle",
+        "Yükseltme listesi kurucu için tek dosyada",
+        "Hiçbir e-posta gönderilmedi (kapalı kipte araç zaten yok)"
+      ],
+      "role": "hesap-asistani",
+      "reviewer": "editor",
+      "requires": [
+        "docs.read",
+        "docs.write"
+      ],
+      "difficulty": "easy",
+      "priority": 3
+    }
+  ],
+  "closedMode": {
+    "deny": [
+      "mcp__claude_ai_Gmail",
+      "mcp__claude_ai_jeeta",
+      "mcp__claude_ai_Higgsfield",
+      "mcp__claude_ai_Notion",
+      "mcp__claude_ai_Google_Calendar",
+      "mcp__claude_ai_Slack",
+      "mcp__claude_ai_Google_Drive",
+      "mcp__plugin_playwright_playwright",
+      "mcp__claude_ai_apify",
+      "Bash(git push*)",
+      "Bash(gh *)",
+      "Bash(curl *)"
+    ]
+  },
+  "estimates": {
+    "quotaPct": null,
+    "usd": 60,
+    "days": 5
+  },
+  "risks": "Pilot 0 kapalı kipte: bağlayıcılar kapalı, veriler sentetik; KÖ7 (≤ 150 tur, ≤ $60/hafta) K0 hipotezdir. Kapalı kip masa dosyasıdır; kararlı atlatmayı durdurmaz (B9 notu §8). Hesap Asistanı şablonu musteri-temsilcisi email.send içerir; bu blueprint yetenek listesini açıkça verir ve şablonun yerine geçer (company.ts hire), gönderim yeteneği yoktur. Gerçek kişi ya da firma yok."
+}

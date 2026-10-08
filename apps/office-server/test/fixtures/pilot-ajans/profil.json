@@ -1,0 +1,38 @@
+{
+  "identity": {
+    "name": "Kıyı Ajans (sentetik)",
+    "sector": "sosyal medya ve içerik ajansı",
+    "summary": "Üç kişilik uydurma bir ajans: altı küçük işletme müşterisine haftalık içerik takvimi, gönderi metinleri, görsel brief'leri, gelen kutusu yönetimi ve aylık rapor hazırlar. Yayın ve gönderim kurucuda.",
+    "country": "Türkiye",
+    "languages": ["tr"],
+    "notes": "Pilot için uydurulmuş firma; gerçek bir işletmeyle ilgisi yoktur."
+  },
+  "offer": {
+    "products": ["Haftalık içerik takvimi ve gönderi metinleri (müşteri başına 6 gönderi)", "Görsel brief'leri", "Gelen kutusu özeti ve yanıt taslakları", "Haftalık ve aylık performans raporu"],
+    "pricing": "Aylık sabit paket (tutarlar pilotun dışında; ofis fiyat sözü vermez)"
+  },
+  "customers": {
+    "segments": ["Mahalle ölçeğinde küçük işletmeler: pastane, diş kliniği, yoga stüdyosu, kahve tezgâhı, butik otel, çiçekçi (altısı da uydurma)"],
+    "channels": ["tavsiye", "Instagram"],
+    "platforms": ["Instagram", "LinkedIn"]
+  },
+  "tools": {
+    "email": ["Ajansın ortak gelen kutusu (Pilot 0: masadaki gelen-kutusu/*.md sentetik dosyaları)"],
+    "social": ["Instagram ve LinkedIn müşteri hesapları (Pilot 0: kapalı; yayın kurucuda)"],
+    "other": ["İçerik takvimi takvim.csv (Pilot 1: Notion)", "Görseller tasarımcıda (Canva)"]
+  },
+  "constraints": {
+    "budget": "aylık 60 USD API karşılığı (pilot KÖ7 hipotezi)",
+    "legal": ["Müşteri kişisel verisi masaya kopyalanmaz", "Sağlık ve tedavi iddiası yazılmaz"],
+    "brandVoice": "Her müşterinin kendi 'Marka dili — <müşteri> (sentetik)' el kitabı konusu",
+    "timezone": "Europe/Istanbul",
+    "other": ["Yayın ve e-posta gönderimi yalnız kurucuda", "Fiyat, indirim ve tarih sözü verilmez"]
+  },
+  "goals": {
+    "goals": ["Altı müşterinin haftalık takvimi her Cuma 17:00'ye kadar onaya hazır", "Aylık raporlar ayın 3. iş gününe kadar kurucuda"],
+    "kpis": ["Zamanında hazır oranı ≥ %90", "Kurucunun yayın onay oranı ≥ %70", "Aylık rapor gecikmesi 0 gün"]
+  },
+  "success": {
+    "done": ["Takvimler zamanında ve markaya uygun", "Gelen kutusu her sabah özetli", "Raporlar zamanında ve kaynaklı"]
+  }
+}
