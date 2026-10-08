@@ -13,26 +13,19 @@ import { TokenRegistry } from '../src/mcp/tokens.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { setup, until } from './helpers.ts';
+import { LOCKED_ARGS } from './real-session.ts';
 
 const enabled = process.env.OFFICE_SMOKE === '1';
 /** The only tools the session may use: the office's own, and Claude Code's loader for deferred tool schemas. */
 const allowed = (name: string) => name.startsWith('mcp__office__') || name === 'ToolSearch';
-/**
- * Closed before anything runs (review, Kerem round 1): no connector of the owner's enters the session
- * (--strict-mcp-config: only the office's own server), and the built-in tools that reach outside, run code or start
- * agents are not there. Left: Read, Glob, Grep, ToolSearch and the office tools (k3-strict-probe.txt).
- */
-const LOCKED = [
-  'Bash', 'WebFetch', 'WebSearch', 'Task', 'Write', 'Edit', 'NotebookEdit', 'PushNotification', 'SendMessage', 'Workflow', 'Skill', 'DesignSync', 'Monitor',
-  'EnterWorktree', 'ExitWorktree', 'ListAgents', 'TaskStop', 'LSP', 'ReportFindings',
-];
+// Closed before anything runs (review, Kerem round 1): only the office's own server, no outward built-in (real-session.ts).
 
 describe.skipIf(!enabled)('core 2 with the real claude CLI (coordinator on haiku, a throwaway data dir, only the office’s server)', () => {
   it('the coordinator calls onboardingStart, onboardingRead and integrationsList once — no connector of the owner’s is even in the session', { timeout: 600_000 }, async () => {
     const s = setup();
     const tokens = new TokenRegistry();
     let url = '';
-    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['claude', '--strict-mcp-config', '--disallowedTools', ...LOCKED], mcp: { url: () => url, tokens } });
+    const engine = new Engine({ roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: ['claude', ...LOCKED_ARGS], mcp: { url: () => url, tokens } });
     const tasks = new TaskStore(s.db);
     const plans = new PlanStore(s.db);
     const notices = new NoticeStore(s.db);
