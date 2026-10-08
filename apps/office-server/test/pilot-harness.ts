@@ -21,6 +21,7 @@ import { ProposalStore } from '../src/company/proposal-store.ts';
 import { Pulse } from '../src/company/pulse.ts';
 import { Scheduling, dueLabel } from '../src/company/scheduling.ts';
 import { SearchIndex } from '../src/company/search.ts';
+import { toolClass, type ToolClass } from '../src/company/capabilities.ts';
 import { sessionDeny } from '../src/company/session-deny.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from '../src/company/store.ts';
 import { Engine } from '../src/engine.ts';
@@ -49,6 +50,12 @@ const STUB = fileURLToPath(new URL('./fixtures/mcp-stub.mjs', import.meta.url));
 export const PILOT_STUBS = ['probe_open', 'probe_shut'] as const;
 export const STUB_CONFIG = JSON.stringify({ mcpServers: Object.fromEntries(PILOT_STUBS.map((n) => [n, { command: process.execPath, args: [STUB, n] }])) });
 
+/**
+ * The stubs' tools count as a non-outward capability here (as B9b's own K3 does; no real connector's name is used): B9b
+ * leaves them open, so probe_shut is closed by the desk file alone (closed mode, step 4), not by B9b.
+ */
+export const pilotClassify = (name: string): ToolClass => (PILOT_STUBS.some((s) => name.startsWith(`mcp__${s}__`)) ? { kind: 'classified', capability: 'docs.read', outward: false } : toolClass(name));
+
 /** How every session starts: the lock (--strict-mcp-config, outward built-ins gone), then the stubs; the office's own server comes from the engine. */
 export function pilotCommand(claude: string[] = ['claude']): string[] {
   return [...claude, ...LOCKED_ARGS, '--mcp-config', STUB_CONFIG];
@@ -66,6 +73,8 @@ export interface PilotOffice extends TestSetup {
   memory: Memory;
   kpis: KpiReadings;
   clock: Clock;
+  scheduling: Scheduling;
+  tokens: TokenRegistry;
   tasks: TaskStore;
   plans: PlanStore;
   schedules: ScheduleStore;
@@ -82,7 +91,12 @@ export interface PilotOffice extends TestSetup {
 }
 
 /** Builds the office for the pilot run. `claude` is the CLI (the K1 check gives the fake one; the run, the real one). */
-export async function pilotOffice(o: { claude?: string[]; env?: NodeJS.ProcessEnv } = {}): Promise<PilotOffice> {
+/**
+ * `autonomy` 'plans' (default here): every plan, the blueprint's too, waits for the owner's approval, as pilot §6 has it.
+ * `safetyMs`: how often the clock runs at the latest (and the dispatcher sweeps after it): a notice without an event (the
+ * owner's onboarding answers) reaches the coordinator within it.
+ */
+export async function pilotOffice(o: { claude?: string[]; env?: NodeJS.ProcessEnv; autonomy?: 'plans' | 'free'; safetyMs?: number } = {}): Promise<PilotOffice> {
   let offset = 0;
   const now = () => Date.now() + offset;
   const s = setup(8, now);
@@ -92,7 +106,7 @@ export async function pilotOffice(o: { claude?: string[]; env?: NodeJS.ProcessEn
   let integrations: IntegrationRegistry;
   const engine = new Engine({
     roster: s.roster, events: s.events, dataDir: s.dataDir, claudeCommand: pilotCommand(o.claude), env: o.env, mcp: { url: () => url, tokens },
-    sessionDeny: (e) => sessionDeny({ capabilities: e.capabilities ?? [], seen: integrations.seenToolNames(), closedServers: integrations.closedServers() }),
+    sessionDeny: (e) => sessionDeny({ capabilities: e.capabilities ?? [], seen: integrations.seenToolNames(), closedServers: integrations.closedServers(), classify: pilotClassify }),
   });
   const index = new SearchIndex(s.db);
   const tasks = new TaskStore(s.db, now, index);
@@ -107,7 +121,9 @@ export async function pilotOffice(o: { claude?: string[]; env?: NodeJS.ProcessEn
     decisions: new DecisionStore(s.db, now, index), playbook: new PlaybookStore(s.db, now, index), notes: new NoteStore(s.db, now, index), employeeNotes: new EmployeeNoteStore(s.db, now),
   });
   const quota = new QuotaTracker(s.db, s.events);
-  const budget = new Budget({ constitution: new ConstitutionStore(s.db), spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8, now });
+  const constitution = new ConstitutionStore(s.db);
+  constitution.set({ autonomy: o.autonomy ?? 'plans' });
+  const budget = new Budget({ constitution, spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices, quota, deskCount: 8, now });
   const characters = () => ['coder', 'designer', 'manager'];
   // Every hire runs on the pilot's model, whatever the blueprint or a template says.
   const hire = (input: HireInput): Employee => engine.hire({ ...input, model: PILOT_MODEL });
@@ -117,7 +133,7 @@ export async function pilotOffice(o: { claude?: string[]; env?: NodeJS.ProcessEn
   });
   const pulse = new Pulse({ company, roster: s.roster, goals, state, plans, tasks, notices, budget, now });
   const scheduling = new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
-  const clock = new Clock({ scheduling, state, events: s.events, label: (at) => dueLabel(tasks, schedules, company, at), now });
+  const clock = new Clock({ scheduling, state, events: s.events, label: (at) => dueLabel(tasks, schedules, company, at), now, safetyMs: o.safetyMs ?? 5_000 });
   company.attachClock(clock);
   const kpis = new KpiReadings({ db: s.db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (p) => performanceReport(s.db, p), now });
   company.attachKpis(kpis);
@@ -155,7 +171,7 @@ export async function pilotOffice(o: { claude?: string[]; env?: NodeJS.ProcessEn
     return spent;
   };
   return {
-    ...s, engine, company, blueprints, memory, kpis, clock, tasks, plans, schedules, notices, integrations, api, port, now,
+    ...s, engine, company, blueprints, memory, kpis, clock, scheduling, tokens, tasks, plans, schedules, notices, integrations, api, port, now,
     advance: (ms) => void (offset += ms), checkCost, stop,
   };
 }

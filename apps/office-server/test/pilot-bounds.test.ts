@@ -3,7 +3,8 @@ import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readArgv } from './engine-helpers.ts';
 import { FAKE_CLAUDE, tempDir } from './helpers.ts';
-import { COST_CAP_USD, PILOT_MODEL, PILOT_STUBS, STEP_TIMEOUT_MS, STUB_CONFIG, pilotCommand, pilotOffice, type PilotOffice } from './pilot-harness.ts';
+import { sessionDeny } from '../src/company/session-deny.ts';
+import { COST_CAP_USD, PILOT_MODEL, PILOT_STUBS, STEP_TIMEOUT_MS, STUB_CONFIG, pilotClassify, pilotCommand, pilotOffice, type PilotOffice } from './pilot-harness.ts';
 import { LOCKED_ARGS, LOCKED_TOOLS } from './real-session.ts';
 
 /**
@@ -75,4 +76,14 @@ describe('pilot K3 — the bounds are fixed in the test (K1)', () => {
     turn(0.0001);
     expect(() => o.checkCost()).toThrow(/Maliyet tavanı aşıldı: \$0\.5001 > \$0\.5; koşu durduruldu\./);
   });
+
+  it('B9b leaves the stubs’ tools open (a non-outward class here), so only the desk file closes probe_shut; real tools keep their class', () => {
+    const stubs = PILOT_STUBS.map((s) => `mcp__${s}__ping`);
+    const deny = sessionDeny({ capabilities: [], seen: [...stubs, 'mcp__plugin_x_x__other'], closedServers: [], classify: pilotClassify });
+    for (const t of stubs) expect(deny).not.toContain(t);
+    expect(deny).toContain('mcp__plugin_x_x__other');
+    expect(pilotClassify('mcp__claude_ai_Gmail__send_message')).toEqual({ kind: 'classified', capability: 'email.send', outward: true });
+    expect(pilotClassify('mcp__office__myTasks')).toEqual({ kind: 'office' });
+  });
 });
+
