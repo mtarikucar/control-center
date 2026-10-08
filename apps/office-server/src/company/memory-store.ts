@@ -163,6 +163,12 @@ export class NoteStore {
     return rows.map(noteFromRow);
   }
 
+  /** The notes written from one source (e.g. `plan:<id>`), oldest first. */
+  bySource(source: string): Note[] {
+    const rows = this.#db.prepare('SELECT * FROM notes WHERE source = ? ORDER BY ts, id').all(source) as unknown as NoteRow[];
+    return rows.map(noteFromRow);
+  }
+
   search(query: string, limit = 20): Array<{ note: Note; snippet: string }> {
     const match = ftsQuery(query);
     if (!match) return [];

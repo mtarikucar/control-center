@@ -316,9 +316,18 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
         last.delete(key);
         last.set(key, text);
       };
+      // The goal whose closing the plan changes right after it come from: the coordinator's goalSet closes the goal's
+      // plans in the same call, so a plan stopped there went with its goal, not by the owner's hand.
+      let closing: string | null = null;
       for (const { event: e } of log) {
-        if (e.type === 'plan.changed') put(`plan:${e.plan.id}`, `${title(e.plan)} planı ${PLAN_TR[e.change]}`);
-        else if (e.type === 'goal.changed') put(`goal:${e.goal.id}`, `${title(e.goal)} hedefi ${e.change === 'closed' ? (e.goal.status === 'done' ? 'tamamlandı' : 'bırakıldı') : GOAL_TR[e.change]}`);
+        if (e.type === 'plan.changed') {
+          const withGoal = e.change === 'stopped' && closing !== null && e.plan.goalId === closing;
+          put(`plan:${e.plan.id}`, `${title(e.plan)} planı ${withGoal ? 'hedefiyle durdu' : PLAN_TR[e.change]}`);
+          if (e.plan.goalId !== closing) closing = null;
+          continue;
+        }
+        closing = e.type === 'goal.changed' && e.change === 'closed' ? e.goal.id : null;
+        if (e.type === 'goal.changed') put(`goal:${e.goal.id}`, `${title(e.goal)} hedefi ${e.change === 'closed' ? (e.goal.status === 'done' ? 'tamamlandı' : 'bırakıldı') : GOAL_TR[e.change]}`);
       }
       return last.size ? [`- Plan ve hedef: ${cap([...last.values()], L.names, 'değişiklik').join('; ')}`] : [];
     };

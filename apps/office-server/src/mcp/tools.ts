@@ -683,9 +683,18 @@ export function officeTools(o: {
       }),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const goal = company.goalSet(employee.id, { goalId: optStr(args, 'goalId'), title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, kpis: args.kpis, status: optStr(args, 'status'), note: optStr(args, 'note') });
-        if (!optStr(args, 'goalId')) return `Hedef açıldı (${goal.id}): “${goal.title}”. Planlarını planPropose ile goalId vererek başlat.`;
-        return `Hedef güncellendi: “${goal.title}” (${goal.status}).`;
+        const goalId = optStr(args, 'goalId');
+        // Its plans under way: closing the goal closes them, and the reply names those whose retro is still to write.
+        const underWay = goalId ? company.goalPlans(goalId).filter((p) => p.status === 'approved') : [];
+        const goal = company.goalSet(employee.id, { goalId, title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, kpis: args.kpis, status: optStr(args, 'status'), note: optStr(args, 'note') });
+        if (!goalId) return `Hedef açıldı (${goal.id}): “${goal.title}”. Planlarını planPropose ile goalId vererek başlat.`;
+        const now = new Map(company.goalPlans(goal.id).map((p) => [p.id, p.status]));
+        const open = underWay.filter((p) => now.get(p.id) !== 'approved' && company.retroOpen(p.id)).map((p) => `“${p.title}”`);
+        const retro =
+          open.length === 0 ? ''
+          : open.length === 1 ? ` ${open[0]} planı da kapandı; değerlendirmesini planRetro ile yaz.`
+          : ` ${open.join(', ')} planları da kapandı; değerlendirmelerini planRetro ile yaz.`;
+        return `Hedef güncellendi: “${goal.title}” (${goal.status}).${retro}`;
       },
     },
     {

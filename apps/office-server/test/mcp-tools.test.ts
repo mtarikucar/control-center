@@ -371,6 +371,26 @@ describe('office tools — task difficulty', () => {
     expect(read).toContain('Site');
   });
 
+  it('goalSet that closes a goal names the plans it closed that still have no retro (planRetro); none, no line', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    t.budget.setConstitution({ autonomy: 'free' });
+    const open = (title: string) => t.company.goalSet(c.id, { title, why: 'Misyon', done: ['site yayında'] });
+    const propose = (title: string, goalId: string) => t.company.propose(c.id, { title, goal: 'g', approach: 'a', method: METHOD, goalId });
+    const launch = open('Lansman');
+    const site = propose('Site', launch.id);
+    propose('Blog', launch.id);
+    t.company.retro(c.id, site.id, { wentWell: 'iyi', stuck: 'yok', change: 'erken başla' });
+    expect(await t.call(c, 'goalSet', { goalId: launch.id, status: 'done' })).toBe('Hedef güncellendi: “Lansman” (done). “Blog” planı da kapandı; değerlendirmesini planRetro ile yaz.');
+    const sales = open('Satış');
+    propose('Teklifler', sales.id);
+    propose('Arama', sales.id);
+    expect(await t.call(c, 'goalSet', { goalId: sales.id, status: 'dropped' })).toBe('Hedef güncellendi: “Satış” (dropped). “Teklifler”, “Arama” planları da kapandı; değerlendirmelerini planRetro ile yaz.');
+    // Nothing closed with it: no line.
+    expect(await t.call(c, 'goalSet', { goalId: open('Destek').id, status: 'done' })).toBe('Hedef güncellendi: “Destek” (done).');
+    expect(await t.call(c, 'goalSet', { goalId: sales.id, note: 'sonra bakılır' })).toBe('Hedef güncellendi: “Satış” (dropped).');
+  });
+
   it('lets the coordinator rest when there is nothing worth doing', async () => {
     const t = make();
     const c = t.company.hireCoordinator('sonnet');

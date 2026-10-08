@@ -151,6 +151,11 @@ export class Memory {
     return query?.trim() ? this.#d.notes.search(query, limit) : this.#d.notes.list(limit).map((note) => ({ note, snippet: '' }));
   }
 
+  /** The notes written from one source (e.g. `plan:<id>`), oldest first. */
+  notesFrom(source: string): Note[] {
+    return this.#d.notes.bySource(source);
+  }
+
   /** Everything the company knows that mentions every word of the query: notes, decisions, playbook topics, finished work. */
   search(query: string, limit = 10): MemoryHit[] {
     const ws = words(query);

@@ -46,6 +46,8 @@ const SELF_REVIEW = 'Bir işi yapan kendi işinin inceleyicisi olamaz; başka bi
 export const PROPOSAL_TR: Record<ProposalKind, string> = { need: 'ihtiyaç', purchase: 'satın alma', idea: 'fikir', objection: 'itiraz' };
 /** What a routine's new status is called in its event. */
 const SCHEDULE_CHANGE: Record<ScheduleStatus, ScheduleChange> = { active: 'resumed', paused: 'paused', stopped: 'stopped' };
+/** Where a plan's retro (and its method suggestion) is written from: the note's source. */
+const retroSource = (planId: string) => `plan:${planId}`;
 
 export interface CompanyDeps {
   roster: Roster;
@@ -996,9 +998,9 @@ export class Company {
     const type = plan.method?.workType;
     const tags = (first: string) => (type ? [first, type] : [first]);
     const text = [`Plan: ${plan.title} (sürüm ${plan.version})`, '', '## Ne iyi gitti', '', wentWell, '', '## Ne takıldı', '', stuck, '', '## Bir dahaki sefere', '', change].join('\n');
-    const retro = memory.writeNote(by, { title: `Değerlendirme: ${plan.title}`, text, tags: tags('retro'), source: `plan:${plan.id}` });
+    const retro = memory.writeNote(by, { title: `Değerlendirme: ${plan.title}`, text, tags: tags('retro'), source: retroSource(plan.id) });
     const suggestion = suggestionText
-      ? memory.writeNote(by, { title: `Yöntem önerisi (${type ?? 'general'}): ${plan.title}`, text: suggestionText, tags: tags('yöntem-önerisi'), source: `plan:${plan.id}` })
+      ? memory.writeNote(by, { title: `Yöntem önerisi (${type ?? 'general'}): ${plan.title}`, text: suggestionText, tags: tags('yöntem-önerisi'), source: retroSource(plan.id) })
       : null;
     return { retro, suggestion };
   }
@@ -1034,7 +1036,7 @@ export class Company {
       this.#assertGoalRoom();
     }
     const closing = status !== undefined && status !== 'active' && current.status === 'active';
-    const goal = store.update(current.id, {
+    const patch = {
       title: input.title === undefined ? current.title : clean(input.title, 'Hedef başlığı', 160, true),
       why: input.why === undefined ? current.why : clean(input.why, 'Neden (misyona bağı)', 2000, true),
       done: input.done === undefined ? current.done : this.#goalDone(input.done),
@@ -1042,9 +1044,59 @@ export class Company {
       status: status ?? current.status,
       closedAt: closing ? this.#now() : status === 'active' ? null : current.closedAt,
       note: input.note === undefined ? current.note : clean(input.note, 'Not', 2000, false) || null,
-    });
+    };
+    // Checked before anything is written: a goal closes only with no open work left in its running plans.
+    const settled = closing ? this.#plansClosingWith(current) : [];
+    const goal = store.update(current.id, patch);
     this.#emit(by, { type: 'goal.changed', change: closing ? 'closed' : 'updated', goal });
+    // The coordinator's word closes them too (management cycle §3.4): a stream that never had a task cannot keep the
+    // plan running. No plan.retro notice — it closes the goal itself, and the tool's reply says which retros are open.
+    for (const plan of settled) this.#settle(plan, goal.status === 'done' && plan.status === 'approved' ? 'done' : 'stopped');
     return goal;
+  }
+
+  /** A goal's plans, oldest first. */
+  goalPlans(goalId: string): Plan[] {
+    return this.#d.plans.ofGoal(goalId);
+  }
+
+  /** The plan has no retro (planRetro) written yet, in an office whose memory keeps them. */
+  retroOpen(planId: string): boolean {
+    const memory = this.#d.memory;
+    return memory ? !memory.notesFrom(retroSource(planId)).some((n) => n.tags.includes('retro')) : false;
+  }
+
+  /**
+   * The plans a goal's closing closes — its running ones, under way or waiting for the owner — refused while any still
+   * holds open work: an open task or a live routine, as a plan finishes (#maybeFinishPlan). Each one is named with what
+   * it holds, with what the coordinator can do about it.
+   */
+  #plansClosingWith(goal: Goal): Plan[] {
+    const plans = this.#d.plans.ofGoal(goal.id).filter((p) => p.status === 'approved' || p.status === 'draft');
+    let tasksOpen = false;
+    let routinesLive = false;
+    const held = plans.flatMap((p) => {
+      const tasks = this.#d.tasks.openInPlan(p.id);
+      const routines = this.#d.schedules?.list({ planId: p.id, statuses: ['active', 'paused'] }).length ?? 0;
+      tasksOpen ||= tasks > 0;
+      routinesLive ||= routines > 0;
+      const what = [tasks ? `${tasks} açık görev` : '', routines ? `${routines} açık rutin` : ''].filter(Boolean).join(' ve ');
+      return what ? [`“${p.title}” planında ${what}`] : [];
+    });
+    if (held.length === 0) return plans;
+    const todo = [
+      tasksOpen ? 'açık görevleri bitir (taskFinish) ya da vazgeçiyorsan sahibinden planı durdurmasını iste (reportToOwner)' : '',
+      routinesLive ? 'rutini scheduleUpdate ile durdur (status: stopped)' : '',
+    ].filter(Boolean);
+    throw new ConflictError(`“${goal.title}” hedefi kapanmadı: ${held.join(', ')} var. Önce ${todo.join('; ')}. Ya da hedefi şimdilik açık tut.`);
+  }
+
+  /** A plan closed with its goal: done (a reached goal's plan under way), else stopped; the screen hears. */
+  #settle(plan: Plan, status: 'done' | 'stopped'): void {
+    // A revision waiting for the owner goes with it, as when the owner stops a plan.
+    if (status === 'stopped') this.#d.plans.clearApproved(plan.id);
+    const next = this.#d.plans.update(plan.id, { status });
+    this.#emit(this.#planDesk(next), { type: 'plan.changed', change: status, plan: next });
   }
 
   /** Active goals first (oldest first), then the last 20 closed. */

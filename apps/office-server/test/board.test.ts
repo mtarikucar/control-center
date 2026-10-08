@@ -272,6 +272,22 @@ describe('board — 1. Ne değişti', () => {
     expect(lines.join('\n')).not.toMatch(/Eski plan|eski mesaj|sistem notu|Ada’ya özel/);
   });
 
+  it('plans the coordinator’s closing of their goal closed: done, or stopped with the goal — not as the owner’s stop, which still says so', () => {
+    const t = make();
+    const [sales, help, launch] = ['Satış', 'Destek', 'Lansman'].map((n) => t.goal(n));
+    t.plan('Teklifler', { goalId: sales!.id });
+    const desk = t.plan('Yardım', { goalId: help!.id });
+    t.plan('Site', { goalId: launch!.id });
+    const since = t.now();
+    t.advance(MIN);
+    t.company.goalSet(t.coordinator.id, { goalId: sales!.id, status: 'dropped' });
+    t.company.stopPlan(desk.id);
+    t.company.goalSet(t.coordinator.id, { goalId: launch!.id, status: 'done' });
+    expect(t.section(t.board({ since }).text, 1).split('\n')).toContain(
+      '- Plan ve hedef: “Satış” hedefi bırakıldı; “Teklifler” planı hedefiyle durdu; “Yardım” planı sahibince durduruldu; “Lansman” hedefi tamamlandı; “Site” planı bitti',
+    );
+  });
+
   it('a note on a task already blocked is not a new stall; only the move into blocked is', () => {
     const t = make();
     const [bora, can, ece] = ['Bora', 'Can', 'Ece'].map((n) => t.person(n));

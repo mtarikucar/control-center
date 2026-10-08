@@ -425,6 +425,12 @@ export class PlanStore {
     return rows.map(planFromRow);
   }
 
+  /** A goal's plans, oldest first. */
+  ofGoal(goalId: string): Plan[] {
+    const rows = this.#db.prepare('SELECT * FROM plans WHERE goal_id = ? ORDER BY created_at, rowid').all(goalId) as unknown as PlanRow[];
+    return rows.map(planFromRow);
+  }
+
   /** Any plan, however old, has one of these statuses. */
   anyIn(statuses: PlanStatus[]): boolean {
     if (statuses.length === 0) return false;
