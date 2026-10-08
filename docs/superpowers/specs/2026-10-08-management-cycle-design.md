@@ -107,8 +107,8 @@ streams: [{ id, title, owner (çalışan ya da "alınacak: <rol>"), dependsOn: [
   yapınca o hedefin süren planları `done` (hedef bittiyse) ya da `stopped` olur, taslakları `stopped`; görevi hiç
   açılmamış akışlar böylece planı açık tutmaz. Planlarda açık iş (açık görev ya da süren rutin) varsa kapanış reddedilir
   ve hangi planda ne kaldığı söylenir; hedef bittiyse sahibinin onayını bekleyen, işi bitmiş bir revizyon da `done` olur.
-  Görevsiz kalmış ama ona bağlı akışları başlamış bir akış panoda uyarı olur. Sahibinin onayı ya da reddi, akışlı bir
-  planda yapılacak iş bırakmadıysa planı bitirir.
+  Görevsiz kalmış ama ona bağlı akışları başlamış bir akış panoda uyarı olur. Sahibinin onayı ya da reddi, başlamış bir
+  planda (akışı ya da görevi olan) yapılacak iş bırakmadıysa planı bitirir.
 
 ### 3.5 Model yönlendirmesi
 

@@ -940,9 +940,9 @@ export class Company {
     const desk = this.#planDesk(plan);
     this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
-    // An approved revision may leave nothing to do (it dropped the last unfinished stream): the plan finishes now. As
-    // under full autonomy only a plan with streams: one without them and without tasks is only starting.
-    if ((plan.streams?.length ?? 0) > 0) this.#maybeFinishPlan(planId);
+    // An approved revision may leave nothing to do (it dropped the last unfinished stream, or its work closed while it
+    // waited): the plan finishes now. Only a plan that has streams or has had work: a fresh one is only starting.
+    if (this.#hadWork(plan)) this.#maybeFinishPlan(planId);
     return this.#d.plans.get(planId);
   }
 
@@ -954,8 +954,8 @@ export class Company {
       const desk = this.#planDesk(kept);
       this.#d.notices.add(desk, 'plan.revision_declined', `Sahibi “${current.title}” revizyonunu onaylamadı; plan onaylı sürümüyle (sürüm ${kept.version}) sürüyor.`);
       this.#emit(desk, { type: 'plan.changed', change: 'kept', plan: kept });
-      // Its streams' work may have closed while the revision waited: the approved plan, with nothing left, finishes now.
-      if ((kept.streams?.length ?? 0) > 0) this.#maybeFinishPlan(planId);
+      // Its work may have closed while the revision waited: the approved plan, with nothing left, finishes now.
+      if (this.#hadWork(kept)) this.#maybeFinishPlan(planId);
       return this.#d.plans.get(planId);
     }
     const plan = this.#d.plans.update(planId, { status: 'declined' });
@@ -1557,6 +1557,11 @@ export class Company {
     const ids = (plan.streams ?? []).map((s) => s.id);
     if (ids.length === 0) throw new ValidationError(`“${plan.title}” planının akışı yok; görevi akışsız aç ya da önce planRevise ile akışları ekle.`);
     if (!ids.includes(streamId)) throw new ValidationError(`“${plan.title}” planında “${streamId}” akışı yok. Planın akışları: ${ids.join(', ')}.`);
+  }
+
+  /** A plan past its start: it has streams, or has had a task. */
+  #hadWork(plan: Plan): boolean {
+    return (plan.streams?.length ?? 0) > 0 || this.#d.tasks.list({ planId: plan.id, limit: 1 }).length > 0;
   }
 
   #maybeFinishPlan(planId: string): void {

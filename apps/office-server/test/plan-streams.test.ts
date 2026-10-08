@@ -208,6 +208,28 @@ describe('plan streams', () => {
     expect(retros()).toBe(before + 1);
   });
 
+  it('“plans to the owner”: a plan without streams whose work closed while a revision waited finishes on the owner’s approval or refusal; a fresh one only starts', () => {
+    const t = make('plans');
+    const work = (planId: string) => {
+      const task = t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Uç noktalar', planId });
+      t.company.start(task.id);
+      return task;
+    };
+    for (const decide of ['approve', 'decline'] as const) {
+      const p = t.company.propose(t.coordinator.id, { ...DRAFT, title: `Akışsız ${decide}` });
+      t.company.approve(p.id);
+      const task = work(p.id);
+      t.company.revise(t.coordinator.id, p.id, { days: 2 });
+      t.company.finish(t.ada.id, task.id, { summary: 'tamam', outputs: [], learned: '' });
+      expect(t.plans.get(p.id).status).toBe('draft');
+      expect(t.company[decide](p.id).status).toBe('done');
+    }
+    // A fresh plan without streams and without tasks is only starting.
+    const fresh = t.company.propose(t.coordinator.id, { ...DRAFT, title: 'Yeni' });
+    expect(t.company.approve(fresh.id).status).toBe('approved');
+    expect(t.company.hasRunningPlan()).toBe(true);
+  });
+
   it('a revision under full autonomy: a finished plan stays finished only while every stream is done; dropping the last unfinished stream finishes a running plan', () => {
     const t = make();
     const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [{ id: 'api', title: 'API', owner: 'Ada' }] });
