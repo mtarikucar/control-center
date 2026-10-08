@@ -87,6 +87,15 @@ describe('memory search — matching and order (B11)', () => {
     expect(t.memory.search(query, { limit: 1 }).map((h) => h.title)).toEqual(['Kapı']);
   });
 
+  it('shows a partial record around the first query word its text has, not from its start', () => {
+    const t = make();
+    t.memory.writeNote(t.ada.id, { title: 'Video', text: `${'Çekim günü planlandı, ışık ve mekân hazır. '.repeat(6)}Son adım kurgu: renk ve ses.` });
+    const [hit] = t.memory.search('montaj kurgu');
+    expect(hit).toMatchObject({ partial: true, matched: 1 });
+    expect(hit!.snippet).toContain('kurgu');
+    expect(hit!.snippet.startsWith('…')).toBe(true);
+  });
+
   it('counts a repeated word once, and a one-word query has no partial round', () => {
     const t = make();
     t.memory.writeNote(t.ada.id, { title: 'Ses', text: 'ses ses ses' });
