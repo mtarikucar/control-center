@@ -202,6 +202,15 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
     expect(t.gate.check(t.ada.id, t.ping).decision).toBe('deny');
   });
 
+  it('turning the gate on is the owner’s, and on record: the constitution event says when, the coordinator hears what changed', () => {
+    const t = make();
+    const before = t.events.lastSeq();
+    t.budget.ownerSetConstitution({ gateEnabled: true });
+    const changed = t.events.list({ after: before, limit: 100 }).filter((e) => e.event.type === 'budget.changed');
+    expect(changed).toEqual([expect.objectContaining({ ts: expect.any(Number), event: expect.objectContaining({ budget: expect.objectContaining({ constitution: expect.objectContaining({ gateEnabled: true }) }) }) })]);
+    expect(t.notices(t.coordinator.id).filter((n) => n.topic === 'constitution.changed').map((n) => n.text)).toEqual([expect.stringContaining('Geri alınamaz iş kapısı kapalı → açık')]);
+  });
+
   it('a hook input it cannot read is refused (fail-closed)', () => {
     const t = make();
     for (const bad of [null, 'x', {}, { tool_name: 3 }]) expect(t.gate.check(t.ada.id, bad).decision).toBe('deny');

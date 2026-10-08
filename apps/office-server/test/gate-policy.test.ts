@@ -226,6 +226,14 @@ describe('gate policy (K1) — the script a line runs, what mktemp gives, loop v
     ['for f in a.md b.md; do perl -pi -e "s/x/y/" "$f"; done', 'self', REPO],
     ['for w in /tmp/a /tmp/b; do rm -rf "$w"; done', 'pass'],
     ['for w in /tmp/a ~/Documents/b; do rm -rf "$w"; done', 'delete'],
+    // Each value of the loop on its own (live seq 4636: node_modules links into a worktree's packages).
+    ['for p in apps/office-server packages/shared; do ln -s ~/x/node_modules $p/node_modules; done', 'pass', `${HOME}/Projects/control-center-x`],
+    ['for w in /tmp/a ~/.control-center/desks/ada; do rm -rf "$w"; done', 'self'],
+    // A command whose name is known only at run time.
+    ['$(echo git) push origin main', 'other'],
+    ['"$CMD" -rf ~/Documents', 'other'],
+    // A ; inside single quotes is text — but bash -c runs it.
+    ["bash -c 'cd /tmp; rm -rf ~/Documents/x'", 'delete'],
     // A script written and run in the same line, its arguments as $1, $2 (Kerem's stress runner, live seq 3946).
     [`cat > /tmp/k/s.sh <<'EOF'\nOUT=$2\nrm -rf "$OUT"; mkdir -p "$OUT"\nEOF\nbash /tmp/k/s.sh ~/x /tmp/k/out`, 'pass'],
     [`cat > /tmp/k/s.sh <<'EOF'\nOUT=$2\nrm -rf "$OUT"\nEOF\nbash /tmp/k/s.sh /tmp/x ~/Documents`, 'delete'],
