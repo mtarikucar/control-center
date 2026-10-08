@@ -1,3 +1,4 @@
+import type { Approval, ApprovalChange, ApprovalKind } from './approval.ts';
 import type { BudgetSummary, Spend } from './budget.ts';
 import type { ClockStatus, CycleTrigger, Goal, GoalChange, Plan, PlanChange, PlanView, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
@@ -127,7 +128,14 @@ export type OfficeEvent =
    * A request to an owner endpoint that did not come the page's way (no Origin, no valid nonce, no browser fetch
    * metadata): refused, or let through and marked. Detection only: a process of the same user can forge every header.
    */
-  | { type: 'owner.request.flagged'; mark: OwnerRequestMark; outcome: 'rejected' | 'accepted'; method: string; path: string; userAgent: string };
+  | { type: 'owner.request.flagged'; mark: OwnerRequestMark; outcome: 'rejected' | 'accepted'; method: string; path: string; userAgent: string }
+  /** An approval was asked for, decided, used or ran out (B9a). */
+  | { type: 'approval.changed'; change: ApprovalChange; approval: Approval }
+  /**
+   * A tool call the gate held (B9a): denied, or let through on an approval. Calls the gate does not hold leave no event.
+   * `kind` and `target` are of the first part that held it (a Bash line may hold more than one).
+   */
+  | { type: 'gate.checked'; tool: string; kind: ApprovalKind; target: string; decision: 'allow' | 'deny'; approvalId: string | null };
 
 export type OwnerRequestMark = 'owner-endpoint, origin-less' | 'owner-endpoint, nonce-less' | 'owner-endpoint, no fetch metadata';
 
@@ -171,6 +179,8 @@ export interface OfficeSnapshot {
   goals?: Goal[];
   /** The owner paused the company: nothing is handed out. */
   paused?: boolean;
+  /** Approvals waiting for the owner and the last decided (B9a; absent from servers without the gate). */
+  approvals?: Approval[];
   /** Routines (all but stopped, plus the last 10 stopped). */
   schedules?: Schedule[];
   clock?: ClockStatus;

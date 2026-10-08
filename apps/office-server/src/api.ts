@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { OWNER, type AgendaReport, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type PlanView, type ServerMessage } from '@cc/shared';
+import { OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type PlanView, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { coordinatorHint } from './model-policy.ts';
 import type { Company } from './company/company.ts';
@@ -12,7 +12,8 @@ import { memoryKinds } from './company/search.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
 import { parseSince } from './company/time.ts';
 import type { Engine } from './engine.ts';
-import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } from './errors.ts';
+import { ForbiddenError, UnauthorizedError, UnsupportedMediaTypeError, ValidationError, statusOf } from './errors.ts';
+import type { Approvals } from './company/approvals.ts';
 import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
@@ -33,6 +34,8 @@ export interface ApiDeps {
   quota: QuotaTracker;
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
+  /** The gate the sessions' hook asks before a tool call (B9a; absent: no /gate/check route). Needs `mcp` (its tokens). */
+  gate?: { check(employeeId: string, input: unknown): Promise<GateDecision> };
   /** The company layer: plans, tasks and the coordinator (absent: v1 office); `clock` is the office clock (spec §5), `agenda` the per-employee sheet (§6.1). */
   company?: {
     service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport };
@@ -43,6 +46,8 @@ export interface ApiDeps {
     /** The coordinator's management cycle: its log for the owner's Yönetim tab (management cycle §3.3). */
     management?: Pick<ManagementCycle, 'log'>;
     blueprints?: Blueprints;
+    /** The owner's approvals of calls the gate holds (B9a). */
+    approvals?: Approvals;
   };
 }
 
@@ -71,6 +76,7 @@ const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/;
 const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
+const APPROVAL_ROUTE = /^\/api\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|deny)$/;
 const EMPLOYEE_ROUTE =
   /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file))?$/;
 
@@ -93,6 +99,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
   return {
     ...base, tasks: [...open, ...closed], plans, budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
     goals: d.company.service.goals(), paused: d.company.service.paused(), schedules: d.company.service.schedules(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),
+    ...(d.company.approvals ? { approvals: d.company.approvals.visible() } : {}),
   };
 }
 
@@ -154,6 +161,17 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     const out = await handleMcp({ method, authorization: req.headers.authorization, body, tokens: d.mcp.tokens, roster: d.roster, tools: d.mcp.tools });
     if (out.body === undefined) return sendEmpty(res, out.status);
     return sendJson(res, out.status, out.body);
+  }
+  // The gate (B9a): the session's hook asks with the session's own token before a tool call. Outside /api/ on purpose:
+  // the caller is the hook, not the page, so the owner guard below stays whole (every change under /api/ is the owner's).
+  if (url.pathname === '/gate/check' && d.gate && d.mcp) {
+    if (method !== 'POST') return sendJson(res, 405, { error: 'Yalnız POST.' });
+    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+    const employeeId = token ? d.mcp.tokens.resolve(token) : null;
+    if (!employeeId) throw new UnauthorizedError('Geçerli bir oturum jetonu gerekli.');
+    const body = await readJson(req);
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
+    return sendJson(res, 200, await d.gate.check(employeeId, body));
   }
   // The owner's endpoints: anything under /api/ that changes something (the MCP tools above have their own tokens).
   if (method === 'GET' && url.pathname === '/api/owner/nonce') return sendJson(res, 200, guard.issue(req, url.pathname));
@@ -271,6 +289,13 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       return sendJson(res, 200, budget.ownerSetConstitution(body as Record<string, unknown>));
     }
     if (method === 'GET' && url.pathname === '/api/proposals') return sendJson(res, 200, visibleProposals(d.company.proposals));
+    // The owner's approvals (B9a): reading is free; deciding has passed the owner guard above (Origin and the page's nonce).
+    if (method === 'GET' && url.pathname === '/api/approvals' && d.company.approvals) return sendJson(res, 200, d.company.approvals.visible());
+    const approval = APPROVAL_ROUTE.exec(url.pathname);
+    if (method === 'POST' && approval && d.company.approvals) {
+      const body = (await readJson(req)) as { note?: unknown } | null;
+      return sendJson(res, 200, d.company.approvals.decide(approval[1] ?? '', approval[2] === 'approve', { via: 'page', note: typeof body?.note === 'string' ? body.note : undefined }));
+    }
     const decide = PROPOSAL_ROUTE.exec(url.pathname);
     if (method === 'POST' && decide) {
       const note = (await readJson(req)) as { note?: unknown } | null;

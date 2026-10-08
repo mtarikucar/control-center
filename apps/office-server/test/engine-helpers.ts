@@ -38,6 +38,8 @@ export interface ArgvEntry {
   cwd: string;
   /** The deny rules of the desk's .claude/settings.json when the session started; null without the file. */
   deny?: string[] | null;
+  /** B9a: OFFICE_GATE_URL and OFFICE_GATE_TOKEN in the session's environment. */
+  gate?: { url: string | null; token: string | null };
 }
 
 export async function readArgv(file: string, atLeast: number, timeoutMs = 5000): Promise<ArgvEntry[]> {

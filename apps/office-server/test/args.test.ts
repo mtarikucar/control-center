@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DISALLOWED_TOOLS, employeeSettings, sessionArgs, sideQuestionArgs, terminalCommand } from '../src/claude/args.ts';
+import { DISALLOWED_TOOLS, employeeSettings, sessionArgs, sideQuestionArgs, terminalCommand, GATE_MATCHER, gateHookCommand } from '../src/claude/args.ts';
+import { REPO_ROOT } from '../src/config.ts';
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -25,6 +26,33 @@ describe('claude args', () => {
       claudeMdExcludes: ['/home/test/.claude/CLAUDE.md'],
       attribution: { commit: '', pr: '' },
     });
+  });
+
+  it('B9a (K1-5, K1-8): with the gate, the settings carry the PreToolUse hook and disableAllHooks: false, which a desk file cannot turn off', () => {
+    const settings = employeeSettings('/home/test', { hook: "'/usr/bin/node' '/r/apps/office-server/hooks/gate.mjs'" });
+    expect(settings).toEqual({
+      ...employeeSettings('/home/test'),
+      // Deney 6A/6B: a desk's .claude/settings.local.json with disableAllHooks: true turns the hook off unless --settings says false.
+      disableAllHooks: false,
+      hooks: { PreToolUse: [{ matcher: GATE_MATCHER, hooks: [{ type: 'command', command: "'/usr/bin/node' '/r/apps/office-server/hooks/gate.mjs'", timeout: 10 }] }] },
+    });
+    const args = sessionArgs({ model: 'haiku', sessionId: 's', resume: false, home: '/home/test', hook: 'h' });
+    expect(JSON.parse(flag(args, '--settings') ?? '')).toEqual(employeeSettings('/home/test', { hook: 'h' }));
+    // The side questions run with no tools at all: no hook there.
+    expect(JSON.parse(flag(sideQuestionArgs({ model: 'haiku', sessionId: 's', home: '/home/test' }), '--settings') ?? '')).toEqual(employeeSettings('/home/test'));
+  });
+
+  it('B9a: the hook’s matcher takes the shell, file, web and connector tools, not the office’s own nor the read-only built-ins', () => {
+    const re = new RegExp(GATE_MATCHER);
+    // Review round 1 (Kerem): the session's own tools compared — SendMessage reaches another Claude session (the owner's),
+    // PushNotification and DesignSync go out. ListAgents only lists; Skill only loads instructions; Task and Workflow
+    // start agents whose own calls meet the hook (locked K3).
+    for (const tool of ['Bash', 'Monitor', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'SendMessage', 'PushNotification', 'DesignSync', 'mcp__probe__ping', 'mcp__claude_ai_Gmail__send_message', 'mcp__plugin_playwright_playwright__browser_click']) expect(re.test(tool), tool).toBe(true);
+    for (const tool of ['mcp__office__myTasks', 'mcp__office__approvalRequest', 'Read', 'Grep', 'Glob', 'ToolSearch', 'WebSearch', 'BashOutput', 'Writer', 'ListAgents', 'Skill', 'Task', 'Workflow']) expect(re.test(tool), tool).toBe(false);
+  });
+
+  it('B9a: the hook runs the checkout’s own script with the office’s node, quoted for the shell', () => {
+    expect(gateHookCommand('/opt/n o/node')).toBe(`'/opt/n o/node' '${REPO_ROOT}/apps/office-server/hooks/gate.mjs'`);
   });
 
   it('resumes an existing session', () => {

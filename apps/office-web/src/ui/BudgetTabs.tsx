@@ -144,6 +144,7 @@ const FIELDS: Field[] = [
   { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır; koordinatörün tur modelleri yine uygulanır.', toggle: true },
   { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },
   { key: 'capabilityPrecheckEnabled', label: 'Yetenek ön-kontrolü açık', hint: 'Açıkken istediği yetenek masada açık olmayan görev dağıtılmaz, bloklanır ve sana yetki önerisi gelir. Kapalıyken görev eskisi gibi dağıtılır.', toggle: true },
+  { key: 'gateEnabled', label: 'Geri alınamaz iş kapısı açık', hint: 'Açıkken yayın, gönderim, ödeme, silme, tarayıcı işi ve ofisin kendisine dokunan araç çağrıları senin onayını bekler (Onaylar sekmesi). Kapıyı kazara ve sıradan yollar için kapatır; aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz.', toggle: true },
   { key: 'autonomy', label: 'Tam serbest', hint: 'Açıkken koordinatör hedef koyar ve planlarını sormadan başlatır; kapalıyken her plan senin onayını bekler.', toggle: true, choice: ['free', 'plans'] },
   { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
   { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre bu aralıkla yönetim turu açılır (dinlenirken açılmaz, dinlenme bitince bir tur açılır); 0 = hiç.' },

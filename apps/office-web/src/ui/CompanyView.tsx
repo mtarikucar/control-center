@@ -11,6 +11,7 @@ import { ManagementTab } from './ManagementTab.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 import { streamOf } from './streams.ts';
+import { ApprovalsTab } from './ApprovalCard.tsx';
 
 const TABS = [
   ['org', 'Örgüt'],
@@ -19,6 +20,7 @@ const TABS = [
   ['tasks', 'Görevler'],
   ['management', 'Yönetim'],
   ['proposals', 'Öneriler'],
+  ['approvals', 'Onaylar'],
   ['decisions', 'Kararlar'],
   ['playbook', 'El kitabı'],
   ['notes', 'Notlar'],
@@ -269,6 +271,8 @@ export function CompanyView() {
           <ManagementTab />
         ) : tab === 'proposals' ? (
           <ProposalsTab />
+        ) : tab === 'approvals' ? (
+          <ApprovalsTab />
         ) : tab === 'decisions' ? (
           <DecisionsTab />
         ) : tab === 'playbook' ? (

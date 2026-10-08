@@ -60,6 +60,12 @@ export const NOTICE_TOPICS = {
   'plan.stopped': 'decision',
   /** The owner stopped a goal (and its running plans). */
   'goal.stopped': 'decision',
+  /** B9a: someone asked the owner to approve a call the gate held (the owner decides on the page; the coordinator hears). */
+  'approval.requested': 'info',
+  /** B9a: the owner approved (repeat the same call) or denied your request. */
+  'approval.decided': 'decision',
+  /** B9a: owner endpoints were called not the page's way (no Origin or nonce): at most one note an hour per kind. */
+  'owner.flagged': 'decision',
   /** A task you hold was cancelled (its plan was stopped): stop working on it. */
   'task.cancelled': 'decision',
   /** The pulse: an active goal has no running plan — start the next one or close the goal. */

@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
@@ -19,6 +19,8 @@ import type { KpiReadings } from '../company/kpi-readings.ts';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
+import type { Approvals } from '../company/approvals.ts';
+import type { HeldCall } from '../company/gate.ts';
 
 const EVERYONE: EmployeeKind[] = ['member', 'lead', 'coordinator'];
 const COORDINATOR: EmployeeKind[] = ['coordinator'];
@@ -145,6 +147,10 @@ export function officeTools(o: {
   blueprints?: Blueprints;
   /** KPI measurement (B26: kpiRecord, goalsRead's last readings); absent in tests that do not care. */
   kpis?: KpiReadings;
+  /** The owner's approvals of calls the gate holds (B9a: approvalRequest, approvalsRead); absent in tests that do not care. */
+  approvals?: Approvals;
+  /** The gate: the last call it held for each employee (approvalRequest with no tool and target). */
+  gate?: { lastHeld(employeeId: string): HeldCall | null };
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -581,6 +587,54 @@ export function officeTools(o: {
         const who = findPerson(str(args, 'employee'));
         engine.wake(who.id);
         return `${who.name} uyandı.`;
+      },
+    },
+    {
+      name: 'approvalRequest',
+      description:
+        `Ask the owner to approve a call the office gate held (publish, send, pay, delete, a browser action, the office itself, or an unknown connector tool). With only summary, it asks for the call the gate just held; or give tool, kind and target as the gate's message named them. scope 'task' asks for every call of the same kind and tool while your current task is open (browser work). The owner decides on the office page; when approved, repeat the same call; while you wait, park the task with taskPark. ${GATE_LIMIT_TEXT}`,
+      inputSchema: object(
+        {
+          summary: s('Why the work needs it, for the owner.'),
+          tool: s('The tool as the gate named it (Bash, mcp__…, Write …). Empty: the call the gate just held.'),
+          kind: { type: 'string', enum: [...APPROVAL_KINDS] },
+          target: s('The target as the gate named it (e.g. git push origin). Empty: the call the gate just held.'),
+          scope: { type: 'string', enum: ['call', 'task'], description: "'call' (default): this call, once. 'task': every call of this kind and tool while your current task is open." },
+          taskId: s('The task it is for (default: the one you are working on).'),
+        },
+        ['summary'],
+      ),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        if (!o.approvals) throw new ConflictError('Bu ofiste onay kaydı yok.');
+        const tool = optStr(args, 'tool');
+        const target = optStr(args, 'target');
+        let input = { kind: optStr(args, 'kind') as unknown, tool: tool as unknown, target: target as unknown, scope: optStr(args, 'scope') as unknown };
+        if (!tool || !target) {
+          const held = o.gate?.lastHeld(employee.id);
+          if (!held) throw new ValidationError('Kapıya takılmış bir çağrın yok: tool, kind ve target ver (kapının mesajındaki gibi) ya da önce çağrıyı yap.');
+          input = { kind: input.kind ?? held.kind, tool: held.tool, target: held.target, scope: input.scope ?? held.scope };
+        }
+        const a = o.approvals.request(employee.id, { ...input, summary: str(args, 'summary'), taskId: optStr(args, 'taskId') });
+        return [
+          `Onay istendi (no ${a.id}): ${APPROVAL_KIND_LABELS[a.kind]} — “${a.target}” (${a.tool}; ${a.scope === 'task' ? 'görev boyunca' : 'tek çağrı'}).`,
+          'Sahibi ofis sayfasından karar verince haber gelecek; onaylanınca aynı çağrıyı tekrarla.',
+          'Beklerken başka işin yoksa görevi taskPark ile park et.',
+        ].join(' ');
+      },
+    },
+    {
+      name: 'approvalsRead',
+      description: 'Your approval requests and how they stand (the coordinator sees everyone’s).',
+      inputSchema: object({}),
+      kinds: EVERYONE,
+      run: ({ employee }) => {
+        if (!o.approvals) return 'Bu ofiste onay kaydı yok.';
+        const list = o.approvals.list(employee.kind === 'coordinator' ? undefined : employee.id);
+        if (list.length === 0) return 'Onay isteği yok.';
+        const line = (a: Approval) =>
+          `• [${APPROVAL_STATUS_LABELS[a.status]}] ${a.id} ${APPROVAL_KIND_LABELS[a.kind]} — “${a.target}” (${a.tool}; ${a.scope === 'task' ? 'görev boyunca' : 'tek çağrı'})${employee.kind === 'coordinator' ? ` — ${company.nameOf(a.employeeId)}` : ''}: ${a.summary}${a.note ? ` — not: ${a.note}` : ''}`;
+        return list.map(line).join('\n');
       },
     },
     {

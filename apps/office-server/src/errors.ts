@@ -1,6 +1,9 @@
 export class ValidationError extends Error {
   readonly status = 400;
 }
+export class UnauthorizedError extends Error {
+  readonly status = 401;
+}
 export class ForbiddenError extends Error {
   readonly status = 403;
   /** Machine-readable reason the page can act on (e.g. fetch a fresh nonce and try again). */
