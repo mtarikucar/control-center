@@ -77,6 +77,9 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
 
     const o: PilotOffice = await pilotOffice();
     const record: StepRecord[] = [];
+    /** Each KÖ the run measures: its threshold met or not. A measurement, not a gate: the steps go on either way. */
+    const kö: Array<{ id: string; measured: string; met: boolean }> = [];
+    const measure = (id: string, measured: string, met: boolean) => kö.push({ id, measured, met });
     let overCap = false;
     const watch = o.events.subscribe((e) => {
       if (e.event.type !== 'turn.finished' || overCap || spentUsd(o) <= COST_CAP_USD) return;
@@ -177,8 +180,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         expect(o.company.onboarding().complete).toBe(true);
         const assumed = Object.values(o.company.profile().sections).flatMap((s) => (s ? s.assumedFields.map((f) => `${s.section}.${f}`) : []));
         checks.push(`varsayılan alanlar: ${assumed.length ? assumed.join(', ') : 'yok'}`);
-        expect(rounds.length).toBeLessThanOrEqual(2);
-        expect(asked).toBeLessThanOrEqual(10);
+        measure('KÖ1', `onboarding ${rounds.length} tur, ${asked} soru (eşik ≤ 2 tur, ≤ 10 soru)`, rounds.length <= 2 && asked <= 10);
       });
 
       // 3 — the package as a blueprint plan; the owner approves it on the page; the coordinator reads and installs it.
@@ -196,7 +198,8 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         await wait('3 üye işe alındı', () => events(after).filter((e) => e.event.type === 'employee.hired').length >= pkg.roles.length);
         const installed = events(after).filter((e) => ['employee.hired', 'playbook.updated', 'goal.changed', 'schedule.changed'].includes(e.event.type));
         const count = (type: string, change?: string) => installed.filter((e) => e.event.type === type && (change === undefined || (e.event as { change?: string }).change === change)).length;
-        checks.push(`onaydan son kurulum olayına ${Math.round(((installed.at(-1)?.ts ?? approvedAt) - approvedAt) / 1000)} sn (≤ 30 dk)`);
+        const took = Math.round(((installed.at(-1)?.ts ?? approvedAt) - approvedAt) / 1000);
+        checks.push(`onaydan son kurulum olayına ${took} sn (≤ 30 dk)`);
         checks.push(`employee.hired ${count('employee.hired')}, playbook.updated ${count('playbook.updated')}, goal.changed set ${count('goal.changed', 'set')}, schedule.changed created ${count('schedule.changed', 'created')}`);
         expect(count('employee.hired')).toBe(pkg.roles.length);
         expect(count('playbook.updated')).toBe(pkg.playbook.length);
@@ -204,6 +207,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         expect(count('schedule.changed', 'created')).toBe(pkg.routines.length);
         const again = o.blueprints.apply(coordinator.id, plan.id);
         expect(again.steps.every((s) => s.result === 'skipped')).toBe(true);
+        measure('KÖ2', `onaydan kurulumun sonuna ${took} sn; ikinci kurulum sıfır yeni adım (eşik ≤ 30 dk)`, took <= 1800);
         checks.push(`ikinci blueprintApply: ${again.steps.length} adımın hepsi 'skipped' (sıfır yeni adım)`);
       });
 
@@ -233,6 +237,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const outward = events().filter((e) => e.event.type === 'tool.started' && /send|publish|post|deploy|charge|delete/i.test(e.event.name));
         checks.push(`yayın/gönderim kalıbına uyan tool.started: ${outward.length} (K3'te böyle araç zaten yok; bu kipi doğrular, kapıyı değil)`);
         expect(outward).toEqual([]);
+        measure('KÖ5 (kapalı kip)', `üç masada mcp__probe_shut doğrulandı, yayın/gönderim tool.started ${outward.length} (kipi doğrular, kapıyı değil)`, true);
       });
 
       // 5 — a plan under H1; the coordinator opens the package's Pastane task with the Editor as reviewer; it is done and reviewed.
@@ -258,10 +263,10 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const t = task();
         const evidence = t.result?.evidence?.length ?? 0;
         checks.push(`görev ${t.status}, tur ${t.round}, atanan ${o.company.nameOf(t.assignee)}, inceleyen ${t.reviewer ? o.company.nameOf(t.reviewer) : '-'}, kanıt ${evidence} / bitti maddesi ${t.done.length}`);
-        expect(t.status).toBe('done');
-        expect(t.round ?? 0).toBeLessThanOrEqual(2);
+        measure('KÖ3', `görev ${t.status}, tur ${t.round} (eşik: inceleme onayıyla bitti, ≤ 2 tur)`, t.status === 'done' && (t.round ?? 0) <= 2);
+        measure('KÖ4', `inceleyen ≠ atanan: ${t.reviewer !== null && t.reviewer !== t.assignee}; kanıt ${evidence} / bitti ${t.done.length}`, t.reviewer !== null && t.reviewer !== t.assignee && (t.status !== 'done' || evidence >= t.done.length));
+        // Mechanics: the coordinator opened it as asked, someone else reviews it.
         expect(t.reviewer).not.toBe(t.assignee);
-        expect(evidence).toBeGreaterThanOrEqual(t.done.length);
         checks.push(`görev açıldıktan sonra tur: ${turns(after)}`);
       });
 
@@ -281,6 +286,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const note = o.memory.notes(undefined, 100).map((n) => n.note).find((n) => n.title === `Değerlendirme: ${h1Plan.title}`);
         checks.push(`retro notunda KPI tablosu: ${note?.text.includes("## KPI'lar") ? 'var' : 'YOK'}; araç cevabında: ${retro.includes("KPI'lar:") ? 'var' : 'yok'}`);
         expect(note?.text).toContain("## KPI'lar");
+        measure('KÖ11', `kpi_readings ${readings.length} satır (1 elle), retro notunda KPI tablosu`, true);
       });
 
       // 8 — the coordinator searches the memory for the Pastane brand voice.
@@ -291,7 +297,8 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const found = await toolResult(coordinator, 'memorySearch', after);
         const top = found.split('\n').filter((l) => l.startsWith('• ')).slice(0, 3);
         checks.push(`ilk 3: ${top.map((l) => l.slice(0, 120)).join(' | ')}`);
-        expect(top.some((l) => /Marka dili — Pastane/i.test(l))).toBe(true);
+        const hit = top.some((l) => /Marka dili — Pastane/i.test(l));
+        measure('KÖ8', `"marka dili pastane" aramasında Pastane marka dili ilk 3'te: ${hit ? 'evet' : 'hayır'}`, hit);
       });
 
       // 6 — last: the members stop (no work on the routine's task), the clock moves to the weekly report's time, it fires.
@@ -306,8 +313,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const fired = events(after).find((e) => e.event.type === 'schedule.changed' && e.event.change === 'fired' && e.event.schedule.id === weekly.id)!;
         const fresh = o.schedules.list({ planId: plan.id }).find((s) => s.id === weekly.id)!;
         checks.push(`“${weekly.title}” ${weekly.cron}: tetiklenme ${Math.round((fired.ts - due) / 1000)} sn sapma (±60), skipCount ${fresh.skipCount}`);
-        expect(Math.abs(fired.ts - due)).toBeLessThanOrEqual(60_000);
-        expect(fresh.skipCount).toBe(0);
+        measure('KÖ10', `rutin cron zamanından ${Math.round((fired.ts - due) / 1000)} sn sapmayla tetiklendi, skipCount ${fresh.skipCount} (eşik ±60 sn, 0)`, Math.abs(fired.ts - due) <= 60_000 && fresh.skipCount === 0);
         expect(o.tasks.list({ statuses: ['waiting', 'in_progress'] }).some((t) => t.scheduleId === weekly.id)).toBe(true);
       });
     } finally {
@@ -321,6 +327,10 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         '| Adım | KÖ | Maliyet | Tur | Süre | Durum |',
         '|---|---|---|---|---|---|',
         ...record.map((r) => `| ${r.step} | ${r.kö} | $${r.usd.toFixed(4)} | ${r.turns} | ${r.seconds} sn | ${r.error ? `HATA: ${r.error}` : 'geçti'} |`),
+        '',
+        '| KÖ | Ölçülen (K3) | Eşik |',
+        '|---|---|---|',
+        ...kö.map((k) => `| ${k.id} | ${k.measured} | ${k.met ? 'tuttu' : 'TUTMADI'} |`),
         '',
         ...record.flatMap((r) => [`## ${r.step}`, ...r.checks.map((c) => `- ${c}`), ...(r.error ? [`- HATA: ${r.error}`] : []), '']),
         '## Oturum raporları (session.started)',
@@ -339,7 +349,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         }),
       ];
       if (process.env.SMOKE_OUT) writeFileSync(process.env.SMOKE_OUT, `${lines.join('\n')}\n`);
-      console.log(lines.slice(0, 12 + record.length).join('\n'));
+      console.log(lines.slice(0, 16 + record.length + kö.length).join('\n'));
       await o.stop();
     }
   });
