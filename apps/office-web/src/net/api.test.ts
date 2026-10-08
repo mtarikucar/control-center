@@ -31,6 +31,12 @@ describe('api', () => {
     await expect(api.fire('e1')).resolves.toBeNull();
   });
 
+  it('reads the office metrics with a GET', async () => {
+    const fetchFn = stubFetch(200, { generatedAt: 1 });
+    await expect(api.metrics()).resolves.toEqual({ generatedAt: 1 });
+    expect(fetchFn).toHaveBeenCalledWith('/api/metrics', { method: 'GET', body: undefined });
+  });
+
   it('turns error responses into ApiError with the server message', async () => {
     stubFetch(409, { error: 'Bu çalışan şu an terminalde; önce ofise geri al.' });
     const err = await api.send('e1', 'x').catch((e: unknown) => e);

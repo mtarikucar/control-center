@@ -46,6 +46,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .meter-value { font-variant-numeric: tabular-nums; font-weight: 600; }
 .meter-reset { color: var(--muted); }
 
+.metrics { display: flex; flex-wrap: wrap; gap: 6px; }
+button.metric { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 10px; border-radius: 99px; background: var(--surface-2); font-size: 12px; white-space: nowrap; }
+button.metric:hover:not(:disabled) { background: var(--line); }
+.metric-label { color: var(--muted); }
+.metric-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+button.metric.warn { border-color: var(--warn); }
+button.metric.warn .metric-value { color: var(--warn); }
+button.metric.bad { border-color: var(--bad); }
+button.metric.bad .metric-value { color: var(--bad); }
+
 button { border: 1px solid var(--line); background: var(--surface); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
 button:hover:not(:disabled) { background: var(--surface-2); }
 button:disabled { opacity: 0.5; cursor: default; }
@@ -118,8 +128,21 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .dialog .field label { font-size: 13px; color: var(--muted); }
 .dialog input, .dialog textarea, .dialog select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
 
+/* Room for the figures as the bar narrows: the meters drop their reset time (still in their tooltip), then their
+   track; below that the bar wraps and the panel starts under its second row. */
+@media (max-width: 1600px) {
+  .topbar { gap: 12px; }
+  .meter-reset { display: none; }
+  .meter-track { width: 56px; }
+}
+@media (max-width: 1400px) { .meter-track { display: none; } }
+@media (max-width: 1240px) {
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
+  .panel { top: 124px; }
+}
 @media (max-width: 720px) {
   .quota { display: none; }
+  .topbar { gap: 8px; }
   .panel { top: auto; height: 60%; }
 }
 

@@ -13,6 +13,8 @@ export interface OfficeStore extends OfficeData {
   terminalCommands: Record<string, string>;
   hireOpen: boolean;
   companyOpen: boolean;
+  /** The tab the company dialog opens on (a CompanyView tab key); null: its first. */
+  companyTab: string | null;
   receive: (m: ServerMessage) => void;
   setConnected: (connected: boolean) => void;
   refresh: () => Promise<void>;
@@ -24,7 +26,8 @@ export interface OfficeStore extends OfficeData {
   setManifest: (m: AssetManifest) => void;
   setTerminalCommand: (id: string, command: string | null) => void;
   setHireOpen: (open: boolean) => void;
-  setCompanyOpen: (open: boolean) => void;
+  /** `tab`: the tab it opens on (e.g. 'agenda'); without one, its first. */
+  setCompanyOpen: (open: boolean, tab?: string) => void;
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,6 +58,7 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
   terminalCommands: {},
   hireOpen: false,
   companyOpen: false,
+  companyTab: null,
 
   receive(m) {
     if (m.type === 'snapshot') {
@@ -115,5 +119,5 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
       return { terminalCommands };
     }),
   setHireOpen: (hireOpen) => set({ hireOpen }),
-  setCompanyOpen: (companyOpen) => set({ companyOpen }),
+  setCompanyOpen: (companyOpen, tab) => set({ companyOpen, companyTab: companyOpen ? (tab ?? null) : null }),
 }));

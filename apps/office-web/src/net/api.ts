@@ -1,4 +1,4 @@
-import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
+import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -65,6 +65,8 @@ export const api = {
   closeTerminal: (id: string) => request<Employee>('DELETE', `${employee(id)}/terminal`),
   events: (id: string, tail = 500) => request<StoredEvent[]>('GET', `${employee(id)}/events?tail=${tail}`),
   agenda: () => request<AgendaReport>('GET', '/api/agenda'),
+  /** The top bar's figures: busy, delivered in the last day, stuck. */
+  metrics: () => request<OfficeMetrics>('GET', '/api/metrics'),
   /** `until`: relative (`+6h`, `+1d`) or local `YYYY-MM-DDTHH:MM`. */
   parkTask: (id: string, until: string, reason: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/park`, { until, reason }),
   /** "Şimdi başlasın": no park or start time any more, priority 1. */

@@ -35,6 +35,16 @@ afterEach(() => {
 });
 
 describe('CompanyView', () => {
+  it('opens on the tab it was asked for (a top-bar figure asks for the Ajanda), else on the org chart', () => {
+    useOffice.setState({ companyTab: 'agenda' });
+    const { unmount } = render(<CompanyView />);
+    expect(screen.getByRole('tab', { name: 'Ajanda' }).getAttribute('aria-selected')).toBe('true');
+    unmount();
+    useOffice.setState({ companyTab: null });
+    render(<CompanyView />);
+    expect(screen.getByRole('tab', { name: 'Örgüt' }).getAttribute('aria-selected')).toBe('true');
+  });
+
   it('without a coordinator, offers to hire one or to make an employee coordinator', async () => {
     office([person('ada', { name: 'Ada' })]);
     render(<CompanyView />);

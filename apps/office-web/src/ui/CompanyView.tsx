@@ -120,7 +120,9 @@ export function CompanyView() {
   const plans = useOffice((s) => s.plans);
   const setCompanyOpen = useOffice((s) => s.setCompanyOpen);
   const select = useOffice((s) => s.select);
-  const [tab, setTab] = useState<Tab>('org');
+  const asked = useOffice((s) => s.companyTab);
+  // The dialog mounts on opening: the tab it was asked for is where it starts.
+  const [tab, setTab] = useState<Tab>(() => TABS.find(([key]) => key === asked)?.[0] ?? 'org');
   const [person, setPerson] = useState('');
   const [planFilter, setPlanFilter] = useState('');
   const people = useMemo(() => Object.values(views).map((v) => v.employee).filter((e) => e.lifecycle !== 'archived'), [views]);
