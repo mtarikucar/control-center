@@ -181,7 +181,7 @@ describe('the coordination craft (ships with the office)', () => {
     const kickoff =
       '- **Başlangıç turu, yönetim turu.** Hedef yokken ya da bir hedefin süren planı yokken gelen pano başlangıç turudur; hiç plan sürmezken sahibinin mesajı da öyle. Bu turda işin dünyasını öğrenmeye, akışları ve ekibi kurmaya zaman ayır (yukarıdaki adımlar), sonra planı akışlarıyla öner. Yönetim turunda kısa ve kararlı ol: tabloyu oku, karar ver, turu kapat.';
     const streams =
-      '- **Plan akışlarla yaşar.** Planın paralel akışlarını `planPropose`\'ta `streams` ile yaz: her akışın sahibi ve beklediği akışlar. Gerçek değişince planı da değiştir: akış eklemek, sahibini değiştirmek, bağımlılığı düzeltmek ya da akışı bölmek `planRevise` ile olur.';
+      '- **Plan akışlarla yaşar.** Planın paralel akışlarını `planPropose`\'ta `streams` ile yaz: her akışın sahibi ve beklediği akışlar. Gerçek değişince planı da değiştir: akış eklemek, sahibini değiştirmek, bağımlılığı düzeltmek ya da akışı bölmek `planRevise` ile olur. Bir akışı kendin yapsan da onu bir görevle kapat ya da iş bitince `planRevise` ile plandan çıkar: görevi olmayan akış bitmiş sayılmaz.';
     expect(pm).toContain(streams);
     expect(pm.indexOf('**Döngü.**')).toBeLessThan(pm.indexOf(streams));
     expect(pm.indexOf(streams)).toBeLessThan(pm.indexOf('**Serbestlik.**'));
