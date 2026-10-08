@@ -7,7 +7,7 @@
 
 /** One piece of a word: plain text, a variable to look up, or something only known at run time. */
 /** `sub`: the command a $(…) or `…` runs (what it prints stands there), for the few whose output can be told (mktemp). */
-export type WordPart = { lit: string } | { var: string; def?: string } | { dyn: true; sub?: string };
+export type WordPart = { lit: string } | { var: string; def?: string } | { dyn: true; sub?: string; glob?: boolean };
 
 export interface ShellWord {
   parts: WordPart[];
@@ -273,9 +273,9 @@ class Lexer {
         continue;
       }
       if (ch === '*') {
-        // A glob: which names it matches is only known at run time.
+        // A glob: which names it matches is only known at run time (relative ones stay where the shell is).
         flush();
-        parts.push({ dyn: true });
+        parts.push({ dyn: true, glob: true });
         this.#i += 1;
         continue;
       }

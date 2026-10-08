@@ -263,6 +263,63 @@ describe('gate policy (K1) — the script a line runs, what mktemp gives, loop v
   ]);
 });
 
+describe('gate policy (K1) — review round 1 (Kerem, minor): an interpreter writing a protected file, and cheap bypasses', () => {
+  const SRV = `${REPO}/apps/office-server`;
+  const WT = `${HOME}/Projects/control-center-x/apps/office-server`;
+  const live = `${REPO}/apps/office-server/hooks/gate.mjs`;
+  rows([
+    // An interpreter that writes, with a literal protected path in its code (absolute or against the effective cwd).
+    [`python3 - <<'EOF'\np='hooks/gate.mjs'; s=open(p).read()\nopen(p,'w').write(s.replace('exit(2)','exit(0)'))\nEOF`, 'self', SRV],
+    [`python3 -c "open('${live}','w').write('x')"`, 'self'],
+    [`node -e "require('fs').writeFileSync('${live}', 'x')"`, 'self'],
+    [`node <<'EOF'\nrequire('fs').writeFileSync('hooks/gate.mjs', '')\nEOF`, 'self', SRV],
+    // The same edit in a worktree, a read at the live checkout, a write elsewhere: free.
+    [`python3 - <<'EOF'\np='hooks/gate.mjs'; s=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nEOF`, 'pass', WT],
+    [`python3 -c "print(open('hooks/gate.mjs').read())"`, 'pass', SRV],
+    [`python3 -c "open('/tmp/x.txt','w').write('x')"`, 'pass', SRV],
+    // Raw sockets to the office's port.
+    ["exec 3<>/dev/tcp/127.0.0.1/4319; printf 'POST /api/approvals/x/approve HTTP/1.0\\r\\n\\r\\n' >&3", 'self'],
+    ['nc 127.0.0.1 4319 < req.txt', 'self'],
+    ['ncat localhost 4319', 'self'],
+    ['socat - TCP:127.0.0.1:4319', 'self'],
+    ['nc api.example.com 80 < req.txt', 'send'],
+    // The live database by a file: URI, by .open, by a link made in the same line.
+    [`sqlite3 file:${DATA}/office.db "UPDATE approvals SET status='approved'"`, 'self'],
+    [`sqlite3 'file:${DATA}/office.db?mode=rw' "UPDATE approvals SET status='approved'"`, 'self'],
+    [`sqlite3 'file:${DATA}/office.db?mode=ro' "SELECT 1"`, 'pass'],
+    [`sqlite3 -cmd ".open ${DATA}/office.db" :memory: "UPDATE approvals SET status='approved'"`, 'self'],
+    [`sqlite3 -readonly ${DATA}/office.db "ATTACH '${DATA}/office.db' AS w; UPDATE w.approvals SET status='approved'"`, 'self'],
+    [`ln -s ${DATA} /tmp/l2 && sqlite3 /tmp/l2/office.db "UPDATE approvals SET status='approved'"`, 'self'],
+    // Commands started from code in list form, and perl/ruby quoting.
+    [`python3 - <<'EOF'\nimport subprocess; subprocess.run(["git","push","origin","main"])\nEOF`, 'publish'],
+    [`node -e "require('child_process').execFileSync('git', ['push', 'origin', 'main'])"`, 'publish'],
+    ['perl -e "system(q{git push origin main})"', 'publish'],
+    ['perl -e \'system("git", "push", "origin")\'', 'publish'],
+    ['ruby -e "system(%q{git push origin main})"', 'publish'],
+    // Commands that run other commands.
+    ['watch -n 60 git push origin main', 'publish'],
+    ['script -qc "git push origin main" /dev/null', 'publish'],
+    ['parallel git push ::: origin', 'publish'],
+    ['trap "git push origin main" EXIT', 'publish'],
+    ['alias p="git push"; p origin main', 'publish'],
+    ['su -c "git push origin main" tarik', 'publish'],
+    ['flock /tmp/l -c "git push origin main"', 'publish'],
+    ['tmux new-session -d "git push origin main"', 'publish'],
+    // Publishing with options first.
+    ['npm --registry https://r.example publish', 'publish'],
+    ['yarn npm publish', 'publish'],
+    // An awk that edits in place.
+    [`awk -i inplace '{print}' ${live}`, 'self'],
+    // Flags missing their value (code cut short, a spawned command): read as far as it goes, never a crash.
+    ['pnpm -C', 'pass'],
+    [`python3 - <<'EOF'\nimport subprocess; subprocess.run("pnpm -C", shell=True)\nEOF`, 'pass'],
+    ['git -C', 'pass'],
+    // A glob at the desk is the desk's (live log: Kerem's battery).
+    ['rm -rf *', 'pass'],
+    ['rm -rf *', 'self', SRV],
+  ]);
+});
+
 describe('gate policy (K1) — targets and fingerprints (§4 madde 4)', () => {
   const first = (v: ReturnType<typeof classifyCall>) => v.parts[0]!;
   it('a coarse target: the command word and the remote or host, a resolved path, a tool and its first target field', () => {

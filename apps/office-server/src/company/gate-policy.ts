@@ -189,8 +189,11 @@ const shown = (s: string) => s.replace(/\u0000/g, '?');
  * A word as a path: resolved against the effective cwd; when only its last part is known at run time, its folder
  * (`partial`); null when it is not known (an unknown variable in front, an unknown cwd for a relative path).
  */
-function pathOf(w: ShellWord, st: ShellState, ctx: GateContext): { path: string; partial: boolean } | null {
-  const t = expand(w, st, ctx);
+function pathOf(w: ShellWord | undefined, st: ShellState, ctx: GateContext): { path: string; partial: boolean } | null {
+  if (!w) return null;
+  // A glob in front (`*`, `*.log`) names things where the shell is.
+  const first = w.parts[0];
+  const t = (!w.tilde && first && 'dyn' in first && first.glob ? './' : '') + expand(w, st, ctx);
   const at = t.indexOf(DYN);
   const resolve = (s: string) => (s.startsWith('/') ? posix.resolve(s) : st.cwd ? posix.resolve(st.cwd, s) : null);
   if (at === -1) {
@@ -438,6 +441,12 @@ function command(words: ShellWord[], assigns: ShellAssign[], redirects: Array<{ 
   // Redirections write files whatever the command is.
   const body = redirects.find((r) => r.op === '<<' && r.body !== undefined)?.body;
   for (const r of redirects) {
+    // Bash's own sockets: /dev/tcp/host/port in any direction (review round 1: a raw request to the office's port).
+    const sock = r.target ? /^\/dev\/(tcp|udp)\/([^/]+)\/(\d+)$/.exec(textOf(r.target, st, ctx)) : null;
+    if (sock) {
+      socket(run, `/dev/${sock[1]}`, sock[2]!, Number(sock[3]));
+      continue;
+    }
     if (!['>', '>>', '>|', '&>', '&>>', '<>', '>&'].includes(r.op) || !r.target) continue;
     const t = textOf(r.target, st, ctx);
     if (/^\/dev\/(null|stdout|stderr|tty|fd\/\d+)$/.test(t)) continue;
@@ -450,6 +459,81 @@ function command(words: ShellWord[], assigns: ShellAssign[], redirects: Array<{ 
 }
 
 const texts = (words: ShellWord[], st: ShellState, ctx: GateContext) => words.map((w) => textOf(w, st, ctx));
+
+/** A raw socket to host:port: the office's own (self) or outward (send). */
+function socket(run: Run, via: string, host: string, port: number): void {
+  const url = urlOf(`http://${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}/`);
+  if (url && isOffice(url.hostname.toLowerCase(), portOf(url), run.ctx)) add(run, { kind: 'self', target: `${via} ${host}:${port}`, why: 'ofisin portuna ham bağlantı (API kuralını dolanır)' });
+  else add(run, { kind: 'send', target: `${via} ${host}`, why: 'başka bir makineye ham bağlantı açar' });
+}
+
+/** office.db named in a text, live or not (a bare or joined name may well be the live one). */
+function liveDb(text: string, st: ShellState, ctx: GateContext): boolean {
+  const live = `${ctx.dataDir}/office.db`;
+  return [...text.matchAll(/[^\s'"`(),;]*office\.db[^\s'"`(),;]*/g)].some(({ 0: m }) => {
+    const path = m.replace(/^file:(\/\/[^/]*)?/, '').split('?')[0]!;
+    if (path.startsWith('/') || path.startsWith('~')) return posix.resolve(path.replace(/^~/, ctx.home)).startsWith(live);
+    return !path.startsWith('./') || (st.cwd !== null && posix.resolve(st.cwd, path).startsWith(live));
+  });
+}
+
+/** Code that writes files (in Python, Node, Perl or Ruby): only then do its literal paths count as targets. */
+const WRITES = /open\([^)]*,\s*(['"])[^'"]*[wax+][^'"]*\1|\.write_(?:text|bytes)\(|shutil\.\w+\(|os\.(?:remove|unlink|rename|replace|rmdir|makedirs|mkdir|truncate)\(|\.(?:unlink|rename|touch|mkdir)\(|(?:write|append)File(?:Sync)?\(|createWriteStream\(|\b(?:rm|unlink|rename|copyFile|mkdir|truncate|rmdir|cp)(?:Sync)?\(|File\.(?:write|delete|rename)|open\s*\(?\s*[\w$]*\s*,\s*['"]?[>+]/;
+
+/** Calls that write their first argument, or (for copy and move) their second; open(…) only with a writing mode. */
+const WRITE_FIRST = /\b(open|writeFile(?:Sync)?|appendFile(?:Sync)?|createWriteStream|rmSync|rm|unlinkSync|unlink|rmdirSync|mkdirSync|truncateSync|os\.remove|os\.unlink|os\.rmdir|os\.makedirs|os\.mkdir|shutil\.rmtree|Path)\(\s*([^,)]+)(?:,\s*([^,)]+))?/g;
+const WRITE_SECOND = /\b(copyFile(?:Sync)?|rename(?:Sync)?|cp(?:Sync)?|shutil\.(?:copy\w*|move)|os\.(?:rename|replace))\(\s*[^,)]+,\s*([^,)]+)/g;
+
+/**
+ * The protected paths a writing program writes (review round 1): a path a write call takes — literally, or through a
+ * variable it was assigned to — absolute, ~, or against the effective cwd. A path the program only reads, or joins to
+ * another base (root + T), is not taken.
+ */
+function protectedLiterals(code: string, st: ShellState, ctx: GateContext): Array<[string, string]> {
+  if (!WRITES.test(code)) return [];
+  const out: Array<[string, string]> = [];
+  const take = (lit: string) => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(lit) || /\s/.test(lit) || !lit) return;
+    const path = lit.startsWith('/') ? posix.resolve(lit) : lit.startsWith('~') ? posix.resolve(lit.replace(/^~/, ctx.home)) : st.cwd ? posix.resolve(st.cwd, lit) : null;
+    const why = path ? protectedWhy(path, ctx) : null;
+    if (path && why) out.push([path, why]);
+  };
+  const literal = (expr: string): string | null => {
+    const e = expr.trim();
+    const q = /^(['"`])([^'"`\n]*)\1$/.exec(e);
+    if (q) return q[2]!;
+    if (!/^[A-Za-z_$][\w$]*$/.test(e)) return null;
+    const assigned = new RegExp(`(?:^|[\\s;,(])${e.replace(/\$/g, '\\$')}\\s*=\\s*(['"\`])([^'"\`\\n]*)\\1`, 'm').exec(code);
+    return assigned ? assigned[2]! : null;
+  };
+  for (const m of code.matchAll(WRITE_FIRST)) {
+    if (m[1] === 'open' && !(m[3] && /^\s*(['"])[^'"]*[wax+][^'"]*\1\s*$/.test(m[3]))) continue;
+    if (m[1] === 'Path' && !/^\s*\)\s*\.\s*(write_text|write_bytes|unlink|touch|mkdir|rename)/.test(code.slice(m.index! + m[0].length).replace(/^[^)]*/, ''))) continue;
+    const lit = literal(m[2]!);
+    if (lit !== null) take(lit);
+  }
+  for (const m of code.matchAll(WRITE_SECOND)) {
+    const lit = literal(m[2]!);
+    if (lit !== null) take(lit);
+  }
+  return out;
+}
+
+const CMD_WORDS = '(?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh)';
+
+/** The commands a program starts, as far as its text shows them: one string, perl/ruby quoting, or a list of strings. */
+function spawnedCommands(code: string): string[] {
+  const out: string[] = [];
+  for (const m of code.matchAll(new RegExp(`(['"\`])(${CMD_WORDS}\\s[^'"\`]*)\\1`, 'g'))) out.push(m[2]!);
+  for (const m of code.matchAll(new RegExp(`(?:q[qw]?|%[qQwW])\\s*[{(\\[<]\\s*(${CMD_WORDS}\\b[^})\\]>]*)[})\\]>]`, 'g'))) out.push(m[1]!);
+  const items = (list: string) => [...list.matchAll(/(['"])([^'"]*)\1/g)].map((x) => x[2]!);
+  for (const m of code.matchAll(/[[(]\s*((?:(['"])[^'"]*\2\s*,\s*)+(['"])[^'"]*\3)\s*,?\s*[\])]/g)) {
+    const list = items(m[1]!);
+    if (new RegExp(`^${CMD_WORDS}$`).test(list[0] ?? '')) out.push(list.join(' '));
+  }
+  for (const m of code.matchAll(new RegExp(`(['"])(${CMD_WORDS})\\1\\s*,\\s*\\[([^\\]]*)\\]`, 'g'))) out.push([m[2]!, ...items(m[3]!)].join(' '));
+  return out;
+}
 
 /** A file the command writes: held when its resolved target is protected, or when it cannot be known. */
 function writeTarget(run: Run, verb: string, w: ShellWord, st: ShellState, recursive = false): void {
@@ -583,6 +667,77 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
     return;
   }
 
+  // Commands that run another command given as words or as one string (review round 1: watch, script -c, parallel,
+  // trap, alias, su -c, flock, tmux, screen).
+  const deeper = { ...run, depth: run.depth + 1 };
+  const valueOf = (opts: string[]) => {
+    for (let k = 1; k < t.length; k += 1) {
+      if (opts.includes(t[k]!)) return t[k + 1] ?? '';
+      const short = opts.find((o) => /^-\w$/.test(o) && t[k]!.length > 2 && /^-\w+$/.test(t[k]!) && t[k]!.endsWith(o[1]!));
+      if (short) return t[k + 1] ?? '';
+    }
+    return null;
+  };
+  if (name === 'watch') {
+    let k = 1;
+    while (k < t.length && flag(t[k]!)) k += ['-n', '--interval', '-d', '-q'].includes(t[k]!) && t[k] !== '-d' ? 2 : 1;
+    return shellLine(t.slice(k).join(' '), copyState(st), deeper);
+  }
+  if (name === 'script' || name === 'su' || name === 'runuser') {
+    const line = valueOf(['-c', '--command']);
+    if (line !== null) shellLine(line, copyState(st), deeper);
+    return;
+  }
+  if (name === 'parallel') {
+    const end = t.indexOf(':::');
+    return shellLine(t.slice(1, end === -1 ? undefined : end).filter((a) => !flag(a)).join(' ').replace(/\{\}/g, DYN), copyState(st), deeper);
+  }
+  if (cmd === 'trap') {
+    if (t[1] && !flag(t[1])) shellLine(t[1], copyState(st), deeper);
+    return;
+  }
+  if (cmd === 'alias') {
+    for (const a of t.slice(1)) if (a.includes('=')) shellLine(a.slice(a.indexOf('=') + 1), copyState(st), deeper);
+    return;
+  }
+  if (name === 'flock') {
+    const line = valueOf(['-c', '--command']);
+    if (line !== null) return shellLine(line, copyState(st), deeper);
+    let k = 1;
+    while (k < t.length && flag(t[k]!)) k += ['-w', '--timeout', '-E', '--conflict-exit-code'].includes(t[k]!) ? 2 : 1;
+    if (k + 1 < words.length) simple(words.slice(k + 1), env, [], st, run);
+    return;
+  }
+  if (name === 'tmux' || name === 'screen') {
+    const valued = new Set(['-t', '-s', '-n', '-c', '-S', '-x', '-e', '-F', '-L', '-f']);
+    const positional: string[] = [];
+    for (let k = 1; k < t.length; k += 1) {
+      if (valued.has(t[k]!)) k += 1;
+      else if (!flag(t[k]!)) positional.push(t[k]!);
+    }
+    // tmux new-session|new-window|split-window|send-keys|respawn-pane 'command'; screen -dm command…
+    const run2 = name === 'tmux' ? positional.slice(1) : positional;
+    if (run2.length) shellLine(run2.join(' '), copyState(st), deeper);
+    return;
+  }
+  // Raw connections (review round 1: nc to the office's port).
+  if (['nc', 'ncat', 'netcat', 'telnet'].includes(name)) {
+    const positional: string[] = [];
+    for (let k = 1; k < t.length; k += 1) {
+      if (/^-[pswiqxXOI]$/.test(t[k]!)) k += 1;
+      else if (!flag(t[k]!)) positional.push(t[k]!);
+    }
+    if (positional[0]) socket(run, name, positional[0], Number(positional[1] ?? 0));
+    return;
+  }
+  if (name === 'socat') {
+    for (const a of args) {
+      const m = /^(?:tcp[46]?|tcp-connect|tcp4-connect|tcp6-connect|openssl|ssl|udp[46]?)[:-]?(\[[^\]]+\]|[^:,]+):(\d+)/i.exec(a);
+      if (m) socket(run, 'socat', m[1]!, Number(m[2]));
+    }
+    return;
+  }
+
   // Indirect execution: what it runs is read and classified as well.
   if (SHELLS.has(name)) return shellIndirect(name, words, redirects, withEnv(st, env), run);
   if (cmd === 'eval') {
@@ -633,7 +788,7 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
     if (name === 'rsync' && positional.length >= 2) writeTarget(run, 'rsync', words[1 + args.lastIndexOf(positional[positional.length - 1]!)]!, st);
     return;
   }
-  if (name === 'sqlite3') return sqlite(words, st, run);
+  if (name === 'sqlite3') return sqlite(words, redirects, st, run);
   if (name === 'find') return find(words, env, st, run);
   fileWrites(name, words, env, st, run);
 }
@@ -691,7 +846,15 @@ const DB_ACCESS: Record<string, RegExp> = {
 };
 const dbAccess = (name: string, code: string) => (DB_ACCESS[name.startsWith('python') ? 'python' : ['node', 'deno', 'bun', 'tsx', 'ts-node'].includes(name) ? 'node' : 'other']!).test(code);
 /** Code that starts commands: only then do its string literals run as commands. */
-const SPAWNS = /subprocess|os\.system|os\.popen|Popen|child_process|exec(File)?Sync|spawn(Sync)?\(|\bsystem\(/;
+/** Code that starts commands, in its own language (an edit script's strings that only mention one are text). */
+const SPAWNS: Record<string, RegExp> = {
+  python: /\bsubprocess\b|\bos\.(system|popen|exec\w*|spawn\w*)\(|\bPopen\(|\bpty\.spawn\(/,
+  node: /child_process|(?<![.\w])(exec|execFile|spawn)(Sync)?\(|Deno\.(run|Command)\b|Bun\.spawn|(^|[\s=(;,])\$`/m,
+  other: /\bsystem\s*[(\s'"q%]|\bexec\s*[(\s]|`[^`]*`|\bqx\s*[{(\[<]|%x\s*[{(\[<]|IO\.popen|Open3/,
+};
+const spawns = (name: string, code: string) => SPAWNS[name.startsWith('python') ? 'python' : ['node', 'deno', 'bun', 'tsx', 'ts-node'].includes(name) ? 'node' : 'other']!.test(code);
+/** perl/ruby as a line filter (-p, -n, -i): its code is a substitution; backticks in it are text, only system/exec/qx run. */
+const FILTER_SPAWNS = /\bsystem\s*[(\s'"q%]|\bexec\s*[(\s]|\bqx\s*[{(\[<]|%x\s*[{(\[<]/;
 /** Code that talks HTTP. */
 const HTTP = /import\s+(requests|httpx|urllib|http\.client)|from\s+(requests|httpx|urllib|http\.client)|\bfetch\(|https?\.request\(|axios/;
 
@@ -737,29 +900,25 @@ function interpreter(name: string, words: ShellWord[], redirects: Array<{ op: st
     for (const f of files) writeTarget(run, 'perl -i', f, st);
   }
   const live = `${ctx.dataDir}/office.db`;
-  const mentions = (text: string) => [...text.matchAll(/[^\s'"`(),;]*office\.db[^\s'"`(),;]*/g)].map((m) => m[0]);
-  const isLive = (m: string) => {
-    if (m.startsWith('/') || m.startsWith('~')) return posix.resolve(m.replace(/^~/, ctx.home)).startsWith(live);
-    // A bare name or a joined path: it may well be the live one.
-    return !m.startsWith('./') || (st.cwd !== null && posix.resolve(st.cwd, m).startsWith(live));
-  };
-  const named = [
-    ...mentions(t.slice(1).filter((a) => !codes.includes(a)).join(' ')),
-    ...codes.filter((c) => dbAccess(name, c)).flatMap(mentions),
-    ...(script !== null && dbAccess(name, script) ? mentions(script) : []),
-  ];
+  const named =
+    liveDb(t.slice(1).filter((a) => !codes.includes(a)).join(' '), st, ctx) ||
+    codes.some((c) => dbAccess(name, c) && liveDb(c, st, ctx)) ||
+    (script !== null && dbAccess(name, script) && liveDb(script, st, ctx));
   const text = [t.join(' '), ...codes, script ?? ''].join('\n');
-  if (named.some(isLive) && !RO_MARK.test(text)) add(run, { kind: 'self', target: `${name} ${live}`, why: 'canlı veritabanına salt-okunur işareti olmadan erişir' });
+  if (named && !RO_MARK.test(text)) add(run, { kind: 'self', target: `${name} ${live}`, why: 'canlı veritabanına salt-okunur işareti olmadan erişir' });
   for (const code of [...codes, ...(script !== null ? [script] : [])]) {
+    // A program that writes files and names a protected one (review round 1: the edit scripts of the office, run at
+    // the live checkout by mistake, as sed -i is caught).
+    const [hit] = protectedLiterals(code, st, ctx);
+    if (hit) add(run, { kind: 'self', target: `${name} ${hit[0]}`, why: `korunan yola yazabilir (programın kodunda): ${hit[1]}` });
     if (HTTP.test(code) && /\b(requests|httpx)\.(post|put|patch|delete)\(|\bmethod\s*[:=]\s*['"](POST|PUT|PATCH|DELETE)['"]|urlopen\([^)]*data\s*=/i.test(code)) {
       const url = /https?:\/\/[^\s'"`]+/.exec(code)?.[0];
       const held = url ? httpParts(name, [{ method: 'POST', url }], ctx) : [{ kind: 'send' as const, target: `${name} ?`, why: KIND_WHY.send }];
       for (const p of held) add(run, p);
     }
-    if (!SPAWNS.test(code)) continue;
-    for (const m of code.matchAll(/(['"`])((?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh)\s[^'"`]*)\1/g)) {
-      shellLine(m[2]!, copyState(st), { ...run, depth: run.depth + 1 });
-    }
+    const filter = (name === 'perl' || name === 'ruby') && t.slice(1).some((a) => /^-\w*[pni]/.test(a));
+    if (filter ? !FILTER_SPAWNS.test(code) : !spawns(name, code)) continue;
+    for (const line of spawnedCommands(code)) shellLine(line, copyState(st), { ...run, depth: run.depth + 1 });
   }
 }
 
@@ -895,7 +1054,8 @@ function packages(pm: string, words: ShellWord[], env: Map<string, string | null
     if (valued) i += 1;
   }
   const sub = t[i] ?? (pm === 'yarn' ? 'install' : '');
-  if (sub === 'publish') return add(run, { kind: 'publish', target: `${pm} publish`, why: KIND_WHY.publish });
+  // publish wherever it stands (npm --registry x publish, yarn npm publish; review round 1).
+  if (t.slice(1).some((a) => a === 'publish')) return add(run, { kind: 'publish', target: `${pm} publish`, why: KIND_WHY.publish });
   if (sub === 'exec' || sub === 'dlx' || sub === 'x') {
     let k = i + 1;
     while (k < t.length && flag(t[k]!)) k += t[k] === '--package' || t[k] === '-p' ? 2 : 1;
@@ -913,30 +1073,47 @@ function packages(pm: string, words: ShellWord[], env: Map<string, string | null
   }
 }
 
-function sqlite(words: ShellWord[], st: ShellState, run: Run): void {
+function sqlite(words: ShellWord[], redirects: Array<{ op: string; target: ShellWord | null; body?: string }>, st: ShellState, run: Run): void {
   const { ctx } = run;
   const t = texts(words, st, ctx);
   const valued = new Set(['-cmd', '-init', '-separator', '-newline', '-nullvalue', '-vfs', '-maxsize', '-mmap', '-pagecache', '-lookaside', '-heap']);
   let readonly = false;
   let db: ShellWord | null = null;
   let dbText = '';
+  const sql: string[] = [];
   for (let i = 1; i < t.length; i += 1) {
     if (t[i] === '-readonly' || t[i] === '--readonly') readonly = true;
-    else if (valued.has(t[i]!)) i += 1;
-    else if (!flag(t[i]!)) {
+    else if (valued.has(t[i]!)) sql.push(t[++i] ?? '');
+    else if (flag(t[i]!)) continue;
+    else if (!db) {
       db = words[i]!;
       dbText = t[i]!;
-      break;
-    }
+    } else sql.push(t[i]!);
   }
-  if (!db || readonly || /mode=ro|immutable=1/.test(dbText)) return;
-  const at = pathOf(db, st, ctx);
+  for (const r of redirects) {
+    if (r.op === '<<' && r.body !== undefined) sql.push(r.body);
+    if (r.op === '<<<' && r.target) sql.push(textOf(r.target, st, ctx));
+  }
   const live = `${ctx.dataDir}/office.db`;
-  if (at ? at.path.startsWith(live) || (at.partial && under(live, at.path)) : /office\.db/.test(dbText)) {
-    add(run, { kind: 'self', target: `sqlite3 ${at && !at.partial ? at.path : shown(dbText)}`, why: 'canlı veritabanını salt-okunur olmadan açar' });
+  // The database operand: a path, or a file: URI whose own mode decides (review round 1: file:…?mode=rw).
+  let path: string | null = null;
+  if (dbText.startsWith('file:')) {
+    const [p = '', query = ''] = dbText.slice(5).replace(/^\/\/[^/]*/, '').split('?');
+    if (/(^|&)(mode=ro|immutable=1)(&|$)/.test(query)) readonly = true;
+    path = p.startsWith('/') ? posix.resolve(p) : st.cwd ? posix.resolve(st.cwd, p) : null;
+  } else if (db) {
+    const at = pathOf(db, st, ctx);
+    path = at && !at.partial ? at.path : at ? `${at.path}/${DYN}` : null;
+  }
+  // ATTACH or .open opens another database, read-write, whatever -readonly said of the first.
+  const opens = /\bATTACH\b|(^|[\s;])\.open\b/i.test(sql.join('\n'));
+  const isLive = (path !== null && (path.startsWith(live) || (path.includes(DYN) && under(live, path.slice(0, path.indexOf(DYN) - 1))))) || (path === null && /office\.db/.test(dbText));
+  if ((isLive && !readonly) || (opens && liveDb(sql.join('\n'), st, ctx))) {
+    add(run, { kind: 'self', target: `sqlite3 ${isLive && path && !path.includes(DYN) ? path : live}`, why: 'canlı veritabanını salt-okunur olmadan açar' });
     return;
   }
-  if (at && !at.partial && protectedWhy(at.path, ctx)) add(run, { kind: 'self', target: `sqlite3 ${at.path}`, why: `korunan yolu yazabilir: ${protectedWhy(at.path, ctx)}` });
+  const why = path && !path.includes(DYN) && !readonly ? protectedWhy(path, ctx) : null;
+  if (why) add(run, { kind: 'self', target: `sqlite3 ${path}`, why: `korunan yolu yazabilir: ${why}` });
 }
 
 function find(words: ShellWord[], env: Map<string, string | null>, st: ShellState, run: Run): void {
@@ -1030,9 +1207,27 @@ function fileWrites(name: string, words: ShellWord[], env: Map<string, string | 
       const dir = targetDir(['-t', '--target-directory']);
       const ops = operands(new Set(['-t', '--target-directory', '-S', '--suffix', '-m', '--mode', '-o', '--owner', '-g', '--group']));
       const dest = dir ?? (ops.length >= 2 ? ops[ops.length - 1]! : null);
+      // A link to a protected path is a way into it (review round 1: ln -s ~/.control-center /tmp/l && sqlite3 /tmp/l/office.db).
+      if (name === 'ln' && t.slice(1).some((a) => a === '--symbolic' || /^-[a-zA-Z]*s/.test(a))) {
+        for (const w of dir ? ops : ops.slice(0, -1)) {
+          const at = pathOf(w, st, ctx);
+          const why = at && !at.partial ? protectedWhy(at.path, ctx, true) : null;
+          if (why) add(run, { kind: 'self', target: `ln -s ${at!.path}`, why: `korunan bir yola bağ kurar: ${why}` });
+        }
+      }
       if (dest) writeTarget(run, name, dest, st, name === 'mv');
       // A move takes its sources away from where they were.
       if (name === 'mv') for (const w of dir ? ops : ops.slice(0, -1)) writeTarget(run, 'mv', w, st, true);
+      return;
+    }
+    case 'awk':
+    case 'gawk': {
+      // gawk -i inplace edits its files in place, like sed -i.
+      const inplace = t.slice(1).some((a, k) => (a === '-i' || a === '--include') && t[k + 2] === 'inplace') || t.slice(1).includes('--include=inplace');
+      if (!inplace) return;
+      const scripted = t.slice(1).some((a) => a === '-f' || a.startsWith('--file'));
+      const ops = operands(new Set(['-i', '--include', '-f', '--file', '-v', '--assign', '-F', '--field-separator'])).filter((w) => textOf(w, st, ctx) !== 'inplace');
+      for (const w of scripted ? ops : ops.slice(1)) writeTarget(run, 'awk -i inplace', w, st);
       return;
     }
     case 'dd':
@@ -1126,7 +1321,12 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
   const start = typeof cwd === 'string' && cwd.startsWith('/') ? posix.resolve(cwd) : ctx.deskDir;
   if (tool === 'Bash' || tool === 'Monitor') {
     const run: Run = { ctx, parts: [], depth: 0, written: new Map() };
-    shellLine(typeof o.command === 'string' ? o.command : '', { cwd: start, vars: new Map(), dirs: [] }, run);
+    try {
+      shellLine(typeof o.command === 'string' ? o.command : '', { cwd: start, vars: new Map(), dirs: [] }, run);
+    } catch (err) {
+      // A line the reader could not follow is held, not let through (fail-closed), and not a crash of the office.
+      add(run, { kind: 'other', target: 'okunamayan komut', why: `kapı komutu okuyamadı (${err instanceof Error ? err.message : String(err)})` });
+    }
     return done(run.parts);
   }
   if (tool === 'Write' || tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit') {
