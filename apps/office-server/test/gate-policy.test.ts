@@ -300,6 +300,11 @@ describe('gate policy (K1) — review round 1 (Kerem, minor): an interpreter wri
     ['perl -e "system(q{git push origin main})"', 'publish'],
     ['perl -e \'system("git", "push", "origin")\'', 'publish'],
     ['ruby -e "system(%q{git push origin main})"', 'publish'],
+    // Spawning is told in the program's own language (live log): an edit script's TypeScript text, a SQL db.exec(),
+    // a perl substitution's backticks are not commands.
+    [`python3 - <<'EOF'\np='test/x.test.ts'; s=open(p).read()\ns=s.replace("a", "execSync('git push origin main')")\nopen(p,'w').write(s)\nEOF`, 'pass', WT],
+    [`node -e "const db = new (require('node:sqlite').DatabaseSync)(':memory:'); db.exec('CREATE TABLE t (c TEXT)'); db.prepare(\\"INSERT INTO t VALUES ('git push origin main')\\").run()"`, 'pass'],
+    ["perl -pi -e 's/`git push origin`/`git push`/' notes.md", 'pass'],
     // Commands that run other commands.
     ['watch -n 60 git push origin main', 'publish'],
     ['script -qc "git push origin main" /dev/null', 'publish'],
