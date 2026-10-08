@@ -81,7 +81,7 @@ const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 // How the work went (B4): read from the log on demand, the last `days` or all time.
 const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };
 // The top bar's figures (busy, delivered in the last day, stuck): read on demand.
-const metrics = { report: () => officeMetrics({ db, roster, tasks }, Date.now()) };
+const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date.now()) };
 // Which connectors the office has (B3): read from the sessions' reports and the coordinator's records.
 const integrations = new IntegrationRegistry({ db, roster, events });
 

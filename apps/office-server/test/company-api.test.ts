@@ -27,7 +27,7 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   // Wired like main.ts: the performance report reads the same database.
   const performance = { report: (r: { days?: number } = {}) => performanceReport(s.db, { since: r.days ? Date.now() - r.days * 86_400_000 : null }) };
   const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
-  const metrics = { report: () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks }, Date.now()) };
+  const metrics = { report: () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks, state: c.state }, Date.now()) };
   const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, metrics, integrations, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
@@ -351,7 +351,7 @@ describe('company API', () => {
     const metrics = await call(t.port, 'GET', '/api/metrics');
     expect(metrics.status).toBe(200);
     expect(metrics.body).toMatchObject({
-      busy: { busy: 1, total: 2, idle: [{ id: can.id, name: 'Can', title: '' }] },
+      busy: { busy: 1, total: 2, idle: [{ id: can.id, name: 'Can', title: '' }], unavailable: [] },
       delivered: { count: 0, firstPassRate: null, windowHours: 24 },
       stuck: { count: 1, items: [{ taskId: task.id, title: 'İş', assignee: 'Ada', reason: 'blocked' }] },
     });

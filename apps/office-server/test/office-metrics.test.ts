@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER } from '@cc/shared';
-import { RENUDGE_MS } from '../src/company/dispatcher.ts';
 import { officeMetrics } from '../src/company/office-metrics.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
@@ -22,44 +21,66 @@ function make() {
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
   const c = companyFor(s, f, ['coder'], now);
-  const metrics = () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks }, clock);
+  const metrics = () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks, state: c.state }, clock);
   const advance = (ms: number) => void (clock += ms);
   return { ...s, ...c, metrics, advance, now };
 }
 
 describe('office metrics — busy', () => {
-  it('in progress or blocked is busy; the coordinator and the archived are not counted; idle since the last finish, else the hire', () => {
+  it('the pulse’s idle rule: busy holds an open task, idle can take work and holds none (since the hire, last close or last task moved away), unavailable cannot take work', () => {
     const t = make();
     const c = t.company.hireCoordinator();
-    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
-    const can = t.company.hire(c.id, { name: 'Can', role: 'r' });
-    const deniz = t.company.hire(c.id, { name: 'Deniz', role: 'r', title: 'Testçi' });
     const gone = t.company.hire(c.id, { name: 'Eski', role: 'r' });
     t.roster.update(gone.id, { lifecycle: 'archived' });
+    const [ada, can, deniz, ece, bora, mert] = ['Ada', 'Can', 'Deniz', 'Ece', 'Bora', 'Mert'].map((name) => t.company.hire(c.id, { name, role: 'r', title: name === 'Deniz' ? 'Testçi' : '' }));
     // The coordinator at work counts for nobody.
     t.company.start(t.company.createTask(OWNER, { assignee: c.id, title: 'Plan' }).id);
-    t.company.start(t.company.createTask(c.id, { assignee: ada.id, title: 'A' }).id);
-    const b = t.company.createTask(c.id, { assignee: can.id, title: 'B' });
+    t.company.start(t.company.createTask(c.id, { assignee: ada!.id, title: 'A' }).id);
+    const b = t.company.createTask(c.id, { assignee: can!.id, title: 'B' });
     t.company.start(b.id);
-    t.company.update(can.id, b.id, { blocked: true });
-    const d = t.company.createTask(c.id, { assignee: deniz.id, title: 'D' });
+    t.company.update(can!.id, b.id, { blocked: true });
+    // In the owner's terminal with a task in hand: cannot take work, so not busy and not idle either.
+    t.company.start(t.company.createTask(c.id, { assignee: mert!.id, title: 'M' }).id);
+    t.roster.update(mert!.id, { lifecycle: 'in_terminal' });
+    const d = t.company.createTask(c.id, { assignee: deniz!.id, title: 'D' });
     t.company.start(d.id);
+    const x = t.company.createTask(c.id, { assignee: ece!.id, title: 'X' });
     t.advance(HOUR);
-    t.company.finish(deniz.id, d.id, { summary: 'd', outputs: [], learned: '' });
+    t.company.finish(deniz!.id, d.id, { summary: 'd', outputs: [], learned: '' });
     t.advance(HOUR);
+    // A sleeper can take work (a task wakes them).
     const selin = t.company.hire(c.id, { name: 'Selin', role: 'r' });
-    // A task in the queue is not work in hand: Deniz is still idle.
-    t.company.createTask(c.id, { assignee: deniz.id, title: 'E' });
+    t.roster.update(selin.id, { lifecycle: 'sleeping' });
+    t.advance(HOUR);
+    // Ece's task moves to Bora: her idle stretch starts now; Bora holds a waiting task, which is work in hand.
+    t.company.assign(c.id, x.id, bora!.id);
     t.advance(5 * HOUR);
 
     expect(t.metrics().busy).toEqual({
-      busy: 2,
-      total: 4,
+      busy: 3,
+      total: 7,
       idle: [
-        { id: deniz.id, name: 'Deniz', title: 'Testçi', since: T0 + HOUR },
+        { id: deniz!.id, name: 'Deniz', title: 'Testçi', since: T0 + HOUR },
         { id: selin.id, name: 'Selin', title: '', since: T0 + 2 * HOUR },
+        { id: ece!.id, name: 'Ece', title: '', since: T0 + 3 * HOUR },
       ],
+      unavailable: [{ id: mert!.id, name: 'Mert', title: '', state: 'in_terminal' }],
     });
+  });
+
+  it('who cannot take work is listed with their state, whether or not they hold a task', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const states = ['limited', 'error', 'stopped', 'in_terminal'] as const;
+    const people = states.map((state, i) => {
+      const e = t.company.hire(c.id, { name: `K${i}`, role: 'r' });
+      t.roster.update(e.id, { lifecycle: state });
+      return e;
+    });
+    t.company.createTask(c.id, { assignee: people[0]!.id, title: 'bekleyen' });
+    const m = t.metrics().busy;
+    expect(m).toMatchObject({ busy: 0, total: 4, idle: [] });
+    expect(m.unavailable).toEqual(people.map((e, i) => ({ id: e.id, name: e.name, title: '', state: states[i] })));
   });
 
   it('the longest idle comes first', () => {
@@ -140,11 +161,11 @@ describe('office metrics — delivered', () => {
 });
 
 describe('office metrics — stuck', () => {
-  it('blocked, then past due, then reminded and still not moving after the re-nudge window; each task once, in that order', () => {
+  it('blocked, then past due, then reminded and its holder not working; each task once, in that order', () => {
     const t = make();
     const c = t.company.hireCoordinator();
     const [mert, ece, ali, su, nur] = ['Mert', 'Ece', 'Ali', 'Su', 'Nur'].map((name) => t.company.hire(c.id, { name, role: 'r' }));
-    const remind = (id: string, at: number | null = t.now()) => t.tasks.update(id, { nudged: true, nudgedAt: at });
+    const remind = (id: string) => t.tasks.update(id, { nudged: true, nudgedAt: t.now() });
     // B1: blocked, and later past due too — counted once, as blocked.
     const b1 = t.company.createTask(c.id, { assignee: mert!.id, title: 'B1', dueAt: '+1h' });
     t.company.start(b1.id);
@@ -153,24 +174,20 @@ describe('office metrics — stuck', () => {
     // B2: waiting past its due time.
     const b2 = t.company.createTask(c.id, { assignee: ece!.id, title: 'B2', dueAt: '+30m' });
     t.advance(MIN);
-    // B3: reminded long ago and still in progress.
+    // B3: the office had to remind, and the holder sits idle with it — however recent the reminder.
     const b3 = t.company.createTask(c.id, { assignee: ali!.id, title: 'B3' });
     t.company.start(b3.id);
-    remind(b3.id);
     t.advance(MIN);
-    // B4: reminded long ago and past due: past due comes first.
+    // B4: reminded and past due: past due comes first.
     const b4 = t.company.createTask(c.id, { assignee: su!.id, title: 'B4', dueAt: '+20m' });
     t.company.start(b4.id);
     remind(b4.id);
     t.advance(MIN);
-    // B5: a reminder from before its time was kept counts as long ago (as the dispatcher reads it).
-    const b5 = t.company.createTask(c.id, { assignee: nur!.id, title: 'B5' });
-    t.company.start(b5.id);
-    remind(b5.id, null);
-    t.advance(MIN);
-    // Not stuck: reminded only ten minutes before the reading, never reminded, done after its due time, parked.
-    const fresh = t.company.createTask(c.id, { assignee: ece!.id, title: 'Taze' });
-    t.company.start(fresh.id);
+    // Not stuck: reminded but the holder is working on it, never reminded, done after its due time, parked.
+    const working = t.company.createTask(c.id, { assignee: nur!.id, title: 'Çalışıyor' });
+    t.company.start(working.id);
+    remind(working.id);
+    t.roster.update(nur!.id, { lifecycle: 'working' });
     t.company.start(t.company.createTask(c.id, { assignee: mert!.id, title: 'Sürüyor' }).id);
     const late = t.company.createTask(c.id, { assignee: ali!.id, title: 'Geç bitti', dueAt: '+10m' });
     t.company.start(late.id);
@@ -178,33 +195,45 @@ describe('office metrics — stuck', () => {
     t.company.finish(ali!.id, late.id, { summary: 's', outputs: [], learned: '' });
     const parked = t.company.createTask(c.id, { assignee: su!.id, title: 'Park' });
     t.company.start(parked.id);
+    remind(parked.id);
     t.company.parkTask(su!.id, parked.id, '+3h', 'pencere');
-    t.advance(55 * MIN);
-    remind(fresh.id);
-    t.advance(10 * MIN);
+    t.advance(64 * MIN);
+    remind(b3.id);
+    t.roster.update(ali!.id, { lifecycle: 'idle' });
 
     expect(t.metrics().stuck).toEqual({
-      count: 5,
+      count: 4,
       items: [
         { taskId: b1.id, title: 'B1', assignee: 'Mert', reason: 'blocked' },
         { taskId: b2.id, title: 'B2', assignee: 'Ece', reason: 'overdue' },
         { taskId: b4.id, title: 'B4', assignee: 'Su', reason: 'overdue' },
         { taskId: b3.id, title: 'B3', assignee: 'Ali', reason: 'stalled' },
-        { taskId: b5.id, title: 'B5', assignee: 'Nur', reason: 'stalled' },
       ],
     });
   });
 
-  it('a reminder is "still not moving" exactly at the dispatcher’s re-nudge window', () => {
+  it('a reminded task is stuck while its holder is not working, and clears when they work or it starts again', () => {
     const t = make();
     const c = t.company.hireCoordinator();
     const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
     const a = t.company.createTask(c.id, { assignee: ada.id, title: 'A' });
     t.company.start(a.id);
-    t.tasks.update(a.id, { nudged: true, nudgedAt: t.now() });
-    t.advance(RENUDGE_MS - 1);
+    t.roster.update(ada.id, { lifecycle: 'idle' });
     expect(t.metrics().stuck).toEqual({ count: 0, items: [] });
-    t.advance(1);
-    expect(t.metrics().stuck).toEqual({ count: 1, items: [{ taskId: a.id, title: 'A', assignee: 'Ada', reason: 'stalled' }] });
+    t.tasks.update(a.id, { nudged: true, nudgedAt: t.now() });
+    const stalled = { count: 1, items: [{ taskId: a.id, title: 'A', assignee: 'Ada', reason: 'stalled' }] };
+    expect(t.metrics().stuck).toEqual(stalled);
+    // A sleeper or a quota limit is not working either.
+    for (const lifecycle of ['sleeping', 'limited'] as const) {
+      t.roster.update(ada.id, { lifecycle });
+      expect(t.metrics().stuck).toEqual(stalled);
+    }
+    t.roster.update(ada.id, { lifecycle: 'working' });
+    expect(t.metrics().stuck.count).toBe(0);
+    t.roster.update(ada.id, { lifecycle: 'idle' });
+    expect(t.metrics().stuck).toEqual(stalled);
+    // Handed out again: a fresh start, no reminder.
+    t.company.start(a.id);
+    expect(t.metrics().stuck.count).toBe(0);
   });
 });
