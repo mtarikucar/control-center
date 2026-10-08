@@ -25,13 +25,14 @@ const T0 = new Date(2026, 9, 5, 9, 0).getTime();
 const SINCE = T0 - HOUR;
 const UNTIL = T0 + 7 * DAY;
 
-// On core-4 the schema has B5's blueprints (v18) and B26's kpi_readings (v19); B9a's approvals (v21, spec) is not in
-// any branch yet, so a test that needs it makes it. An older office (the live one is v15) has none of the three.
+// On core-4 the schema has B5's blueprints (v18) and B26's kpi_readings (v19). B9a's approvals is v21 on its own branch:
+// where the migrations already made it the test keeps it, elsewhere it makes it with the same columns (B9a's v21). An
+// older office (the live one is v15) has none of the three, so that state drops all of them (task 9937b72a).
 const APPROVALS = `
-  CREATE TABLE approvals (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, task_id TEXT, kind TEXT NOT NULL, tool TEXT NOT NULL, target TEXT NOT NULL, fingerprint TEXT NOT NULL,
+  CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, task_id TEXT, kind TEXT NOT NULL, tool TEXT NOT NULL, target TEXT NOT NULL, fingerprint TEXT NOT NULL,
     summary TEXT NOT NULL, scope TEXT NOT NULL, status TEXT NOT NULL, requested_at INTEGER NOT NULL, decided_at INTEGER, decided_by TEXT, decided_via TEXT,
     expires_at INTEGER, used_at INTEGER, note TEXT);`;
-const AS_BEFORE_V18 = 'DROP TABLE blueprint_steps; DROP TABLE blueprints; DROP TABLE kpi_readings;';
+const AS_BEFORE_V18 = 'DROP TABLE blueprint_steps; DROP TABLE blueprints; DROP TABLE kpi_readings; DROP TABLE IF EXISTS approvals;';
 
 /** An office database on disk, filled by the test, then read by a second, read-only connection. */
 function office(o: { pilot: boolean }) {
@@ -244,12 +245,22 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     expect(measure(r, 'KÖ7').pass).toBe(true);
   });
 
-  it('an office with nothing in the window says “veri yok” where there is nothing to measure, and writes nothing', () => {
+  // Both states whichever branch runs it: with B9a's approvals an empty window is a KÖ5 measure (no outward call, none
+  // unapproved), as KÖ7 and KÖ9 are; without it there is nothing to measure.
+  it.each([
+    ['without the approvals table (core-4)', false],
+    ['with the approvals table (B9a, v21)', true],
+  ])('an office with nothing in the window says “veri yok” where there is nothing to measure, and writes nothing — %s', (_, approvals) => {
     const t = office({ pilot: false });
+    t.db.exec(approvals ? APPROVALS : 'DROP TABLE IF EXISTS approvals;');
     t.db.close();
     const before = createHash('sha256').update(readFileSync(t.file)).digest('hex');
     const r = pilotMetrics(t.read(), { since: SINCE, until: UNTIL });
-    expect(r.measures.filter((m) => m.pass === null).map((m) => m.id)).toEqual(['KÖ1', 'KÖ2', 'KÖ3', 'KÖ4', 'KÖ5', 'KÖ6', 'KÖ8', 'KÖ10']);
+    expect(r.tables.approvals).toBe(approvals);
+    const nothing = ['KÖ1', 'KÖ2', 'KÖ3', 'KÖ4', 'KÖ5', 'KÖ6', 'KÖ8', 'KÖ10'];
+    expect(r.measures.filter((m) => m.pass === null).map((m) => m.id)).toEqual(approvals ? nothing.filter((id) => id !== 'KÖ5') : nothing);
+    const k5 = measure(r, 'KÖ5');
+    expect([k5.facts, k5.pass]).toEqual(approvals ? [{ outward: 0, unapproved: 0 }, true] : [{ outward: 0, unapproved: null }, null]);
     // kpi_readings is there (v19) and no goal defines a KPI: that is a measure, and it does not hold.
     expect([measure(r, 'KÖ11').value, measure(r, 'KÖ11').pass]).toEqual(['KPI tanımlı etkin hedef yok', false]);
     expect(createHash('sha256').update(readFileSync(t.file)).digest('hex')).toBe(before);
