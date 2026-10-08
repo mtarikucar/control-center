@@ -11,7 +11,7 @@ import { formatPilotMetrics, pilotMetrics } from '../src/pilot-metrics.ts';
 import { METHOD } from './company-helpers.ts';
 import { tempDir, until } from './helpers.ts';
 import { pageHeaders } from './owner-helpers.ts';
-import { COST_CAP_USD, PILOT_MODEL, PILOT_STUBS, STEP_TIMEOUT_MS, pilotCommand, pilotOffice, spentUsd, type PilotOffice } from './pilot-harness.ts';
+import { COST_CAP_USD, PILOT_MODEL, PILOT_STUBS, STEP_TIMEOUT_MS, pilotCommand, pilotKo1, pilotOffice, spentUsd, type PilotOffice } from './pilot-harness.ts';
 import { LOCKED_TOOLS } from './real-session.ts';
 
 /**
@@ -199,12 +199,12 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
           return events(after).some((e) => e.event.type === 'onboarding.changed' && e.event.change === 'finished');
         });
         const rounds = events(after).flatMap((e) => (e.event.type === 'onboarding.changed' && e.event.change === 'round' && e.event.round ? [e.event.round] : []));
-        const asked = rounds.reduce((n, r) => n + r.questions.length, 0);
-        checks.push(`tur ${rounds.length} (≤ 2), soru ${asked} (≤ 10): ${rounds.map((r) => r.questions.join(', ')).join(' | ')}`);
+        const ko1 = pilotKo1(rounds);
+        checks.push(ko1.line);
         expect(o.company.onboarding().complete).toBe(true);
         const assumed = Object.values(o.company.profile().sections).flatMap((s) => (s ? s.assumedFields.map((f) => `${s.section}.${f}`) : []));
         checks.push(`varsayılan alanlar: ${assumed.length ? assumed.join(', ') : 'yok'}`);
-        measure('KÖ1', `onboarding ${rounds.length} tur, ${asked} soru (eşik ≤ 2 tur, ≤ 10 soru)`, rounds.length <= 2 && asked <= 10);
+        measure('KÖ1', ko1.measured, ko1.met);
       });
 
       // 3 — the package as a blueprint plan; the owner approves it on the page; the coordinator reads and installs it.

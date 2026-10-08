@@ -77,6 +77,16 @@ export function pilotCommand(claude: string[] = ['claude']): string[] {
   return [...claude, ...LOCKED_ARGS, '--mcp-config', STUB_CONFIG];
 }
 
+/** The pilot test's KÖ1 (pilot readiness §4 step 2) from the onboarding's rounds as asked: ≤ 2 rounds, ≤ 10 questions. */
+export function pilotKo1(rounds: ReadonlyArray<{ questions: readonly string[] }>): { met: boolean; measured: string; line: string } {
+  const asked = rounds.reduce((n, r) => n + r.questions.length, 0);
+  return {
+    met: rounds.length <= 2 && asked <= 10,
+    measured: `onboarding ${rounds.length} tur, ${asked} soru (eşik ≤ 2 tur, ≤ 10 soru)`,
+    line: `tur ${rounds.length} (≤ 2), soru ${asked} (≤ 10): ${rounds.map((r) => r.questions.join(', ')).join(' | ')}`,
+  };
+}
+
 /** What the run has spent so far: claude's own count, every turn result. */
 export function spentUsd(s: TestSetup): number {
   return s.events.list({ limit: 1_000_000 }).reduce((sum, e) => sum + (e.event.type === 'turn.finished' ? e.event.costUsd : 0), 0);
