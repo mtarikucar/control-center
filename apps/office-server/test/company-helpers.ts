@@ -14,7 +14,8 @@ import type { FakeEngine } from './engine-helpers.ts';
 import type { TestSetup } from './helpers.ts';
 
 /** The company layer over a test setup and a fake engine, wired like main.ts; `now` (optional) is every store's clock. */
-export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = ['coder', 'designer', 'manager'], now?: () => number) {
+/** `reload` (optional) is also called when the company restarts a session (as main.ts wires Engine.reload). */
+export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = ['coder', 'designer', 'manager'], now?: () => number, reload?: (id: string) => void) {
   const tasks = new TaskStore(s.db, now);
   const plans = new PlanStore(s.db, now);
   const notices = new NoticeStore(s.db, now);
@@ -41,7 +42,10 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   const clock = { touch: () => void (touched += 1) };
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
-    reload: (id) => void reloaded.push(id), schedules, clock, now, profile: new ProfileStore(s.db, now), onboarding: new OnboardingStore(s.db, now),
+    reload: (id) => {
+      reloaded.push(id);
+      reload?.(id);
+    }, schedules, clock, now, profile: new ProfileStore(s.db, now), onboarding: new OnboardingStore(s.db, now),
   });
   const scheduling = new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
   /** A restarted office's due-processor on the same database. */

@@ -22,6 +22,7 @@ import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
+import { sessionDeny } from './company/session-deny.ts';
 import { loadConfig } from './config.ts';
 import { migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
@@ -51,6 +52,8 @@ const quota = new QuotaTracker(db, events);
 const tokens = new TokenRegistry();
 let mcpUrl = '';
 const engine = new Engine({
+  // B9b: each session closes the employee's own list (the registry is built below; asked only when a session starts).
+  sessionDeny: (e) => sessionDeny({ capabilities: e.capabilities ?? [], seen: integrations.seenToolNames(), closedServers: integrations.closedServers() }),
   roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens },
   cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
   modelPolicyEnabled: () => budget.constitution().modelPolicyEnabled,

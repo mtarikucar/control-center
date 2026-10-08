@@ -433,7 +433,7 @@ describe('Capabilities — reading them, and the tools that take them', () => {
     const ada = await read(t.can, { employee: 'Ada' });
     expect(ada).toContain('# Ada — yetenekler (3), masasındaki karşılığı');
     expect(ada).toContain('• email.read — E-posta okuma [açık] claude.ai Gmail: bu masada açık');
-    expect(ada).toContain('• crm.read — Müşteri kayıtlarını okuma [kapalı] claude.ai jeeta: masa ayarı: oturumda aracı yok (açık: Can)');
+    expect(ada).toContain('• crm.read — Müşteri kayıtlarını okuma [kapalı] claude.ai jeeta: oturumda aracı yok (masa ayarı ya da rolün kapatması) (açık: Can)');
     expect(await read(t.ada, { employee: 'Efe' })).toBe('Efe için bildirilmiş yetenek yok. Koordinatör editRoleCard(capabilities) ile bildirir.');
     const task = t.company.createTask(t.coordinator.id, { assignee: t.efe.id, title: 'Kampanya', requires: ['email.send', 'crm.read'] } as never);
     const forTask = await read(t.efe, { task: task.id });
