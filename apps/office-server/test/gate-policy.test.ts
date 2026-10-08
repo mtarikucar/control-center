@@ -136,6 +136,10 @@ describe('gate policy (K1) — effective cwd, resolved target and git (review ro
     ['cd ~/Projects/control-center && cat apps/office-server/hooks/gate.mjs', 'pass'],
     // Two calls: the shell went back to the desk after the first (live log), so the second runs at the desk (3f7fe283 round 1).
     ['git checkout feat/x', 'pass', DESK],
+    // A subshell's cd ends with it; a { group }'s does not.
+    ['(cd ~/Projects/control-center && git status) && git checkout feat/x', 'pass'],
+    ['{ cd ~/Projects/control-center; } && git checkout feat/x', 'self'],
+    ['pushd ~/Projects/control-center && popd && git checkout feat/x', 'pass'],
   ]);
 });
 
