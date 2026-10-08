@@ -76,4 +76,19 @@ describe('QuotaTracker', () => {
     expect(all.c?.total).toMatchObject({ turns: 16, sideAnswers: 2 });
     expect(all.m?.today).toMatchObject({ turns: 1, sideAnswers: 0 });
   });
+
+  it('sums everyone’s use since a time (the board’s last day), side answers included', () => {
+    const { events, quota, setClock } = make();
+    setClock(YESTERDAY);
+    events.append('c', turn(5));
+    setClock(TODAY_NOON);
+    events.append('c', turn(0.5));
+    events.append('m', turn(0.25));
+    events.append(null, { type: 'side.answer', text: 'x', ok: true, usage: usage(1), costUsd: 0.1 });
+    events.append('m', { type: 'turn.started' });
+    const day = quota.officeSince(TODAY_NOON - 60_000);
+    expect(day).toMatchObject({ turns: 2, sideAnswers: 1, inputTokens: 3, outputTokens: 6 });
+    expect(day.costUsd).toBeCloseTo(0.85);
+    expect(quota.officeSince(0).turns).toBe(3);
+  });
 });

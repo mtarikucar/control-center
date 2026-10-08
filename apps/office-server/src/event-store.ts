@@ -62,6 +62,23 @@ export class EventStore {
     return row ? toStored(row) : null;
   }
 
+  /** Events of these types logged after `ts` (strictly), oldest first; over `limit`, the newest are kept (the type-and-time index). */
+  since(ts: number, types: readonly OfficeEventType[], limit = 1000): StoredEvent[] {
+    if (types.length === 0) return [];
+    const rows = this.#db
+      .prepare(`SELECT seq, employee_id, ts, payload FROM events WHERE type IN (${types.map(() => '?').join(', ')}) AND ts > ? ORDER BY seq DESC LIMIT ?`)
+      .all(...types, ts, Math.max(1, limit)) as unknown as Row[];
+    return rows.map(toStored).reverse();
+  }
+
+  /** The last event of this type logged at or before `ts`; null: none. */
+  lastAt(type: OfficeEventType, ts: number): StoredEvent | null {
+    const row = this.#db
+      .prepare('SELECT seq, employee_id, ts, payload FROM events WHERE type = ? AND ts <= ? ORDER BY ts DESC, seq DESC LIMIT 1')
+      .get(type, ts) as unknown as Row | undefined;
+    return row ? toStored(row) : null;
+  }
+
   lastSeq(): number {
     const row = this.#db.prepare('SELECT MAX(seq) AS s FROM events').get() as unknown as { s: number | null };
     return row.s ?? 0;

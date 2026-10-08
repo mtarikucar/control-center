@@ -52,7 +52,14 @@ export class QuotaTracker {
     return Object.fromEntries(ids.map((id) => [id, this.usage(id)]));
   }
 
-  #sum(employeeId: string, since: number): UsageTotals {
+  /** Everyone's use since `since` (the management board's last day). */
+  officeSince(since: number): UsageTotals {
+    return this.#sum(null, since);
+  }
+
+  /** One employee's use since `since`; null: everyone's. */
+  #sum(employeeId: string | null, since: number): UsageTotals {
+    const who = employeeId === null ? '' : 'employee_id = ? AND ';
     const row = this.#db
       .prepare(
         `SELECT
@@ -64,9 +71,9 @@ export class QuotaTracker {
            COALESCE(SUM(type = 'turn.finished'), 0) AS turns,
            COALESCE(SUM(type = 'side.answer'), 0) AS side
          FROM events
-         WHERE employee_id = ? AND ts >= ? AND type IN ('turn.finished', 'side.answer')`,
+         WHERE ${who}ts >= ? AND type IN ('turn.finished', 'side.answer')`,
       )
-      .get(employeeId, since) as unknown as { input: number; output: number; cacheRead: number; cacheCreation: number; cost: number; turns: number; side: number };
+      .get(...(employeeId === null ? [since] : [employeeId, since])) as unknown as { input: number; output: number; cacheRead: number; cacheCreation: number; cost: number; turns: number; side: number };
     return {
       inputTokens: row.input,
       outputTokens: row.output,

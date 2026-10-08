@@ -61,6 +61,39 @@ describe('EventStore', () => {
     expect(s.list({ tail: true, limit: 1 }).map((e) => e.seq)).toEqual([6]);
   });
 
+  it('lists events of the given types logged after a time, oldest first, keeping the newest when over the limit', () => {
+    let clock = 1000;
+    const s = store(() => clock);
+    s.append('e1', { type: 'message.user', text: 'önce', source: 'owner' });
+    clock = 2000;
+    const a = s.append('e1', { type: 'message.user', text: 'sınırda', source: 'owner' });
+    clock = 3000;
+    const b = s.append(null, { type: 'company.paused', paused: true });
+    s.append('e1', { type: 'turn.started' });
+    clock = 4000;
+    const c = s.append('e2', { type: 'message.user', text: 'sonra', source: 'system' });
+    // Strictly after the time: an event at 1000 is not "after 1000".
+    expect(s.since(1000, ['message.user', 'company.paused'])).toEqual([a, b, c]);
+    expect(s.since(2000, ['message.user'])).toEqual([c]);
+    expect(s.since(1000, ['message.user', 'company.paused'], 2)).toEqual([b, c]);
+    expect(s.since(0, [])).toEqual([]);
+  });
+
+  it('finds the last event of a type logged at or before a time', () => {
+    let clock = 1000;
+    const s = store(() => clock);
+    expect(s.lastAt('company.paused', 5000)).toBeNull();
+    s.append(null, { type: 'company.paused', paused: true });
+    clock = 2000;
+    const second = s.append(null, { type: 'company.paused', paused: false });
+    s.append('e1', { type: 'turn.started' });
+    clock = 3000;
+    s.append(null, { type: 'company.paused', paused: true });
+    expect(s.lastAt('company.paused', 2500)).toEqual(second);
+    expect(s.lastAt('company.paused', 2000)).toEqual(second);
+    expect(s.lastAt('company.paused', 999)).toBeNull();
+  });
+
   it('reports lastSeq, 0 when empty', () => {
     const s = store();
     expect(s.lastSeq()).toBe(0);

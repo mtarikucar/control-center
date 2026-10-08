@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_CONSTITUTION, OWNER, type QuotaState, type Usage } from '@cc/shared';
-import { Budget } from '../src/company/budget.ts';
+import { Budget, constitutionChanges } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
@@ -128,6 +128,12 @@ describe('Budget — the owner’s constitution change reaches the coordinator',
     expect(changed(t, c.id)[1]!.text).toBe(
       'Sahibi anayasayı değiştirdi: Aylık para sınırı (USD) yok → 100; Özet saatleri 9, 17 → 8, 18; Koordinatör modelleri sonnet / sonnet / haiku → opus / sonnet / haiku; Özet kapalı → açık; Serbestlik planlar sahibine → tam serbest; Boşta kapasite uyarısı (saat) 2 → 4. Süren planlarını yeni sınırlara göre gözden geçir.',
     );
+  });
+
+  it('constitutionChanges: what differs, old → new, in the words of the owner’s notice (the board shares it); none for the same rules', () => {
+    const after = { ...DEFAULT_CONSTITUTION, ownerReservePct: 40, autonomy: 'plans' as const, coordinatorModels: { ...DEFAULT_CONSTITUTION.coordinatorModels, owner: 'opus' as const } };
+    expect(constitutionChanges(DEFAULT_CONSTITUTION, after)).toEqual(['Ofisin kota sınırı %75 → %60', 'Koordinatör modelleri sonnet / sonnet / haiku → opus / sonnet / haiku', 'Serbestlik tam serbest → planlar sahibine']);
+    expect(constitutionChanges(after, { ...after })).toEqual([]);
   });
 
   it('W3: no notice when nothing changed (the form sends every field), without a coordinator, for a refused change, or for a change that is not the owner’s', () => {

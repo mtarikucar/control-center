@@ -80,6 +80,15 @@ function described(key: keyof Constitution, c: Constitution): [label: string, va
   return [RULES[key as NumberKey].label, value === null ? 'yok' : String(value)];
 }
 
+/** What differs between two constitutions, `Label old → new` in the constitution's order (the owner's notice and the board). */
+export function constitutionChanges(before: Constitution, after: Constitution): string[] {
+  return (Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>).flatMap((key) => {
+    const [label, was] = described(key, before);
+    const is = described(key, after)[1];
+    return was === is ? [] : [`${label} ${was} → ${is}`];
+  });
+}
+
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toString()}`;
 
 /** A window whose reset time has passed is a fresh window: 0 %. */
@@ -194,11 +203,7 @@ export class Budget {
   ownerSetConstitution(patch: Record<string, unknown>): Constitution {
     const before = this.constitution();
     const next = this.setConstitution(patch);
-    const changes = (Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>).flatMap((key) => {
-      const [label, was] = described(key, before);
-      const is = described(key, next)[1];
-      return was === is ? [] : [`${label} ${was} → ${is}`];
-    });
+    const changes = constitutionChanges(before, next);
     const coordinator = this.#d.roster.list().find((e) => e.kind === 'coordinator');
     if (coordinator && changes.length) {
       this.#d.notices.add(coordinator.id, 'constitution.changed', `Sahibi anayasayı değiştirdi: ${changes.join('; ')}. Süren planlarını yeni sınırlara göre gözden geçir.`);
