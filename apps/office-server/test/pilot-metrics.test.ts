@@ -184,7 +184,7 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
       KÖ4: [{ done: 2, withEvidence: 1, reviewed: 2, approvedWithin2: 1, selfReviews: 0 }, false],
       KÖ5: [{ outward: 2, unapproved: 1 }, false],
       KÖ6: [{ decided: 4, accepted: 3, approvalsDecided: 1, approvalsApproved: 1 }, true],
-      KÖ7: [{ turns: 6, usd: 5, turnsPerWeek: 5.96, usdPerWeek: 4.97 }, true],
+      KÖ7: [{ turns: 6, usd: 5, windowDays: 7.04, turnsPerWeek: 5.96, usdPerWeek: 4.97 }, true],
       KÖ8: [{ searches: 2, empty: 1 }, null],
       KÖ9: [{ toCoordinator: 2, toMembers: 1, plans: 1, plansByCoordinator: 1 }, false],
       KÖ10: [{ fired: 3, late: 1, maxDelaySec: 120, maxSkip: 1 }, false],
@@ -284,8 +284,45 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     expect(outwardCall('mcp__claude_ai_Gmail__send_email', {})).toBe(true);
     expect(outwardCall('mcp__claude_ai_jeeta__jeeta_publish_social_post', {})).toBe(true);
     expect(outwardCall('mcp__claude_ai_Gmail__create_draft', {})).toBe(false);
-    expect(outwardCall('mcp__claude_ai_Google_Calendar__create_event', {})).toBe(false);
     expect(outwardCall('mcp__office__scheduleCreate', {})).toBe(false);
+  });
+
+  it('KÖ5 reads outward as B7 does (review, Selin): every tool its vocabulary calls outward, and every tool it does not classify; the name pattern only without the vocabulary', () => {
+    const outward = [
+      'mcp__claude_ai_Gmail__reply', 'mcp__claude_ai_Gmail__forward', 'mcp__claude_ai_Gmail__trash_message', 'mcp__claude_ai_Google_Calendar__create_event',
+      'mcp__claude_ai_jeeta__jeeta_reallocate_budget', 'mcp__claude_ai_jeeta__jeeta_click_to_dial', 'mcp__claude_ai_Higgsfield__generate_image', 'mcp__claude_ai_Higgsfield__generate_video',
+      // Not in the vocabulary: the allow-list counts it as outward.
+      'mcp__claude_ai_jeeta__jeeta_list_team', 'mcp__blender__execute_blender_code',
+    ];
+    for (const name of outward) expect(outwardCall(name, {}), name).toBe(true);
+    for (const name of ['mcp__claude_ai_Gmail__get_message', 'mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Notion__notion-fetch', 'mcp__office__memorySearch', 'WebFetch', 'Read']) {
+      expect(outwardCall(name, {}), name).toBe(false);
+    }
+    // Without the vocabulary (it failed to load): the pilot §7 name pattern, which misses reply.
+    const none = () => {
+      throw new Error('sözlük yok');
+    };
+    expect(outwardCall('mcp__claude_ai_Gmail__send_message', {}, none)).toBe(true);
+    expect(outwardCall('mcp__claude_ai_Gmail__reply', {}, none)).toBe(false);
+  });
+
+  it('a window shorter than a week (review, Selin): KÖ7 shows the raw numbers, the window and the weekly estimate, and fails only when the raw numbers already do; KÖ11 asks no weekly reading', () => {
+    const t = office({ pilot: false });
+    const coord = t.hire('Koordinatör', 'coordinator');
+    for (let i = 0; i < 60; i++) t.ev(coord, T0 + i * 30 * MIN, turn(1 / 3));
+    new GoalStore(t.db, t.clock).create({ title: 'H1', why: 'w', done: ['d'], createdBy: coord, kpis: [{ name: 'Zamanında hazır oranı', target: 90, direction: 'atLeast', unit: '%', source: 'manual', metric: null, cadence: 'weekly' }] });
+    t.db.close();
+    const two = pilotMetrics(t.read(), { since: T0, until: T0 + 2 * DAY });
+    const k7 = measure(two, 'KÖ7');
+    expect(k7.facts).toMatchObject({ turns: 60, windowDays: 2, turnsPerWeek: 210 });
+    expect(k7.value).toBe('60 tur, $20 (pencere 2 gün; haftalık tahmini 210 tur, $70)');
+    expect(k7.pass).toBeNull();
+    expect([measure(two, 'KÖ11').value, measure(two, 'KÖ11').pass]).toEqual(['1 KPI; pencere 2 gün, haftalık okuma bu pencerede ölçülmedi', null]);
+    // Over the weekly threshold in two days already: that fails without an estimate.
+    const db = new DatabaseSync(t.file);
+    for (let i = 0; i < 100; i++) db.prepare('INSERT INTO events (employee_id, ts, type, payload) VALUES (?, ?, ?, ?)').run(coord, T0 + DAY + i * MIN, 'turn.finished', JSON.stringify(turn(0.1)));
+    db.close();
+    expect(measure(pilotMetrics(t.read(), { since: T0, until: T0 + 2 * DAY }), 'KÖ7').pass).toBe(false);
   });
 
   it('the script reads a database file read-only and prints the table; the file is unchanged', () => {
