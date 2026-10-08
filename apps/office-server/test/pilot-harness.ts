@@ -40,6 +40,7 @@ import { TokenRegistry } from '../src/mcp/tokens.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { OwnerFlags } from '../src/owner-flags.ts';
 import { performanceReport } from '../src/performance.ts';
+import { splitOnboardingRounds } from '../src/pilot-metrics.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { setup, type TestSetup } from './helpers.ts';
 import { LOCKED_ARGS } from './real-session.ts';
@@ -77,13 +78,21 @@ export function pilotCommand(claude: string[] = ['claude']): string[] {
   return [...claude, ...LOCKED_ARGS, '--mcp-config', STUB_CONFIG];
 }
 
-/** The pilot test's KÖ1 (pilot readiness §4 step 2) from the onboarding's rounds as asked: ≤ 2 rounds, ≤ 10 questions. */
-export function pilotKo1(rounds: ReadonlyArray<{ questions: readonly string[] }>): { met: boolean; measured: string; line: string } {
-  const asked = rounds.reduce((n, r) => n + r.questions.length, 0);
+/**
+ * The pilot test's KÖ1 (pilot readiness §4 step 2) from the onboarding's rounds as asked: ≤ 2 rounds, ≤ 10 questions,
+ * the required rounds only, by pilotMetrics' rule (splitOnboardingRounds; decision 2908968d); `optional`, the optional
+ * round's line apart.
+ */
+export function pilotKo1(rounds: ReadonlyArray<{ questions: readonly string[] }>): { met: boolean; measured: string; optional: string; line: string } {
+  const { required, optional } = splitOnboardingRounds(rounds);
+  const count = (rs: typeof rounds) => rs.reduce((n, r) => n + r.questions.length, 0);
+  const list = (rs: typeof rounds) => rs.map((r) => r.questions.join(', ')).join(' | ');
+  const asked = count(required);
   return {
-    met: rounds.length <= 2 && asked <= 10,
-    measured: `onboarding ${rounds.length} tur, ${asked} soru (eşik ≤ 2 tur, ≤ 10 soru)`,
-    line: `tur ${rounds.length} (≤ 2), soru ${asked} (≤ 10): ${rounds.map((r) => r.questions.join(', ')).join(' | ')}`,
+    met: required.length <= 2 && asked <= 10,
+    measured: `onboarding ${required.length} zorunlu tur, ${asked} soru (eşik ≤ 2 tur, ≤ 10 soru)`,
+    optional: `isteğe bağlı ${optional.length} tur, ${count(optional)} soru (KÖ1’e sayılmaz)`,
+    line: `zorunlu tur ${required.length} (≤ 2), soru ${asked} (≤ 10): ${list(required)}; isteğe bağlı tur ${optional.length}, soru ${count(optional)}${optional.length ? `: ${list(optional)}` : ''}`,
   };
 }
 

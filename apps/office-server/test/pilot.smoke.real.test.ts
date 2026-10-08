@@ -86,8 +86,9 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
     const since = o.now();
     const record: StepRecord[] = [];
     /** Each KÖ the run measures: its threshold met or not. A measurement, not a gate: the steps go on either way. */
-    const kö: Array<{ id: string; measured: string; met: boolean }> = [];
-    const measure = (id: string, measured: string, met: boolean) => kö.push({ id, measured, met });
+    const kö: Array<{ id: string; measured: string; met: boolean | null }> = [];
+    /** `met` null: measured beside a KÖ, not counted for it (KÖ1's optional round). */
+    const measure = (id: string, measured: string, met: boolean | null) => kö.push({ id, measured, met });
     let overCap = false;
     const watch = o.events.subscribe((e) => {
       if (e.event.type !== 'turn.finished' || overCap || SPENT_BEFORE + spentUsd(o) <= COST_CAP_USD) return;
@@ -205,6 +206,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const assumed = Object.values(o.company.profile().sections).flatMap((s) => (s ? s.assumedFields.map((f) => `${s.section}.${f}`) : []));
         checks.push(`varsayılan alanlar: ${assumed.length ? assumed.join(', ') : 'yok'}`);
         measure('KÖ1', ko1.measured, ko1.met);
+        measure('KÖ1 dışında', ko1.optional, null);
       });
 
       // 3 — the package as a blueprint plan; the owner approves it on the page; the coordinator reads and installs it.
@@ -381,7 +383,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         '',
         '| KÖ | Ölçülen (K3) | Eşik |',
         '|---|---|---|',
-        ...kö.map((k) => `| ${k.id} | ${k.measured} | ${k.met ? 'tuttu' : 'TUTMADI'} |`),
+        ...kö.map((k) => `| ${k.id} | ${k.measured} | ${k.met === null ? 'sayılmaz' : k.met ? 'tuttu' : 'TUTMADI'} |`),
         '',
         ...record.flatMap((r) => [`## ${r.step}`, ...r.checks.map((c) => `- ${c}`), ...(r.error ? [`- HATA: ${r.error}`] : []), '']),
         '## KÖ1–KÖ11: C5-5 pilotMetrics, bu koşunun veritabanı (K3)',

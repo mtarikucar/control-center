@@ -179,7 +179,7 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     expect(r.measures.map((m) => m.id)).toEqual(['KÖ1', 'KÖ2', 'KÖ3', 'KÖ4', 'KÖ5', 'KÖ6', 'KÖ7', 'KÖ8', 'KÖ9', 'KÖ10', 'KÖ11']);
     const got = Object.fromEntries(r.measures.map((m) => [m.id, [m.facts, m.pass]]));
     expect(got).toEqual({
-      KÖ1: [{ turns: 2, questions: 8 }, true],
+      KÖ1: [{ turns: 2, questions: 8, optionalRounds: 0, optionalQuestions: 0 }, true],
       KÖ2: [{ minutes: 18, steps: 4, ownerMessages: 0 }, true],
       KÖ3: [{ hours: 19.53, rounds: 1 }, true],
       KÖ4: [{ done: 2, withEvidence: 1, reviewed: 2, approvedWithin2: 1, selfReviews: 0 }, false],
@@ -193,6 +193,33 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     });
     expect(r.measures.every((m) => m.level === 'K4')).toBe(true);
     expect(measure(r, 'KÖ5').evidence).toContain('git push');
+  });
+
+  it('KÖ1 counts the required rounds only (decision 2908968d): two required rounds, then an optional one — KÖ1 holds, the optional round is reported apart', () => {
+    const t = office({ pilot: true });
+    const coord = t.hire('Koordinatör', 'coordinator');
+    // As C5-4's runs 3, 5 and 6 asked them (K3 records): the ten required questions, then onboardingNext(optional: true).
+    const asked = [
+      ['name', 'sector', 'products', 'segments', 'channels'],
+      ['goals', 'success', 'tools', 'budget', 'limits'],
+      ['pricing', 'platforms', 'brandVoice', 'legal', 'timezone'],
+    ];
+    const onboarding = (status: string, n: number) => ({
+      id: 'o1', description: 'Altı müşterili ajans', status, startedBy: 'owner', startedAt: T0, finishedAt: status === 'done' ? T0 + 10 * MIN : null,
+      rounds: asked.slice(0, n).map((questions, i) => ({ round: i + 1, questions, askedAt: T0 + (3 * i + 0.5) * MIN, replied: true })),
+    });
+    t.ev(coord, T0, { type: 'onboarding.changed', change: 'started', onboarding: onboarding('active', 0) } as OfficeEvent);
+    // The turns that asked the two required rounds; then the one that asked the optional round (+6.5 min) and the one
+    // that read its answers: the optional round's, not KÖ1's.
+    for (const at of [1, 4, 7, 9]) t.ev(coord, T0 + at * MIN, turn(0.01));
+    t.ev(coord, T0 + 10 * MIN, { type: 'onboarding.changed', change: 'finished', onboarding: onboarding('done', 3) } as OfficeEvent);
+    const r = pilotMetrics(t.read(), { since: SINCE, until: UNTIL });
+    expect([measure(r, 'KÖ1').facts, measure(r, 'KÖ1').pass]).toEqual([{ turns: 2, questions: 10, optionalRounds: 1, optionalQuestions: 5 }, true]);
+    expect(measure(r, 'KÖ1').value).toBe('2 koordinatör turu, 10 soru');
+    // Its own line under the table, not a measure: the table keeps its eleven rows.
+    const text = formatPilotMetrics(r);
+    expect(text.split('\n').filter((l) => /^\| KÖ\d+ \|/.test(l))).toHaveLength(11);
+    expect(text).toContain('\nKÖ1 dışında: isteğe bağlı onboarding 1 tur, 5 soru (zorunlu sorular bittikten sonra açılır; KÖ1’e sayılmaz)');
   });
 
   it('KÖ2 fails when the owner had to write during the install; KÖ10 holds on time with one skip, fails with two', () => {
@@ -241,7 +268,7 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
       expect(measure(r, id).value, id).toMatch(/^veri yok/);
     }
     // Measures from main's own tables are unchanged.
-    expect(measure(r, 'KÖ1').facts).toEqual({ turns: 2, questions: 8 });
+    expect(measure(r, 'KÖ1').facts).toEqual({ turns: 2, questions: 8, optionalRounds: 0, optionalQuestions: 0 });
     expect(measure(r, 'KÖ7').pass).toBe(true);
   });
 

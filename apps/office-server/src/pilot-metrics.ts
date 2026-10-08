@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { ONBOARDING_QUESTIONS } from '@cc/shared';
 import { toolClass, type ToolClass } from './company/capabilities.ts';
 import { formatStamp, nextCron, parseCron } from './company/time.ts';
 import { EventStore } from './event-store.ts';
@@ -30,6 +31,8 @@ export interface PilotMeasure {
   evidence: string;
   /** The numbers, for tests and other readers; null where there is no data. */
   facts: Record<string, number | null>;
+  /** What was measured beside it but does not count for it (KÖ1: the optional onboarding round), a line under the table. */
+  apart?: string;
 }
 
 export interface PilotMetrics {
@@ -39,6 +42,19 @@ export interface PilotMetrics {
   /** Which tables of branches not on main yet the database has. */
   tables: { approvals: boolean; kpiReadings: boolean; blueprints: boolean };
   measures: PilotMeasure[];
+}
+
+const OPTIONAL_QUESTIONS = new Set(ONBOARDING_QUESTIONS.filter((q) => !q.required).map((q) => q.id));
+
+/**
+ * KÖ1 counts the required rounds only (decision 2908968d): an optional round — onboardingNext(optional: true), offered
+ * once the required questions are in — is a feature, reported apart. nextBlock never mixes the two in a round, so a
+ * round is optional when every question in it is a known optional one; a question the code does not know counts as
+ * required. The pilot test (pilotKo1) counts by it too.
+ */
+export function splitOnboardingRounds<R extends { questions: readonly string[] }>(rounds: readonly R[]): { required: R[]; optional: R[] } {
+  const optional = (r: R) => r.questions.length > 0 && r.questions.every((q) => OPTIONAL_QUESTIONS.has(q));
+  return { required: rounds.filter((r) => !optional(r)), optional: rounds.filter(optional) };
 }
 
 const MIN = 60_000;
@@ -114,7 +130,7 @@ export function pilotMetrics(db: DatabaseSync, o: { since: number; until: number
   const report = performanceReport(db, { since, now: until });
 
   const m = (id: PilotMeasureId, title: string, threshold: string, r: Omit<PilotMeasure, 'id' | 'title' | 'threshold' | 'level'> & { level?: string }): PilotMeasure => ({
-    id, title, threshold, value: r.value, pass: r.pass, level: r.level ?? level, evidence: r.evidence, facts: r.facts,
+    id, title, threshold, value: r.value, pass: r.pass, level: r.level ?? level, evidence: r.evidence, facts: r.facts, ...(r.apart ? { apart: r.apart } : {}),
   });
   const none = (id: PilotMeasureId, title: string, threshold: string, why: string, facts: Record<string, number | null>, evidence = '—'): PilotMeasure =>
     m(id, title, threshold, { value: `veri yok: ${why}`, pass: null, evidence, facts });
@@ -126,17 +142,23 @@ export function pilotMetrics(db: DatabaseSync, o: { since: number; until: number
     const changes = events('onboarding.changed');
     const started = changes.find((e) => e.event.change === 'started');
     const finished = started && changes.find((e) => e.event.change === 'finished' && e.event.onboarding?.id === started.event.onboarding?.id);
-    if (!started) return none('KÖ1', T, TH, 'pencerede onboarding başlamadı', { turns: null, questions: null });
-    if (!finished) return none('KÖ1', T, TH, `onboarding #${started.seq}'de başladı, pencerede bitmedi`, { turns: null, questions: null });
-    const turns = events('turn.finished').filter((e) => e.employeeId !== null && coordinators.has(e.employeeId) && e.ts > started.ts && e.ts <= finished.ts).length;
-    const rounds = (finished.event.onboarding?.rounds ?? []) as Array<{ questions: string[]; replied: boolean }>;
-    const questions = rounds.filter((r) => r.replied).reduce((n, r) => n + r.questions.length, 0);
+    const unknown = { turns: null, questions: null, optionalRounds: null, optionalQuestions: null };
+    if (!started) return none('KÖ1', T, TH, 'pencerede onboarding başlamadı', unknown);
+    if (!finished) return none('KÖ1', T, TH, `onboarding #${started.seq}'de başladı, pencerede bitmedi`, unknown);
+    const rounds = (finished.event.onboarding?.rounds ?? []) as Array<{ questions: string[]; replied: boolean; askedAt: number }>;
+    const { required, optional } = splitOnboardingRounds(rounds);
+    // The required part ends where the first optional round was asked: the coordinator's turns after it are that round's.
+    const end = optional.length > 0 ? Math.min(...optional.map((r) => r.askedAt)) : finished.ts;
+    const turns = events('turn.finished').filter((e) => e.employeeId !== null && coordinators.has(e.employeeId) && e.ts > started.ts && e.ts <= end).length;
+    const questions = required.filter((r) => r.replied).reduce((n, r) => n + r.questions.length, 0);
+    const optionalQuestions = optional.reduce((n, r) => n + r.questions.length, 0);
     const assumed = (db
       .prepare('SELECT p.section FROM company_profile p JOIN (SELECT section, MAX(version) AS v FROM company_profile GROUP BY section) l ON p.section = l.section AND p.version = l.v WHERE p.assumed = 1')
       .all() as unknown as Array<{ section: string }>).map((r) => r.section);
     return m('KÖ1', T, TH, {
-      value: `${turns} koordinatör turu, ${questions} soru`, pass: turns <= 2 && questions <= 10, facts: { turns, questions },
-      evidence: `onboarding.changed #${started.seq} başladı → #${finished.seq} bitti; arada koordinatörün turn.finished olayları; ${rounds.length} soru turu; varsayım işaretli bölümler: ${assumed.length ? assumed.join(', ') : 'yok'}`,
+      value: `${turns} koordinatör turu, ${questions} soru`, pass: turns <= 2 && questions <= 10, facts: { turns, questions, optionalRounds: optional.length, optionalQuestions },
+      evidence: `onboarding.changed #${started.seq} başladı → #${finished.seq} bitti; arada (ilk isteğe bağlı tura kadar) koordinatörün turn.finished olayları; ${required.length} zorunlu soru turu; varsayım işaretli bölümler: ${assumed.length ? assumed.join(', ') : 'yok'}`,
+      apart: `KÖ1 dışında: isteğe bağlı onboarding ${optional.length} tur, ${optionalQuestions} soru (zorunlu sorular bittikten sonra açılır; KÖ1’e sayılmaz)`,
     });
   };
 
@@ -399,5 +421,6 @@ export function formatPilotMetrics(r: PilotMetrics): string {
     '| No | Ölçüt | Değer | Eşik | Sonuç | K | Kanıt |',
     '|---|---|---|---|---|---|---|',
     ...r.measures.map((m) => `| ${m.id} | ${cell(m.title)} | ${cell(m.value)} | ${cell(m.threshold)} | ${RESULT(m.pass)} | ${cell(m.level)} | ${cell(m.evidence)} |`),
+    ...(r.measures.some((m) => m.apart) ? ['', ...r.measures.flatMap((m) => (m.apart ? [m.apart] : []))] : []),
   ].join('\n');
 }
