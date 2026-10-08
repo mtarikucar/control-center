@@ -145,7 +145,9 @@ class Lexer {
       this.#i += /^(\d+|-)/.exec(s.slice(this.#i))![1]!.length;
       return { kind: 'redirect', redirect: { op, fd, target: null } };
     }
-    if (this.#i >= s.length || OPERATOR_START.has(s[this.#i]!)) throw new ShellSyntaxError(`yönlendirmenin hedefi yok (${op})`);
+    // A process substitution is a word, also as a target: `done < <(…)`.
+    const substitution = (s[this.#i] === '<' || s[this.#i] === '>') && s[this.#i + 1] === '(';
+    if (this.#i >= s.length || (OPERATOR_START.has(s[this.#i]!) && !substitution)) throw new ShellSyntaxError(`yönlendirmenin hedefi yok (${op})`);
     return { kind: 'redirect', redirect: { op, fd, target: this.#word(subs) } };
   }
 
