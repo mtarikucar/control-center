@@ -106,7 +106,9 @@ streams: [{ id, title, owner (çalışan ya da "alınacak: <rol>"), dependsOn: [
 - Hedefin kapanışı planlarını kapatır (2026-10-08 deneme bulgusu): koordinatör bir hedefi `done` ya da `dropped`
   yapınca o hedefin süren planları `done` (hedef bittiyse) ya da `stopped` olur, taslakları `stopped`; görevi hiç
   açılmamış akışlar böylece planı açık tutmaz. Planlarda açık iş (açık görev ya da süren rutin) varsa kapanış reddedilir
-  ve hangi planda ne kaldığı söylenir. Görevsiz kalmış ama ona bağlı akışları başlamış bir akış panoda uyarı olur.
+  ve hangi planda ne kaldığı söylenir; hedef bittiyse sahibinin onayını bekleyen, işi bitmiş bir revizyon da `done` olur.
+  Görevsiz kalmış ama ona bağlı akışları başlamış bir akış panoda uyarı olur. Sahibinin onayı ya da reddi, akışlı bir
+  planda yapılacak iş bırakmadıysa planı bitirir.
 
 ### 3.5 Model yönlendirmesi
 
@@ -115,7 +117,7 @@ bağımsızdır: koordinatörün rol modeli her zaman uygulanır.
 
 | Tür | Ne zaman | Model (varsayılan) |
 |---|---|---|
-| **Başlangıç** | Ofiste süren plan yokken sahibinin mesajı; panoda "hedef yok" ya da "hedefin süren planı yok" | Fable |
+| **Başlangıç** | Ofiste süren plan yokken sahibinin mesajı; panoda "hedef yok" ya da "hiçbir hedefin süren planı yok" (bir hedefin planı sürerken ikinci hedefi planlamak yönetim turunun işidir) | Fable |
 | **Yönetim turu** | 3.1'deki tetikler | Opus |
 | **Sıradan** | Diğer her şey: bir çalışanın önerisine, sorusuna, inceleme yönlendirmesine yanıt; sahibine kısa cevap | Sonnet |
 
