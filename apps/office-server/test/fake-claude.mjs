@@ -13,7 +13,10 @@ const opt = (name) => {
 };
 const stateDir = process.env.FAKE_CLAUDE_STATE ?? join(process.cwd(), '.fake-claude');
 mkdirSync(stateDir, { recursive: true });
-if (process.env.FAKE_CLAUDE_ARGV_LOG) appendFileSync(process.env.FAKE_CLAUDE_ARGV_LOG, `${JSON.stringify({ args, cwd: process.cwd() })}\n`);
+// What the session would read at start: the desk's own settings' deny rules (B5's closed mode), or null without a file.
+const deskSettings = join(process.cwd(), '.claude', 'settings.json');
+const deny = existsSync(deskSettings) ? (JSON.parse(readFileSync(deskSettings, 'utf8')).permissions?.deny ?? null) : null;
+if (process.env.FAKE_CLAUDE_ARGV_LOG) appendFileSync(process.env.FAKE_CLAUDE_ARGV_LOG, `${JSON.stringify({ args, cwd: process.cwd(), deny })}\n`);
 
 const failFlag = process.env.FAKE_CLAUDE_FAIL_FLAG;
 if (failFlag && existsSync(failFlag)) {

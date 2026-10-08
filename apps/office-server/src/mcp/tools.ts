@@ -2,6 +2,7 @@ import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, typ
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
+import { applyText, blueprintText, type Blueprints } from '../company/blueprint.ts';
 import { capabilityVocabulary, coverage, coverageBrief, coverageLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
 import { listRoleTemplates, roleTemplate, templateRole } from '../company/role-templates.ts';
 import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
@@ -115,6 +116,8 @@ export function officeTools(o: {
   performance?: { report(o: { days?: number }): PerformanceReport };
   /** The integration registry (integrationsList, integrationRegister); absent in tests that do not care. */
   integrations?: IntegrationRegistry;
+  /** The blueprints (B5: blueprintPropose, blueprintApply, blueprintRead); absent in tests that do not care. */
+  blueprints?: Blueprints;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -728,6 +731,48 @@ export function officeTools(o: {
           '',
           templateRole(t),
         ].join('\n');
+      },
+    },
+    {
+      name: 'blueprintPropose',
+      description:
+        'Propose the company’s setup as a blueprint (coordinator), once the onboarding’s required questions are in: the roles (from roleTemplates, with capabilities — read capabilitiesRead and integrationsList), the playbook topics to seed, the first goals with KPIs, routines, the first tasks, optionally the brief and a closed mode (deny rules each new desk gets before its first session). The office checks it against the profile, the catalog and the constitution, shows it to the owner as a plan card (what is open, what is missing, what goes outward) and keeps it with the plan. With planId: that blueprint plan’s revision. Install it with blueprintApply once approved.',
+      inputSchema: object({
+        blueprint: {
+          type: 'object',
+          description: 'title, summary (the business in a paragraph), brief?, roles [{key, name, template?, role?, title?, team?, model?, capabilities?}], playbook [{topic, text}], goals [{key, title, why, done[], kpis?}], routines [{key, title, role (a role key or "coordinator"), reviewer?, cron, done?, description?, difficulty?}], tasks [{key, title, role, reviewer?, done?, description?, requires?, difficulty?, priority?}], closedMode? {deny[]}, estimates? {quotaPct, usd, days}, risks?. Keys: a-z, 0-9, dashes; at most 40 steps.',
+        },
+        planId: s('Revise this blueprint plan instead of opening a new one.'),
+        goalId: s('The active goal the setup serves.'),
+      }, ['blueprint']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.blueprints) throw new ConflictError('Bu ofiste blueprint açık değil.');
+        const { plan, blueprint } = o.blueprints.propose(employee.id, args.blueprint, { planId: optStr(args, 'planId'), goalId: optStr(args, 'goalId') });
+        const n = plan.steps.length;
+        if (plan.status === 'approved') return `Blueprint planı başladı (tam serbestlik): “${blueprint.title}” (plan ${plan.id}), ${n} adım. Şimdi blueprintApply ile kur.`;
+        return `Blueprint plan kartı olarak sahibine gitti: “${blueprint.title}” (plan ${plan.id}), ${n} adım. Onaylanınca blueprintApply ile kur.`;
+      },
+    },
+    {
+      name: 'blueprintApply',
+      description: 'Install an approved blueprint plan (coordinator): brief, playbook, hires, goals, routines, tasks in that order. Idempotent: a step already done — recorded, or found by its natural key (same name, title or topic) — is not done again; if it stops halfway, fix what it says and run it again, it goes on where it stopped.',
+      inputSchema: object({ planId: s('The blueprint plan.') }, ['planId']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.blueprints) throw new ConflictError('Bu ofiste blueprint açık değil.');
+        return applyText(o.blueprints.apply(employee.id, str(args, 'planId')));
+      },
+    },
+    {
+      name: 'blueprintRead',
+      description: 'Read a blueprint plan (coordinator or team lead): its steps and how far the install went, the profile version it stood on, and — when it has a closed mode — each installed desk’s rules as its latest session shows them (read only: no tool is called to check).',
+      inputSchema: object({ planId: s('The blueprint plan.') }, ['planId']),
+      kinds: LEADS,
+      run: (_ctx, args) => {
+        if (!o.blueprints) throw new ConflictError('Bu ofiste blueprint açık değil.');
+        const planId = str(args, 'planId');
+        return blueprintText(o.blueprints.read(planId), plans().find((p) => p.id === planId)!);
       },
     },
     {

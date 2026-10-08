@@ -13,6 +13,7 @@ import { ForbiddenError, UnsupportedMediaTypeError, ValidationError, statusOf } 
 import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
+import type { Blueprints } from './company/blueprint.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
 import { OwnerGuard } from './owner-guard.ts';
 import { capabilityVocabulary, coverage, unclassifiedTools } from './company/capabilities.ts';
@@ -36,6 +37,7 @@ export interface ApiDeps {
     /** The top bar's three figures: busy, delivered in the last day, stuck. */
     metrics?: { report(): OfficeMetrics };
     integrations?: IntegrationRegistry;
+    blueprints?: Blueprints;
   };
 }
 
@@ -215,6 +217,9 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
     if (method === 'GET' && url.pathname === '/api/role-templates') return sendJson(res, 200, listRoleTemplates());
+    // The blueprint behind a plan card (B5): its steps, how far the install went, its closed mode.
+    const blueprintRoute = /^\/api\/plans\/([^/]+)\/blueprint$/.exec(url.pathname);
+    if (method === 'GET' && blueprintRoute && d.company.blueprints) return sendJson(res, 200, d.company.blueprints.read(blueprintRoute[1] ?? ''));
     // The capability model (B7): the vocabulary and how the office, or one desk, has each capability.
     if (method === 'GET' && url.pathname === '/api/capabilities' && d.company.integrations) {
       const vocabulary = capabilityVocabulary();

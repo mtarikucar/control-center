@@ -36,6 +36,8 @@ export function fakeEngine(s: TestSetup, opts: { env?: Record<string, string>; e
 export interface ArgvEntry {
   args: string[];
   cwd: string;
+  /** The deny rules of the desk's .claude/settings.json when the session started; null without the file. */
+  deny?: string[] | null;
 }
 
 export async function readArgv(file: string, atLeast: number, timeoutMs = 5000): Promise<ArgvEntry[]> {

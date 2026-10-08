@@ -12,6 +12,8 @@ import { Memory } from './company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
 import { Dispatcher } from './company/dispatcher.ts';
 import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
+import { Blueprints } from './company/blueprint.ts';
+import { BlueprintStore } from './company/blueprint-store.ts';
 import { IntegrationRegistry } from './company/integrations.ts';
 import { officeMetrics } from './company/office-metrics.ts';
 import { OnboardingStore } from './company/onboarding-store.ts';
@@ -84,12 +86,13 @@ const performance = { report: (o: { days?: number }) => performanceReport(db, { 
 const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date.now()) };
 // Which connectors the office has (B3): read from the sessions' reports and the coordinator's records.
 const integrations = new IntegrationRegistry({ db, roster, events });
+const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, memory, store: new BlueprintStore(db), integrations, constitution: () => budget.constitution() });
 
 const api = createApi(
   {
     engine, roster, events, quota,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations }) },
-    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations },
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints }) },
+    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );

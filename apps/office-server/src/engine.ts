@@ -4,7 +4,7 @@ import { sessionArgs, sideQuestionArgs, terminalCommand } from './claude/args.ts
 import { normalize, replayedUuid, taskChange, usageSince } from './claude/normalize.ts';
 import { runOnce } from './claude/once.ts';
 import { ClaudeProcess } from './claude/process.ts';
-import { deskDir, prepareDesk } from './desk.ts';
+import { deskDir, prepareDesk, writeDeskDeny } from './desk.ts';
 import { ConflictError, ValidationError } from './errors.ts';
 import type { EventStore } from './event-store.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
@@ -185,6 +185,8 @@ export class Engine {
   hire(input: NewEmployee): Employee {
     const employee = this.#roster.create(input);
     this.#emit(employee.id, { type: 'employee.hired', name: employee.name });
+    // Closed mode (B5): the desk's settings are in place before the first session opens and reads them.
+    if (input.deskDeny?.length) writeDeskDeny(this.#dataDir, employee.slug, input.deskDeny);
     return this.#start(employee, 'işe alındı');
   }
 
