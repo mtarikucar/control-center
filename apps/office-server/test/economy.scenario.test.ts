@@ -16,7 +16,8 @@ import { setup, tempDir, until, type TestSetup } from './helpers.ts';
  *   baseline note's tables and with the messages and events recorded by this same test on main (the golden file);
  * - the economy on (all three switches): the plan's thresholds.
  *
- * Deterministic by construction: the dispatcher's clock and its deferred work belong to the test. Time jumps from one
+ * Deterministic by construction: the dispatcher's clock and its deferred work belong to the test, and the test plays a
+ * turn's tools at a fixed point (the start of the turn, before the process answers). Time jumps from one
  * event to the next (a discrete-event simulation) and after each event the office runs until it rests. A member's
  * task is one long turn: the fake claude holds it open (HOLD) until the test hands the task in at its simulated time,
  * so the member is really working meanwhile and idle-sleep times are the real ones. Digest hours are local wall-clock
@@ -53,6 +54,23 @@ const SINCE_GOLDEN: Array<[string, string]> = [
   ],
 ];
 const sinceGolden = (message: string) => SINCE_GOLDEN.reduce((m, [was, now]) => m.replaceAll(was, now), message);
+/**
+ * The one change to main's event order since the golden: the test plays each turn's tools at a fixed point, the start
+ * of the turn (see simulateDay). On main the coordinator's turn that brought proposalDecide happened to finish before
+ * the test's poll caught its message, so the golden has the decision after that turn; the report, caught before its
+ * session started, is already where the fixed point puts it. Fails loudly if the golden is not what this expects.
+ */
+function eventsSinceGolden(events: Record<string, string[]>): Record<string, string[]> {
+  const coordinator = [...events['Koordinatör']!];
+  const at = coordinator.indexOf('decision.recorded');
+  const decision = coordinator.splice(at, 2);
+  const turn = coordinator.lastIndexOf('turn.started', at);
+  if (decision.join() !== 'decision.recorded,proposal.changed' || coordinator.indexOf('decision.recorded') >= 0 || coordinator[turn + 1] !== 'lifecycle.changed') {
+    throw new Error('The golden is not the one recorded on main: its decision is not where eventsSinceGolden expects it.');
+  }
+  coordinator.splice(turn + 2, 0, ...decision);
+  return { ...events, Koordinatör: coordinator };
+}
 
 /** The plan "Ofis ekonomisi" targets: the coordinator's turns for this day, and its modelled cost at most 30 % of main's (measured on e2889e8). */
 // 5 from the economy plan, + 1 since the coordination craft: a plan's end is a decision (retro, then report).
@@ -165,21 +183,23 @@ async function simulateDay(cfg: { economy: boolean }) {
     });
   };
 
-  let seen = 0;
-  const react = () => {
-    for (let page = s.events.list({ after: seen, limit: 5000 }); page.length; page = s.events.list({ after: seen, limit: 5000 })) {
-      for (const e of page) {
-        seen = e.seq;
-        if (e.event.type !== 'message.user' || !e.employeeId) continue;
-        if (e.employeeId === coord.id) coordinatorTurn(e.event.text, e.event.source);
-        else if (e.event.source === 'system') memberTurn(s.roster.get(e.employeeId), e.event.text);
-      }
-    }
-  };
-  const resting = () => {
-    react();
-    return s.roster.list().every((e) => e.lifecycle === 'sleeping' || held.has(e.id) || f.engine.ready(e.id));
-  };
+  // The test plays each turn's tools at one fixed point: right after the office step that delivered the message (the
+  // engine logs message.user, turn.started and the lifecycle in one go), before the employee's process says anything —
+  // its output arrives as I/O, which never runs ahead of a microtask. Picked up by polling instead, the coordinator's
+  // tools (decideProposal, report) landed before, inside or after its turn's own events depending on how fast the
+  // fake claude answered: under load the event order broke (task 6fd42791).
+  cleanups.push(
+    s.events.subscribe((e) => {
+      if (e.event.type !== 'message.user' || !e.employeeId) return;
+      const { employeeId } = e;
+      const { text, source } = e.event;
+      queueMicrotask(() => {
+        if (employeeId === coord.id) coordinatorTurn(text, source);
+        else if (source === 'system') memberTurn(s.roster.get(employeeId), text);
+      });
+    }),
+  );
+  const resting = () => s.roster.list().every((e) => e.lifecycle === 'sleeping' || held.has(e.id) || f.engine.ready(e.id));
   /** Runs the dispatcher's deferred work until the office rests: no turn running, nothing new happening. */
   const settle = async () => {
     for (let round = 0; round < 500; round += 1) {
@@ -392,7 +412,7 @@ describe('economy scenario', () => {
     expect(timeline.slice(2)).toEqual(tableAfter(baseline, 'Zaman çizelgesi'));
     const golden = JSON.parse(readFileSync(BASELINE_LOG, 'utf8')) as ReturnType<typeof logOf>;
     expect(log.messages).toEqual(golden.messages.map(sinceGolden));
-    expect(log.events).toEqual(golden.events);
+    expect(log.events).toEqual(eventsSinceGolden(golden.events));
   }, 60_000);
 
   it('the economy on: turns, models and modelled cost per employee, within the plan’s thresholds', async () => {
