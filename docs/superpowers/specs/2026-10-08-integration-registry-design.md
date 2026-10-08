@@ -5,6 +5,9 @@
   (`integrations(id, name, kind, status, capabilities[], authNeeded, costNote, lastSeen, registeredBy)`, oturum
   açılışındaki MCP listesinden otomatik besleme, `integrationRegister`, `integrationsList`, "Bağlantılar"), §6.
 - Dal `feat/integration-registry`, `feat/onboarding` (6e45547) üstünde. **Göç v15** (v14 onboarding).
+- Sürüm 2 (inceleme turu 1, Kerem): "açık" masanın deny kurallarını hesaba katıyor. Oturumun araç listesinden
+  sunucu başına araç sayısı okunuyor, `denied` durumu eklendi, masanın neden kapalı olduğu ayrı alanda
+  (`closedBy`), kayıttaki kapatma `registryClosed` adını aldı (§3, §5, §7, §9).
 
 ## 1. Bugün
 
@@ -24,7 +27,12 @@ Kapsam dışı: bir bağlayıcıyı oturumlarda gerçekten kapatmak (`--disallow
 ## 3. Kaynaklar: gözlenen ve elle
 
 - **Gözlenen (olay kaydından, her okumada):** her **güncel masanın** (işten çıkarılmamış çalışan) son
-  `session.started` olayındaki liste, o masanın o andaki bağlantı durumudur. Ayrıca kopyalanmaz: tek doğruluk kaynağı
+  `session.started` olayındaki liste, o masanın o andaki bağlantı durumudur. Olay, CLI'nin `system/init`
+  mesajından gelir (`normalize.ts`). Bu sürümden itibaren her sunucu için oturumun araç listesindeki (`init.tools`)
+  araç sayısını da taşır (`mcp[].tools`; sunucu adı `mcpToolPrefix` ile öneke çevrilir: `claude.ai Gmail` →
+  `mcp__claude_ai_Gmail__`). Masanın `.claude/settings.json` deny kuralları dosyadan okunmaz; etkileri bu listeden
+  gözlenir. Sunucu düzeyinde deny, sunucuyu `connected` bırakıp araçlarını listeden kaldırır (Selin'in K3'ü ve bu
+  işin K3'ü). Ayrıca kopyalanmaz: tek doğruluk kaynağı
   olay kaydıdır, kayıt bayatlamaz, göç öncesi geçmiş de hemen okunur. `firstSeen`/`lastSeen` adın geçtiği ilk ve son
   `session.started` zamanıdır. Bir masanın son oturumunda olmayan bağlantı o masada yoktur.
 - **Elle (tablo, göç v15):** koordinatörün `integrationRegister` ile yazdıkları: tür (oturumlarda görünmeyen
@@ -55,16 +63,24 @@ diğerleri → `local_mcp`. `adapter` ve `cli` yalnız elle.
 
 ## 5. Durumlar
 
-**Masa durumu** (ham değerden): `connected` → `connected` (bağlı), `needs-auth` → `needs_auth` (yetki bekliyor),
+**Masa durumu** (ham değerden ve araç sayısından): `connected` ve oturumda **0 aracı** → `denied` (masada kapalı:
+masa ayarı aracı kaldırıyor). `connected` → `connected` (bağlı), `needs-auth` → `needs_auth` (yetki bekliyor),
 `pending` → `pending` (bağlanıyor), `failed` → `failed` (hata), **tanınmayan her değer** → `unknown` (ham değer
-saklanır). Masa ancak `connected` ise ve bağlantı kapalı değilse **açık** sayılır; değilse **kapalı**, nedeniyle.
+saklanır). Araç sayısı olmayan eski oturumlarda (`tools: null`) yalnız sunucu durumu bilinir.
+
+**Masada açık** (`open`) = durum `connected` (bağlı **ve** oturumda aracı var ya da sayı bilinmiyor) **ve** kayıtta
+kapalı değil. Değilse `closedBy` nedenini söyler: `server` (sunucu bağlı değil), `desk` (bağlı ama oturumda aracı
+yok: masa ayarı), `registry` (koordinatör kayıtta kapattı; **oturumda araçlar duruyor**, `tools` sayısı görünür).
+JSON tüketicisi (web sekmesi, B8) bu ayrımı alanlardan okur; yalnız metne bakmak gerekmez.
 
 **Bağlantı durumu:**
 1. Elle kapatıldıysa `closed` (kapalı), masalarda bağlı görünse bile. Kayıt bunu yalnız işaretler; oturumlarda
    kapatma D4/B9'un işi. Okuma bunu açıkça yazar.
 2. Hiçbir güncel masa bildirmiyorsa `unknown` (bilinmiyor). Örnekler: yalnız elle kaydedildi; yalnız işten
    çıkarılan birinin oturumunda göründü; masaların son oturumlarından düştü.
-3. Değilse masalardaki en iyi durum: `connected` > `needs_auth` > `pending` > `failed` > `unknown`.
+3. Değilse masalardaki en iyi durum: `connected` > `denied` > `needs_auth` > `pending` > `failed` > `unknown`.
+   Bir masada açık, ötekinde deny edilmiş bağlantı `connected` görünür; masa satırları farkı söyler. Her masada deny
+   edilmişse bağlantı `denied` olur.
 
 ## 6. Araçlar ve API
 
@@ -83,6 +99,14 @@ olayı yazılır.
 - Okuma bütün `session.started` olaylarını tarar (bugün 48; oturum açılışı başına bir olay). Kayıt büyürse ilk/son
   görülme için özet tablo eklenebilir; bugün gerek yok.
 - Masa durumu son oturum açılışı anındadır. Oturum sürerken düşen bağlantı ancak sonraki açılışta görünür.
+- `init` ilk mesajla gelir ve bağlantıları o anki halleriyle söyler. Hemen yazılan ilk mesajda bütün sunucular
+  `pending` ve hiçbir MCP aracı listede yok; 8 sn sonra yazılanda yerel sunucular `connected` (deny edilenlerde 0
+  araç), claude.ai bağlayıcılarının bir kısmı hâlâ `pending` (`outputs/integrations/k3-init-stream.txt`). Böyle bir
+  masa kayıtta `pending` (açık değil) görünür, araçları oturuma sonradan girse de. Temkinli taraftır.
+- Deny dosyası oturum açıldıktan sonra konursa o oturumun listesi değişmez; kayıt yeni durumu masanın sonraki oturum
+  açılışında görür (Pilot 0 kurulumu kapalı kipi oturumlar başlamadan kurar).
+- Kayıttaki kapatma (`registryClosed`) oturumlarda araçları kaldırmaz; bu B9'un işi. Metin ve `closedBy: registry`
+  bunu açıkça söyler.
 
 ## 8. Doğrulama
 
@@ -92,3 +116,13 @@ olayı yazılır.
 - Mutasyon kontrolü: her durum kuralı, tür çıkarımı, son oturum seçimi, kapalı önceliği, işten çıkarılan masa,
   süzgeçler, yetki.
 - K4 (kopya): canlı DB'nin salt okunur kopyasında okuma 48 oturumdan 52 bağlantıyı ve 5 masayı çıkarır.
+- K3 (`integrations.real.test.ts`, `OFFICE_SMOKE=1`): masa klasörüne `permissions.deny: ["mcp__cad",
+  "mcp__claude_ai_Gmail"]` konur, gerçek CLI ofisin argümanlarıyla açılır, `init` normalleştirilip kayda verilir.
+  Beklenen: `cad` ve Gmail `denied` (0 araç, `closedBy: desk`), `blender` `connected` (araçlı, açık).
+
+## 9. Değişiklik günlüğü
+
+- Sürüm 2 (inceleme turu 1, Kerem, [önemli]): "açık" yalnız sunucu durumundan türüyordu. Pilot 0'ın deny dosyalı
+  masalarında Gmail/Jeeta/Higgsfield "açık" görünür, B8 kayda dayanırsa işi aracı olmayan masaya verirdi. Düzeltme:
+  `session.started` sunucu başına araç sayısını taşır; `denied` durumu; `open` = bağlı ve aracı var ve kayıtta kapalı
+  değil; `closedBy` (server/desk/registry); `closed` → `registryClosed`. Gerçek CLI ile deny dosyalı masa K3'ü.

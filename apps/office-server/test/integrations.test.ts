@@ -36,7 +36,9 @@ function make() {
   const coordinator = c.company.hireCoordinator();
   const ada = c.company.hire(coordinator.id, { name: 'Ada', role: 'r' });
   const can = c.company.hire(coordinator.id, { name: 'Can', role: 'r' });
-  const session = (who: Employee, mcp: Array<[string, string]>) => s.events.append(who.id, { type: 'session.started', model: 'm', mcp: mcp.map(([name, status]) => ({ name, status })) });
+  /** A session's report; with a tool count when given (sessions before tool counts carry none). */
+  const session = (who: Employee, mcp: Array<[string, string] | [string, string, number]>) =>
+    s.events.append(who.id, { type: 'session.started', model: 'm', mcp: mcp.map(([name, status, tools]) => (tools === undefined ? { name, status } : { name, status, tools })) });
   const advance = (ms: number) => void (clock += ms);
   return { ...s, ...c, integrations, tools, call, coordinator, ada, can, session, advance };
 }
@@ -56,7 +58,9 @@ describe('Integration registry — what the desks report', () => {
   it('reads each current desk’s latest session: the kind from the name, the status per desk, the best one overall', () => {
     const t = day();
     const one = (name: string) => t.integrations.get(name);
-    expect(one('office')).toMatchObject({ kind: 'office', status: 'connected', closed: false, registeredBy: null, firstSeen: T0, lastSeen: T0 + 2 * HOUR });
+    expect(one('office')).toMatchObject({ kind: 'office', status: 'connected', registryClosed: false, registeredBy: null, firstSeen: T0, lastSeen: T0 + 2 * HOUR });
+    // These sessions predate tool counts: what the server state says, the tools unknown.
+    expect(one('office').desks.map((d) => [d.tools, d.closedBy])).toEqual([[null, null], [null, null]]);
     expect(one('office').desks.map((d) => [d.name, d.status, d.open])).toEqual([['Ada', 'connected', true], ['Can', 'connected', true]]);
     expect(one('claude.ai Gmail')).toMatchObject({ kind: 'claude_ai', status: 'connected' });
     expect(one('claude.ai Gmail').desks.map((d) => [d.name, d.status, d.raw, d.open, d.seenAt])).toEqual([
@@ -88,12 +92,13 @@ describe('Integration registry — what the desks report', () => {
   it('review focus: closed — the registry closes a connector whatever the desks say; no desk counts it open; it can be opened again', () => {
     const t = day();
     const closed = t.integrations.register(t.coordinator.id, { name: 'claude.ai Gmail', closed: true, note: 'gönderim sahibinde' });
-    expect(closed).toMatchObject({ kind: 'claude_ai', status: 'closed', closed: true, note: 'gönderim sahibinde' });
-    expect(closed.desks.map((d) => [d.name, d.status, d.open])).toEqual([['Ada', 'connected', false], ['Can', 'needs_auth', false]]);
+    expect(closed).toMatchObject({ kind: 'claude_ai', status: 'closed', registryClosed: true, note: 'gönderim sahibinde' });
+    // Shut by the registry where the session has it, by the server state where it does not: told apart.
+    expect(closed.desks.map((d) => [d.name, d.status, d.open, d.closedBy])).toEqual([['Ada', 'connected', false, 'registry'], ['Can', 'needs_auth', false, 'server']]);
     expect(t.integrations.list({ status: 'closed' }).map((i) => i.name)).toEqual(['claude.ai Gmail']);
     // Writing one field keeps the others.
     expect(t.integrations.register(t.coordinator.id, { name: 'claude.ai Gmail', costNote: 'ücretsiz' })).toMatchObject({ status: 'closed', note: 'gönderim sahibinde', costNote: 'ücretsiz' });
-    expect(t.integrations.register(t.coordinator.id, { name: 'claude.ai Gmail', closed: false })).toMatchObject({ status: 'connected', closed: false, note: 'gönderim sahibinde' });
+    expect(t.integrations.register(t.coordinator.id, { name: 'claude.ai Gmail', closed: false })).toMatchObject({ status: 'connected', registryClosed: false, note: 'gönderim sahibinde' });
     expect(t.integrations.get('claude.ai Gmail').desks.find((d) => d.name === 'Ada')!.open).toBe(true);
   });
 
@@ -117,6 +122,31 @@ describe('Integration registry — what the desks report', () => {
   });
 });
 
+describe('Integration registry — a desk whose settings deny a connector (review, Kerem round 1)', () => {
+  it('connected but with no tools in the session is shut on that desk (“masada kapalı”), open where the session has its tools; denied everywhere, the connector is denied', async () => {
+    const t = make();
+    // Ada's desk denies Gmail (Pilot 0's closed mode): the CLI keeps it connected and lists none of its tools.
+    t.session(t.ada, [['office', 'connected', 70], ['claude.ai Gmail', 'connected', 0], ['claude.ai Notion', 'connected', 46], ['claude.ai Jeeta', 'connected', 0]]);
+    t.session(t.can, [['office', 'connected', 70], ['claude.ai Gmail', 'connected', 9], ['claude.ai Notion', 'connected', 46], ['claude.ai Jeeta', 'connected', 0]]);
+    const gmail = t.integrations.get('claude.ai Gmail');
+    expect(gmail).toMatchObject({ status: 'connected' });
+    expect(gmail.desks.map((d) => [d.name, d.status, d.raw, d.tools, d.open, d.closedBy])).toEqual([
+      ['Ada', 'denied', 'connected', 0, false, 'desk'],
+      ['Can', 'connected', 'connected', 9, true, null],
+    ]);
+    // Shut on every desk: the connector itself is denied, not connected.
+    expect(t.integrations.get('claude.ai Jeeta')).toMatchObject({ status: 'denied' });
+    expect(t.integrations.get('claude.ai Jeeta').desks.every((d) => !d.open && d.closedBy === 'desk')).toBe(true);
+    expect(t.integrations.list({ status: 'denied' }).map((i) => i.name)).toEqual(['claude.ai Jeeta']);
+    const text = await t.call(t.ada, 'integrationsList');
+    expect(text).toContain('• claude.ai Gmail [bağlı] (claude.ai bağlayıcısı) — açık: Can; kapalı: Ada (masa ayarı: oturumda aracı yok)');
+    expect(text).toContain('• claude.ai Jeeta [masada kapalı] (claude.ai bağlayıcısı) — kapalı: Ada (masa ayarı: oturumda aracı yok), Can (masa ayarı: oturumda aracı yok)');
+    // Closed in the registry while the session still has the tools: the JSON says so (closedBy, tools).
+    const closed = t.integrations.register(t.coordinator.id, { name: 'claude.ai Notion', closed: true });
+    expect(closed.desks.map((d) => [d.name, d.tools, d.open, d.closedBy])).toEqual([['Ada', 46, false, 'registry'], ['Can', 46, false, 'registry']]);
+  });
+});
+
 describe('Integration registry — reading it', () => {
   it('integrationsList (everyone) reads without calling any connector; integrationRegister (coordinator) writes one event', async () => {
     const t = day();
@@ -130,7 +160,8 @@ describe('Integration registry — reading it', () => {
     expect(all).toContain('# Bağlantılar (6: bağlı 1, yetki bekliyor 1, bağlanıyor 1, kapalı 1, bilinmiyor 2) — salt okunur; hiçbir bağlayıcı çağrılmadı.');
     expect(all).toContain('• office [bağlı] (ofis) — açık: Ada, Can');
     expect(all).toContain('• plugin:design:figma [yetki bekliyor] (eklenti) — kapalı: Ada (yetki bekliyor), Can (yetki bekliyor)');
-    expect(all).toContain('• claude.ai Gmail [kapalı] (claude.ai bağlayıcısı) — kapalı: Ada (kayıtta kapalı), Can (kayıtta kapalı); kayıtta kapalı, oturumlarda kapatma B9’da');
+    // Each desk says its own reason: the registry where the session has it, the server state where it does not.
+    expect(all).toContain('• claude.ai Gmail [kapalı] (claude.ai bağlayıcısı) — kapalı: Ada (kayıtta kapalı), Can (yetki bekliyor); kayıtta kapalı, oturumlarda kapatma B9’da');
     expect(all).toContain('• claude.ai Slack [bilinmiyor] (claude.ai bağlayıcısı) — kapalı: Ada (bilinmeyen durum: starting)');
     expect(all).toMatch(/• blender \[bilinmiyor\] \(yerel MCP\) — güncel hiçbir masada yok \(son görülme: .+\)/);
     const pending = await t.call(t.ada, 'integrationsList', { status: 'needs_auth' });
@@ -141,7 +172,7 @@ describe('Integration registry — reading it', () => {
     expect(cans).toMatch(/^• office \[bağlı\] \(ofis\) — açık: Can$/m);
     expect(t.integrations.list({ employee: t.can.id }).find((i) => i.name === 'office')!.desks.map((d) => d.name)).toEqual(['Can']);
     expect(cans).not.toContain('blender');
-    await expect(t.call(t.ada, 'integrationsList', { status: 'kapalı' })).rejects.toThrow(/durum \(status\) connected, needs_auth, pending, failed, closed ya da unknown olmalı/);
+    await expect(t.call(t.ada, 'integrationsList', { status: 'kapalı' })).rejects.toThrow(/durum \(status\) connected, denied, needs_auth, pending, failed, closed ya da unknown olmalı/);
     await expect(t.call(t.ada, 'integrationRegister', { name: 'office', closed: true })).rejects.toThrow(/kapalı araç/);
   });
 

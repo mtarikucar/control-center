@@ -323,7 +323,7 @@ export function officeTools(o: {
     },
     {
       name: 'integrationsList',
-      description: 'Read the integration registry, read-only: every connector the office has, its status (connected, needs_auth, pending, failed, closed, unknown), on which desks it is open or shut and why, and what the coordinator noted (capabilities, what the owner must do, cost). It calls no connector. status or employee narrow it.',
+      description: 'Read the integration registry, read-only: every connector the office has, its status (connected, denied — connected but the desk’s session has none of its tools —, needs_auth, pending, failed, closed, unknown), on which desks it is open or shut and why, and what the coordinator noted (capabilities, what the owner must do, cost). It calls no connector. status or employee narrow it.',
       inputSchema: object({ status: { type: 'string', enum: [...INTEGRATION_STATUSES] }, employee: s('Only what this person’s desk reports (id or name).') }),
       kinds: EVERYONE,
       run: (_ctx, args) => {

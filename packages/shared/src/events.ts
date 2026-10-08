@@ -24,7 +24,8 @@ export interface QuotaWindow {
 export type OfficeEvent =
   | { type: 'employee.hired'; name: string }
   | { type: 'employee.fired' }
-  | { type: 'session.started'; model: string; mcp: { name: string; status: string }[] }
+  /** `tools`: how many of the server's tools the session has (sessions from before carry none). */
+  | { type: 'session.started'; model: string; mcp: { name: string; status: string; tools?: number }[] }
   | { type: 'turn.started' }
   | {
       type: 'turn.finished';

@@ -127,9 +127,9 @@ export class IntegrationRegistry {
   #observed(): { seen: Map<string, { first: number; last: number }>; desks: Map<string, IntegrationDesk[]> } {
     const rows = this.#db.prepare("SELECT employee_id, ts, payload FROM events WHERE type = 'session.started' ORDER BY seq").all() as unknown as Array<{ employee_id: string | null; ts: number; payload: string }>;
     const seen = new Map<string, { first: number; last: number }>();
-    const latest = new Map<string, { ts: number; mcp: Array<{ name: string; status: string }> }>();
+    const latest = new Map<string, { ts: number; mcp: Array<{ name: string; status: string; tools?: number }> }>();
     for (const row of rows) {
-      const mcp = (JSON.parse(row.payload) as { mcp?: Array<{ name: string; status: string }> }).mcp ?? [];
+      const mcp = (JSON.parse(row.payload) as { mcp?: Array<{ name: string; status: string; tools?: number }> }).mcp ?? [];
       for (const m of mcp) {
         const s = seen.get(m.name);
         seen.set(m.name, { first: s?.first ?? row.ts, last: row.ts });
@@ -141,37 +141,45 @@ export class IntegrationRegistry {
     for (const e of this.#roster.list()) {
       const session = latest.get(e.id);
       for (const m of session?.mcp ?? []) {
-        const status = RAW[m.status] ?? 'unknown';
-        desks.set(m.name, [...(desks.get(m.name) ?? []), { employeeId: e.id, name: e.name, deskIndex: e.deskIndex, status, raw: m.status, seenAt: session!.ts, open: status === 'connected' }]);
+        // Connected but none of its tools in the session: the desk's settings deny it (Pilot 0's closed mode).
+        const status: DeskConnection = m.status === 'connected' && m.tools === 0 ? 'denied' : (RAW[m.status] ?? 'unknown');
+        const desk: IntegrationDesk = {
+          employeeId: e.id, name: e.name, deskIndex: e.deskIndex, status, raw: m.status, tools: m.tools ?? null, seenAt: session!.ts,
+          open: status === 'connected', closedBy: status === 'connected' ? null : status === 'denied' ? 'desk' : 'server',
+        };
+        desks.set(m.name, [...(desks.get(m.name) ?? []), desk]);
       }
     }
     return { seen, desks };
   }
 
   #build(name: string, seen: { first: number; last: number } | null, reported: IntegrationDesk[], manual: ManualRow | null): Integration {
-    const closed = manual?.closed === 1;
-    const desks = reported.map((d) => ({ ...d, open: d.open && !closed }));
+    const registryClosed = manual?.closed === 1;
+    // A desk open as far as its session goes is shut by the registry's word; otherwise its own reason stays.
+    const desks = reported.map((d) => (registryClosed && d.open ? { ...d, open: false, closedBy: 'registry' as const } : d));
     // Closed in the registry first; no current desk reporting it: unknown; else the best a desk reports.
-    const status: IntegrationStatus = closed ? 'closed' : desks.length === 0 ? 'unknown' : desks.map((d) => d.status as IntegrationStatus).sort((a, b) => rank(a) - rank(b))[0]!;
+    const status: IntegrationStatus = registryClosed ? 'closed' : desks.length === 0 ? 'unknown' : desks.map((d) => d.status as IntegrationStatus).sort((a, b) => rank(a) - rank(b))[0]!;
     return {
-      name, kind: (manual?.kind as IntegrationKind | undefined) ?? kindOf(name), status, closed, desks,
+      name, kind: (manual?.kind as IntegrationKind | undefined) ?? kindOf(name), status, registryClosed, desks,
       capabilities: manual ? (JSON.parse(manual.capabilities) as string[]) : [], authNeeded: manual?.auth_needed ?? null, costNote: manual?.cost_note ?? null, note: manual?.note ?? null,
       registeredBy: manual?.registered_by ?? null, registeredAt: manual?.registered_at ?? null, firstSeen: seen?.first ?? null, lastSeen: seen?.last ?? null,
     };
   }
 }
 
-const REASON: Record<DeskConnection, string> = { connected: 'bağlı', needs_auth: 'yetki bekliyor', pending: 'bağlanıyor', failed: 'hata', unknown: 'bilinmeyen durum' };
+const REASON: Record<DeskConnection, string> = {
+  connected: 'bağlı', denied: 'masa ayarı: oturumda aracı yok', needs_auth: 'yetki bekliyor', pending: 'bağlanıyor', failed: 'hata', unknown: 'bilinmeyen durum',
+};
 
 function line(i: Integration): string {
   const parts: string[] = [];
   if (i.desks.length === 0) parts.push(`güncel hiçbir masada yok${i.lastSeen ? ` (son görülme: ${new Date(i.lastSeen).toLocaleString('tr-TR')})` : ' (hiçbir oturumda görülmedi)'}`);
   else {
     const open = i.desks.filter((d) => d.open).map((d) => d.name);
-    const shut = i.desks.filter((d) => !d.open).map((d) => `${d.name} (${i.closed ? 'kayıtta kapalı' : d.status === 'unknown' ? `bilinmeyen durum: ${d.raw}` : REASON[d.status]})`);
+    const shut = i.desks.filter((d) => !d.open).map((d) => `${d.name} (${d.closedBy === 'registry' ? 'kayıtta kapalı' : d.status === 'unknown' ? `bilinmeyen durum: ${d.raw}` : REASON[d.status]})`);
     parts.push([open.length ? `açık: ${open.join(', ')}` : '', shut.length ? `kapalı: ${shut.join(', ')}` : ''].filter(Boolean).join('; '));
   }
-  if (i.closed) parts.push('kayıtta kapalı, oturumlarda kapatma B9’da');
+  if (i.registryClosed) parts.push('kayıtta kapalı, oturumlarda kapatma B9’da');
   if (i.capabilities.length) parts.push(`yetenekler: ${i.capabilities.join(', ')}`);
   if (i.authNeeded) parts.push(`yetki: ${i.authNeeded}`);
   if (i.costNote) parts.push(`maliyet: ${i.costNote}`);
