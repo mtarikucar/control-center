@@ -83,16 +83,17 @@ export interface BlueprintApplyReport {
   planId: string;
   title: string;
   finished: boolean;
-  steps: Array<{ step: string; label: string; result: BlueprintStepResult; ref: string | null; error: string | null }>;
+  steps: Array<{ step: string; label: string; result: BlueprintStepResult; ref: string | null; error: string | null; note: string | null }>;
 }
 
 /**
  * How one closed-mode rule stands on one desk, read from its latest session only (no tool is ever called):
  * `verified` — the session has none of the tools it denies; `open` — it has them (the rule did not hold);
  * `not_connected` — the server is not connected there (no tools either way); `no_session` — the desk has not opened
- * one yet; `unverifiable` — not a connector rule (a shell pattern): a list cannot show it, the call is refused.
+ * one yet; `unverifiable` — not a connector rule (a shell pattern): a list cannot show it, the call is refused;
+ * `unknown` — no session and no vocabulary has seen such a server or tool: the rule may close nothing (review round 1).
  */
-export type ClosedModeCheck = 'verified' | 'open' | 'not_connected' | 'no_session' | 'unverifiable';
+export type ClosedModeCheck = 'verified' | 'open' | 'not_connected' | 'no_session' | 'unverifiable' | 'unknown';
 
 export interface BlueprintView {
   planId: string;

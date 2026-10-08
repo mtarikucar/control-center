@@ -7,6 +7,8 @@
     ve A4 (yeniden onboarding farkı);
   - `pilot-senaryosu.md` §3 A4–A11 ve §4 (blueprint içeriği), §8 (kurulum sırası, kapalı kip, etkisiz doğrulama).
 - Dal `feat/blueprint`, `feat/capability-model` (B7, 2bd5f1b) üstünde. **Göç v18.**
+- Sürüm 2 (inceleme turu 1, Kerem): kapalı kipte tanınmayan adlar, işten çıkarılan rol, revizyonda sayım, kapalı kibin
+  sınırı, dosyanın oturumdan önce yazıldığının testi (§2, §3, §4, §8).
 
 ## 1. Bugün ve kapsam
 
@@ -74,7 +76,8 @@ interface Blueprint {
   - cron, rutin aralığı ve görev alanları mevcut doğrulamadan geçiyor.
 - **Sınırlar (anayasa):**
   - Boş masa sayısı: aynı adla zaten çalışan, kurulumda yeni masa istemez.
-  - Aktif hedef, rutin ve plan başına açık görev sınırları.
+  - Aktif hedef, rutin ve plan başına açık görev sınırları. Yalnız kurulumun yeni açacakları sayılır. Revizyonda
+    kaydı olan ya da doğal anahtarıyla var olan rutin ve görev ikinci kez sayılmaz.
   - En fazla 40 adım (plan kartının adım sınırı).
 
 **Plan kartı (zenginleştirme):** ofis blueprint'ten mevcut kartın alanlarını üretir. Eski plan kartları aynen çalışır;
@@ -123,6 +126,11 @@ yapılmış sayılır; yapılmış adım bir daha yazılmaz.**
 - **Revizyon:** blueprint revize edilirse (`blueprintPropose(planId)` → plan revizyonu → sahibinin onayı) aynı
   anahtarlı adımlar atlanır, yeniler kurulur. Kaldırılan adımlar geri alınmaz (işten çıkarma kurulumun işi değil);
   okuma bunları "blueprint'te artık yok" diye gösterir.
+- **İşten çıkarılan rol:** kurulumdan sonra bir rolün çalışanı işten çıkarılırsa kurulum onu geri almaz. Rol adımı
+  "zaten yapılmıştı (çalışanı işten çıkarıldı)" kalır. O role yeni görev ya da rutin veren bir adım şunu söyleyerek
+  durur: "revizyonda bu role yeni bir anahtar ver (yeni biri işe alınır) ya da adımı başka bir role bağla". Revizyonun
+  plan kartı da bunu onaydan önce gösterir. Gerekçe: işten çıkarmayı sahibi ya da koordinatör bilinçli yaptı; aynı
+  rolü sessizce yeniden doldurmak bu kararı geri alır.
 
 ## 4. Kapalı kip (pilot §8)
 
@@ -135,6 +143,11 @@ hemen açıyor. Dosya artık oturumdan önce yazılıyor; ilk oturum dosyalı a�
 Benimsenen (zaten var olan) çalışanın masasına dokunulmaz. Okuma bunu "kapalı kip uygulanmadı: var olan çalışan"
 diye söyler.
 
+**Sınırı (B9'a kadar):** kural çalışanın kendi masasındaki dosyadadır. Çalışan `bypassPermissions` ile, Write ya da
+Bash'le dosyayı değiştirebilir. Bu kazara yayını ve gönderimi durdurur, kararlı bir çalışanı durdurmaz (pilot §8).
+Kaldırılan kural bir sonraki oturumda `blueprintRead`'de "TUTMADI" görünür. Plan kartının riskler satırı da bunu
+yazar; korunan yollar B9'un işi.
+
 **Etkisiz doğrulama (yalnız liste, salt okunur):** hiçbir araç denemek için çağrılmaz. `blueprintRead` her masa ve
 kural için B3 kaydının son oturum satırını okur:
 - `mcp__sunucu` kuralı: masada sunucu `denied` → doğrulandı. Araçlarıyla açık → **TUTMADI**. Bağlı değil (yetki
@@ -142,6 +155,13 @@ kural için B3 kaydının son oturum satırını okur:
 - `mcp__sunucu__araç` kuralı: masanın araç adları (B7) bu aracı içermiyor → doğrulandı.
 - `Bash(…)` ve diğer kalıplar: listeyle doğrulanamaz, çağrı anında reddedilir (pilot §8, K3 kanıtlı). Okuma bunu
   açıkça yazar.
+- **Tanınmayan ad (inceleme turu 1):** sunucu kuralının sunucusu hiçbir oturumda görülmemiş ve sözlükte yoksa, ya da
+  araç kuralının aracı hiçbir güncel masanın oturum listesinde ve sözlükte yoksa, kural `unknown` olur: "tanınmıyor;
+  kural bir şey kapatmıyor olabilir". "Doğrulandı" yalnız var olduğu bilinen bir aracın masada olmamasıdır. Yanlış
+  yazılmış bir ad (`send_email`; gerçeği `send_message`) böylece doğrulanmış görünmez. `blueprintPropose` bu adları
+  plan kartının riskler satırında onaydan önce sayar.
+- **Sıra testi:** dosyanın ilk oturumun süreci başlatılmadan önce diskte olduğu doğrudan sınanır: testte `spawn`
+  sarılır, her çağrıda masanın ayar dosyası okunur (`engine-desk-deny.test.ts`).
 
 ## 5. Araçlar ve API
 
@@ -197,3 +217,14 @@ Yeni tablolar; mevcut tablolara dokunulmaz. Eski planların blueprint'i yoktur; 
 - **K3** (`OFFICE_SMOKE=1`, stub sunucular + `LOCKED_ARGS`): kurulumun yazdığı masa dosyası gerçek CLI'de geçerli.
   Masada gerçek bir `init` alınır; deny edilen stub'ın aracı listede yoktur ve `blueprintRead` "doğrulandı" der.
   Hiçbir araç çağrılmaz, süreç `init`'te öldürülür.
+
+## 8. Değişiklik günlüğü
+
+- **Sürüm 2 (inceleme turu 1, Kerem).**
+  - **[önemli]** Araç düzeyindeki kural var olmayan bir aracı adlandırınca okuma "doğrulandı" diyordu. Düzeltme:
+    `unknown` durumu ve kartta uyarı (§4).
+  - **[küçük]** İşten çıkarılan rolün çalışanı yüzünden revizyon sonsuza dek takılıyor, mesaj yanlış yol gösteriyordu.
+    Düzeltme: doğru yolu söyleyen mesaj ve kartta uyarı (§3).
+  - **[küçük]** Revizyonda kurulu rutin ve görevler iki kez sayılıyordu (§2).
+  - **[küçük]** Kapalı kibin sınırı notta ve kartta yoktu (§4).
+  - **[küçük]** Dosyanın oturumdan önce yazıldığı yalnız zamanlamayla korunuyordu; doğrudan test (§4).

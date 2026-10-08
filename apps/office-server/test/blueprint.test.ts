@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { kpiText, type Employee } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
 import { BlueprintStore } from '../src/company/blueprint-store.ts';
-import { Blueprints } from '../src/company/blueprint.ts';
+import { blueprintText, Blueprints } from '../src/company/blueprint.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { deskDir, writeDeskDeny } from '../src/desk.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
@@ -108,7 +108,8 @@ describe('Blueprint — proposing it', () => {
     expect(plan.risks).toContain('Pilot 0: bağlayıcılar kapalı.');
     expect(plan.risks).toContain('Açık olmayan yetenekler: social.draft (Ece), email.read (Nil), email.send (Nil), calendar.read (Nil)');
     expect(plan.risks).toContain('Dışa dönük yetenekler (B9’a kadar yalnız metinle korunur): email.send (Nil)');
-    expect(plan.risks).toContain('Kapalı kip: 3 kural, her yeni masaya ilk oturumdan önce yazılır');
+    // Review, Kerem round 1: what the closed mode does not do, on the card the owner approves.
+    expect(plan.risks).toContain('Kapalı kip: 3 kural, her yeni masaya ilk oturumdan önce yazılır; B9’a kadar çalışan kendi masasındaki kuralı kaldırabilir, blueprintRead bunu bir sonraki oturumda “TUTMADI” diye gösterir');
     expect(t.blueprints.read(plan.id).blueprint.roles.map((r) => r.key)).toEqual(['yazar', 'editor', 'hesap']);
   });
 
@@ -280,6 +281,60 @@ describe('Blueprint — installing it', () => {
     expect(report.steps.find((x) => x.step === 'goal:h1')!.ref).not.toBe(old.id);
   });
 
+  it('review focus (Kerem, round 1): a role whose employee was let go is not hired back; new work for it says to name the role anew — and that works', async () => {
+    const t = make();
+    t.profile();
+    const c = t.coordinator.id;
+    const { plan } = t.blueprints.propose(c, BP());
+    t.company.approve(plan.id);
+    t.blueprints.apply(c, plan.id);
+    const nil = t.roster.list().find((e) => e.name === 'Nil')!;
+    await t.f.engine.fire(nil.id);
+    const next = BP();
+    next.tasks.push({ key: 'yeni', title: 'Aylık rapor', role: 'hesap', reviewer: 'editor', done: ['Rapor'] } as never);
+    const revised = t.blueprints.propose(c, next, { planId: plan.id });
+    expect(revised.plan.risks).toContain('Çalışanı işten çıkarılmış rol: hesap (Nil) — kurulum onu geri almaz; ona yeni iş verecek adımlar kurulamaz, rolü yeni bir anahtarla yaz');
+    t.company.approve(plan.id);
+    for (let run = 0; run < 2; run += 1) {
+      const report = t.blueprints.apply(c, plan.id);
+      expect(report.steps.find((x) => x.step === 'role:hesap')).toMatchObject({ result: 'skipped', note: 'çalışanı işten çıkarıldı (Nil)' });
+      expect(report.steps.find((x) => x.step === 'task:yeni')).toMatchObject({
+        result: 'failed', error: expect.stringMatching(/“hesap” rolünün çalışanı Nil işten çıkarıldı; kurulum işten çıkarılanı geri almaz: revizyonda bu role yeni bir anahtar ver/),
+      });
+    }
+    expect(t.roster.list().map((e) => e.name)).not.toContain('Nil');
+    // Named anew: a new key hires someone, and the new work goes to them.
+    const again = BP();
+    again.roles.push({ key: 'hesap2', name: 'Naz', role: 'Gelen kutusu özeti ve aylık rapor.', model: 'sonnet', title: 'Hesap Asistanı' } as never);
+    again.tasks.push({ key: 'yeni', title: 'Aylık rapor', role: 'hesap2', reviewer: 'editor', done: ['Rapor'] } as never);
+    t.blueprints.propose(c, again, { planId: plan.id });
+    t.company.approve(plan.id);
+    const report = t.blueprints.apply(c, plan.id);
+    expect(report.finished).toBe(true);
+    const naz = t.roster.list().find((e) => e.name === 'Naz')!;
+    expect(t.tasks.list({ planId: plan.id }).find((x) => x.title === 'Aylık rapor')!.assignee).toBe(naz.id);
+  });
+
+  it('review focus (Kerem, round 1): a revision counts against the limits only the routines and tasks it would add', () => {
+    const t = make();
+    t.profile();
+    const c = t.coordinator.id;
+    t.budget.setConstitution({ maxSchedules: 2, openTasksPerPlan: 3 });
+    const { plan } = t.blueprints.propose(c, BP());
+    t.company.approve(plan.id);
+    t.blueprints.apply(c, plan.id);
+    const next = BP();
+    next.routines.push({ key: 'ozet', title: 'Gelen kutusu özeti', role: 'hesap', cron: '30 8 * * 1-5', done: ['Özet'] } as never);
+    next.tasks.push({ key: 'sablon', title: 'Rapor şablonu', role: 'hesap', done: ['Şablon'] } as never);
+    // One routine installed + one new = 2 (the limit); two tasks open + one new = 3 (the limit).
+    expect(t.blueprints.propose(c, next, { planId: plan.id }).plan.status).toBe('draft');
+    t.company.approve(plan.id);
+    expect(t.blueprints.apply(c, plan.id).finished).toBe(true);
+    // One more of each is over.
+    next.routines.push({ key: 'fazla', title: 'Fazla', role: 'hesap', cron: '0 12 * * 1', done: ['x'] } as never);
+    expect(() => t.blueprints.propose(c, next, { planId: plan.id })).toThrow(/Kurulum 1 rutin açacak; rutin sınırına 0 yer var/);
+  });
+
   it('closing a desk keeps what its settings already say: other keys and rules stay, the new rules join', () => {
     const t = make();
     const dir = join(deskDir(t.dataDir, 'ornek'), '.claude');
@@ -334,6 +389,29 @@ describe('Blueprint — reading it, and the closed mode checked by list only', (
     expect(view.profileVersion).toBe(t.company.profile().version);
     // Reading writes nothing.
     expect(t.events.lastSeq()).toBe(before + 1);
+  });
+
+  it('review focus (Kerem, round 1): a rule naming a tool or server no session and no vocabulary has seen is not “verified” — it may close nothing; the card warns before approval', () => {
+    const t = make();
+    t.profile();
+    const c = t.coordinator.id;
+    const b = BP();
+    b.closedMode = { deny: ['mcp__claude_ai_Gmail__send_email', 'mcp__claude_ai_Gmail__send_message', 'mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Gmial'] };
+    const { plan } = t.blueprints.propose(c, b);
+    expect(plan.risks).toContain('Kapalı kipte tanınmayan ad: mcp__claude_ai_Gmail__send_email, mcp__claude_ai_Gmial — hiçbir oturumda ya da sözlükte görülmedi; kural bir şey kapatmıyor olabilir, adı denetle');
+    t.company.approve(plan.id);
+    t.blueprints.apply(c, plan.id);
+    const ece = t.roster.list().find((e) => e.name === 'Ece')!;
+    // The real name is send_message: open on Ece's desk; the guessed send_email closes nothing.
+    t.events.append(ece.id, { type: 'session.started', model: 'm', mcp: [{ name: 'claude.ai Gmail', status: 'connected', tools: 2, toolNames: ['send_message', 'list_labels'] }] });
+    expect(t.blueprints.read(plan.id).closedMode.find((d) => d.name === 'Ece')!.rules).toEqual([
+      { rule: 'mcp__claude_ai_Gmail__send_email', check: 'unknown' },
+      { rule: 'mcp__claude_ai_Gmail__send_message', check: 'open' },
+      // A tool the office knows (the vocabulary names it) and not in this session: closed there.
+      { rule: 'mcp__claude_ai_Gmail__create_draft', check: 'verified' },
+      { rule: 'mcp__claude_ai_Gmial', check: 'unknown' },
+    ]);
+    expect(blueprintText(t.blueprints.read(plan.id), t.plans.get(plan.id))).toContain('mcp__claude_ai_Gmail__send_email tanınmıyor: hiçbir oturumda ya da sözlükte görülmedi, kural bir şey kapatmıyor olabilir');
   });
 
   it('the tools: blueprintPropose and blueprintApply for the coordinator, blueprintRead for leads; the API reads it', async () => {

@@ -7,7 +7,7 @@ import { mcpToolPrefix } from '../claude/normalize.ts';
 import { ConflictError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { BlueprintStore } from './blueprint-store.ts';
-import { capability, capabilityIds, coverage } from './capabilities.ts';
+import { capability, capabilityIds, capabilityVocabulary, coverage } from './capabilities.ts';
 import type { Company, PlanDraft } from './company.ts';
 import type { IntegrationRegistry } from './integrations.ts';
 import { checkKpis } from './kpi.ts';
@@ -45,6 +45,7 @@ const STATE_TR: Record<BlueprintView['steps'][number]['state'], string> = { pend
 const CHECK_TR: Record<ClosedModeCheck, string> = {
   verified: 'doğrulandı (oturumun araç listesinde yok)', open: 'TUTMADI (oturumda araçları var)', not_connected: 'sunucu bu masada bağlı değil (aracı yok)',
   no_session: 'henüz oturum yok', unverifiable: 'listeyle doğrulanamaz (çağrı anında reddedilir)',
+  unknown: 'tanınmıyor: hiçbir oturumda ya da sözlükte görülmedi, kural bir şey kapatmıyor olabilir',
 };
 
 const lower = (s: string) => s.toLocaleLowerCase('tr').trim();
@@ -113,12 +114,15 @@ export class Blueprints {
     for (const s of this.#steps(by, plan, stored.blueprint, refs)) {
       const known = records.get(s.step);
       if (failed) {
-        report.steps.push({ step: s.step, label: s.label, result: 'pending', ref: null, error: null });
+        report.steps.push({ step: s.step, label: s.label, result: 'pending', ref: null, error: null, note: null });
         continue;
       }
       if (known) {
         this.#remember(s.step, known.ref, refs);
-        report.steps.push({ step: s.step, label: s.label, result: 'skipped', ref: known.ref, error: null });
+        // A role's employee let go since: not hired back (spec §3); steps that would give it new work say what to do.
+        const gone = s.step.startsWith('role:') && known.ref ? this.#d.roster.get(known.ref) : null;
+        const note = gone?.lifecycle === 'archived' ? `çalışanı işten çıkarıldı (${gone.name})` : null;
+        report.steps.push({ step: s.step, label: s.label, result: 'skipped', ref: known.ref, error: null, note });
         continue;
       }
       try {
@@ -127,11 +131,11 @@ export class Blueprints {
         const ref = found ?? s.make();
         this.#d.store.record(planId, s.step, ref, outcome);
         this.#remember(s.step, ref, refs);
-        report.steps.push({ step: s.step, label: s.label, result: outcome, ref, error: null });
+        report.steps.push({ step: s.step, label: s.label, result: outcome, ref, error: null, note: null });
       } catch (err) {
         failed = true;
         report.finished = false;
-        report.steps.push({ step: s.step, label: s.label, result: 'failed', ref: null, error: err instanceof Error ? err.message : String(err) });
+        report.steps.push({ step: s.step, label: s.label, result: 'failed', ref: null, error: err instanceof Error ? err.message : String(err), note: null });
       }
     }
     return report;
@@ -176,6 +180,10 @@ export class Blueprints {
       }
       const id = refs.get(key);
       if (!id) throw new ConflictError(`“${key}” rolünün çalışanı yok.`);
+      const e = this.#d.roster.get(id);
+      if (e.lifecycle === 'archived') {
+        throw new ConflictError(`“${key}” rolünün çalışanı ${e.name} işten çıkarıldı; kurulum işten çıkarılanı geri almaz: revizyonda bu role yeni bir anahtar ver (yeni biri işe alınır) ya da adımı başka bir role bağla.`);
+      }
       return id;
     };
     const keys = stepKeys(b);
@@ -255,10 +263,16 @@ export class Blueprints {
     const newGoals = b.goals.filter((g) => !goals.some((x) => x.status === 'active' && lower(x.title) === lower(g.title))).length;
     const activeGoals = goals.filter((g) => g.status === 'active').length;
     if (activeGoals + newGoals > rules.activeGoals) throw new ConflictError(`Kurulum ${newGoals} hedef açacak; aktif hedef sınırına ${Math.max(0, rules.activeGoals - activeGoals)} yer var.`);
+    // A revision: what the install already made (recorded, or there by its natural key) is not counted again.
+    const done = new Set(planId ? this.#d.store.steps(planId).map((r) => r.step) : []);
+    const inPlan = planId ? this.#d.schedules.list({ planId, statuses: ['active', 'paused'] }) : [];
+    const newRoutines = b.routines.filter((r) => !done.has(`routine:${r.key}`) && !inPlan.some((x) => lower(x.title) === lower(r.title))).length;
     const active = this.#d.schedules.list({ statuses: ['active', 'paused'] }).length;
-    if (active + b.routines.length > rules.maxSchedules) throw new ConflictError(`Kurulum ${b.routines.length} rutin açacak; rutin sınırına ${Math.max(0, rules.maxSchedules - active)} yer var.`);
+    if (active + newRoutines > rules.maxSchedules) throw new ConflictError(`Kurulum ${newRoutines} rutin açacak; rutin sınırına ${Math.max(0, rules.maxSchedules - active)} yer var.`);
+    const tasks = planId ? this.#d.tasks.list({ planId }) : [];
+    const newTasks = b.tasks.filter((t) => !done.has(`task:${t.key}`) && !tasks.some((x) => lower(x.title) === lower(t.title))).length;
     const open = planId ? this.#d.tasks.openInPlan(planId) : 0;
-    if (open + b.tasks.length > rules.openTasksPerPlan) throw new ConflictError(`Kurulum ${b.tasks.length} görev açacak; plan başına en fazla ${rules.openTasksPerPlan} açık görev olabilir.`);
+    if (open + newTasks > rules.openTasksPerPlan) throw new ConflictError(`Kurulum ${newTasks} görev açacak; plan başına en fazla ${rules.openTasksPerPlan} açık görev olabilir.`);
   }
 
   /** The plan card the owner sees: the blueprint's own words, and what the office reads from B3, B6 and B7. */
@@ -295,8 +309,15 @@ export class Blueprints {
     // What the owner should see before approving: what exists already, what is not open, what goes outward.
     const lacking = b.roles.flatMap((r) => coverage(registry, capsOf(r)).filter((c) => c.status === 'shut' || c.status === 'missing').map((c) => `${c.id} (${r.name})`));
     const outward = b.roles.flatMap((r) => capsOf(r).filter((c) => capability(c).outward).map((c) => `${c} (${r.name})`));
+    const unknownRules = (b.closedMode?.deny ?? []).filter((rule) => !knownRule(registry, rule));
+    const records = planId ? this.#d.store.steps(planId) : [];
+    const gone = records.flatMap((r) => {
+      if (!r.step.startsWith('role:') || !r.ref) return [];
+      const e = this.#d.roster.get(r.ref);
+      return e.lifecycle === 'archived' ? [`${r.step.slice('role:'.length)} (${e.name})`] : [];
+    });
     const adopted = [
-      ...b.roles.filter((r) => this.#employeeNamed(r.name)).map((r) => `${r.name} (çalışan)`),
+      ...b.roles.filter((r) => this.#employeeNamed(r.name) && !records.some((x) => x.step === `role:${r.key}`)).map((r) => `${r.name} (çalışan)`),
       ...b.playbook.filter((p) => this.#d.memory.playbookTopics().some((x) => lower(x.topic) === lower(p.topic))).map((p) => `“${p.topic}” (el kitabı)`),
       ...b.goals.filter((g) => this.#d.company.goals().some((x) => x.status === 'active' && lower(x.title) === lower(g.title))).map((g) => `“${g.title}” (hedef)`),
     ];
@@ -305,7 +326,9 @@ export class Blueprints {
       adopted.length ? `Var olan kullanılacak: ${adopted.join(', ')}` : '',
       lacking.length ? `Açık olmayan yetenekler: ${lacking.join(', ')}` : '',
       outward.length ? `Dışa dönük yetenekler (B9’a kadar yalnız metinle korunur): ${outward.join(', ')}` : '',
-      b.closedMode ? `Kapalı kip: ${b.closedMode.deny.length} kural, her yeni masaya ilk oturumdan önce yazılır` : '',
+      b.closedMode ? `Kapalı kip: ${b.closedMode.deny.length} kural, her yeni masaya ilk oturumdan önce yazılır; B9’a kadar çalışan kendi masasındaki kuralı kaldırabilir, blueprintRead bunu bir sonraki oturumda “TUTMADI” diye gösterir` : '',
+      unknownRules.length ? `Kapalı kipte tanınmayan ad: ${unknownRules.join(', ')} — hiçbir oturumda ya da sözlükte görülmedi; kural bir şey kapatmıyor olabilir, adı denetle` : '',
+      gone.length ? `Çalışanı işten çıkarılmış rol: ${gone.join(', ')} — kurulum onu geri almaz; ona yeni iş verecek adımlar kurulamaz, rolü yeni bir anahtarla yaz` : '',
     ].filter(Boolean);
     const counts = `${b.roles.length} rol, ${b.playbook.length} el kitabı konusu, ${b.goals.length} hedef, ${b.routines.length} rutin, ${b.tasks.length} görev${b.closedMode ? `; kapalı kip: ${b.closedMode.deny.length} kural` : ''}`;
     return {
@@ -342,10 +365,24 @@ function labelOf(step: string): string {
   return step === 'brief' ? 'Şirket özeti' : `${tr[kind] ?? kind}: ${key}`;
 }
 
+/**
+ * A connector rule names something the office has seen: a server some session reported or the vocabulary names, and
+ * — for a tool rule — a tool some current desk's session listed or the vocabulary names (review round 1).
+ */
+function knownRule(registry: Integration[], rule: string): boolean {
+  const m = /^mcp__([A-Za-z0-9_-]+?)(?:__(.+))?$/.exec(rule);
+  if (!m) return true;
+  const prefix = `mcp__${m[1]}__`;
+  const vocabulary = capabilityVocabulary().capabilities.flatMap((c) => c.tools);
+  if (m[2] === undefined) return registry.some((i) => mcpToolPrefix(i.name) === prefix) || vocabulary.some((t) => t.startsWith(prefix));
+  return vocabulary.includes(rule) || registry.some((i) => i.desks.some((d) => d.toolNames?.includes(rule)));
+}
+
 /** One deny rule on one desk, from its latest session as the registry reads it (spec §4). */
 function closedCheck(registry: Integration[], employeeId: string, rule: string): ClosedModeCheck {
   const m = /^mcp__([A-Za-z0-9_-]+?)(?:__(.+))?$/.exec(rule);
   if (!m) return 'unverifiable';
+  if (!knownRule(registry, rule)) return 'unknown';
   if (!registry.some((i) => i.desks.some((d) => d.employeeId === employeeId))) return 'no_session';
   const prefix = `mcp__${m[1]}__`;
   const desk = registry.find((i) => mcpToolPrefix(i.name) === prefix)?.desks.find((d) => d.employeeId === employeeId);
@@ -521,7 +558,7 @@ function required(x: unknown, label: string): string[] {
 export function applyText(r: BlueprintApplyReport): string {
   const n = r.steps.length;
   const count = (x: BlueprintStepResult) => r.steps.filter((s) => s.result === x).length;
-  const linesOut = r.steps.map((s) => `• ${s.label} — ${RESULT_TR[s.result]}${s.error ? `: ${s.error}` : ''}`);
+  const linesOut = r.steps.map((s) => `• ${s.label} — ${RESULT_TR[s.result]}${s.note ? ` (${s.note})` : ''}${s.error ? `: ${s.error}` : ''}`);
   if (!r.finished) {
     const at = r.steps.findIndex((s) => s.result === 'failed');
     return [`Kurulum durdu: “${r.title}” — ${at + 1}. adımda (${r.steps[at]!.label}): ${r.steps[at]!.error}. Yapılanlar kayıtlı; sorunu çözüp blueprintApply'ı yeniden çalıştır, kaldığı yerden sürer.`, ...linesOut].join('\n');
