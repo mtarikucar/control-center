@@ -76,7 +76,7 @@ export interface CycleOpening {
   unclosedWarning: boolean;
   /** The board's text, the cycle's first message. */
   text: string;
-  /** The board's kickoff (no active goal, or a goal without a running plan): for the model routing. */
+  /** The board's kickoff (no active goal, or none with a running plan): for the model routing. */
   kickoff: boolean;
 }
 

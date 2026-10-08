@@ -529,9 +529,10 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     expect(t.boards()[0]).toMatchObject({ model: 'fable', role: true });
     await t.closeCycle();
     expect(t.records().at(-1)).toMatchObject({ closed: true, model: 'fable' });
-    // The plan runs: the next cycle re-plans on opus.
+    // The plan runs — a second goal waits for its plan meanwhile: the next cycle re-plans on opus.
     const plan = t.company.propose(t.coord.id, { method: METHOD, title: 'Site', goal: 'g', approach: 'a', goalId: g.id });
     expect(t.plans.get(plan.id).status).toBe('approved');
+    t.company.goalSet(t.coord.id, { title: 'Satış', why: 'misyon', done: ['teklif'] });
     const x = t.task(ada.id, 'Yaz', { planId: plan.id });
     t.task(ada.id, 'Düzelt', { planId: plan.id });
     t.settle();

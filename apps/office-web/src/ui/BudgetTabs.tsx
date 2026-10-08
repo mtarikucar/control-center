@@ -135,7 +135,7 @@ const FIELDS: Field[] = [
   { key: 'digestHours', label: 'Özet saatleri', hint: 'Karar gerektirmeyen notlar bu saatlerde tek turda gelir; sonuncusu günlük raporu getirir (ör. 9, 17).', hours: true },
   {
     key: 'coordinatorModels', label: 'Koordinatör modelleri',
-    hint: 'Koordinatörün turu, türüne göre. Başlangıç: süren plan yokken senin mesajın; aktif hedef yokken ya da bir hedefin süren planı yokken gelen yönetim turu. Yönetim turu: diğer yönetim turları (yeniden planlama). Sıradan: geri kalan her tur (notlar, öneriler, kısa cevaplar). Daha güçlü modele hemen, daha zayıfa önbellek süresinden sonra geçer; model politikası kapalıyken de uygulanır.',
+    hint: 'Koordinatörün turu, türüne göre. Başlangıç: süren plan yokken senin mesajın; aktif hedef yokken ya da hiçbir hedefin süren planı yokken gelen yönetim turu. Yönetim turu: diğer yönetim turları (yeniden planlama). Sıradan: geri kalan her tur (notlar, öneriler, kısa cevaplar). Daha güçlü modele hemen, daha zayıfa önbellek süresinden sonra geçer; model politikası kapalıyken de uygulanır.',
     selects: [['kickoff', 'Başlangıç'], ['cycle', 'Yönetim turu'], ['routine', 'Sıradan']],
   },
   { key: 'difficultyModels', label: 'Zorluk modelleri', hint: 'Kolay / orta / zor / kritik görev (ör. haiku / sonnet / opus / fable).', models: ['easy', 'medium', 'hard', 'critical'] },

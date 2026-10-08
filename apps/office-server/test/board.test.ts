@@ -129,21 +129,31 @@ describe('board — kickoff', () => {
     expect(t.board().kickoff).toBe(false);
   });
 
-  it('an active goal with no running plan — none yet, or its plan finished, was declined or stopped: kickoff', () => {
+  it('no active goal has a running plan — the only one has none yet, its plan finished, was declined or stopped: kickoff; another goal waiting for its plan while one runs: no kickoff', () => {
     const t = make();
     const ada = t.person('Ada');
     const a = t.goal('Lansman');
-    t.plan('Site', { goalId: a.id });
-    const b = t.goal('Satış');
     expect(t.board().kickoff).toBe(true);
-    const p = t.plan('Teklifler', { goalId: b.id });
+    const site = t.plan('Site', { goalId: a.id });
     expect(t.board().kickoff).toBe(false);
-    const only = t.task(ada.id, 'tek iş', { planId: p.id });
+    // A second goal set to be planned later while the first one's plan runs: the work is under way, no project start.
+    const b = t.goal('Satış');
+    expect(t.board().kickoff).toBe(false);
+    expect(t.section(t.board().text, 2)).toContain('- Hedef “Satış”: süren planı yok');
+    // The running plan finishes: no goal has a running plan.
+    const only = t.task(ada.id, 'tek iş', { planId: site.id });
     t.company.start(only.id);
     t.finish(ada.id, only.id);
-    expect(t.plans.get(p.id).status).toBe('done');
+    expect(t.plans.get(site.id).status).toBe('done');
     expect(t.board().kickoff).toBe(true);
-    expect(t.section(t.board().text, 2)).toContain('- Hedef “Satış”: süren planı yok');
+    // A plan waiting for the owner runs too; declined or stopped, it does not.
+    t.budget.setConstitution({ autonomy: 'plans' });
+    t.company.decline(t.plan('Teklifler', { goalId: b.id }).id);
+    expect(t.board().kickoff).toBe(true);
+    const next = t.plan('Teklifler 2', { goalId: b.id });
+    expect(t.board().kickoff).toBe(false);
+    t.company.stopPlan(next.id);
+    expect(t.board().kickoff).toBe(true);
   });
 });
 
@@ -965,7 +975,8 @@ describe('board — a realistic office', () => {
     t.company.openProposal(bora!.id, { kind: 'idea', title: 'Test verisini otomatik üret', text: 'her koşuda aynı veri' });
     t.advance(10 * MIN);
     const b = t.board({ since });
-    expect(b.kickoff).toBe(true);
+    // “Satış ortaklıkları” waits for its plan while “Lansman”'s runs: a management cycle, not a project start.
+    expect(b.kickoff).toBe(false);
     expect(b.text).toBe(`Yönetim panosu · 8 Eki 2026 10:30 · son tur 10:00 (30 dk önce)
 
 ## 1. Ne değişti (son turdan beri)

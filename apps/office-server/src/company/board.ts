@@ -47,7 +47,7 @@ export interface BoardOptions {
 
 export interface Board {
   text: string;
-  /** No active goal, or an active goal without a running plan (spec §3.5: the kickoff model). */
+  /** No active goal, or no active goal with a running plan (spec §3.5: the kickoff model). */
   kickoff: boolean;
 }
 
@@ -229,7 +229,8 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     return moved;
   };
 
-  const kickoff = goals.length === 0 || goals.some((g) => !live.some((p) => p.goalId === g.id));
+  // A project start only when no goal's work is under way: a goal set to be planned later beside a running one is not one.
+  const kickoff = goals.length === 0 || !live.some((p) => p.goalId !== null && goals.some((g) => g.id === p.goalId));
   // Each plan's tasks and streams, read once however often the board is drawn.
   const planData = new Map(live.map((p) => [p.id, { tasks: d.tasks.list({ planId: p.id, limit: 100_000 }), streams: d.company.planStreams(p.id) }]));
   const header = `Yönetim panosu · ${formatStamp(now)} · ${o.since > 0 ? `son tur ${when(o.since)} (${ago(o.since)})` : 'ilk tur'}`;

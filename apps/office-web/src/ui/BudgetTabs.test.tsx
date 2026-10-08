@@ -84,7 +84,7 @@ describe('ConstitutionTab', () => {
     expect(within(group).getAllByRole('combobox').map((s) => s.getAttribute('aria-label'))).toEqual(['Başlangıç', 'Yönetim turu', 'Sıradan']);
     expect(within(group).getAllByRole('option', { name: 'fable' })).toHaveLength(3);
     expect([...(screen.getByLabelText('Başlangıç') as HTMLSelectElement).options].map((o) => o.value)).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
-    expect(group.textContent).toMatch(/Başlangıç: süren plan yokken/);
+    expect(group.textContent).toMatch(/Başlangıç: süren plan yokken senin mesajın; aktif hedef yokken ya da hiçbir hedefin süren planı yokken gelen yönetim turu\./);
     expect(group.textContent).toMatch(/model politikası kapalıyken de/);
   });
 

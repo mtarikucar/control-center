@@ -3,8 +3,8 @@ import { MODEL_ALIASES, type ModelAlias } from './employee.ts';
 
 /**
  * What a coordinator turn is for (management cycle §3.5), each with its model in coordinatorModels: `kickoff`, a project
- * start — the owner's message while no plan runs, a management cycle whose board finds a goal without a running plan
- * (or none at all); `cycle`, any other management cycle; `routine`, every other turn (notices, a colleague's proposal,
+ * start — the owner's message while no plan runs, a management cycle whose board finds no goal with a running plan
+ * (or no goal at all); `cycle`, any other management cycle; `routine`, every other turn (notices, a colleague's proposal,
  * review routing, the owner's message while a plan runs).
  */
 export const COORDINATOR_TURNS = ['kickoff', 'cycle', 'routine'] as const;
