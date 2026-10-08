@@ -237,6 +237,21 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', '/api/onboarding/answers', {})).status).toBe(400);
   });
 
+  it('shows the owner the role templates and hires from one', async () => {
+    const t = await start();
+    t.company.hireCoordinator();
+    const templates = (await call(t.port, 'GET', '/api/role-templates')).body;
+    expect(templates.map((x: { id: string }) => x.id)).toContain('icerik-yazari');
+    expect(templates.find((x: { id: string }) => x.id === 'icerik-yazari')).toMatchObject({ title: 'İçerik Yazarı', model: 'sonnet', methods: ['content'] });
+    const hired = await call(t.port, 'POST', '/api/employees', { name: 'Ece', template: 'icerik-yazari', role: 'Marka dili: samimi.' });
+    expect(hired.status).toBe(201);
+    expect(hired.body).toMatchObject({ name: 'Ece', title: 'İçerik Yazarı', template: { id: 'icerik-yazari' } });
+    expect(hired.body.role).toContain('### Bu şirkette\n\nMarka dili: samimi.');
+    expect((await call(t.port, 'POST', '/api/employees', { name: 'Can', template: 'yok' })).status).toBe(400);
+    // The old form, free text, as before.
+    expect((await call(t.port, 'POST', '/api/employees', { name: 'Ada', role: 'Testleri yazar.' })).body).toMatchObject({ role: 'Testleri yazar.', template: null });
+  });
+
   it('shows the owner the integration registry, read-only', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();

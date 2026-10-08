@@ -5,7 +5,7 @@ import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
-import type { Roster } from '../roster.ts';
+import type { NewEmployee, Roster } from '../roster.ts';
 import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { Memory } from './memory.ts';
@@ -18,6 +18,7 @@ import type { OnboardingStore } from './onboarding-store.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
+import { roleTemplate, templateRole } from './role-templates.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
 import type { NoticeStore, PlanStore, SchedulePatch, ScheduleStore, TaskPatch, TaskStore } from './store.ts';
@@ -54,7 +55,7 @@ export interface CompanyDeps {
   notices: NoticeStore;
   dataDir: string;
   /** Hires and starts a session (Engine.hire). */
-  hire: (input: HireInput) => Employee;
+  hire: (input: NewEmployee) => Employee;
   /** Character ids from the asset manifest. */
   characters: () => string[];
   /** Restarts a session so it reads a new role card and tool list (Engine.reload); absent in tests that do not care. */
@@ -228,13 +229,29 @@ export class Company {
   }
 
   /** The owner or the coordinator hires a member; the character is the given one if the manifest has it, else the least used. */
+  /**
+   * The owner or the coordinator hires. With a role template (B6) the role text comes from it — the given `role`
+   * becomes the company's own part — and so do the title, team and model unless given; the template and its version
+   * are recorded. Without one, as before: the role text as given.
+   */
   hire(by: string, input: HireInput): Employee {
     if (by !== OWNER) this.#assertCoordinator(by);
+    const template = input.template === undefined || input.template === null || input.template === '' ? null : roleTemplate(input.template);
+    const resolved: NewEmployee = template
+      ? {
+          ...input,
+          role: templateRole(template, typeof input.role === 'string' ? input.role : undefined),
+          title: input.title?.trim() ? input.title : template.title,
+          team: input.team?.trim() ? input.team : template.team,
+          model: input.model ?? template.model,
+          templateRef: { id: template.id, version: template.version },
+        }
+      : { ...input, templateRef: null };
     const characters = this.#d.characters();
     const characterId = input.characterId && characters.includes(input.characterId) ? input.characterId : this.#leastUsedCharacter(characters);
-    const lead = input.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === input.team?.trim()) : undefined;
+    const lead = resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
     this.#assertRoom();
-    return this.#d.hire({ ...input, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null });
+    return this.#d.hire({ ...resolved, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null });
   }
 
   /** Fable by default: planning and judgement are the hardest work in the company. */

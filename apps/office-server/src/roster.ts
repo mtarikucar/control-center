@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { EMPLOYEE_KINDS, MODEL_ALIASES, type Employee, type EmployeeKind, type HireInput, type ModelAlias } from '@cc/shared';
+import { EMPLOYEE_KINDS, MODEL_ALIASES, type Employee, type EmployeeKind, type HireInput, type ModelAlias, type TemplateRef } from '@cc/shared';
 import type { Db } from './db.ts';
 import { ConflictError, NotFoundError, ValidationError } from './errors.ts';
 
@@ -35,6 +35,8 @@ interface Row {
   team: string;
   kind: string;
   reports_to: string | null;
+  template: string | null;
+  template_version: number | null;
 }
 
 function fromRow(r: Row): Employee {
@@ -56,8 +58,12 @@ function fromRow(r: Row): Employee {
     limitResetsAt: r.limit_resets_at,
     lastError: r.last_error,
     createdAt: r.created_at,
+    template: r.template ? { id: r.template, version: r.template_version ?? 1 } : null,
   };
 }
+
+/** What the roster writes for a hire: the input, and the template resolved by the company (never the raw id). */
+export type NewEmployee = HireInput & { templateRef?: TemplateRef | null };
 
 export type EmployeePatch = Partial<
   Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model'>
@@ -77,7 +83,7 @@ export class Roster {
     this.#slugTaken = slugTaken;
   }
 
-  create(input: HireInput): Employee {
+  create(input: NewEmployee): Employee {
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     const role = typeof input.role === 'string' ? input.role.trim() : '';
     if (!name) throw new ValidationError('Ad boş olamaz.');
@@ -122,32 +128,19 @@ export class Roster {
       limitResetsAt: null,
       lastError: null,
       createdAt: this.#now(),
+      template: input.templateRef ?? null,
     };
-    this.#db
-      .prepare(
-        `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started,
-           lifecycle, limit_resets_at, last_error, created_at, title, team, kind, reports_to)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        employee.id,
-        employee.slug,
-        employee.name,
-        employee.role,
-        employee.model,
-        employee.characterId,
-        employee.deskIndex,
-        employee.sessionId,
-        0,
-        employee.lifecycle,
-        null,
-        null,
-        employee.createdAt,
-        employee.title,
-        employee.team,
-        employee.kind,
-        employee.reportsTo,
-      );
+    // A free-text hire writes the row exactly as before templates (v16); the template columns only for a template hire.
+    const columns = ['id', 'slug', 'name', 'role', 'model', 'character_id', 'desk_index', 'session_id', 'session_started', 'lifecycle', 'limit_resets_at', 'last_error', 'created_at', 'title', 'team', 'kind', 'reports_to'];
+    const values: Array<string | number | null> = [
+      employee.id, employee.slug, employee.name, employee.role, employee.model, employee.characterId, employee.deskIndex, employee.sessionId, 0, employee.lifecycle, null, null,
+      employee.createdAt, employee.title, employee.team, employee.kind, employee.reportsTo,
+    ];
+    if (employee.template) {
+      columns.push('template', 'template_version');
+      values.push(employee.template.id, employee.template.version);
+    }
+    this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
     return employee;
   }
 
