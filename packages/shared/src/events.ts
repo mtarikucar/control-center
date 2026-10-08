@@ -1,5 +1,5 @@
 import type { BudgetSummary, Spend } from './budget.ts';
-import type { ClockStatus, Goal, GoalChange, Plan, PlanChange, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
+import type { ClockStatus, CycleTrigger, Goal, GoalChange, Plan, PlanChange, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Integration } from './integration.ts';
 import type { Decision } from './memory.ts';
@@ -84,6 +84,27 @@ export type OfficeEvent =
   /** A session could not run on the model a hint asked for; it goes on on `from` and the turn's messages are sent again. */
   | { type: 'model.switch.failed'; from: string; to: string; reason: string }
   | { type: 'proposal.changed'; change: ProposalChange; proposal: Proposal }
+  /**
+   * The office opened a management cycle: the board went to the coordinator (management cycle §3.1). `since`: the
+   * previous cycle's start, which the board's “Ne değişti” covers from (0: the first); `unclosedWarning`: the board
+   * began with the warning that the previous cycle was not closed.
+   */
+  | { type: 'management.cycle.started'; triggers: CycleTrigger[]; since: number; unclosedWarning: boolean }
+  /**
+   * A management cycle's record (§3.3): closed with cycleClose (its changes, reasoning and what to look at next), or not
+   * closed — the turn that carried the board ended without it (logged once). `costUsd`: what the cycle's turn cost as
+   * far as known when this was logged (null: no result of it yet).
+   */
+  | {
+      type: 'management.cycle';
+      closed: boolean;
+      startedAt: number;
+      triggers: CycleTrigger[];
+      changes: string[];
+      reasoning: string;
+      next: string | null;
+      costUsd: number | null;
+    }
   | { type: 'error'; message: string };
 
 export type OfficeEventType = OfficeEvent['type'];

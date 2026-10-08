@@ -1,6 +1,7 @@
 import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
+import type { ManagementCycle } from '../company/cycle.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
 import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
 import { nextText, ofThem } from '../company/onboarding.ts';
@@ -129,6 +130,11 @@ export function officeTools(o: {
   performance?: { report(o: { days?: number }): PerformanceReport };
   /** The integration registry (integrationsList, integrationRegister); absent in tests that do not care. */
   integrations?: IntegrationRegistry;
+  /**
+   * The management cycle: cycleClose, and every call runs as its caller's own action, so nothing the coordinator does
+   * opens a cycle. Absent: neither (an office without cycles).
+   */
+  cycle?: Pick<ManagementCycle, 'acting' | 'close'>;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -155,7 +161,7 @@ export function officeTools(o: {
     return ` Akışlar: ${list.map((x) => `${x.title} → ${owner(x.owner)}${x.dependsOn.length ? ` (önce: ${x.dependsOn.map(titleOf).join(', ')})` : ''}`).join('; ')}.`;
   };
 
-  return [
+  const tools: McpTool[] = [
     {
       name: 'myTasks',
       description: 'List your own tasks (open ones first, then the last finished). Call it when you need to know what is on your plate.',
@@ -850,4 +856,26 @@ export function officeTools(o: {
       },
     },
   ];
+  const cycle = o.cycle;
+  if (!cycle) return tools;
+  tools.push({
+    name: 'cycleClose',
+    description:
+      'Close the management cycle (coordinator). The office opens one with the management board (“Yönetim panosu”) when the work changed — a hand-in, a review decision, someone left with no work, a plan or goal moved, a constraint changed, a stall — and at least every 45 minutes while work is open. Read the board, compare it with your plans, make the changes it calls for, then call this once, at the end of the turn that began with the board. A turn that began with the board and ends without it is logged as not closed, and the next board says so.',
+    inputSchema: object(
+      {
+        changes: strings('The plan changes you made in this cycle, one each (reassigned, split, parallelised, hired, parked, reprioritised, asked the owner); [] for none.'),
+        reasoning: s('Why. With no changes: “değişiklik yok, çünkü …”.'),
+        next: s('What to look at in the next cycle (optional).'),
+      },
+      ['changes', 'reasoning'],
+    ),
+    kinds: COORDINATOR,
+    run: ({ employee }, args) => {
+      const { changes } = cycle.close(employee.id, { changes: list(args, 'changes') ?? [], reasoning: str(args, 'reasoning'), next: optStr(args, 'next') });
+      return changes.length ? `Yönetim turu kapandı: ${changes.length} değişiklik kaydedildi.` : 'Yönetim turu kapandı: değişiklik yok, gerekçe kaydedildi.';
+    },
+  });
+  // Every call is its caller's own action (what the coordinator does itself never opens a cycle).
+  return tools.map((t) => ({ ...t, run: (ctx, args) => cycle.acting(ctx.employee.id, () => t.run(ctx, args)) }));
 }

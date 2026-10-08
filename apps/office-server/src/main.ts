@@ -3,11 +3,13 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { createApi } from './api.ts';
 import { Agenda } from './company/agenda.ts';
+import { buildBoard } from './company/board.ts';
 import { Budget } from './company/budget.ts';
 import { ConstitutionStore, SpendStore } from './company/budget-store.ts';
 import { manifestCharacters } from './company/characters.ts';
 import { Clock } from './company/clock.ts';
 import { Company } from './company/company.ts';
+import { ManagementCycle } from './company/cycle.ts';
 import { Memory } from './company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
 import { Dispatcher } from './company/dispatcher.ts';
@@ -74,9 +76,12 @@ const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, 
 const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });
 const clock = new Clock({ scheduling, state, events, label: (now) => dueLabel(tasks, schedules, company, now) });
 company.attachClock(clock);
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock });
-// Who does what when (spec §6.1): reads only, for the sheet and agendaRead.
+// Who does what when (spec §6.1): reads only, for the sheet, agendaRead and the management board.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
+// The coordinator's management cycle (management cycle §3.1): when the board is due, built from the office's services.
+const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota };
+const cycle = new ManagementCycle({ events, state, company, roster, tasks, budget, clock, board: (o) => buildBoard(boardDeps, o) });
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, cycle });
 
 // How the work went (B4): read from the log on demand, the last `days` or all time.
 const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };
@@ -88,7 +93,7 @@ const integrations = new IntegrationRegistry({ db, roster, events });
 const api = createApi(
   {
     engine, roster, events, quota,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations }) },
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, cycle }) },
     company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
@@ -105,11 +110,14 @@ api.server.on('error', (err: NodeJS.ErrnoException) => {
 // Stopped first on shutdown, so no tick or due run reaches a closing engine or a closed database.
 let stopDispatcher: (() => void) | null = null;
 let stopClock: (() => void) | null = null;
+let stopCycle: (() => void) | null = null;
 // Recover only once the port is ours, so a failed start never touches the employees.
 api.server.listen(config.port, config.host, () => {
   const { port } = api.server.address() as AddressInfo;
   mcpUrl = `http://${config.host}:${port}/mcp`;
   engine.recover();
+  // After recover (a cycle the stopped office left open is closed as not closed), before the clock's first run.
+  stopCycle = cycle.start();
   stopDispatcher = dispatcher.start();
   stopClock = clock.start();
   budget.watch();
@@ -123,6 +131,7 @@ async function shutdown(): Promise<void> {
   console.log('office-server kapanıyor…');
   stopClock?.();
   stopDispatcher?.();
+  stopCycle?.();
   await api.close();
   await engine.shutdown();
   db.close();

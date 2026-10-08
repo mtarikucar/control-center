@@ -3,7 +3,8 @@ import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
-import { digestText, lastDigestSlot } from './notices.ts';
+import type { ManagementCycle } from './cycle.ts';
+import { digestText, lastDigestSlot, type Notice } from './notices.ts';
 import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 import { formatWhen } from './time.ts';
 
@@ -34,12 +35,20 @@ export interface DispatcherDeps {
   pulse?: { check(): unknown };
   /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
   clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: () => void): void };
+  /**
+   * The management cycle (management cycle §3.1, §3.6): when one is due the coordinator's next turn is the board, with
+   * its decisions; its information is the board's. Absent (tests, the economy scenario): the coordinator as before.
+   */
+  cycle?: Pick<ManagementCycle, 'due' | 'waiting' | 'isOpen' | 'ended' | 'opening' | 'started' | 'lost' | 'onDue' | 'trigger'>;
 }
 
 export const NUDGE_PREFIX = 'Hatırlatma:';
 export const NOTICES_PREFIX = 'Ofisten notlar:';
 export const WORK_CLOSING =
   'İş bitince `taskFinish` ile teslim et: görev no, kısa özet, bitti tanımının her maddesi için bir kanıt (evidence, aynı sırayla), ürettiğin dosyalar, öğrendiklerin. Takılırsan `taskUpdate` ile "blocked" yap ve nedenini yaz; başka birinin yapması gereken bir parça çıkarsa `taskPass` kullan.';
+/** The cycle's last lines: what the turn is for and how it ends (management cycle §3.3). */
+export const CYCLE_CLOSING =
+  'Yönetim turu: panoyu planlarla karşılaştır, gerekeni değiştir (iş aç ya da dağıt, planRevise, işe al, park et, sahibine sor) ve turu `cycleClose` ile kapat — yaptığın değişiklikler ve gerekçesi; değişiklik yoksa “değişiklik yok, çünkü …”.';
 export const REVIEW_CLOSING =
   'Kararını `reviewDecide` ile ver: bu inceleme görevinin no’su, approve ya da changes, bulgular (her biri için severity — critical, important ya da minor — ve somut bir senaryo). Her iddiayı kendin doğrula; düzeltmeyi kendin yapma, yapana bırak. `taskFinish` kullanma.';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -54,7 +63,9 @@ export const ESCALATE_MS = 2 * 60 * 60_000;
  * unanswered, and then the coordinator hears, at most every ESCALATE_MS). Notices for the record (a colleague
  * handed in) ride along on those turns, or come together in one digest at the constitution's digest hours; the
  * coordinator's daily report reminder comes with the day's last digest. Never interrupts: it waits for the employee
- * to be idle (v1 rule: only the owner interrupts).
+ * to be idle (v1 rule: only the owner interrupts). With a management cycle wired, a due cycle is the coordinator's next
+ * turn (the board and its decisions in one message), its information is the board's, and its decisions wait for a
+ * cycle on its way.
  */
 export class Dispatcher {
   readonly #d: DispatcherDeps;
@@ -78,7 +89,12 @@ export class Dispatcher {
   }
 
   start(): () => void {
-    const off = this.#d.events.subscribe((stored) => {
+    // A cycle that became due: the coordinator is looked at (it gets the board when it is free).
+    const offCycle = this.#d.cycle?.onDue(() => {
+      const c = this.#d.company.coordinator();
+      if (c) this.#schedule(c.id);
+    });
+    const events = this.#d.events.subscribe((stored) => {
       const ev = stored.event;
       if (ev.type === 'lifecycle.changed' && stored.employeeId) {
         if (ev.to === 'idle') this.#idleSince.set(stored.employeeId, this.#now());
@@ -86,6 +102,10 @@ export class Dispatcher {
         if (ev.to === 'idle') this.#schedule(stored.employeeId);
       } else if (['task.changed', 'plan.changed', 'decision.recorded', 'quota.updated', 'budget.changed', 'company.paused', 'schedule.changed'].includes(ev.type)) this.#scheduleSweep();
     });
+    const off = () => {
+      events();
+      offCycle?.();
+    };
     if (this.#d.clock) {
       // The clock runs the tick at its start and on its interval, and sweeps after every due run (a park came back).
       this.#d.clock.every('dispatcher.tick', this.#d.tickMs ?? 60_000, () => this.tick());
@@ -155,13 +175,24 @@ export class Dispatcher {
       this.#letGo(id);
       return;
     }
-    const pending = this.#d.notices.pending(id);
+    let pending = this.#d.notices.pending(id);
+    // Someone the owner is letting go gets nothing but their hand-over, even while it is blocked.
+    const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
+    const cycle = employee.kind === 'coordinator' ? this.#d.cycle : undefined;
+    if (cycle) {
+      // Idle again while the office still counts it in the cycle's turn: that turn is over.
+      if (cycle.isOpen()) cycle.ended();
+      if (handover?.status !== 'waiting' && cycle.due()) {
+        this.#deliverCycle(employee, pending);
+        return;
+      }
+      // The coordinator's information is the next board's (its “Ne değişti”); its decisions wait for a cycle on its way.
+      pending = cycle.waiting() ? [] : pending.filter((n) => n.kind === 'decision');
+    }
     // With the digest switched off every notice goes at once, as before the economy plan.
     const digestOn = this.#rules().digestEnabled;
     const decisions = digestOn ? pending.filter((n) => n.kind === 'decision') : pending;
     const infos = digestOn ? pending.filter((n) => n.kind === 'info') : [];
-    // Someone the owner is letting go gets nothing but their hand-over, even while it is blocked.
-    const handover = this.#d.tasks.list({ assignee: id, statuses: ['waiting', 'in_progress', 'blocked'] }).find((t) => t.kind === 'handover');
     const focus = handover && handover.status !== 'waiting' ? handover : this.#d.tasks.inProgressOf(id);
     let body = '';
     let started: Task | null = null;
@@ -209,6 +240,31 @@ export class Dispatcher {
     if (reminded) this.#d.tasks.update(reminded.id, { nudged: true, nudgedAt: this.#now() });
     this.#d.notices.markDelivered(pending.map((n) => n.id));
     if (report !== null) this.#d.events.append(id, { type: 'report.reminded', slot: report });
+  }
+
+  /**
+   * A management cycle is due (management cycle §3.1): one message — the board, the coordinator's pending decisions, what
+   * the turn is for — on the coordinator's current hint. Its information is marked delivered with them (the board's “Ne
+   * değişti” covers it). Lost on the way: the notices and the cycle's triggers wait for the next idle moment.
+   */
+  #deliverCycle(e: Employee, pending: Notice[]): void {
+    const cycle = this.#d.cycle!;
+    const opening = cycle.opening(this.#now());
+    const decisions = pending.filter((n) => n.kind === 'decision');
+    const text = [opening.text, decisions.length ? `${NOTICES_PREFIX}\n${decisions.map((n) => `- ${n.text}`).join('\n')}` : '', CYCLE_CLOSING].filter(Boolean).join('\n\n');
+    const onLost = () => {
+      this.#d.notices.markUndelivered(pending.map((n) => n.id));
+      cycle.lost(opening);
+      this.#scheduleSweep();
+    };
+    try {
+      this.#d.engine.send(e.id, text, 'system', { ...this.#hint(e, null, true), onLost });
+    } catch {
+      // The session went away between ready() and send(): the cycle stays due for the next idle moment.
+      return;
+    }
+    this.#d.notices.markDelivered(pending.map((n) => n.id));
+    cycle.started(opening);
   }
 
   /**
@@ -297,6 +353,13 @@ export class Dispatcher {
     const next = this.#d.tasks.nextFor(e.id);
     if (next && this.#mayStart(next)) return true;
     if (e.kind !== 'coordinator' && e.kind !== 'lead') return false;
+    const cycle = e.kind === 'coordinator' ? this.#d.cycle : undefined;
+    if (cycle) {
+      // A due cycle wakes the coordinator; its decisions do unless they wait for a cycle on its way; information never.
+      if (cycle.due()) return true;
+      if (!cycle.waiting() && this.#d.notices.pending(e.id).some((n) => n.kind === 'decision')) return true;
+      return this.#rules().digestEnabled && !this.#reserve() && this.#reportDue(e) !== null;
+    }
     const digestOn = this.#rules().digestEnabled;
     if (this.#d.notices.pending(e.id).some((n) => !digestOn || n.kind === 'decision')) return true;
     return digestOn && e.kind === 'coordinator' && !this.#reserve() && this.#reportDue(e) !== null;
@@ -387,6 +450,7 @@ ${task.kind === 'review' ? REVIEW_CLOSING : WORK_CLOSING}`;
     if (!coordinator || coordinator.id === id) return;
     this.#escalated.set(task.id, this.#now());
     const name = this.#d.company.nameOf(id);
+    this.#d.cycle?.trigger('stuck', `“${task.title}” hatırlatmaya rağmen ilerlemiyor (${name})`);
     this.#d.notices.add(
       coordinator.id,
       'task.stalled',
