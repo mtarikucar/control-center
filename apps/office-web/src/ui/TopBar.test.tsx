@@ -9,7 +9,7 @@ const MIN = 60_000;
 const H = 60 * MIN;
 const reading = (over: Partial<OfficeMetrics> = {}): OfficeMetrics => ({
   generatedAt: NOW,
-  busy: { busy: 1, total: 3, idle: [{ id: 'd', name: 'Deniz', title: 'Testçi', since: NOW - 6 * H - 10 * MIN }, { id: 's', name: 'Selin', title: '', since: NOW - 5 * H }] },
+  busy: { busy: 1, total: 3, idle: [{ id: 'd', name: 'Deniz', title: 'Testçi', since: NOW - 6 * H - 10 * MIN }, { id: 's', name: 'Selin', title: '', since: NOW - 5 * H }], unavailable: [] },
   delivered: { count: 7, firstPassRate: 4 / 7, windowHours: 24 },
   stuck: { count: 1, items: [{ taskId: 't6', title: 'B6 raporu', assignee: 'Mert', reason: 'stalled' }] },
   ...over,
@@ -72,7 +72,7 @@ describe('TopBar — the office at a glance', () => {
     useOffice.setState({ budget: RESERVE_OFF });
     vi.mocked(api.metrics).mockResolvedValueOnce(
       reading({
-        busy: { busy: 2, total: 3, idle: [{ id: 'c', name: 'Can', title: '', since: NOW - 90 * MIN }] },
+        busy: { busy: 2, total: 3, idle: [{ id: 'c', name: 'Can', title: '', since: NOW - 90 * MIN }], unavailable: [] },
         delivered: { count: 0, firstPassRate: null, windowHours: 24 },
         stuck: { count: 0, items: [] },
       }),
@@ -92,7 +92,7 @@ describe('TopBar — the office at a glance', () => {
     const items = Array.from({ length: 12 }, (_, i) => ({ taskId: `t${i}`, title: `İş ${i + 1}`, assignee: 'Ada', reason: (['blocked', 'overdue', 'stalled'] as const)[i % 3]! }));
     vi.mocked(api.metrics).mockResolvedValueOnce(
       reading({
-        busy: { busy: 1, total: 3, idle: [{ id: 'a', name: 'Ali', title: '', since: NOW - 50 * H }, { id: 'e', name: 'Ece', title: '', since: NOW - 40 * MIN }] },
+        busy: { busy: 1, total: 3, idle: [{ id: 'a', name: 'Ali', title: '', since: NOW - 50 * H }, { id: 'e', name: 'Ece', title: '', since: NOW - 40 * MIN }], unavailable: [] },
         stuck: { count: 12, items },
       }),
     );
@@ -103,9 +103,33 @@ describe('TopBar — the office at a glance', () => {
     expect(lines).toHaveLength(11);
     expect(lines[10]).toBe('… ve 2 iş daha');
     unmount();
-    vi.mocked(api.metrics).mockResolvedValueOnce(reading({ busy: { busy: 3, total: 3, idle: [] } }));
+    vi.mocked(api.metrics).mockResolvedValueOnce(reading({ busy: { busy: 3, total: 3, idle: [], unavailable: [] } }));
     render(<TopBar />);
     expect((await chip('Meşgul 3/3')).title).toBe('Herkes meşgul');
+  });
+
+  it('who cannot take work shows on lines of their own with their state, and never makes the busy chip warn', async () => {
+    useOffice.setState({ budget: RESERVE_OFF });
+    const away = (id: string, name: string, state: 'limited' | 'error' | 'stopped' | 'in_terminal') => ({ id, name, title: '', state });
+    vi.mocked(api.metrics).mockResolvedValueOnce(
+      reading({
+        busy: {
+          busy: 1,
+          total: 6,
+          idle: [{ id: 'c', name: 'Can', title: '', since: NOW - 30 * MIN }],
+          unavailable: [away('a', 'Ada', 'limited'), away('b', 'Bora', 'error'), away('e', 'Ece', 'stopped'), away('m', 'Mert', 'in_terminal')],
+        },
+      }),
+    );
+    const { unmount } = render(<TopBar />);
+    const busy = await chip('Meşgul 1/6');
+    expect(busy.title).toBe('Can — 30 dk boşta\nAda — kota doldu\nBora — hata\nEce — durduruldu\nMert — terminalde');
+    expect(busy.className).not.toContain('warn');
+    unmount();
+    // Nobody idle, someone away: not "Herkes meşgul".
+    vi.mocked(api.metrics).mockResolvedValueOnce(reading({ busy: { busy: 1, total: 2, idle: [], unavailable: [away('a', 'Ada', 'limited')] } }));
+    render(<TopBar />);
+    expect((await chip('Meşgul 1/2')).title).toBe('Ada — kota doldu');
   });
 
   it('a figure opens the company on the Ajanda tab; the Şirket button on its first tab', async () => {

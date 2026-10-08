@@ -1,5 +1,6 @@
-import type { OfficeMetrics, StuckReason } from '@cc/shared';
+import type { Lifecycle, OfficeMetrics, StuckReason } from '@cc/shared';
 import { formatPercent } from './format.ts';
+import { lifecycleLabel } from './labels.ts';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -8,6 +9,8 @@ const IDLE_WARN_MS = 2 * HOUR;
 /** The stuck tooltip names at most this many tasks. */
 const STUCK_SHOWN = 10;
 const REASON_LABELS: Record<StuckReason, string> = { blocked: 'engellendi', overdue: 'son tarihi geçti', stalled: 'hatırlatmaya rağmen ilerlemiyor' };
+/** Why someone cannot take work right now; any other state reads as its usual label. */
+const AWAY_LABELS: Partial<Record<Lifecycle, string>> = { limited: 'kota doldu', error: 'hata', stopped: 'durduruldu', in_terminal: 'terminalde' };
 
 /** "40 dk", "6 sa", "2 gün" (rounded down). */
 function idleFor(ms: number): string {
@@ -28,13 +31,14 @@ function Chip({ label, value, title, tone, onClick }: { label: string; value: st
 /** The office at a glance (busy, delivered in the last day, stuck), each explained in its tooltip; a click opens the agenda. */
 export function MetricChips({ metrics, onOpen }: { metrics: OfficeMetrics; onOpen: () => void }) {
   const { busy, delivered, stuck, generatedAt } = metrics;
-  // Someone idle means the team is not all busy; idle long enough is worth a look.
+  // Someone who could work and has none means the team is not all used; idle long enough is worth a look. Who cannot
+  // take work right now is shown, not warned about.
   const idleLong = busy.idle.some((p) => generatedAt - p.since >= IDLE_WARN_MS);
-  const idle = busy.idle.length
-    ? busy.idle.map((p) => `${p.name} — ${idleFor(generatedAt - p.since)} boşta`).join(', ')
-    : busy.total > 0
-      ? 'Herkes meşgul'
-      : 'Koordinatörden başka çalışan yok';
+  const people = [
+    ...(busy.idle.length ? [busy.idle.map((p) => `${p.name} — ${idleFor(generatedAt - p.since)} boşta`).join(', ')] : []),
+    ...busy.unavailable.map((p) => `${p.name} — ${AWAY_LABELS[p.state] ?? lifecycleLabel(p.state).toLocaleLowerCase('tr-TR')}`),
+  ];
+  const idle = people.length ? people.join('\n') : busy.total > 0 ? 'Herkes meşgul' : 'Koordinatörden başka çalışan yok';
   const firstPass = `İlk turda geçen: ${delivered.firstPassRate === null ? 'henüz incelenen yok' : formatPercent(delivered.firstPassRate)}`;
   const stuckLines = stuck.items.slice(0, STUCK_SHOWN).map((i) => `${i.assignee}: ${i.title} — ${REASON_LABELS[i.reason]}`);
   if (stuck.items.length > STUCK_SHOWN) stuckLines.push(`… ve ${stuck.items.length - STUCK_SHOWN} iş daha`);

@@ -10,7 +10,7 @@ const metrics = vi.mocked(api.metrics);
 
 const reading = (busy: number): OfficeMetrics => ({
   generatedAt: busy,
-  busy: { busy, total: 5, idle: [] },
+  busy: { busy, total: 5, idle: [], unavailable: [] },
   delivered: { count: 0, firstPassRate: null, windowHours: 24 },
   stuck: { count: 0, items: [] },
 });
