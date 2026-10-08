@@ -11,7 +11,7 @@ import { PlanStore, ScheduleStore, TaskStore } from '../src/company/store.ts';
 import { migrateUp, openDb, type Db } from '../src/db.ts';
 import { EventStore } from '../src/event-store.ts';
 import { performanceReport } from '../src/performance.ts';
-import { formatPilotMetrics, pilotMetrics, type PilotMetrics } from '../src/pilot-metrics.ts';
+import { formatPilotMetrics, outwardCall, pilotMetrics, type PilotMetrics } from '../src/pilot-metrics.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { Roster } from '../src/roster.ts';
 import { tempDir } from './helpers.ts';
@@ -182,11 +182,11 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     expect(got).toEqual({
       KÖ1: [{ turns: 2, questions: 8 }, true],
       KÖ2: [{ minutes: 18, steps: 4, ownerMessages: 0 }, true],
-      KÖ3: [{ hours: expect.closeTo(19.53, 1), rounds: 1 }, true],
+      KÖ3: [{ hours: 19.53, rounds: 1 }, true],
       KÖ4: [{ done: 2, withEvidence: 1, reviewed: 2, approvedWithin2: 1, selfReviews: 0 }, false],
       KÖ5: [{ outward: 2, unapproved: 1 }, false],
       KÖ6: [{ decided: 4, accepted: 3, approvalsDecided: 1, approvalsApproved: 1 }, true],
-      KÖ7: [{ turns: 5, usd: 4, turnsPerWeek: expect.closeTo(4.97, 1), usdPerWeek: expect.closeTo(3.98, 1) }, true],
+      KÖ7: [{ turns: 5, usd: 4, turnsPerWeek: 4.97, usdPerWeek: 3.98 }, true],
       KÖ8: [{ searches: 2, empty: 1 }, null],
       KÖ9: [{ toCoordinator: 2, toMembers: 1, plans: 1, plansByCoordinator: 1 }, false],
       KÖ10: [{ fired: 3, late: 1, maxDelaySec: 120, maxSkip: 1 }, false],
@@ -250,6 +250,28 @@ describe('pilot metrics (C5-5): KÖ1–KÖ11 from an office database, read-only'
     expect(rows).toHaveLength(11);
     for (const row of rows) expect(row.split(/(?<!\\)\|/).length, row).toBe(9);
     expect(rows[4]).toMatch(/\| veri yok \| K4 \(tespit\) \|/);
+  });
+
+  it('KÖ5 counts a command that goes outward, not one that only names it (a grep pattern, a script’s text, a heredoc — the live log had five of those)', () => {
+    const bash = (command: string) => outwardCall('Bash', { command });
+    for (const c of ['cd repo && git push origin main', 'git -C /x push', 'curl -s -X POST https://api.example/x', 'FOO=1 curl --request POST https://x.example', 'bash -c "git push origin"', 'ls; git push']) {
+      expect(bash(c), c).toBe(true);
+    }
+    for (const c of [
+      'grep -n -i -E "bash|kabuk|curl|git push|webfetch" hedef-mimari.md',
+      "node -e 'const risky = bash.filter(c => /git push|gh pr|curl .*-X *POST/i.test(c))'",
+      "cat > notlar.md <<'EOF'\n**Dışa dönük:** `git push` (her biçim) → yayın; `curl -X POST`\nEOF\nwc -l notlar.md",
+      "cat > adimlar.sh <<'EOF'\ngit push origin main\nEOF\nchmod +x adimlar.sh",
+      'git status && git log --oneline -3',
+      'curl -s https://x.example/get',
+    ]) {
+      expect(bash(c), c).toBe(false);
+    }
+    expect(outwardCall('mcp__claude_ai_Gmail__send_email', {})).toBe(true);
+    expect(outwardCall('mcp__claude_ai_jeeta__jeeta_publish_social_post', {})).toBe(true);
+    expect(outwardCall('mcp__claude_ai_Gmail__create_draft', {})).toBe(false);
+    expect(outwardCall('mcp__claude_ai_Google_Calendar__create_event', {})).toBe(false);
+    expect(outwardCall('mcp__office__scheduleCreate', {})).toBe(false);
   });
 
   it('the script reads a database file read-only and prints the table; the file is unchanged', () => {
