@@ -109,4 +109,13 @@ export class CompanyStateStore {
     this.set('restUntil', until > 0 ? String(until) : null);
     this.set('restReason', until > 0 ? reason : null);
   }
+
+  /** When a task was last moved from this person to someone else, epoch ms; 0 = never (the pulse's idle stretch). */
+  taskLostAt(employeeId: string): number {
+    return Number(this.get(`pulse.idle.lost.${employeeId}`) ?? '0') || 0;
+  }
+
+  setTaskLost(employeeId: string, at: number): void {
+    this.set(`pulse.idle.lost.${employeeId}`, String(at));
+  }
 }

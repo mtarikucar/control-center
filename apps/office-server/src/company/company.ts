@@ -378,6 +378,8 @@ export class Company {
     // Whoever takes over a review also reviews the later rounds.
     if (task.kind === 'review' && task.reviewOf) this.#d.tasks.update(task.reviewOf, { reviewer: target.id });
     if (holder && holder.id !== target.id && holder.lifecycle !== 'archived') {
+      // The task leaves no trace with its holder: the pulse counts their idle time from now, not from their last finish.
+      this.#d.state?.setTaskLost(holder.id, this.#now());
       const started = task.status === 'in_progress' || task.status === 'blocked';
       this.#d.notices.add(
         holder.id,

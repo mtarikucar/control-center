@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, type Constitution } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, type Constitution, type Lifecycle } from '@cc/shared';
 import type { Roster } from '../roster.ts';
 import type { Company } from './company.ts';
 import type { CompanyStateStore, GoalStore } from './goal-store.ts';
@@ -8,6 +8,11 @@ import { OPEN_STATUSES, type NoticeStore, type PlanStore, type TaskStore } from 
 const HOUR = 60 * 60_000;
 /** An approved plan that has not had a single task this long after it started is not running: it stalled. */
 const EMPTY_PLAN_GRACE_MS = 10 * 60_000;
+/**
+ * Who cannot take work now is not idle capacity: a quota limit, a failed session, stopped by the owner, in the owner's
+ * terminal. A sleeper is (a task wakes them).
+ */
+const UNAVAILABLE: readonly Lifecycle[] = ['limited', 'error', 'stopped', 'in_terminal'];
 
 export interface PulseDeps {
   company: Company;
@@ -84,17 +89,19 @@ export class Pulse {
   }
 
   /**
-   * Everyone but the coordinator who has held no open task for the constitution's idleCapacityHours, in one line;
-   * null when there is no one new to name. An idle stretch starts at their last closed task (or their hire) and is named
-   * once: its start is the marker, so someone who gets work and closes it can be named again.
+   * Everyone but the coordinator who could take work and has held no open task for the constitution's
+   * idleCapacityHours, in one line; null when there is no one new to name. An idle stretch starts at the latest of their
+   * hire, their last closed task and the last task moved from them, and is named once: its start is the marker, so
+   * someone who gets work and closes it (or loses it) can be named again.
    */
   #idleCapacity(coordinatorId: string, now: number): string | null {
     const hours = (this.#d.budget?.constitution() ?? DEFAULT_CONSTITUTION).idleCapacityHours;
     if (hours <= 0) return null;
     const idle: Array<{ name: string; title: string; since: number }> = [];
     for (const e of this.#d.roster.list()) {
-      if (e.id === coordinatorId || this.#d.tasks.list({ assignee: e.id, statuses: OPEN_STATUSES, limit: 1 }).length > 0) continue;
-      const since = this.#d.tasks.lastFinishedAt(e.id) ?? e.createdAt;
+      if (e.id === coordinatorId || UNAVAILABLE.includes(e.lifecycle)) continue;
+      if (this.#d.tasks.list({ assignee: e.id, statuses: OPEN_STATUSES, limit: 1 }).length > 0) continue;
+      const since = Math.max(e.createdAt, this.#d.tasks.lastFinishedAt(e.id) ?? 0, this.#d.state.taskLostAt(e.id));
       const key = `pulse.idle.${e.id}`;
       if (now - since < hours * HOUR || this.#d.state.get(key) === String(since)) continue;
       this.#d.state.set(key, String(since));

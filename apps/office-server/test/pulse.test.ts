@@ -195,4 +195,75 @@ describe('the pulse (spec §6.3)', () => {
     expect(t.pulse().check()).toEqual(['pulse.idle_capacity']);
     expect(t.notices.pending(c.id).filter((n) => n.topic === 'pulse.idle_capacity')).toHaveLength(1);
   });
+
+  it('W2 review: a task moved away starts the idle stretch at the move — named once, its hours counted from there', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const goal = t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    const plan = t.company.propose(c.id, { title: 'Site', goal: 'g', approach: 'a', method: METHOD, goalId: goal.id });
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r', title: 'Geliştirici' });
+    const can = t.company.hire(OWNER, { name: 'Can', role: 'r', title: 'Geliştirici' });
+    const task = t.company.createTask(c.id, { assignee: ada.id, title: 'iş', planId: plan.id });
+    t.advance(3 * HOUR);
+    t.company.assign(c.id, task.id, can.id);
+    const idle = () => t.notices.pending(c.id).filter((n) => n.topic === 'pulse.idle_capacity');
+    expect(t.pulse().check()).toEqual([]);
+    t.advance(2 * HOUR);
+    expect(t.pulse().check()).toEqual(['pulse.idle_capacity']);
+    expect(idle().map((n) => n.text)).toEqual([
+      'Boşta kapasite: Ada (Geliştirici, 2 saattir) işsiz; aktif hedefler sürüyor. Ona bağımsız iş ver (sonraki adımların tasarımı, araştırma, test, ölçüm) ya da ekibin fazla olduğuna karar verip kısa yaz.',
+    ]);
+    t.advance(5 * HOUR);
+    expect(t.pulse().check()).toEqual([]);
+  });
+
+  it('W2 review: someone already named who then held a task until it was moved away is named again, counted from the move', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const goal = t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    const plan = t.company.propose(c.id, { title: 'Site', goal: 'g', approach: 'a', method: METHOD, goalId: goal.id });
+    const deniz = t.company.hire(OWNER, { name: 'Deniz', role: 'r', title: 'Pazar araştırmacısı' });
+    const idle = () => t.notices.pending(c.id).filter((n) => n.topic === 'pulse.idle_capacity');
+    t.advance(2 * HOUR);
+    expect(t.pulse().check()).toContain('pulse.idle_capacity');
+    expect(idle()[0]!.text).toContain('Deniz (Pazar araştırmacısı, 2 saattir)');
+    const task = t.company.createTask(c.id, { assignee: deniz.id, title: 'pazar notu', planId: plan.id });
+    t.advance(2 * HOUR);
+    const selin = t.company.hire(OWNER, { name: 'Selin', role: 'r', title: 'Mimar' });
+    t.advance(HOUR);
+    t.company.assign(c.id, task.id, selin.id);
+    expect(t.pulse().check()).toEqual([]);
+    t.advance(2 * HOUR);
+    expect(t.pulse().check()).toEqual(['pulse.idle_capacity']);
+    expect(idle()).toHaveLength(2);
+    expect(idle()[1]!.text).toContain('Boşta kapasite: Deniz (Pazar araştırmacısı, 2 saattir) işsiz;');
+    expect(idle()[1]!.text).not.toContain('Selin');
+  });
+
+  it('W2 review: someone who cannot take work now (quota limit, failed session, stopped, in the owner’s terminal) is not named; a sleeper is', () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const goal = t.company.goalSet(c.id, { title: 'Lansman', why: 'misyon', done: ['site'] });
+    t.company.propose(c.id, { title: 'Site', goal: 'g', approach: 'a', method: METHOD, goalId: goal.id });
+    const who = (name: string, lifecycle: 'sleeping' | 'limited' | 'error' | 'stopped' | 'in_terminal') => {
+      const e = t.company.hire(OWNER, { name, role: 'r', title: 'Uzman' });
+      t.roster.update(e.id, { lifecycle });
+      return e;
+    };
+    who('Deniz', 'sleeping');
+    const selin = who('Selin', 'limited');
+    who('Ada', 'error');
+    who('Bora', 'stopped');
+    who('Ece', 'in_terminal');
+    const idle = () => t.notices.pending(c.id).filter((n) => n.topic === 'pulse.idle_capacity');
+    t.advance(3 * HOUR);
+    expect(t.pulse().check()).toContain('pulse.idle_capacity');
+    expect(idle().map((n) => n.text)).toEqual([
+      'Boşta kapasite: Deniz (Uzman, 3 saattir) işsiz; aktif hedefler sürüyor. Ona bağımsız iş ver (sonraki adımların tasarımı, araştırma, test, ölçüm) ya da ekibin fazla olduğuna karar verip kısa yaz.',
+    ]);
+    // Back at work after the quota window: nothing was announced for her, so she is named now.
+    t.roster.update(selin.id, { lifecycle: 'idle' });
+    expect(t.pulse().check()).toEqual(['pulse.idle_capacity']);
+    expect(idle()[1]!.text).toContain('Boşta kapasite: Selin (Uzman, 3 saattir) işsiz;');
+  });
 });
