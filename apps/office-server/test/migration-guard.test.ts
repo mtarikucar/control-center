@@ -55,6 +55,14 @@ describe('migrations: an applied version must be the code’s migration of that 
     expect(() => migrateDown(db, 14)).toThrow('Veritabanı koddan ileride (v16, v17, v18 bu kodda yok): bu kod geri göç yapamaz; geri almayı o göçleri bilen kodla yap.');
     expect(appliedVersion(db)).toBe(18);
     expect(applied(db)).toContain('15:integration registry: what the coordinator records by hand');
+    // Nothing to revert (the rehearsal script's migrateDown to where it started): no refusal.
+    expect(migrateDown(db, 18)).toBe(18);
+  });
+
+  it('a version inside the code’s range that the code lost (a merge dropped 16 and kept 17) stops it: “kodda yok”', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, [...MIGRATIONS, B26_AS_16]);
+    expect(() => migrateUp(db, [...MIGRATIONS, B7_17])).toThrow('v16 canlıda “KPI readings”, kodda yok: göç sırası bozuk.');
   });
 
   it('ahead is only above the code: a version within the code’s range with another name still stops it', () => {
