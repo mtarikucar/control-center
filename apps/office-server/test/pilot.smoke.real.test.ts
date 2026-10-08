@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { Employee, StoredEvent } from '@cc/shared';
+import type { Employee } from '@cc/shared';
 import { DISALLOWED_TOOLS, gateHookCommand, sessionArgs } from '../src/claude/args.ts';
 import { sessionDeny } from '../src/company/session-deny.ts';
 import { deskDir } from '../src/desk.ts';
@@ -144,18 +144,24 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         await new Promise((r) => setTimeout(r, 1_000));
       }
     };
-    /** The result of the first call of an office tool by `who` after `after`. */
-    const toolResult = async (who: Employee, tool: string, after: number): Promise<string> => {
-      const started = () => events(after).find((e) => e.employeeId === who.id && e.event.type === 'tool.started' && e.event.name === `mcp__office__${tool}`);
-      let finished: StoredEvent | undefined;
+    /**
+     * `who`'s call of an office tool after `after`: the first that succeeded — a call refused for a missing argument may be
+     * made again in the same turn (run 6: planRetro without `change`) — else, once their turn is over, the last one.
+     */
+    const toolResult = async (who: Employee, tool: string, after: number): Promise<{ ok: boolean; output: string; calls: number }> => {
+      let result: { ok: boolean; output: string; calls: number } | undefined;
       await wait(`${who.name}: ${tool}`, () => {
-        const s = started();
-        if (!s || s.event.type !== 'tool.started') return false;
-        const id = s.event.toolUseId;
-        finished = events(s.seq).find((e) => e.event.type === 'tool.finished' && e.event.toolUseId === id);
-        return finished !== undefined;
+        const done = events(after).flatMap((s) => {
+          if (s.employeeId !== who.id || s.event.type !== 'tool.started' || s.event.name !== `mcp__office__${tool}`) return [];
+          const id = s.event.toolUseId;
+          const f = events(s.seq).find((e) => e.event.type === 'tool.finished' && e.event.toolUseId === id);
+          return f?.event.type === 'tool.finished' ? [{ ok: !f.event.isError, output: f.event.output }] : [];
+        });
+        const pick = done.find((d) => d.ok) ?? (done.length > 0 && o.engine.ready(who.id) ? done.at(-1) : undefined);
+        result = pick && { ...pick, calls: done.length };
+        return result !== undefined;
       });
-      return finished!.event.type === 'tool.finished' ? finished!.event.output : '';
+      return result!;
     };
 
     let coordinator!: Employee;
@@ -212,7 +218,8 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const approvedAt = o.now();
         await idle(coordinator);
         await say(coordinator, `Kurulum planını onayladım (planId ${plan.id}). blueprintRead ile oku, sonra blueprintApply ile kur. Başka araç kullanma.`);
-        await toolResult(coordinator, 'blueprintApply', after);
+        const applied = await toolResult(coordinator, 'blueprintApply', after);
+        expect(applied.ok, applied.output).toBe(true);
         await wait('3 üye işe alındı', () => events(after).filter((e) => e.event.type === 'employee.hired').length >= pkg.roles.length);
         const installed = events(after).filter((e) => ['employee.hired', 'playbook.updated', 'goal.changed', 'schedule.changed'].includes(e.event.type));
         const count = (type: string, change?: string) => installed.filter((e) => e.event.type === type && (change === undefined || (e.event as { change?: string }).change === change)).length;
@@ -302,9 +309,14 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const kpi = h1.kpis.find((k) => k.source === 'manual')!;
         const after = o.events.lastSeq();
         await idle(coordinator);
-        await say(coordinator, `kpiRecord ile “${h1.title}” hedefinin (goalId ${h1.id}) “${kpi.name}” KPI'sına 92 yaz (not: K3 denemesi, sentetik). Sonra planRetro ile “${h1Plan.title}” planını (planId ${h1Plan.id}) kısaca değerlendir. Başka araç kullanma.`);
-        const recorded = await toolResult(coordinator, 'kpiRecord', after);
-        const retro = await toolResult(coordinator, 'planRetro', after);
+        await say(coordinator, `kpiRecord ile “${h1.title}” hedefinin (goalId ${h1.id}) “${kpi.name}” KPI'sına 92 yaz (not: K3 denemesi, sentetik). Sonra planRetro ile “${h1Plan.title}” planını (planId ${h1Plan.id}) kısaca değerlendir (wentWell, stuck ve change alanlarının üçü de zorunlu). Başka araç kullanma.`);
+        const kpiCall = await toolResult(coordinator, 'kpiRecord', after);
+        const retroCall = await toolResult(coordinator, 'planRetro', after);
+        checks.push(`kpiRecord ${kpiCall.calls} çağrı, planRetro ${retroCall.calls} çağrı (${retroCall.ok ? 'başarılı' : `başarısız: ${retroCall.output.slice(0, 120)}`})`);
+        expect(kpiCall.ok, kpiCall.output).toBe(true);
+        expect(retroCall.ok, retroCall.output).toBe(true);
+        const recorded = kpiCall.output;
+        const retro = retroCall.output;
         const readings = o.db.prepare('SELECT kpi, value, source FROM kpi_readings ORDER BY id').all() as unknown as Array<{ kpi: string; value: number | null; source: string }>;
         checks.push(`kpiRecord: ${recorded.replace(/\s+/g, ' ').slice(0, 160)}`);
         checks.push(`kpi_readings: ${readings.map((r) => `${r.kpi} ${r.value ?? 'veri yok'} (${r.source})`).join('; ')}`);
@@ -320,7 +332,9 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         const after = o.events.lastSeq();
         await idle(coordinator);
         await say(coordinator, 'memorySearch ile "marka dili pastane" ara (query tam bu). Başka araç kullanma; sonucu bir cümleyle yaz.');
-        const found = await toolResult(coordinator, 'memorySearch', after);
+        const search = await toolResult(coordinator, 'memorySearch', after);
+        expect(search.ok, search.output).toBe(true);
+        const found = search.output;
         const top = found.split('\n').filter((l) => l.startsWith('• ')).slice(0, 3);
         checks.push(`ilk 3: ${top.map((l) => l.slice(0, 120)).join(' | ')}`);
         const hit = top.some((l) => /Marka dili — Pastane/i.test(l));
