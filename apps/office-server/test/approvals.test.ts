@@ -193,6 +193,27 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
     expect(t.gate.check(t.ada.id, click).decision).toBe('deny');
   });
 
+  it('review round 1 (important): a browser approval for the task never opens the office page — held per call; only a one-call approval of that very call passes it, once', () => {
+    const t = make();
+    const task = t.company.createTask(OWNER, { assignee: t.ada.id, title: 'Formu doldur' });
+    t.company.start(task.id);
+    const PW = 'mcp__plugin_playwright_playwright__';
+    const click = { tool_name: `${PW}browser_click`, tool_input: { element: 'Gönder' }, cwd: `${DATA}/desks/ada` };
+    const office = { tool_name: `${PW}browser_navigate`, tool_input: { url: 'http://127.0.0.1:4319/' }, cwd: `${DATA}/desks/ada` };
+    const code = { tool_name: `${PW}browser_run_code_unsafe`, tool_input: { code: "fetch('/api/approvals/x/approve', { method: 'POST' })" }, cwd: `${DATA}/desks/ada` };
+    const browser = t.approvals.request(t.ada.id, { kind: 'browser', tool: click.tool_name, target: 'browser_click', summary: 'form', scope: 'task' });
+    t.approvals.decide(browser.id, true, { via: 'page' });
+    expect(t.gate.check(t.ada.id, click).decision).toBe('allow');
+    expect(t.gate.check(t.ada.id, office)).toMatchObject({ decision: 'deny', kind: 'self' });
+    expect(t.gate.check(t.ada.id, code)).toMatchObject({ decision: 'deny', kind: 'self' });
+    // The office itself is never asked for a task's worth.
+    expect(() => t.approvals.request(t.ada.id, { kind: 'self', tool: office.tool_name, target: 'browser_navigate /', summary: 's', scope: 'task' })).toThrow(/scope/);
+    const once = t.approvals.request(t.ada.id, { kind: 'self', tool: office.tool_name, target: 'browser_navigate /', summary: 'sayfaya bakmam gerek' });
+    t.approvals.decide(once.id, true, { via: 'page' });
+    expect(t.gate.check(t.ada.id, office).decision).toBe('allow');
+    expect(t.gate.check(t.ada.id, office).decision).toBe('deny');
+  });
+
   it('a line with two held parts passes only when both are approved, and uses both', () => {
     const t = make();
     const call = { tool_name: 'Bash', tool_input: { command: 'git push origin main && npm publish' }, cwd: `${DATA}/desks/ada` };

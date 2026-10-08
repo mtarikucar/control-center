@@ -55,6 +55,25 @@ describe('gate policy (K1) — connector, browser, file and web tools', () => {
   tool('mcp__office__taskFinish', { taskId: 't' }, 'pass');
   tool('mcp__plugin_playwright_playwright__browser_click', { element: 'Gönder' }, 'browser', 'task');
   tool('mcp__plugin_playwright_playwright__browser_snapshot', {}, 'pass');
+  // Review round 1 (Kerem, important): the browser to the office's own page or API is the office itself — every way of
+  // getting there, every host form the browser accepts for it; held per call, never on a browser approval.
+  const PW = 'mcp__plugin_playwright_playwright__';
+  tool(`${PW}browser_navigate`, { url: 'http://127.0.0.1:4319/' }, 'self', 'call');
+  tool(`${PW}browser_navigate`, { url: 'http://localhost:4319/api/approvals/x/approve' }, 'self');
+  tool(`${PW}browser_navigate`, { url: 'http://127.1:4319/' }, 'self');
+  tool(`${PW}browser_navigate`, { url: 'http://0x7f000001:4319/' }, 'self');
+  tool(`${PW}browser_navigate`, { url: 'http://[::1]:4319/' }, 'self');
+  tool(`${PW}browser_navigate`, { url: 'http://office.localhost:5180/' }, 'self');
+  tool(`${PW}browser_navigate`, { url: 'http://127.0.0.1.nip.io:4319/' }, 'self');
+  tool(`${PW}browser_navigate`, { url: 'localhost:4319' }, 'self');
+  tool(`${PW}browser_navigate`, { url: "data:text/html,<script>location='http://127.0.0.1:4319/'</script>" }, 'self');
+  tool(`${PW}browser_navigate`, { url: 'https://example.com/form' }, 'pass');
+  tool(`${PW}browser_tabs`, { action: 'new', url: 'http://127.0.0.1:4319/' }, 'self');
+  tool(`${PW}browser_run_code_unsafe`, { code: "await page.evaluate(() => fetch('/api/approvals/x/approve', { method: 'POST' }))" }, 'self');
+  tool(`${PW}browser_run_code_unsafe`, { code: "await page.goto('http://localhost:4319/')" }, 'self');
+  tool(`${PW}browser_evaluate`, { function: "() => fetch('http://127.0.0.1:4319/api/owner/nonce')" }, 'self');
+  tool(`${PW}browser_evaluate`, { function: '() => document.title' }, 'browser');
+  tool(`${PW}browser_network_request`, { url: 'http://127.0.0.1:4319/api/office' }, 'self');
   tool('mcp__plugin_playwright_playwright__browser_navigate_back', {}, 'pass');
   tool('Write', { file_path: `${HOME}/.ssh/x`, content: 'k' }, 'self');
   tool('Write', { file_path: `${DESK}/a.md`, content: 'k' }, 'pass');
@@ -199,6 +218,10 @@ describe('gate policy (K1) — indirection, substitution, here-documents (the pa
     ['cd ~/Projects/control-center && pnpm run test', 'pass'],
     ['cd ~/Projects/control-center && pnpm --filter @cc/office-web build', 'self'],
     ['curl -s http://localhost:5180/', 'self'],
+    // The same host forms for curl (the URL parser's normalisation).
+    ['curl -X POST http://0x7f000001:4319/api/approvals/x/approve', 'self'],
+    ['curl -X POST http://office.localhost:4319/api/approvals/x/approve', 'self'],
+    ['curl -X POST http://127.0.0.1.nip.io:4319/api/approvals/x/approve', 'self'],
   ]);
 });
 

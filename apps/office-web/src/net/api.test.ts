@@ -47,6 +47,17 @@ describe('api', () => {
     expect(fetchFn).toHaveBeenCalledWith('/api/metrics', { method: 'GET', body: undefined });
   });
 
+  it('B9a (review round 1): a page driven by automation (navigator.webdriver, the employees’ browser) asks for no nonce and changes nothing; reads go on', async () => {
+    const fetchFn = stubFetch(200, { ok: true });
+    vi.stubGlobal('navigator', { webdriver: true });
+    const err = await api.approveApproval('a1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ code: 'owner_automation', message: expect.stringMatching(/otomasyon/) });
+    expect(fetchFn.mock.calls.map(([input]) => String(input))).toEqual([]);
+    await api.office();
+    expect(fetchFn.mock.calls.map(([input]) => String(input))).toEqual(['/api/office']);
+  });
+
   it('turns error responses into ApiError with the server message', async () => {
     stubFetch(409, { error: 'Bu çalışan şu an terminalde; önce ofise geri al.' });
     const err = await api.send('e1', 'x').catch((e: unknown) => e);

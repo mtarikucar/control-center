@@ -84,6 +84,8 @@ export class Approvals {
       const task = this.#d.tasks.get(taskId);
       if (task.assignee !== who.id || task.status === 'done' || task.status === 'cancelled') throw new ValidationError('Görev senin açık görevlerinden biri olmalı.');
     } else taskId = this.#d.tasks.inProgressOf(who.id)?.id ?? null;
+    // The office itself (its page, its API, its code and data) is asked for one call at a time, never for a task's worth.
+    if (scope === 'task' && kind === 'self') throw new ValidationError('Ofisin kendisine dokunan bir çağrı için görev boyunca onay (scope: task) istenemez; tek çağrı için iste (scope: call).');
     if (scope === 'task' && !taskId) throw new ValidationError('Görev boyunca geçerli onay (scope: task) için üzerinde çalıştığın bir görev gerekir; taskId ver ya da scope: call kullan.');
     const print = fingerprint(tool, { kind, target });
     const waiting = this.#d.store.pending(who.id, print, scope);
@@ -136,7 +138,7 @@ export class Approvals {
         continue;
       }
       const family = toolFamily(tool, part.target);
-      const scoped = this.#d.store.taskScoped(employeeId, part.kind, now).find((a) => toolFamily(a.tool, a.target) === family && this.#open(a.taskId));
+      const scoped = part.kind === 'self' ? undefined : this.#d.store.taskScoped(employeeId, part.kind, now).find((a) => toolFamily(a.tool, a.target) === family && this.#open(a.taskId));
       if (scoped) {
         tasks.push(scoped.id);
         continue;

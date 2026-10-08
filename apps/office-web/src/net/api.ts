@@ -15,6 +15,12 @@ export class ApiError extends Error {
 let ownerNonce: { nonce: string; expiresAt: number } | null = null;
 
 async function nonce(): Promise<string> {
+  // B9a (review round 1): an employee's browser is driven by automation (Playwright sets navigator.webdriver). The
+  // owner's changes come from the owner's own browser only: a driven page — reached by a redirect the gate cannot see —
+  // asks for no nonce, so no approve button works there. A determined script can still forge it (§8 of the B9a note).
+  if (typeof navigator !== 'undefined' && navigator.webdriver) {
+    throw new ApiError(403, 'Bu sayfa otomasyonla açılmış (navigator.webdriver); sahibi işlemleri yalnız sahibinin kendi tarayıcısından yapılır.', 'owner_automation');
+  }
   if (!ownerNonce || ownerNonce.expiresAt - Date.now() < 60_000) ownerNonce = await send<{ nonce: string; expiresAt: number }>('GET', '/api/owner/nonce');
   return ownerNonce.nonce;
 }

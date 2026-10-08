@@ -212,7 +212,15 @@ const flag = (t: string) => t.startsWith('-') && t.length > 1;
 // ---------------------------------------------------------------------------------------------------------------------
 // HTTP: curl, wget, httpie; and the office's own API.
 
-const LOOPBACK = /^(localhost|127(?:\.\d+){3}|\[?::1\]?|0\.0\.0\.0|0)$/i;
+/**
+ * The office's own address, in every form a client takes for it (review round 1, Kerem): hosts the URL parser has
+ * normalised (127.1, 0x7f000001 → 127.0.0.1), the loopback names (localhost, *.localhost, ::1, ::ffff:127.x), names that
+ * resolve back to it (127.0.0.1.nip.io, 127-0-0-1.sslip.io), the hosts the office answers, and its port on any host.
+ */
+const LOOPBACK = /^(localhost|.+\.localhost|127(?:\.\d+){3}|\[?::1\]?|\[::ffff:(?:127\.[\d.]+|7f[0-9a-f]{2}:[0-9a-f]{1,4})\]|0\.0\.0\.0|0|\[::\])$/i;
+const REBINDS = /(^|[.-])127[.-]0[.-]0[.-]1([.-]|$)/;
+const isOffice = (host: string, port: number, ctx: GateContext) => LOOPBACK.test(host) || REBINDS.test(host) || ctx.officeHosts.includes(host) || port === ctx.officePort;
+const portOf = (url: URL) => (url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80);
 
 interface Request {
   method: string;
@@ -243,10 +251,8 @@ function httpParts(cmd: string, reqs: Request[], ctx: GateContext): GatePart[] {
       else if (/\/api\/|\/gate\/|\/mcp\b|localhost|127\.0\.0\.1/.test(r.url)) out.push({ kind: 'self', target: `${cmd} ${method} ${shown(r.url)}`, why: 'ofisin API’sine gidiyor olabilir (adres çalışınca belli olur)' });
       continue;
     }
-    const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
     const host = url.hostname.toLowerCase();
-    const office = LOOPBACK.test(host) || ctx.officeHosts.includes(host) || port === ctx.officePort;
-    if (office) {
+    if (isOffice(host, portOf(url), ctx)) {
       if (reads && officeRead(url.pathname)) continue;
       out.push({ kind: 'self', target: `${cmd} ${method} ${url.pathname}`, why: 'ofisin kendi API’si (yalnız okuma izin listesi serbest; onay ve sahibi uçları kapıda)' });
       continue;
@@ -1066,6 +1072,37 @@ function fileWrites(name: string, words: ShellWord[], env: Map<string, string | 
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// The browser to the office (review round 1, Kerem, important): the office page in the employee's browser would take
+// the owner's approvals (the owner guard trusts the page's origin and nonce), so every browser call that reaches it is
+// the office itself — held per call, never on a browser or task approval.
+
+const URL_LIKE = /(?:[a-z][a-z0-9+.-]*:\/\/)?(?:\[[0-9a-f:.]+\]|[\w-]+(?:\.[\w-]+)*)(?::\d+)?(?:[/?#][^\s'"`<>)\\]*)?/gi;
+const OFFICE_PATH = /(['"`])(\/(?:api|gate|mcp)\b[^'"`]*)\1/;
+const CODE_FIELDS = new Set(['code', 'function', 'script', 'expression']);
+
+function strings(input: unknown, key = ''): Array<[string, string]> {
+  if (typeof input === 'string') return [[key, input]];
+  if (Array.isArray(input)) return input.flatMap((v) => strings(v, key));
+  if (input && typeof input === 'object') return Object.entries(input as Record<string, unknown>).flatMap(([k, v]) => strings(v, k));
+  return [];
+}
+
+/** Where a browser call reaches the office (its path), or null. */
+function browserOffice(short: string, input: unknown, ctx: GateContext): string | null {
+  const code = ['browser_run_code_unsafe', 'browser_evaluate', 'browser_network_request'].includes(short);
+  for (const [key, value] of strings(input)) {
+    for (const m of value.matchAll(URL_LIKE)) {
+      const url = urlOf(m[0]);
+      if (url && isOffice(url.hostname.toLowerCase(), portOf(url), ctx)) return url.pathname;
+    }
+    // In code, a path of the office's own is completed by the page's origin — the office's, once the page is there.
+    const path = (code || CODE_FIELDS.has(key)) && OFFICE_PATH.exec(value);
+    if (path) return path[2]!.split(/[?#]/)[0]!;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Tool calls.
 
 /** The first field that names whom or what the call is about, its first 80 characters (§4 madde 4). */
@@ -1106,6 +1143,8 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
   const short = cut === -1 ? tool : tool.slice(cut + 2);
   if (server === 'office') return done([]);
   if (server.includes('playwright') && short.startsWith('browser_')) {
+    const office = browserOffice(short, input, ctx);
+    if (office !== null) return done([{ kind: 'self', target: `${short} ${office}`, why: 'tarayıcıyla ofisin kendi sayfasına ya da API’sine gider (sahibi onayı yalnız sahibinin sayfasından sayılır)' }]);
     return done(BROWSER_READ.has(short) ? [] : [{ kind: 'browser', target: short, why: KIND_WHY.browser }]);
   }
   const c = toolClass(tool);
