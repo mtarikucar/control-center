@@ -233,7 +233,7 @@ describe('company memory', () => {
 
 describe('budget', () => {
   const summary = (pct: number): BudgetSummary => ({
-    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
+    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { owner: 'sonnet', decision: 'sonnet', digest: 'haiku' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
     reserve: { active: false, limitPct: 100 - pct, fiveHourPct: null, sevenDayPct: null },
     month: { key: '2026-10', usd: 0 },
     plans: {},
@@ -319,3 +319,14 @@ describe('the scheduler', () => {
     expect(applySnapshot(EMPTY_DATA, snapshot()).clock).toBeNull();
   });
 });
+
+describe('approvals (B9a)', () => {
+  it('come with the snapshot and change with approval.changed', () => {
+    const a = { id: 'a1', employeeId: 'ada', taskId: null, kind: 'other', tool: 'mcp__probe__ping', target: 'ping', fingerprint: 'f', summary: 's', scope: 'call', status: 'pending', requestedAt: 1, decidedAt: null, decidedBy: null, decidedVia: null, expiresAt: null, usedAt: null, note: null } as const;
+    let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 0, approvals: [a] });
+    expect(d.approvals).toEqual({ a1: a });
+    d = applyEvent(d, { seq: 1, employeeId: 'ada', ts: 2, event: { type: 'approval.changed', change: 'approved', approval: { ...a, status: 'approved' } } });
+    expect(d.approvals.a1!.status).toBe('approved');
+  });
+});
+

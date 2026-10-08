@@ -85,6 +85,9 @@ const OWNER_ROUTES: Array<[string, string]> = [
   ['POST', '/api/constitution'],
   ['POST', `/api/proposals/${ID}/approve`],
   ['POST', `/api/proposals/${ID}/reject`],
+  // B9a: the owner's approval of a held call (design §4 madde 2; review round 1, critical: no self-approval).
+  ['POST', `/api/approvals/${ID}/approve`],
+  ['POST', `/api/approvals/${ID}/deny`],
   ['DELETE', `/api/employees/${ID}`],
   ['POST', `/api/employees/${ID}/messages`],
   ['POST', `/api/employees/${ID}/side-questions`],

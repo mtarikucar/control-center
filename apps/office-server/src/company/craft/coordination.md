@@ -19,6 +19,9 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
    darboğaz (bir kişinin sırası uzarken iş bölünebiliyorsa aynı rolden ikinci birini al). İş bölünemiyorsa nedenini plan
    kartına yaz.
 7. **Geri alınamaz işler sahibinden geçer.** Yayın, dışarıya gönderim, ödeme, canlıya alma, silme: önce sahibinin onayı.
+   Kapı kodda: anayasada açıkken bu çağrılar kapıya takılır, çalışan `approvalRequest` ile ister, sahibi ofis sayfasından
+   onaylar (`approvalsRead` hepsini gösterir). Kapı kazara ve sıradan yolları kapatır; aynı kullanıcıdaki kararlı bir
+   atlatmayı durdurmaz; sahibi onayı yalnız ofis sayfasından sayılır.
 8. **Değerlendirme.** Plan bitince `planRetro`: ne iyi gitti, ne takıldı, bir dahaki sefere ne değişecek. Şirkete özgü
    dersi `playbookUpdate` ile el kitabına yaz; her şirkete yarayacak bir yöntem önerin varsa `methodSuggestion` olarak ekle.
 9. **Raporlama.** Kısa, sayılarla, doğrulanmış; belirsizliği ve riski gizleme.

@@ -1,4 +1,4 @@
-import type { AgendaReport, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
+import type { AgendaReport, Approval, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -15,6 +15,12 @@ export class ApiError extends Error {
 let ownerNonce: { nonce: string; expiresAt: number } | null = null;
 
 async function nonce(): Promise<string> {
+  // B9a (review round 1): an employee's browser is driven by automation (Playwright sets navigator.webdriver). The
+  // owner's changes come from the owner's own browser only: a driven page — reached by a redirect the gate cannot see —
+  // asks for no nonce, so no approve button works there. A determined script can still forge it (§8 of the B9a note).
+  if (typeof navigator !== 'undefined' && navigator.webdriver) {
+    throw new ApiError(403, 'Bu sayfa otomasyonla açılmış (navigator.webdriver); sahibi işlemleri yalnız sahibinin kendi tarayıcısından yapılır.', 'owner_automation');
+  }
   if (!ownerNonce || ownerNonce.expiresAt - Date.now() < 60_000) ownerNonce = await send<{ nonce: string; expiresAt: number }>('GET', '/api/owner/nonce');
   return ownerNonce.nonce;
 }
@@ -78,6 +84,10 @@ export const api = {
   spending: (planId?: string) => request<Spend[]>('GET', `/api/budget/spend${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`),
   setConstitution: (patch: Record<string, unknown>) => request<Constitution>('POST', '/api/constitution', patch),
   proposals: () => request<Proposal[]>('GET', '/api/proposals'),
+  /** B9a: the owner's approvals of calls the gate held; deciding goes through the owner guard like every change. */
+  approvals: () => request<Approval[]>('GET', '/api/approvals'),
+  approveApproval: (id: string, note?: string) => request<Approval>('POST', `/api/approvals/${encodeURIComponent(id)}/approve`, note ? { note } : {}),
+  denyApproval: (id: string, note?: string) => request<Approval>('POST', `/api/approvals/${encodeURIComponent(id)}/deny`, note ? { note } : {}),
   approveProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/approve`, note ? { note } : {}),
   rejectProposal: (id: string, note?: string) => request<Proposal>('POST', `/api/proposals/${encodeURIComponent(id)}/reject`, note ? { note } : {}),
   decisions: () => request<Decision[]>('GET', '/api/memory/decisions'),
