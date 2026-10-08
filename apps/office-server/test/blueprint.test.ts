@@ -356,6 +356,8 @@ describe('Blueprint — installing it', () => {
     next.tasks.push({ key: 'rapor-sablonu', title: 'Rapor şablonu', role: 'hesap', reviewer: 'editor', done: ['Şablon'] } as never);
     const revised = t.blueprints.propose(c, next, { planId: plan.id });
     expect(revised.plan).toMatchObject({ id: plan.id, status: 'draft', version: 2 });
+    // The install's own hires are not "existing ones to adopt" on its revision's card.
+    expect(revised.plan.risks).not.toContain('Var olan kullanılacak');
     // A revision of a running plan waits for the owner like any revision.
     expect(() => t.blueprints.apply(c, plan.id)).toThrow(/Plan onaylı değil/);
     t.company.approve(plan.id);
@@ -396,7 +398,11 @@ describe('Blueprint — reading it, and the closed mode checked by list only', (
     t.profile();
     const c = t.coordinator.id;
     const b = BP();
-    b.closedMode = { deny: ['mcp__claude_ai_Gmail__send_email', 'mcp__claude_ai_Gmail__send_message', 'mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Gmial'] };
+    b.closedMode = {
+      deny: ['mcp__claude_ai_Gmail__send_email', 'mcp__claude_ai_Gmail__send_message', 'mcp__claude_ai_Gmail__create_draft', 'mcp__claude_ai_Gmial', 'mcp__claude_ai_Gmail__untrash_message', 'mcp__blender'],
+    };
+    // The coordinator's session shows two things no vocabulary names: a Gmail tool and a local server.
+    t.events.append(c, { type: 'session.started', model: 'm', mcp: [{ name: 'claude.ai Gmail', status: 'connected', tools: 1, toolNames: ['untrash_message'] }, { name: 'blender', status: 'connected', tools: 1, toolNames: ['look'] }] });
     const { plan } = t.blueprints.propose(c, b);
     expect(plan.risks).toContain('Kapalı kipte tanınmayan ad: mcp__claude_ai_Gmail__send_email, mcp__claude_ai_Gmial — hiçbir oturumda ya da sözlükte görülmedi; kural bir şey kapatmıyor olabilir, adı denetle');
     t.company.approve(plan.id);
@@ -410,6 +416,9 @@ describe('Blueprint — reading it, and the closed mode checked by list only', (
       // A tool the office knows (the vocabulary names it) and not in this session: closed there.
       { rule: 'mcp__claude_ai_Gmail__create_draft', check: 'verified' },
       { rule: 'mcp__claude_ai_Gmial', check: 'unknown' },
+      // Known from a session alone: a tool another desk lists, a server another desk reported.
+      { rule: 'mcp__claude_ai_Gmail__untrash_message', check: 'verified' },
+      { rule: 'mcp__blender', check: 'not_connected' },
     ]);
     expect(blueprintText(t.blueprints.read(plan.id), t.plans.get(plan.id))).toContain('mcp__claude_ai_Gmail__send_email tanınmıyor: hiçbir oturumda ya da sözlükte görülmedi, kural bir şey kapatmıyor olabilir');
   });

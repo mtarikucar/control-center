@@ -316,10 +316,12 @@ export class Blueprints {
       const e = this.#d.roster.get(r.ref);
       return e.lifecycle === 'archived' ? [`${r.step.slice('role:'.length)} (${e.name})`] : [];
     });
+    // What the install will adopt: there already, and not this install's own (a revision's steps already recorded).
+    const fresh = (step: string) => !records.some((x) => x.step === step);
     const adopted = [
-      ...b.roles.filter((r) => this.#employeeNamed(r.name) && !records.some((x) => x.step === `role:${r.key}`)).map((r) => `${r.name} (çalışan)`),
-      ...b.playbook.filter((p) => this.#d.memory.playbookTopics().some((x) => lower(x.topic) === lower(p.topic))).map((p) => `“${p.topic}” (el kitabı)`),
-      ...b.goals.filter((g) => this.#d.company.goals().some((x) => x.status === 'active' && lower(x.title) === lower(g.title))).map((g) => `“${g.title}” (hedef)`),
+      ...b.roles.filter((r) => fresh(`role:${r.key}`) && this.#employeeNamed(r.name)).map((r) => `${r.name} (çalışan)`),
+      ...b.playbook.filter((p) => fresh(`playbook:${p.topic}`) && this.#d.memory.playbookTopics().some((x) => lower(x.topic) === lower(p.topic))).map((p) => `“${p.topic}” (el kitabı)`),
+      ...b.goals.filter((g) => fresh(`goal:${g.key}`) && this.#d.company.goals().some((x) => x.status === 'active' && lower(x.title) === lower(g.title))).map((g) => `“${g.title}” (hedef)`),
     ];
     const risks = [
       b.risks,
