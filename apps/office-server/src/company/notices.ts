@@ -16,6 +16,8 @@ export const NOTICE_TOPICS = {
   'task.blocked': 'decision',
   /** Someone's background job ran alone past the cap: they take tasks again; stop the job or move the task, or let it run. */
   'background.overdue': 'decision',
+  /** A KPI read by hand is due (B26's measuring routine): read it and write it with kpiRecord. */
+  'kpi.due': 'decision',
   /** Still open after the office's reminder: the queue behind it is stuck. */
   'task.stalled': 'decision',
   /** A started (or blocked) task went to someone else: its holder must stop working on it. */

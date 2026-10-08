@@ -163,7 +163,7 @@ export interface Kpi {
 }
 
 const KPI_SOURCE_TR: Record<Exclude<KpiSource, 'office'>, string> = { manual: 'elle', capability: 'bağlantıdan' };
-const KPI_CADENCE_TR: Record<KpiCadence, string> = { daily: 'günlük', weekly: 'haftalık', monthly: 'aylık' };
+export const KPI_CADENCE_TR: Record<KpiCadence, string> = { daily: 'günlük', weekly: 'haftalık', monthly: 'aylık' };
 
 /** One KPI as goalsRead and the Goals tab show it: `Onay oranı ≥ %70 (ofis: ilk geçişte onay oranı, haftalık)`. */
 export function kpiText(k: Kpi): string {

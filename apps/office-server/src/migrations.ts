@@ -492,4 +492,28 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE blueprint_steps;
       DROP TABLE blueprints;`,
   },
+  {
+    // B26 (feat/kpi-readings): 16 on its own branch, 19 here after core-3's 16–18 (coordinator's decision d63e5d27;
+    // design note 2026-10-08-kpi-readings-design §7).
+    version: 19,
+    name: 'KPI readings',
+    // Each reading keeps the target, direction and unit it was measured against; a NULL value: no data in the window.
+    up: `
+    CREATE TABLE IF NOT EXISTS kpi_readings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      goal_id TEXT NOT NULL,
+      kpi TEXT NOT NULL,
+      value REAL,
+      unit TEXT NOT NULL,
+      target REAL NOT NULL,
+      direction TEXT NOT NULL,
+      source TEXT NOT NULL,
+      period_start INTEGER,
+      recorded_at INTEGER NOT NULL,
+      recorded_by TEXT NOT NULL,
+      note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS kpi_readings_goal ON kpi_readings (goal_id, recorded_at);`,
+    down: `DROP TABLE IF EXISTS kpi_readings;`,
+  },
 ];

@@ -22,6 +22,7 @@ import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
+import { KpiReadings } from './company/kpi-readings.ts';
 import { loadConfig } from './config.ts';
 import { aheadOfCode, migrateUp, openDb } from './db.ts';
 import { deskDir } from './desk.ts';
@@ -89,7 +90,10 @@ const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, 
 const scheduling = new Scheduling({ db, tasks, schedules, notices, company, state, events, constitution: () => budget.constitution() });
 const clock = new Clock({ scheduling, state, events, label: (now) => dueLabel(tasks, schedules, company, now) });
 company.attachClock(clock);
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock });
+// KPI measurement (B26): the office reads its own KPIs from the metrics (B4) and asks the coordinator for the rest.
+const kpis = new KpiReadings({ db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(db, o) });
+company.attachKpis(kpis);
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis });
 // Who does what when (spec §6.1): reads only, for the sheet and agendaRead.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 
@@ -104,7 +108,7 @@ const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, me
 const api = createApi(
   {
     engine, roster, events, quota,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints }) },
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis }) },
     company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },

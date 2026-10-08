@@ -42,7 +42,7 @@ describe('office tools', () => {
       'agendaRead', 'blueprintRead', 'decisionRecord', 'goalsRead', 'performanceRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'roleTemplates', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
     ]);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'appointLead', 'blueprintApply', 'blueprintPropose', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'integrationRegister', 'onboardingFinish', 'onboardingNext', 'onboardingRead', 'onboardingStart', 'planPropose', 'planRetro', 'planRevise', 'profileUpdate', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
+      'appointLead', 'blueprintApply', 'blueprintPropose', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'integrationRegister', 'kpiRecord', 'onboardingFinish', 'onboardingNext', 'onboardingRead', 'onboardingStart', 'planPropose', 'planRetro', 'planRevise', 'profileUpdate', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });

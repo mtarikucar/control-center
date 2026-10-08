@@ -199,6 +199,8 @@ export class Company {
   /** The clock attached after construction (attachClock); else the one in the deps. */
   #clock: { touch(): void } | null = null;
   #isBlueprint: ((planId: string) => boolean) | null = null;
+  /** KPI measurement (B26), attached after construction (it asks the company who coordinates). */
+  #kpis: { retroTable(goalId: string | null): string | null } | null = null;
 
   constructor(d: CompanyDeps) {
     this.#d = d;
@@ -571,6 +573,11 @@ export class Company {
   /** The clock is built after the company (it needs the scheduling service, which needs the company): attached here. */
   attachClock(clock: { touch(): void }): void {
     this.#clock = clock;
+  }
+
+  /** KPI measurement (B26) is built after the company: the retro's KPI table comes from it. */
+  attachKpis(kpis: { retroTable(goalId: string | null): string | null }): void {
+    this.#kpis = kpis;
   }
 
   /** A time changed: the clock re-arms for the nearest one. */
@@ -976,7 +983,7 @@ export class Company {
     return plan;
   }
   /** The coordinator assesses a plan (spec §5.4): a note tagged retro; a method suggestion becomes its own note. */
-  retro(by: string, planId: string, r: { wentWell: string; stuck: string; change: string; methodSuggestion?: string }): { retro: Note; suggestion: Note | null } {
+  retro(by: string, planId: string, r: { wentWell: string; stuck: string; change: string; methodSuggestion?: string }): { retro: Note; suggestion: Note | null; kpiTable: string | null } {
     this.#assertCoordinator(by);
     const plan = this.#d.plans.get(planId);
     if (plan.status === 'draft' || plan.status === 'declined') throw new ConflictError('Bu plan başlamadı; değerlendirilecek bir iş yok.');
@@ -988,12 +995,15 @@ export class Company {
     const suggestionText = clean(r.methodSuggestion, 'Yöntem önerisi', 3000, false);
     const type = plan.method?.workType;
     const tags = (first: string) => (type ? [first, type] : [first]);
-    const text = [`Plan: ${plan.title} (sürüm ${plan.version})`, '', '## Ne iyi gitti', '', wentWell, '', '## Ne takıldı', '', stuck, '', '## Bir dahaki sefere', '', change].join('\n');
+    // The goal's KPIs (B26), the office's read now: a plan with no goal or no KPIs is assessed as before.
+    const kpiTable = this.#kpis?.retroTable(plan.goalId ?? null) ?? null;
+    const kpiPart = kpiTable ? ['', "## KPI'lar", '', kpiTable] : [];
+    const text = [`Plan: ${plan.title} (sürüm ${plan.version})`, '', '## Ne iyi gitti', '', wentWell, '', '## Ne takıldı', '', stuck, '', '## Bir dahaki sefere', '', change, ...kpiPart].join('\n');
     const retro = memory.writeNote(by, { title: `Değerlendirme: ${plan.title}`, text, tags: tags('retro'), source: `plan:${plan.id}` });
     const suggestion = suggestionText
       ? memory.writeNote(by, { title: `Yöntem önerisi (${type ?? 'general'}): ${plan.title}`, text: suggestionText, tags: tags('yöntem-önerisi'), source: `plan:${plan.id}` })
       : null;
-    return { retro, suggestion };
+    return { retro, suggestion, kpiTable };
   }
 
   // ── goals ─────────────────────────────────────────────────────────────────
