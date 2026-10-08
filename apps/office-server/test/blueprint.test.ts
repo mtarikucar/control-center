@@ -423,6 +423,33 @@ describe('Blueprint — reading it, and the closed mode checked by list only', (
     expect(blueprintText(t.blueprints.read(plan.id), t.plans.get(plan.id))).toContain('mcp__claude_ai_Gmail__send_email tanınmıyor: hiçbir oturumda ya da sözlükte görülmedi, kural bir şey kapatmıyor olabilir');
   });
 
+  it('the pilot’s closed list on an office no session has reported to yet: every rule known, the card does not warn; a tool of a connector known by name only is not (task e6d46b69)', () => {
+    const t = make();
+    t.profile();
+    const c = t.coordinator.id;
+    const b = BP();
+    // pilot-senaryosu §8, as the pilot package's blueprint.json has it.
+    const pilot = [
+      'mcp__claude_ai_Gmail', 'mcp__claude_ai_jeeta', 'mcp__claude_ai_Higgsfield', 'mcp__claude_ai_Notion', 'mcp__claude_ai_Google_Calendar', 'mcp__claude_ai_Slack',
+      'mcp__claude_ai_Google_Drive', 'mcp__plugin_playwright_playwright', 'mcp__claude_ai_apify', 'Bash(git push*)', 'Bash(gh *)', 'Bash(curl *)',
+    ];
+    b.closedMode = { deny: pilot };
+    expect(t.events.list({ limit: 1000 }).some((e) => e.event.type === 'session.started')).toBe(false);
+    const { plan } = t.blueprints.propose(c, b);
+    expect(plan.risks).not.toContain('tanınmayan');
+    t.company.approve(plan.id);
+    t.blueprints.apply(c, plan.id);
+    for (const desk of t.blueprints.read(plan.id).closedMode) {
+      expect(desk.rules.filter((r) => r.check === 'unknown'), desk.name).toEqual([]);
+      expect(desk.rules.find((r) => r.rule === 'mcp__claude_ai_Slack')?.check, desk.name).toBe('no_session');
+      expect(desk.rules.find((r) => r.rule === 'mcp__claude_ai_Google_Drive')?.check, desk.name).toBe('no_session');
+    }
+    // Only the server is known: a tool rule under it names a tool no session and no vocabulary has listed.
+    const tool = BP();
+    tool.closedMode = { deny: ['mcp__claude_ai_Slack__authenticate'] };
+    expect(t.blueprints.propose(c, tool).plan.risks).toContain('Kapalı kipte tanınmayan ad: mcp__claude_ai_Slack__authenticate');
+  });
+
   it('review focus (task 8d67d8ba): a wildcard rule (mcp__server__*) closes the whole server as the CLI applies it — read like a server rule, never “unknown” for a known server', () => {
     const t = make();
     t.profile();
