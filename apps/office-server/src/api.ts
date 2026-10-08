@@ -14,6 +14,7 @@ import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
+import { capabilityVocabulary, coverage } from './company/capabilities.ts';
 import { listRoleTemplates } from './company/role-templates.ts';
 import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
@@ -206,6 +207,14 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
     if (method === 'GET' && url.pathname === '/api/role-templates') return sendJson(res, 200, listRoleTemplates());
+    // The capability model (B7): the vocabulary and how the office, or one desk, has each capability.
+    if (method === 'GET' && url.pathname === '/api/capabilities' && d.company.integrations) {
+      const vocabulary = capabilityVocabulary();
+      const who = url.searchParams.get('employee');
+      const person = who === null ? null : d.roster.get(who);
+      const wanted = person ? (person.capabilities ?? []) : vocabulary.capabilities.map((c) => c.id);
+      return sendJson(res, 200, { ...vocabulary, coverage: coverage(d.company.integrations.list(), wanted, person?.id) });
+    }
     if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {
       const raw = url.searchParams.get('days');
       const days = raw === null ? undefined : Number(raw);

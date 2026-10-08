@@ -157,6 +157,9 @@ Sınırlar:
 - Eşleme **bağlantı düzeyindedir**. B3 masa başına sunucunun araç sayısını tutar, araç adlarını tutmaz. Masa
   ayarının yalnız `send_message`'ı kapatması görülmez; Gmail açık sayılır. Araç düzeyi B9'da gerekir.
 - Durum son oturum açılışı anınındır (B3 §7).
+- Sözlüğün sonraki bir sürümü bir kimliği kaldırırsa, o kimliği taşıyan eski satırlar okumayı bozmaz. Kimlik
+  "sözlükte yok" diye okunur, sözlükten aracı gelmez, yalnız kayıt onu hâlâ sağlayabilir. Yeni bildirimde ise
+  reddedilir.
 
 ## 5. Araçlar ve API
 

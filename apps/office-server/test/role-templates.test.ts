@@ -188,7 +188,8 @@ describe('Role templates — tools', () => {
   it('hire takes a template (the model then optional); without one it asks for role and model as before', async () => {
     const t = make();
     const reply = await t.call(t.coordinator, 'hire', { name: 'Ece', template: 'icerik-yazari', role: 'Kanallar: Instagram.' });
-    expect(reply).toMatch(/^İşe alındı: Ece \(.+\), masa \d+, model sonnet, şablon icerik-yazari \(sürüm \d+\)\.$/);
+    // B7: a template hire also says the capabilities it declares (no registry here: only the list).
+    expect(reply).toMatch(/^İşe alındı: Ece \(.+\), masa \d+, model sonnet, şablon icerik-yazari \(sürüm \d+\)\.\nYetenekler: docs\.write, web\.fetch\.$/);
     expect(t.roster.list().find((e) => e.name === 'Ece')!.role).toContain('### Bu şirkette\n\nKanallar: Instagram.');
     expect(await t.call(t.coordinator, 'hire', { name: 'Ada', role: 'r', model: 'haiku' })).toMatch(/^İşe alındı: Ada \(.+\), masa \d+, model haiku\.$/);
     await expect(t.call(t.coordinator, 'hire', { name: 'Can', model: 'haiku' })).rejects.toThrow(/role gerekli/);

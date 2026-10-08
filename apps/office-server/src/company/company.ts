@@ -19,6 +19,7 @@ import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
 import { roleTemplate, templateRole } from './role-templates.ts';
+import { capabilityIds } from './capabilities.ts';
 import { COORDINATOR_ROLE } from './roles.ts';
 import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
 import type { NoticeStore, PlanStore, SchedulePatch, ScheduleStore, TaskPatch, TaskStore } from './store.ts';
@@ -98,6 +99,8 @@ export interface TaskInput {
   dueAt?: string | null;
   /** The routine this task is an instance of (spec §4.4; set by the due-processor only). */
   scheduleId?: string | null;
+  /** The capabilities the work needs (B7): ids of the vocabulary. */
+  requires?: unknown;
 }
 
 /** Recurring work (spec §4.4): each firing opens an ordinary task with these fields. */
@@ -232,11 +235,13 @@ export class Company {
   /**
    * The owner or the coordinator hires. With a role template (B6) the role text comes from it — the given `role`
    * becomes the company's own part — and so do the title, team and model unless given; the template and its version
-   * are recorded. Without one, as before: the role text as given.
+   * are recorded. Without one, as before: the role text as given. The capabilities (B7) given replace the template's;
+   * none given, the template's (or none).
    */
   hire(by: string, input: HireInput): Employee {
     if (by !== OWNER) this.#assertCoordinator(by);
     const template = input.template === undefined || input.template === null || input.template === '' ? null : roleTemplate(input.template);
+    const capabilities = input.capabilities === undefined || input.capabilities === null ? (template?.capabilities ?? []) : capabilityIds(input.capabilities, 'Yetenekler');
     const resolved: NewEmployee = template
       ? {
           ...input,
@@ -245,8 +250,9 @@ export class Company {
           team: input.team?.trim() ? input.team : template.team,
           model: input.model ?? template.model,
           templateRef: { id: template.id, version: template.version },
+          capabilityIds: capabilities,
         }
-      : { ...input, templateRef: null };
+      : { ...input, templateRef: null, capabilityIds: capabilities };
     const characters = this.#d.characters();
     const characterId = input.characterId && characters.includes(input.characterId) ? input.characterId : this.#leastUsedCharacter(characters);
     const lead = resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
@@ -292,13 +298,15 @@ export class Company {
     return next;
   }
 
-  editRoleCard(by: string, id: string, patch: { title?: string; team?: string; role?: string }): Employee {
+  /** `capabilities` (B7), when given, is the whole new list ([] clears it); not given, it stays. */
+  editRoleCard(by: string, id: string, patch: { title?: string; team?: string; role?: string; capabilities?: unknown }): Employee {
     this.#assertCoordinator(by);
     const current = this.#d.roster.get(id);
     const next = this.#d.roster.update(id, {
       title: patch.title === undefined ? current.title : clean(patch.title, 'Unvan', 80, false),
       team: patch.team === undefined ? current.team : clean(patch.team, 'Ekip adı', 40, false),
       role: patch.role === undefined ? current.role : clean(patch.role, 'Rol tanımı', 4000, true),
+      ...(patch.capabilities === undefined ? {} : { capabilities: capabilityIds(patch.capabilities, 'Yetenekler') }),
     });
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
@@ -343,6 +351,7 @@ export class Company {
     }
     const dependsOn = (input.dependsOn ?? []).filter(Boolean);
     for (const dep of dependsOn) this.#d.tasks.get(dep);
+    const requires = input.requires === undefined || input.requires === null ? [] : capabilityIds(input.requires, 'Gereken yetenekler');
     const chainDepth = by === OWNER ? 0 : (this.#d.tasks.inProgressOf(by)?.chainDepth ?? -1) + 1;
     if (chainDepth > rules.chainDepth) {
       this.#tellCoordinator(by, 'limit.chain', `${this.nameOf(by)} “${title}” görevini paslayamadı: görev zinciri ${rules.chainDepth} halkayı geçti. Zinciri sen çöz.`);
@@ -360,7 +369,7 @@ export class Company {
     const reviewer = this.#reviewerOf(input.reviewer, assignee.id);
     const task = this.#d.tasks.create({
       planId, title, description, done, requester: by, assignee: assignee.id, priority, difficulty: this.#difficultyBy(by, input.difficulty), reviewer, dependsOn, chainDepth: Math.max(0, chainDepth),
-      notBefore, dueAt, scheduleId: input.scheduleId ?? null,
+      notBefore, dueAt, scheduleId: input.scheduleId ?? null, requires,
     });
     this.#taskEvent('created', task);
     if (notBefore !== null || dueAt !== null) this.#touchClock();

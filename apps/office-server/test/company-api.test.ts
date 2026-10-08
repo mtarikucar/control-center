@@ -247,6 +247,25 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', '/api/employees', { name: 'Ada', role: 'Testleri yazar.' })).body).toMatchObject({ role: 'Testleri yazar.', template: null });
   });
 
+  it('shows the owner the capability vocabulary and what the office or one desk has of it; hires with capabilities (B7)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    t.events.append(c.id, { type: 'session.started', model: 'm', mcp: [{ name: 'claude.ai Gmail', status: 'connected', tools: 30 }, { name: 'office', status: 'connected', tools: 18 }] });
+    const all = (await call(t.port, 'GET', '/api/capabilities')).body;
+    expect(all.version).toBe(1);
+    expect(all.capabilities).toHaveLength(16);
+    expect(all.capabilities.find((x: { id: string }) => x.id === 'email.send')).toMatchObject({ title: 'E-posta gönderme', outward: true });
+    expect(all.coverage.map((x: { id: string }) => x.id)).toEqual(all.capabilities.map((x: { id: string }) => x.id));
+    expect(all.coverage.find((x: { id: string }) => x.id === 'email.read')).toMatchObject({ status: 'open', providers: [expect.objectContaining({ name: 'claude.ai Gmail', openOn: ['Koordinatör'] })] });
+    const hired = await call(t.port, 'POST', '/api/employees', { name: 'Ada', role: 'Yanıtlar.', capabilities: ['email.read', 'crm.read'] });
+    expect(hired.status).toBe(201);
+    expect(hired.body).toMatchObject({ name: 'Ada', capabilities: ['email.read', 'crm.read'] });
+    const ada = (await call(t.port, 'GET', `/api/capabilities?employee=${hired.body.id}`)).body;
+    expect(ada.coverage.map((x: { id: string; status: string }) => [x.id, x.status])).toEqual([['email.read', 'unseen'], ['crm.read', 'missing']]);
+    expect((await call(t.port, 'GET', '/api/capabilities?employee=yok')).status).toBe(404);
+    expect((await call(t.port, 'POST', '/api/employees', { name: 'Can', role: 'r', capabilities: ['email.sending'] })).status).toBe(400);
+  });
+
   it('shows the owner the integration registry, read-only', async () => {
     const t = await start();
     const c = t.company.hireCoordinator();

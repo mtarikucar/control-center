@@ -1,4 +1,5 @@
 export * from './budget.ts';
+export * from './capability.ts';
 export * from './company.ts';
 export * from './employee.ts';
 export * from './events.ts';

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { MODEL_ALIASES, WORK_TYPES, type ModelAlias, type RoleTemplate, type WorkType } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
+import { capabilityVocabulary } from './capabilities.ts';
 
 /**
  * The role template catalog (B6; spec 2026-10-08-role-templates-design): product knowledge, shipped as files in
@@ -14,7 +15,8 @@ const SECTIONS = ['### Sorumlulukların', '### Nasıl çalışırsın', '### Bit
 
 /**
  * One template from its file text. The front matter takes `key: value` and `key:` followed by `- item` lines only;
- * an unknown or missing field, a model or method the office does not have, a wrong id or a missing section is refused.
+ * an unknown or missing field, a model, method or capability (B7) the office does not have, a wrong id or a missing
+ * section is refused.
  */
 export function parseRoleTemplate(id: string, text: string): RoleTemplate {
   const fail = (why: string) => new ValidationError(`Rol şablonu ${id}: ${why}`);
@@ -51,6 +53,9 @@ export function parseRoleTemplate(id: string, text: string): RoleTemplate {
   if (!(MODEL_ALIASES as readonly string[]).includes(scalars.model!)) throw fail(`model ${MODEL_ALIASES.join(', ')} olmalı.`);
   const unknownMethod = lists.methods!.find((m) => !(WORK_TYPES as readonly string[]).includes(m));
   if (unknownMethod) throw fail(`bilinmeyen yöntem “${unknownMethod}”.`);
+  const known = new Set(capabilityVocabulary().capabilities.map((c) => c.id));
+  const unknownCapability = lists.capabilities!.find((c) => !known.has(c));
+  if (unknownCapability) throw fail(`bilinmeyen yetenek “${unknownCapability}” (yetenek sözlüğünde yok).`);
   const body = match[2]!.trim();
   const missing = SECTIONS.find((h) => !body.includes(h));
   if (missing) throw fail(`gövdede “${missing}” yok.`);

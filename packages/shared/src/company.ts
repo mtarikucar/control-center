@@ -81,6 +81,8 @@ export interface Task {
   parkCount?: number;
   /** The routine that opened it, if any. */
   scheduleId?: string | null;
+  /** The capabilities the work needs (B7), ids of the vocabulary; empty when none. */
+  requires?: string[];
   dependsOn: string[];
   status: TaskStatus;
   /** How many passes deep this task is (a task passed while working on a passed task is one deeper). */

@@ -28,7 +28,7 @@ const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version)
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(16);
+    expect(migrateUp(db)).toBe(17);
     expect(tables(db)).toEqual(V15_TABLES);
   });
 
@@ -42,14 +42,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(16);
+    expect(migrateUp(db)).toBe(17);
     expect(tables(db)).toEqual(V15_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(16);
+    expect(migrateUp(db)).toBe(17);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -327,13 +327,39 @@ describe('migrations', () => {
       `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started, lifecycle, created_at, title, team, kind)
        VALUES ('e1', 'ada', 'Ada', 'serbest metin', 'sonnet', 'coder', 0, 's1', 0, 'stopped', 1, '', '', 'member')`,
     ).run();
-    migrateUp(db);
+    migrateUp(db, upTo(16));
     expect(appliedVersion(db)).toBe(16);
     expect(columns(db, 'employees')).toEqual([...before, 'template', 'template_version']);
     expect({ ...(db.prepare('SELECT role, template, template_version FROM employees').get() as object) }).toEqual({ role: 'serbest metin', template: null, template_version: null });
     expect(migrateDown(db, 15)).toBe(15);
     expect(columns(db, 'employees')).toEqual(before);
     expect(db.prepare('SELECT name FROM employees').get()).toMatchObject({ name: 'Ada' });
-    expect(migrateUp(db)).toBe(16);
+    expect(migrateUp(db, upTo(16))).toBe(16);
+  });
+
+  it('v17 records the capabilities an employee declares and a task requires, none for those before; v17 down restores v16 exactly and keeps them', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(16));
+    const employees = columns(db, 'employees');
+    const tasks = columns(db, 'tasks');
+    db.prepare(
+      `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started, lifecycle, created_at, title, team, kind)
+       VALUES ('e1', 'ada', 'Ada', 'serbest metin', 'sonnet', 'coder', 0, 's1', 0, 'stopped', 1, '', '', 'member')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at)
+       VALUES ('t1', NULL, 'Rapor', '', '[]', 'owner', 'e1', 3, '[]', 'waiting', 0, 1)`,
+    ).run();
+    expect(migrateUp(db)).toBe(17);
+    expect(columns(db, 'employees')).toEqual([...employees, 'capabilities']);
+    expect(columns(db, 'tasks')).toEqual([...tasks, 'requires']);
+    expect({ ...(db.prepare('SELECT role, template, capabilities FROM employees').get() as object) }).toEqual({ role: 'serbest metin', template: null, capabilities: null });
+    expect({ ...(db.prepare('SELECT title, requires FROM tasks').get() as object) }).toEqual({ title: 'Rapor', requires: null });
+    expect(migrateDown(db, 16)).toBe(16);
+    expect(columns(db, 'employees')).toEqual(employees);
+    expect(columns(db, 'tasks')).toEqual(tasks);
+    expect(db.prepare('SELECT name FROM employees').get()).toMatchObject({ name: 'Ada' });
+    expect(db.prepare('SELECT title FROM tasks').get()).toMatchObject({ title: 'Rapor' });
+    expect(migrateUp(db)).toBe(17);
   });
 });
