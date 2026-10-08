@@ -197,6 +197,18 @@ describe('Capability precheck — the dispatcher, and the switch', () => {
     expect(messages.some((m) => m.includes('## Görev: Gönder'))).toBe(false);
   });
 
+  it('review focus: a precheck that says “held” but leaves the task waiting never spins the dispatcher (mutation P23)', async () => {
+    const t = make();
+    const stuck = { hold: () => true, release() {} };
+    const dispatcher = new Dispatcher({ events: t.events, roster: t.roster, tasks: t.tasks, notices: t.notices, plans: t.plans, company: t.company, engine: t.f.engine, budget: t.budget, precheck: stuck });
+    cleanups.unshift(dispatcher.start());
+    const task = t.task(t.ada, 'Takılmasın');
+    await new Promise((r) => setTimeout(r, 300));
+    // The office still answers (the loop ended), and the task the precheck claimed to hold was not handed out.
+    expect(t.tasks.get(task.id).status).toBe('waiting');
+    expect(systemMessages(t.events.list({ limit: 5000 }), t.ada.id).some((m) => m.includes('## Görev: Takılmasın'))).toBe(false);
+  });
+
   it('review focus: switched off, nothing changes — the task goes out, no need, the precheck writes no event', async () => {
     const t = dispatching({ off: true });
     expect(DEFAULT_CONSTITUTION.capabilityPrecheckEnabled).toBe(false);

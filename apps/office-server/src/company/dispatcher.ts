@@ -185,8 +185,14 @@ export class Dispatcher {
       }
     } else {
       let next = this.#d.tasks.nextFor(id);
-      // B8: a task whose required capability this desk lacks is held, and the next one is tried.
-      while (next && this.#d.precheck?.hold(next)) next = this.#d.tasks.nextFor(id);
+      // B8: a task whose required capability this desk lacks is held, and the next one is tried. Each task is held at
+      // most once here: a hold that leaves the task waiting must not spin the office.
+      const held = new Set<string>();
+      while (next && !held.has(next.id) && this.#d.precheck?.hold(next)) {
+        held.add(next.id);
+        next = this.#d.tasks.nextFor(id);
+      }
+      if (next && held.has(next.id)) next = null;
       if (next && this.#mayStart(next)) started = this.#d.company.start(next.id);
     }
     const hint = this.#hint(employee, started, Boolean(body) || started !== null || decisions.length > 0);
