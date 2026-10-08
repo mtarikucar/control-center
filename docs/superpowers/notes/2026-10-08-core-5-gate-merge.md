@@ -1,5 +1,7 @@
 # Kapı — birleştirme ve çıkış notu (`integration/core-5-gate`: adım 5)
 
+> **YERİNE GEÇTİ (2026-10-08 gece):** main yönetim döngüsüyle ilerledi (46764f9, göç 16 = living plans). Bu notun satırı kullanılmaz; zincir yeni main üstünde göçleri 17–22'ye kaydırılarak yeniden kuruldu: `2026-10-08-core-on-main-merge.md` (`integration/core-on-main`).
+
 > **SIRA:** bu, **adım 5**'tir. Önce adım 4 (`integration/core-5`, Can, ec929c7, onaylı c8c652e1) alınmış olmalı. Adım 4
 > adım 1–3'ü (açılış denetimi, core-3, core-4) ve B8 ile B9b'yi zaten içeriyor. Aşağıdaki satır bunu kendisi denetler:
 > core-5 main'de değilse hiçbir şeye dokunmadan durur. Yönetim döngüsü (v22) bundan sonra gelir (adım 6). Kaynak:
