@@ -388,6 +388,13 @@ describe('office tools — task difficulty', () => {
     expect(await t.call(c, 'goalSet', { goalId: sales.id, status: 'dropped' })).toBe('Hedef güncellendi: “Satış” (dropped). “Teklifler”, “Arama” planları da kapandı; değerlendirmelerini planRetro ile yaz.');
     // Nothing closed with it: no line.
     expect(await t.call(c, 'goalSet', { goalId: open('Destek').id, status: 'done' })).toBe('Hedef güncellendi: “Destek” (done).');
+    // A revision waiting for the owner: its plan ran, so a reached goal finishes it and its retro is open too.
+    t.budget.setConstitution({ autonomy: 'plans' });
+    const shop = open('Mağaza');
+    const store = propose('Vitrin', shop.id);
+    t.company.approve(store.id);
+    t.company.revise(c.id, store.id, { days: 2 });
+    expect(await t.call(c, 'goalSet', { goalId: shop.id, status: 'done' })).toBe('Hedef güncellendi: “Mağaza” (done). “Vitrin” planı da kapandı; değerlendirmesini planRetro ile yaz.');
     expect(await t.call(c, 'goalSet', { goalId: sales.id, note: 'sonra bakılır' })).toBe('Hedef güncellendi: “Satış” (dropped).');
   });
 

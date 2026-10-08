@@ -1055,8 +1055,13 @@ export class Company {
     const goal = store.update(current.id, patch);
     this.#emit(by, { type: 'goal.changed', change: closing ? 'closed' : 'updated', goal });
     // The coordinator's word closes them too (management cycle §3.4): a stream that never had a task cannot keep the
-    // plan running. No plan.retro notice — it closes the goal itself, and the tool's reply says which retros are open.
-    for (const plan of settled) this.#settle(plan, goal.status === 'done' && plan.status === 'approved' ? 'done' : 'stopped');
+    // plan running. A reached goal's plan that ran is done — under way, or a revision of an approved plan waiting for
+    // the owner (its work is complete: none is open) — anything else stops. No plan.retro notice: the coordinator closes
+    // the goal itself, and the tool's reply says which retros are open.
+    for (const plan of settled) {
+      const ran = plan.status === 'approved' || this.#d.plans.approvedSnapshot(plan.id) !== null;
+      this.#settle(plan, goal.status === 'done' && ran ? 'done' : 'stopped');
+    }
     return goal;
   }
 
@@ -1093,13 +1098,13 @@ export class Company {
       tasksOpen ? 'açık görevleri bitir (taskFinish) ya da vazgeçiyorsan sahibinden planı durdurmasını iste (reportToOwner)' : '',
       routinesLive ? 'rutini scheduleUpdate ile durdur (status: stopped)' : '',
     ].filter(Boolean);
-    throw new ConflictError(`“${goal.title}” hedefi kapanmadı: ${held.join(', ')} var. Önce ${todo.join('; ')}. Ya da hedefi şimdilik açık tut.`);
+    throw new ConflictError(`“${goal.title}” hedefi kapatılamadı: ${held.join(', ')} var. Önce ${todo.join('; ')}. Ya da hedefi şimdilik açık tut.`);
   }
 
-  /** A plan closed with its goal: done (a reached goal's plan under way), else stopped; the screen hears. */
+  /** A plan closed with its goal, done or stopped; the screen hears. */
   #settle(plan: Plan, status: 'done' | 'stopped'): void {
     // A revision waiting for the owner goes with it, as when the owner stops a plan.
-    if (status === 'stopped') this.#d.plans.clearApproved(plan.id);
+    this.#d.plans.clearApproved(plan.id);
     const next = this.#d.plans.update(plan.id, { status });
     this.#emit(this.#planDesk(next), { type: 'plan.changed', change: status, plan: next });
   }

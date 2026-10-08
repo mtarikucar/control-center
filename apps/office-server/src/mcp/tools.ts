@@ -684,12 +684,14 @@ export function officeTools(o: {
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
         const goalId = optStr(args, 'goalId');
-        // Its plans under way: closing the goal closes them, and the reply names those whose retro is still to write.
-        const underWay = goalId ? company.goalPlans(goalId).filter((p) => p.status === 'approved') : [];
+        // Its running plans: closing the goal closes them, and the reply names those that ran whose retro is still to write.
+        const running = goalId ? company.goalPlans(goalId).filter((p) => p.status === 'approved' || p.status === 'draft') : [];
         const goal = company.goalSet(employee.id, { goalId, title: optStr(args, 'title'), why: optStr(args, 'why'), done: args.done as string[] | undefined, kpis: args.kpis, status: optStr(args, 'status'), note: optStr(args, 'note') });
         if (!goalId) return `Hedef açıldı (${goal.id}): “${goal.title}”. Planlarını planPropose ile goalId vererek başlat.`;
         const now = new Map(company.goalPlans(goal.id).map((p) => [p.id, p.status]));
-        const open = underWay.filter((p) => now.get(p.id) !== 'approved' && company.retroOpen(p.id)).map((p) => `“${p.title}”`);
+        // Ran: done now (under way, or a revision of an approved plan), or under way and stopped with a dropped goal.
+        const ran = running.filter((p) => now.get(p.id) === 'done' || (p.status === 'approved' && now.get(p.id) === 'stopped'));
+        const open = ran.filter((p) => company.retroOpen(p.id)).map((p) => `“${p.title}”`);
         const retro =
           open.length === 0 ? ''
           : open.length === 1 ? ` ${open[0]} planı da kapandı; değerlendirmesini planRetro ile yaz.`

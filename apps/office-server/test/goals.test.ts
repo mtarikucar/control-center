@@ -126,10 +126,10 @@ describe('closing a goal settles its plans (management cycle §3.4)', () => {
     const seq = lastSeq(t);
     expect(() => t.company.goalSet(t.coordinator.id, { goalId: goal.id, status: 'done', note: 'ulaşıldı' })).toThrow(
       new ConflictError(
-        '“İlk müşteriler” hedefi kapanmadı: “Site” planında 2 açık görev, “Bakım” planında 1 açık rutin var. Önce açık görevleri bitir (taskFinish) ya da vazgeçiyorsan sahibinden planı durdurmasını iste (reportToOwner); rutini scheduleUpdate ile durdur (status: stopped). Ya da hedefi şimdilik açık tut.',
+        '“İlk müşteriler” hedefi kapatılamadı: “Site” planında 2 açık görev, “Bakım” planında 1 açık rutin var. Önce açık görevleri bitir (taskFinish) ya da vazgeçiyorsan sahibinden planı durdurmasını iste (reportToOwner); rutini scheduleUpdate ile durdur (status: stopped). Ya da hedefi şimdilik açık tut.',
       ),
     );
-    expect(() => t.company.goalSet(t.coordinator.id, { goalId: goal.id, status: 'dropped' })).toThrow(/hedefi kapanmadı: “Site” planında 2 açık görev/);
+    expect(() => t.company.goalSet(t.coordinator.id, { goalId: goal.id, status: 'dropped' })).toThrow(/hedefi kapatılamadı: “Site” planında 2 açık görev/);
     expect(t.goals.get(goal.id)).toMatchObject({ status: 'active', note: null, closedAt: null });
     expect(t.plans.list().map((p) => p.status)).toEqual(['approved', 'approved', 'approved']);
     expect(t.tasks.get(running.id).status).toBe('in_progress');
@@ -148,19 +148,30 @@ describe('closing a goal settles its plans (management cycle §3.4)', () => {
     expect(t.plans.get(upkeep.id).status).toBe('done');
   });
 
-  it('a revision waiting for the owner still holds its plan’s open work: refused the same; once the work is closed the plan stops with the goal, the revision with it', () => {
+  it('a revision waiting for the owner still holds its plan’s open work: refused the same; once the work is closed a reached goal finishes the plan (it ran), a dropped one stops it — the revision goes with it either way', () => {
     const t = make('plans');
-    const goal = t.company.goalSet(t.coordinator.id, GOAL);
-    const site = plan(t, 'Site', goal.id);
-    t.company.approve(site.id);
-    const task = work(t, t.ada.id, 'Sayfalar', site.id);
-    t.company.revise(t.coordinator.id, site.id, { days: 3 });
-    expect(t.plans.get(site.id).status).toBe('draft');
-    expect(() => t.company.goalSet(t.coordinator.id, { goalId: goal.id, status: 'done' })).toThrow(/“Site” planında 1 açık görev var/);
-    finish(t, t.ada.id, task.id);
-    t.company.goalSet(t.coordinator.id, { goalId: goal.id, status: 'done' });
-    expect(t.plans.get(site.id).status).toBe('stopped');
-    expect(t.plans.approvedSnapshot(site.id)).toBeNull();
+    const ran = (title: string) => {
+      const goal = t.company.goalSet(t.coordinator.id, { ...GOAL, title });
+      const p = plan(t, title, goal.id);
+      t.company.approve(p.id);
+      const task = work(t, t.ada.id, 'Sayfalar', p.id);
+      t.company.revise(t.coordinator.id, p.id, { days: 3 });
+      expect(t.plans.get(p.id).status).toBe('draft');
+      return { goal, p, task };
+    };
+    const site = ran('Site');
+    expect(() => t.company.goalSet(t.coordinator.id, { goalId: site.goal.id, status: 'done' })).toThrow(/“Site” planında 1 açık görev var/);
+    finish(t, t.ada.id, site.task.id);
+    const seq = lastSeq(t);
+    t.company.goalSet(t.coordinator.id, { goalId: site.goal.id, status: 'done' });
+    expect(t.plans.get(site.p.id).status).toBe('done');
+    expect(t.plans.approvedSnapshot(site.p.id)).toBeNull();
+    expect(changesAfter(t, seq)).toEqual([['goal', 'closed', 'Site'], ['plan', 'done', 'Site']]);
+    const blog = ran('Blog');
+    finish(t, t.ada.id, blog.task.id);
+    t.company.goalSet(t.coordinator.id, { goalId: blog.goal.id, status: 'dropped' });
+    expect(t.plans.get(blog.p.id).status).toBe('stopped');
+    expect(t.plans.approvedSnapshot(blog.p.id)).toBeNull();
   });
 
   it('a dropped goal: its running plan is stopped, one waiting for the owner too; the screen hears each', () => {
