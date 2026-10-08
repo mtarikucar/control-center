@@ -27,7 +27,7 @@ function make() {
 }
 
 describe('office metrics — busy', () => {
-  it('the pulse’s idle rule: busy holds an open task, idle can take work and holds none (since the hire, last close or last task moved away), unavailable cannot take work', () => {
+  it('at work holds a task in progress or blocked; idle can take work and holds none (since the hire, last close or last task moved away); unavailable cannot take work', () => {
     const t = make();
     const c = t.company.hireCoordinator();
     const gone = t.company.hire(c.id, { name: 'Eski', role: 'r' });
@@ -39,7 +39,7 @@ describe('office metrics — busy', () => {
     const b = t.company.createTask(c.id, { assignee: can!.id, title: 'B' });
     t.company.start(b.id);
     t.company.update(can!.id, b.id, { blocked: true });
-    // In the owner's terminal with a task in hand: cannot take work, so not busy and not idle either.
+    // In the owner's terminal with a task in hand: cannot take work, so in no other group.
     t.company.start(t.company.createTask(c.id, { assignee: mert!.id, title: 'M' }).id);
     t.roster.update(mert!.id, { lifecycle: 'in_terminal' });
     const d = t.company.createTask(c.id, { assignee: deniz!.id, title: 'D' });
@@ -52,19 +52,67 @@ describe('office metrics — busy', () => {
     const selin = t.company.hire(c.id, { name: 'Selin', role: 'r' });
     t.roster.update(selin.id, { lifecycle: 'sleeping' });
     t.advance(HOUR);
-    // Ece's task moves to Bora: her idle stretch starts now; Bora holds a waiting task, which is work in hand.
+    // Ece's task moves to Bora: her idle stretch starts now; Bora holds work but is not at it yet.
     t.company.assign(c.id, x.id, bora!.id);
     t.advance(5 * HOUR);
 
     expect(t.metrics().busy).toEqual({
-      busy: 3,
+      busy: 2,
       total: 7,
+      atWork: [
+        { id: ada!.id, name: 'Ada', title: '' },
+        { id: can!.id, name: 'Can', title: '' },
+      ],
+      holding: [{ id: bora!.id, name: 'Bora', title: '', why: 'queued', at: null }],
       idle: [
         { id: deniz!.id, name: 'Deniz', title: 'Testçi', since: T0 + HOUR },
         { id: selin.id, name: 'Selin', title: '', since: T0 + 2 * HOUR },
         { id: ece!.id, name: 'Ece', title: '', since: T0 + 3 * HOUR },
       ],
       unavailable: [{ id: mert!.id, name: 'Mert', title: '', state: 'in_terminal' }],
+    });
+  });
+
+  it('holding work but not at it: waiting on a reviewer, parked (until when), scheduled (from when) or queued; one reason each, the nearest', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const [ada, can, ece, bora, deniz, mert, selin] = ['Ada', 'Can', 'Ece', 'Bora', 'Deniz', 'Mert', 'Selin'].map((name) => t.company.hire(c.id, { name, role: 'r' }));
+    const park = (who: string, until: string) => {
+      const p = t.company.createTask(c.id, { assignee: who, title: `park ${until}` });
+      t.company.start(p.id);
+      t.company.parkTask(who, p.id, until, 'pencere');
+    };
+    // Ada handed in and waits on Can; Can's review of it is in his queue.
+    const a = t.company.createTask(c.id, { assignee: ada!.id, title: 'A', reviewer: can!.id });
+    t.company.start(a.id);
+    t.company.finish(ada!.id, a.id, { summary: 's', outputs: [], learned: '' });
+    // Ece's only task starts in two hours.
+    const later = t.company.createTask(c.id, { assignee: ece!.id, title: 'Sonra', startAfter: '+2h' });
+    park(bora!.id, '+3h');
+    // Deniz: one queued behind a dependency, one parked — queued is the nearer.
+    t.company.createTask(c.id, { assignee: deniz!.id, title: 'Bağlı', dependsOn: [later.id] });
+    park(deniz!.id, '+1h');
+    // Mert: two start times, the earlier counts.
+    t.company.createTask(c.id, { assignee: mert!.id, title: 'M5', startAfter: '+5h' });
+    t.company.createTask(c.id, { assignee: mert!.id, title: 'M1', startAfter: '+1h' });
+    // At work wins over anything else in hand.
+    park(selin!.id, '+4h');
+    t.company.start(t.company.createTask(c.id, { assignee: selin!.id, title: 'S' }).id);
+
+    expect(t.metrics().busy).toEqual({
+      busy: 1,
+      total: 7,
+      atWork: [{ id: selin!.id, name: 'Selin', title: '' }],
+      holding: [
+        { id: ada!.id, name: 'Ada', title: '', why: 'review', at: null },
+        { id: can!.id, name: 'Can', title: '', why: 'queued', at: null },
+        { id: ece!.id, name: 'Ece', title: '', why: 'scheduled', at: T0 + 2 * HOUR },
+        { id: bora!.id, name: 'Bora', title: '', why: 'parked', at: T0 + 3 * HOUR },
+        { id: deniz!.id, name: 'Deniz', title: '', why: 'queued', at: null },
+        { id: mert!.id, name: 'Mert', title: '', why: 'scheduled', at: T0 + HOUR },
+      ],
+      idle: [],
+      unavailable: [],
     });
   });
 
@@ -78,8 +126,9 @@ describe('office metrics — busy', () => {
       return e;
     });
     t.company.createTask(c.id, { assignee: people[0]!.id, title: 'bekleyen' });
+    t.company.start(t.company.createTask(c.id, { assignee: people[1]!.id, title: 'süren' }).id);
     const m = t.metrics().busy;
-    expect(m).toMatchObject({ busy: 0, total: 4, idle: [] });
+    expect(m).toMatchObject({ busy: 0, total: 4, atWork: [], holding: [], idle: [] });
     expect(m.unavailable).toEqual(people.map((e, i) => ({ id: e.id, name: e.name, title: '', state: states[i] })));
   });
 

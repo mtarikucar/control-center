@@ -351,7 +351,7 @@ describe('company API', () => {
     const metrics = await call(t.port, 'GET', '/api/metrics');
     expect(metrics.status).toBe(200);
     expect(metrics.body).toMatchObject({
-      busy: { busy: 1, total: 2, idle: [{ id: can.id, name: 'Can', title: '' }], unavailable: [] },
+      busy: { busy: 1, total: 2, atWork: [{ id: ada.id, name: 'Ada', title: '' }], holding: [], idle: [{ id: can.id, name: 'Can', title: '' }], unavailable: [] },
       delivered: { count: 0, firstPassRate: null, windowHours: 24 },
       stuck: { count: 1, items: [{ taskId: task.id, title: 'İş', assignee: 'Ada', reason: 'blocked' }] },
     });

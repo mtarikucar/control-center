@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { STUCK_REASONS, type Employee, type IdlePerson, type OfficeMetrics, type StuckItem, type StuckReason, type Task, type UnavailablePerson } from '@cc/shared';
+import { HOLDING_REASONS, STUCK_REASONS, type Employee, type HoldingPerson, type HoldingReason, type IdlePerson, type OfficeMetrics, type StuckItem, type StuckReason, type Task, type TeamMember, type UnavailablePerson } from '@cc/shared';
 import { deliveredSince } from '../performance.ts';
 import type { Roster } from '../roster.ts';
 import { availability } from './availability.ts';
@@ -16,6 +16,14 @@ export interface OfficeMetricsDeps {
   state: Pick<CompanyStateStore, 'taskLostAt'>;
 }
 
+/** Why someone holds these open tasks (none in progress or blocked) without being at them: the nearest reason, then the earliest time. */
+function holdingOf(own: readonly Task[], now: number): { why: HoldingReason; at: number | null } {
+  const reasons = own.map((t): { why: HoldingReason; at: number | null } =>
+    t.status === 'review' ? { why: 'review', at: null } : t.status === 'parked' ? { why: 'parked', at: t.notBefore ?? null } : (t.notBefore ?? 0) > now ? { why: 'scheduled', at: t.notBefore! } : { why: 'queued', at: null },
+  );
+  return reasons.sort((a, b) => HOLDING_REASONS.indexOf(a.why) - HOLDING_REASONS.indexOf(b.why) || (a.at ?? 0) - (b.at ?? 0))[0]!;
+}
+
 /** Why an open task is stuck, the first that holds in STUCK_REASONS' order; null when it is not. */
 function stuckReason(t: Task, holder: Employee | undefined, now: number): StuckReason | null {
   if (t.status === 'blocked') return 'blocked';
@@ -26,24 +34,30 @@ function stuckReason(t: Task, holder: Employee | undefined, now: number): StuckR
 }
 
 /**
- * The office's three health figures for the top bar, at `now` (reads only): who of the team holds work (the pulse's
- * idle rule, `availability`), what work was delivered in the last day and how much of it passed its first review,
+ * The office's three health figures for the top bar, at `now` (reads only): who of the team is at work, holds work,
+ * is idle (the pulse's rule, `availability`) or cannot take work, what work was delivered in the last day and how much of it passed its first review,
  * which open tasks are stuck.
  */
 export function officeMetrics(d: OfficeMetricsDeps, now: number): OfficeMetrics {
   const open = d.tasks.list({ statuses: OPEN_STATUSES, limit: 100_000 });
   const everyone = new Map(d.roster.list({ includeArchived: true }).map((e) => [e.id, e]));
 
-  const holding = new Set(open.map((t) => t.assignee));
+  const openOf = new Map<string, Task[]>();
+  for (const t of open) openOf.set(t.assignee, [...(openOf.get(t.assignee) ?? []), t]);
   const team = [...everyone.values()].filter((e) => e.lifecycle !== 'archived' && e.kind !== 'coordinator');
+  // Each person in exactly one group.
+  const atWork: TeamMember[] = [];
+  const holding: HoldingPerson[] = [];
   const idle: IdlePerson[] = [];
   const unavailable: UnavailablePerson[] = [];
-  let busy = 0;
   for (const e of team) {
+    const member = { id: e.id, name: e.name, title: e.title };
     const a = availability(e, d);
-    if (!a.canTakeWork) unavailable.push({ id: e.id, name: e.name, title: e.title, state: e.lifecycle });
-    else if (holding.has(e.id)) busy += 1;
-    else idle.push({ id: e.id, name: e.name, title: e.title, since: a.idleSince });
+    const own = openOf.get(e.id) ?? [];
+    if (!a.canTakeWork) unavailable.push({ ...member, state: e.lifecycle });
+    else if (own.some((t) => t.status === 'in_progress' || t.status === 'blocked')) atWork.push(member);
+    else if (own.length) holding.push({ ...member, ...holdingOf(own, now) });
+    else idle.push({ ...member, since: a.idleSince });
   }
   idle.sort((a, b) => a.since - b.since);
 
@@ -59,7 +73,7 @@ export function officeMetrics(d: OfficeMetricsDeps, now: number): OfficeMetrics 
 
   return {
     generatedAt: now,
-    busy: { busy, total: team.length, idle, unavailable },
+    busy: { busy: atWork.length, total: team.length, atWork, holding, idle, unavailable },
     delivered: { count: delivered.done, firstPassRate: delivered.firstPassRate, windowHours: WINDOW_HOURS },
     stuck: { count: items.length, items },
   };
