@@ -1,3 +1,4 @@
+export * from './blueprint.ts';
 export * from './budget.ts';
 export * from './capability.ts';
 export * from './company.ts';

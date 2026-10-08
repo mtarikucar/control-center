@@ -56,6 +56,20 @@ export function prepareDesk(dataDir: string, e: Employee): string {
   return dir;
 }
 
+/**
+ * Closes tools on a desk (B5's closed mode, pilot §8): the deny rules go into the desk's .claude/settings.json, which
+ * a session opened there reads at start. An existing file keeps its other keys and rules; the given ones are added.
+ */
+export function writeDeskDeny(dataDir: string, slug: string, deny: string[]): void {
+  const dir = join(deskDir(dataDir, slug), '.claude');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'settings.json');
+  const settings = (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {}) as { permissions?: { deny?: string[] } & Record<string, unknown> } & Record<string, unknown>;
+  const rules = [...(settings.permissions?.deny ?? [])];
+  for (const rule of deny) if (!rules.includes(rule)) rules.push(rule);
+  writeFileSync(file, `${JSON.stringify({ ...settings, permissions: { ...settings.permissions, deny: rules } }, null, 2)}\n`);
+}
+
 /** The coordinator changed someone's role card (or their kind): write the card and their guide out again. */
 export function writeRoleCard(dataDir: string, e: Employee): void {
   const dir = deskDir(dataDir, e.slug);

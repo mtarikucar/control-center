@@ -462,4 +462,29 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE tasks DROP COLUMN requires;
       ALTER TABLE employees DROP COLUMN capabilities;`,
   },
+  {
+    version: 18,
+    name: 'blueprints: the install plan behind a plan card, and the steps its install made',
+    // New tables only: plans from before have no blueprint and stay as they are.
+    up: `
+      CREATE TABLE blueprints (
+        plan_id TEXT PRIMARY KEY,
+        json TEXT NOT NULL,
+        profile_version INTEGER NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE blueprint_steps (
+        plan_id TEXT NOT NULL,
+        step TEXT NOT NULL,
+        ref TEXT,
+        outcome TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (plan_id, step)
+      );`,
+    down: `
+      DROP TABLE blueprint_steps;
+      DROP TABLE blueprints;`,
+  },
 ];

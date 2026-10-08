@@ -67,9 +67,10 @@ function fromRow(r: Row): Employee {
 
 /**
  * What the roster writes for a hire: the input, and what the company resolved — the template (never the raw id) and the
- * capabilities checked against the vocabulary (never the raw list).
+ * capabilities checked against the vocabulary (never the raw list), and the deny rules the desk gets before its first
+ * session (B5's closed mode; the engine writes them).
  */
-export type NewEmployee = HireInput & { templateRef?: TemplateRef | null; capabilityIds?: string[] };
+export type NewEmployee = HireInput & { templateRef?: TemplateRef | null; capabilityIds?: string[]; deskDeny?: string[] };
 
 export type EmployeePatch = Partial<
   Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities'>

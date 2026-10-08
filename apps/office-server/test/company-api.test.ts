@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
+import { Blueprints } from '../src/company/blueprint.ts';
+import { BlueprintStore } from '../src/company/blueprint-store.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { performanceReport } from '../src/performance.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -26,11 +28,12 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   // Wired like main.ts: the performance report reads the same database.
   const performance = { report: (r: { days?: number } = {}) => performanceReport(s.db, { since: r.days ? Date.now() - r.days * 86_400_000 : null }) };
   const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, integrations, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
+  const blueprints = new Blueprints({ company: c.company, roster: s.roster, tasks: c.tasks, plans: c.plans, schedules: c.schedules, memory: c.memory, store: new BlueprintStore(s.db), integrations, constitution: () => c.budget.constitution() });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, integrations, blueprints, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine };
+  return { port, company: c.company, tasks: c.tasks, memory: c.memory, budget: c.budget, notices: c.notices, argvLog: f.argvLog, events: s.events, engine: f.engine, blueprints };
 }
 
 function call(port: number, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
@@ -245,6 +248,21 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', '/api/employees', { name: 'Can', template: 'yok' })).status).toBe(400);
     // The old form, free text, as before.
     expect((await call(t.port, 'POST', '/api/employees', { name: 'Ada', role: 'Testleri yazar.' })).body).toMatchObject({ role: 'Testleri yazar.', template: null });
+  });
+
+  it('shows the owner a plan’s blueprint and how far its install went (B5)', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    const plain = t.company.propose(c.id, { method: METHOD, title: 'Düz plan', goal: 'g', approach: 'a' });
+    expect((await call(t.port, 'GET', `/api/plans/${plain.id}/blueprint`)).status).toBe(404);
+    expect((await call(t.port, 'GET', '/api/plans/yok/blueprint')).status).toBe(404);
+    // A blueprint plan: the whole blueprint, every step pending until it is installed.
+    for (const [section, fields] of [['identity', { name: 'Fırın', sector: 'gıda' }], ['offer', { products: ['ekmek'] }], ['customers', { segments: ['mahalle'], channels: ['dükkan'] }], ['goals', { goals: ['satış'] }], ['success', { done: ['kâr'] }], ['tools', { email: ['Gmail'] }], ['constraints', { budget: '0', other: ['yok'] }]] as const) {
+      t.company.profileUpdate(c.id, { section, fields, assumed: false });
+    }
+    const { plan } = t.blueprints.propose(c.id, { title: 'Kurulum', summary: 'Bir fırın.', roles: [{ key: 'satis', name: 'Ada', template: 'satis-asistani' }], playbook: [], goals: [], routines: [], tasks: [] });
+    const body = (await call(t.port, 'GET', `/api/plans/${plan.id}/blueprint`)).body;
+    expect(body).toMatchObject({ planId: plan.id, blueprint: { title: 'Kurulum', roles: [{ key: 'satis', name: 'Ada' }] }, steps: [{ step: 'role:satis', state: 'pending' }], closedMode: [] });
   });
 
   it('shows the owner the capability vocabulary and what the office or one desk has of it; hires with capabilities (B7)', async () => {

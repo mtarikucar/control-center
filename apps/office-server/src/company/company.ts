@@ -198,6 +198,7 @@ export class Company {
   readonly #now: () => number;
   /** The clock attached after construction (attachClock); else the one in the deps. */
   #clock: { touch(): void } | null = null;
+  #isBlueprint: ((planId: string) => boolean) | null = null;
 
   constructor(d: CompanyDeps) {
     this.#d = d;
@@ -238,7 +239,7 @@ export class Company {
    * are recorded. Without one, as before: the role text as given. The capabilities (B7) given replace the template's;
    * none given, the template's (or none).
    */
-  hire(by: string, input: HireInput): Employee {
+  hire(by: string, input: HireInput, o: { deny?: string[] } = {}): Employee {
     if (by !== OWNER) this.#assertCoordinator(by);
     const template = input.template === undefined || input.template === null || input.template === '' ? null : roleTemplate(input.template);
     const capabilities = input.capabilities === undefined || input.capabilities === null ? (template?.capabilities ?? []) : capabilityIds(input.capabilities, 'Yetenekler');
@@ -257,7 +258,7 @@ export class Company {
     const characterId = input.characterId && characters.includes(input.characterId) ? input.characterId : this.#leastUsedCharacter(characters);
     const lead = resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
     this.#assertRoom();
-    return this.#d.hire({ ...resolved, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null });
+    return this.#d.hire({ ...resolved, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null, ...(o.deny?.length ? { deskDeny: o.deny } : {}) });
   }
 
   /** Fable by default: planning and judgement are the hardest work in the company. */
@@ -558,6 +559,11 @@ export class Company {
     this.#taskEvent('reprioritized', next);
     this.#tellOwnerChanged(`Sahibi “${task.title}” görevini öne aldı (öncelik 1).`);
     return next;
+  }
+
+  /** The blueprints (B5) are built after the company (they need it): which plans are install plans, attached here. */
+  attachBlueprints(isBlueprint: (planId: string) => boolean): void {
+    this.#isBlueprint = isBlueprint;
   }
 
   /** The clock is built after the company (it needs the scheduling service, which needs the company): attached here. */
@@ -945,7 +951,8 @@ export class Company {
     const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now(), approvedBy: 'owner' });
     this.#d.plans.clearApproved(planId);
     const desk = this.#planDesk(plan);
-    this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
+    const next = this.#isBlueprint?.(plan.id) ? 'Bu bir kurulum planı: blueprintApply ile kur; yarıda kalırsa yeniden çalıştır, yapılmışı atlar.' : 'Görevleri aç ve dağıt.';
+    this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). ${next}`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
     return plan;
   }
