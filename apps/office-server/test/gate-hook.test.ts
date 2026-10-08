@@ -110,6 +110,9 @@ describe('hooks/gate.mjs (K2): exit 0 lets the call run, exit 2 stops it; every 
     expect((await hook(ping, { OFFICE_GATE_URL: refused.url, OFFICE_GATE_TOKEN: 'abc' })).code).toBe(2);
     const garbage = await office(() => ({ text: '<html>' }));
     expect((await hook(ping, { OFFICE_GATE_URL: garbage.url, OFFICE_GATE_TOKEN: 'abc' })).code).toBe(2);
+    // An error status never lets a call through, whatever its body says.
+    const broken = await office(() => ({ status: 500, text: JSON.stringify({ decision: 'allow' }) }));
+    expect((await hook(ping, { OFFICE_GATE_URL: broken.url, OFFICE_GATE_TOKEN: 'abc' })).code).toBe(2);
     const odd = await office(() => ({ text: JSON.stringify({ decision: 'maybe' }) }));
     expect((await hook(ping, { OFFICE_GATE_URL: odd.url, OFFICE_GATE_TOKEN: 'abc' })).code).toBe(2);
   });

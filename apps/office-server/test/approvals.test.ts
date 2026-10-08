@@ -180,6 +180,19 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
     expect(t.gate.check(t.ada.id, click).decision).toBe('deny');
   });
 
+  it('a task’s approval needs its task open even before the closing is heard (a status written straight to the store)', () => {
+    const t = make();
+    const task = t.company.createTask(OWNER, { assignee: t.ada.id, title: 'Formu doldur' });
+    t.company.start(task.id);
+    const click = { tool_name: 'mcp__plugin_playwright_playwright__browser_click', tool_input: {}, cwd: `${DATA}/desks/ada` };
+    const a = t.approvals.request(t.ada.id, { kind: 'browser', tool: click.tool_name, target: 'browser_click', summary: 'form', scope: 'task' });
+    t.approvals.decide(a.id, true, { via: 'page' });
+    expect(t.gate.check(t.ada.id, click).decision).toBe('allow');
+    t.tasks.update(task.id, { status: 'cancelled' });
+    expect(t.store.get(a.id).status).toBe('approved');
+    expect(t.gate.check(t.ada.id, click).decision).toBe('deny');
+  });
+
   it('a line with two held parts passes only when both are approved, and uses both', () => {
     const t = make();
     const call = { tool_name: 'Bash', tool_input: { command: 'git push origin main && npm publish' }, cwd: `${DATA}/desks/ada` };
