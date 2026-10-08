@@ -386,7 +386,13 @@ export function parseBlueprint(value: unknown): Blueprint {
     if (names.has(lower(name))) throw fail(`“${name}” adı iki rolde geçiyor.`);
     names.add(lower(name));
     const template = str(r.template);
-    if (template !== undefined) roleTemplate(template);
+    if (template !== undefined) {
+      try {
+        roleTemplate(template);
+      } catch (err) {
+        throw fail(`rol “${key}”: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     const model = str(r.model);
     if (model !== undefined && !(MODEL_ALIASES as readonly string[]).includes(model)) throw fail(`rol “${key}”: model ${MODEL_ALIASES.join(', ')} olmalı.`);
     const role = str(r.role);
@@ -394,7 +400,7 @@ export function parseBlueprint(value: unknown): Blueprint {
     return {
       key, name, ...(template !== undefined ? { template } : {}), ...(role !== undefined ? { role } : {}), ...(str(r.title) !== undefined ? { title: str(r.title)! } : {}),
       ...(str(r.team) !== undefined ? { team: str(r.team)! } : {}), ...(model !== undefined ? { model: model as ModelAlias } : {}),
-      ...(r.capabilities !== undefined ? { capabilities: capabilityIds(r.capabilities, `rol “${key}”: yetenekler`) } : {}),
+      ...(r.capabilities !== undefined ? { capabilities: roleCapabilities(r.capabilities, key) } : {}),
     };
   });
   if (roles.length === 0) throw fail('en az bir rol olmalı.');
@@ -493,6 +499,15 @@ export function checkRoutines(b: Blueprint, rules: Constitution, now: number): v
       throw new ValidationError(`Blueprint: rutin “${r.key}”: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (gap < rules.minScheduleMinutes) throw new ValidationError(`Blueprint: rutin “${r.key}”: iki çalışma arası en az ${rules.minScheduleMinutes} dakika olmalı; bu zamanlama ${Math.round(gap)} dakikada bir.`);
+  }
+}
+
+/** A role's capabilities, checked at the blueprint (the error says which role). */
+function roleCapabilities(x: unknown, key: string): string[] {
+  try {
+    return capabilityIds(x, 'yetenekler');
+  } catch (err) {
+    throw new ValidationError(`Blueprint: rol “${key}”: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

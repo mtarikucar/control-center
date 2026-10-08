@@ -122,8 +122,8 @@ describe('Blueprint — proposing it', () => {
       return b;
     };
     const bad: Array<[unknown, RegExp]> = [
-      [variant((b) => void (b.roles[1]!.template = 'yok')), /Bilinmeyen rol şablonu: yok/],
-      [variant((b) => void (b.roles[0]!.capabilities = ['whatsapp.send'])), /Bilinmeyen yetenek: whatsapp.send/],
+      [variant((b) => void (b.roles[1]!.template = 'yok')), /Blueprint: rol “editor”: Bilinmeyen rol şablonu: yok/],
+      [variant((b) => void (b.roles[0]!.capabilities = ['whatsapp.send'])), /Blueprint: rol “yazar”: Bilinmeyen yetenek: whatsapp.send/],
       [variant((b) => void (b.roles[1]!.key = 'yazar')), /rol anahtarı “yazar” iki kez geçiyor/],
       [variant((b) => void (b.roles[1]!.name = 'Ece')), /“Ece” adı iki rolde geçiyor/],
       [variant((b) => void (b.roles[0]!.key = 'Yazar 1')), /anahtar “Yazar 1”: küçük harf, rakam ve tire olmalı/],
