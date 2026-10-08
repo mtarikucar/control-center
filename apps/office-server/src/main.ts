@@ -121,10 +121,8 @@ const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date
 const integrations = new IntegrationRegistry({ db, roster, events });
 // The gate for work that cannot be taken back (B9a): the owner's approvals, and the check the sessions' hook asks for.
 const approvals = new Approvals({ store: new ApprovalStore(db), events, notices, roster, tasks, coordinator: () => company.coordinator(), memory });
-const gate = new Gate({
-  approvals, events, roster, enabled: () => budget.constitution().gateEnabled,
-  context: liveContext({ repoRoot: REPO_ROOT, dataDir: config.dataDir, home: homedir(), port: () => port, hosts: config.allowedHosts }),
-});
+const gateContext = liveContext({ repoRoot: REPO_ROOT, dataDir: config.dataDir, home: homedir(), port: () => port, hosts: config.allowedHosts });
+const gate = new Gate({ approvals, events, roster, enabled: () => budget.constitution().gateEnabled, context: gateContext, git: gateContext.git });
 // Owner endpoints called not the page's way: the coordinator hears, at most once an hour per kind.
 new OwnerFlags({ events, notices, coordinator: () => company.coordinator() });
 const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, memory, store: new BlueprintStore(db), integrations, constitution: () => budget.constitution() });

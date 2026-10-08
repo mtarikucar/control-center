@@ -87,7 +87,8 @@ async function office(lock: readonly string[]) {
     constitution: () => budget.constitution(), proposals, goals: new GoalStore(s.db), state: new CompanyStateStore(s.db), schedules, profile: new ProfileStore(s.db, Date.now, index), onboarding: new OnboardingStore(s.db),
   });
   const approvals = new Approvals({ store: new ApprovalStore(s.db), events: s.events, notices, roster: s.roster, tasks, coordinator: () => company.coordinator(), memory });
-  const gate = new Gate({ approvals, events: s.events, roster: s.roster, enabled: () => budget.constitution().gateEnabled, context: liveContext({ repoRoot: REPO_ROOT, dataDir: s.dataDir, home: process.env.HOME ?? '/', port: () => port, hosts: [] }) });
+  const gateContext = liveContext({ repoRoot: REPO_ROOT, dataDir: s.dataDir, home: process.env.HOME ?? '/', port: () => port, hosts: [] });
+  const gate = new Gate({ approvals, events: s.events, roster: s.roster, enabled: () => budget.constitution().gateEnabled, context: gateContext, git: gateContext.git });
   const agenda = new Agenda({ roster: s.roster, tasks, schedules, company, budget });
   const api = createApi(
     {

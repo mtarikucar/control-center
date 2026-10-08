@@ -52,7 +52,7 @@ function make(o: { enabled?: boolean } = {}) {
 }
 
 describe('the approval store (K1-2)', () => {
-  it('one call, once: a second consume finds nothing; another employee’s approval never passes', () => {
+  it('one call, once: a second consume finds nothing; another employee’s approval never passes', async () => {
     const t = make();
     const base = { employeeId: t.ada.id, taskId: null, kind: 'publish' as const, tool: 'Bash', target: 'git push origin', fingerprint: 'f1', summary: 'yayın', scope: 'call' as const };
     const a = t.store.create(base);
@@ -65,7 +65,7 @@ describe('the approval store (K1-2)', () => {
     expect(t.store.get(a.id).status).toBe('used');
   });
 
-  it('a decision is taken once; an approval runs out at its time; a task’s approvals end with it', () => {
+  it('a decision is taken once; an approval runs out at its time; a task’s approvals end with it', async () => {
     const t = make();
     const base = { employeeId: t.ada.id, taskId: 't1', kind: 'browser' as const, tool: 'mcp__plugin_playwright_playwright__browser_click', target: 'browser_click', fingerprint: 'f2', summary: 'form', scope: 'task' as const };
     const a = t.store.create(base);
@@ -84,7 +84,7 @@ describe('the approval store (K1-2)', () => {
 });
 
 describe('requests, the owner’s decision, notes and the ledger (K1-3)', () => {
-  it('a request waits for the owner: event, an info note to the coordinator; the owner approves: the ledger, a decision note to the asker', () => {
+  it('a request waits for the owner: event, an info note to the coordinator; the owner approves: the ledger, a decision note to the asker', async () => {
     const t = make();
     const task = t.company.createTask(OWNER, { assignee: t.ada.id, title: 'Duyuru' });
     t.company.start(task.id);
@@ -101,16 +101,16 @@ describe('requests, the owner’s decision, notes and the ledger (K1-3)', () => 
     expect(() => t.approvals.decide(a.id, false, { via: 'page' })).toThrow(/bekleyen/);
   });
 
-  it('a denial: the ledger says so, the asker hears the note, nothing passes', () => {
+  it('a denial: the ledger says so, the asker hears the note, nothing passes', async () => {
     const t = make();
     const a = t.approvals.request(t.ada.id, { kind: 'other', tool: 'mcp__probe__ping', target: 'ping', summary: 'deneme' });
     t.approvals.decide(a.id, false, { via: 'page', note: 'gerek yok' });
     expect(t.memory.decisions({ limit: 5 })[0]).toMatchObject({ chosen: 'Reddedildi', reason: 'gerek yok' });
     expect(t.notices(t.ada.id).find((n) => n.topic === 'approval.decided')?.text).toContain('gerek yok');
-    expect(t.gate.check(t.ada.id, t.ping).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, t.ping)).decision).toBe('deny');
   });
 
-  it('what a request needs: a reason, a kind from the list, a task for a task’s scope', () => {
+  it('what a request needs: a reason, a kind from the list, a task for a task’s scope', async () => {
     const t = make();
     expect(() => t.approvals.request(t.ada.id, { kind: 'publish', tool: 'Bash', target: 'git push origin', summary: ' ' })).toThrow(/summary/);
     expect(() => t.approvals.request(t.ada.id, { kind: 'yayın', tool: 'Bash', target: 'x', summary: 's' })).toThrow(/kind/);
@@ -119,7 +119,7 @@ describe('requests, the owner’s decision, notes and the ledger (K1-3)', () => 
 });
 
 describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', () => {
-  it('a call the gate does not hold passes with no event (Read, Grep, an office tool, a desk write)', () => {
+  it('a call the gate does not hold passes with no event (Read, Grep, an office tool, a desk write)', async () => {
     const t = make();
     for (const call of [
       { tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } },
@@ -128,14 +128,14 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
       { tool_name: 'Write', tool_input: { file_path: `${DATA}/desks/ada/a.md` }, cwd: `${DATA}/desks/ada` },
       { tool_name: 'Bash', tool_input: { command: 'pnpm test' }, cwd: `${DATA}/desks/ada` },
     ]) {
-      expect(t.gate.check(t.ada.id, call), call.tool_name).toMatchObject({ decision: 'allow' });
+      expect((await t.gate.check(t.ada.id, call)), call.tool_name).toMatchObject({ decision: 'allow' });
     }
     expect(t.ev('gate.checked')).toEqual([]);
   });
 
   it('held → approvalRequest → the owner approves → the same call passes once → the next is held again', async () => {
     const t = make();
-    const first = t.gate.check(t.ada.id, t.ping);
+    const first = (await t.gate.check(t.ada.id, t.ping));
     expect(first).toMatchObject({ decision: 'deny', kind: 'other', target: 'ping' });
     expect(first.reason).toMatch(/OFİS KAPISI.*approvalRequest/s);
     // The tool takes the call the gate just held when no tool and target are given.
@@ -144,56 +144,56 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
     expect(a).toMatchObject({ tool: 'mcp__probe__ping', target: 'ping', kind: 'other', scope: 'call' });
     expect(reply).toContain(a.id);
     t.approvals.decide(a.id, true, { via: 'page' });
-    expect(t.gate.check(t.ada.id, t.ping)).toMatchObject({ decision: 'allow', approvalId: a.id });
+    expect((await t.gate.check(t.ada.id, t.ping))).toMatchObject({ decision: 'allow', approvalId: a.id });
     expect(t.store.get(a.id).status).toBe('used');
-    expect(t.gate.check(t.ada.id, t.ping).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, t.ping)).decision).toBe('deny');
     expect(t.ev('gate.checked').map((e) => [(e.event as { decision: string }).decision, (e.event as { approvalId: string | null }).approvalId])).toEqual([['deny', null], ['allow', a.id], ['deny', null]]);
     expect(t.ev('gate.checked')[0]).toMatchObject({ employeeId: t.ada.id, event: { tool: 'mcp__probe__ping', kind: 'other', target: 'ping' } });
     expect(t.ev('approval.changed').map((e) => (e.event as { change: string }).change)).toEqual(['requested', 'approved', 'used']);
   });
 
-  it('one employee’s approval does not pass another’s call; an approval runs out after a day', () => {
+  it('one employee’s approval does not pass another’s call; an approval runs out after a day', async () => {
     const t = make();
     const can = t.company.hire(OWNER, { name: 'Can', role: 'r' });
     const a = t.approvals.request(t.ada.id, { kind: 'other', tool: 'mcp__probe__ping', target: 'ping', summary: 's' });
     t.approvals.decide(a.id, true, { via: 'page' });
-    expect(t.gate.check(can.id, { ...t.ping, cwd: `${DATA}/desks/can` }).decision).toBe('deny');
+    expect((await t.gate.check(can.id, { ...t.ping, cwd: `${DATA}/desks/can` })).decision).toBe('deny');
     t.advance(24 * HOUR);
-    expect(t.gate.check(t.ada.id, t.ping).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, t.ping)).decision).toBe('deny');
     expect(t.store.get(a.id).status).toBe('expired');
   });
 
-  it('a task’s scope: browser actions pass while the task is open, and stop when it is done', () => {
+  it('a task’s scope: browser actions pass while the task is open, and stop when it is done', async () => {
     const t = make();
     const task = t.company.createTask(OWNER, { assignee: t.ada.id, title: 'Formu doldur' });
     t.company.start(task.id);
     const click = { tool_name: 'mcp__plugin_playwright_playwright__browser_click', tool_input: { element: 'Gönder' }, cwd: `${DATA}/desks/ada` };
     const type = { tool_name: 'mcp__plugin_playwright_playwright__browser_type', tool_input: { text: 'a' }, cwd: `${DATA}/desks/ada` };
-    expect(t.gate.check(t.ada.id, click).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, click)).decision).toBe('deny');
     const a = t.approvals.request(t.ada.id, { kind: 'browser', tool: click.tool_name, target: 'browser_click', summary: 'form', scope: 'task' });
     t.approvals.decide(a.id, true, { via: 'page' });
-    for (let i = 0; i < 3; i += 1) expect(t.gate.check(t.ada.id, click).decision).toBe('allow');
-    expect(t.gate.check(t.ada.id, type).decision).toBe('allow');
+    for (let i = 0; i < 3; i += 1) expect((await t.gate.check(t.ada.id, click)).decision).toBe('allow');
+    expect((await t.gate.check(t.ada.id, type)).decision).toBe('allow');
     expect(t.store.get(a.id).status).toBe('approved');
     t.company.finish(t.ada.id, task.id, { summary: 'bitti', outputs: [], learned: '' });
     expect(t.store.get(a.id).status).toBe('expired');
-    expect(t.gate.check(t.ada.id, click).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, click)).decision).toBe('deny');
   });
 
-  it('a task’s approval needs its task open even before the closing is heard (a status written straight to the store)', () => {
+  it('a task’s approval needs its task open even before the closing is heard (a status written straight to the store)', async () => {
     const t = make();
     const task = t.company.createTask(OWNER, { assignee: t.ada.id, title: 'Formu doldur' });
     t.company.start(task.id);
     const click = { tool_name: 'mcp__plugin_playwright_playwright__browser_click', tool_input: {}, cwd: `${DATA}/desks/ada` };
     const a = t.approvals.request(t.ada.id, { kind: 'browser', tool: click.tool_name, target: 'browser_click', summary: 'form', scope: 'task' });
     t.approvals.decide(a.id, true, { via: 'page' });
-    expect(t.gate.check(t.ada.id, click).decision).toBe('allow');
+    expect((await t.gate.check(t.ada.id, click)).decision).toBe('allow');
     t.tasks.update(task.id, { status: 'cancelled' });
     expect(t.store.get(a.id).status).toBe('approved');
-    expect(t.gate.check(t.ada.id, click).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, click)).decision).toBe('deny');
   });
 
-  it('review round 1 (important): a browser approval for the task never opens the office page — held per call; only a one-call approval of that very call passes it, once', () => {
+  it('review round 1 (important): a browser approval for the task never opens the office page — held per call; only a one-call approval of that very call passes it, once', async () => {
     const t = make();
     const task = t.company.createTask(OWNER, { assignee: t.ada.id, title: 'Formu doldur' });
     t.company.start(task.id);
@@ -203,40 +203,40 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
     const code = { tool_name: `${PW}browser_run_code_unsafe`, tool_input: { code: "fetch('/api/approvals/x/approve', { method: 'POST' })" }, cwd: `${DATA}/desks/ada` };
     const browser = t.approvals.request(t.ada.id, { kind: 'browser', tool: click.tool_name, target: 'browser_click', summary: 'form', scope: 'task' });
     t.approvals.decide(browser.id, true, { via: 'page' });
-    expect(t.gate.check(t.ada.id, click).decision).toBe('allow');
-    expect(t.gate.check(t.ada.id, office)).toMatchObject({ decision: 'deny', kind: 'self' });
-    expect(t.gate.check(t.ada.id, code)).toMatchObject({ decision: 'deny', kind: 'self' });
+    expect((await t.gate.check(t.ada.id, click)).decision).toBe('allow');
+    expect((await t.gate.check(t.ada.id, office))).toMatchObject({ decision: 'deny', kind: 'self' });
+    expect((await t.gate.check(t.ada.id, code))).toMatchObject({ decision: 'deny', kind: 'self' });
     // The office itself is never asked for a task's worth.
     expect(() => t.approvals.request(t.ada.id, { kind: 'self', tool: office.tool_name, target: 'browser_navigate /', summary: 's', scope: 'task' })).toThrow(/scope/);
     const once = t.approvals.request(t.ada.id, { kind: 'self', tool: office.tool_name, target: 'browser_navigate /', summary: 'sayfaya bakmam gerek' });
     t.approvals.decide(once.id, true, { via: 'page' });
-    expect(t.gate.check(t.ada.id, office).decision).toBe('allow');
-    expect(t.gate.check(t.ada.id, office).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, office)).decision).toBe('allow');
+    expect((await t.gate.check(t.ada.id, office)).decision).toBe('deny');
   });
 
-  it('a line with two held parts passes only when both are approved, and uses both', () => {
+  it('a line with two held parts passes only when both are approved, and uses both', async () => {
     const t = make();
     const call = { tool_name: 'Bash', tool_input: { command: 'git push origin main && npm publish' }, cwd: `${DATA}/desks/ada` };
     const push = t.approvals.request(t.ada.id, { kind: 'publish', tool: 'Bash', target: 'git push origin', summary: 's' });
     t.approvals.decide(push.id, true, { via: 'page' });
-    expect(t.gate.check(t.ada.id, call)).toMatchObject({ decision: 'deny', target: 'npm publish' });
+    expect((await t.gate.check(t.ada.id, call))).toMatchObject({ decision: 'deny', target: 'npm publish' });
     expect(t.store.get(push.id).status).toBe('approved');
     const publish = t.approvals.request(t.ada.id, { kind: 'publish', tool: 'Bash', target: 'npm publish', summary: 's' });
     t.approvals.decide(publish.id, true, { via: 'page' });
-    expect(t.gate.check(t.ada.id, call).decision).toBe('allow');
+    expect((await t.gate.check(t.ada.id, call)).decision).toBe('allow');
     expect([t.store.get(push.id).status, t.store.get(publish.id).status]).toEqual(['used', 'used']);
   });
 
-  it('the switch off (the constitution’s gateEnabled): every call passes and nothing is written', () => {
+  it('the switch off (the constitution’s gateEnabled): every call passes and nothing is written', async () => {
     const t = make({ enabled: false });
-    expect(t.gate.check(t.ada.id, t.ping)).toMatchObject({ decision: 'allow' });
-    expect(t.gate.check(t.ada.id, { tool_name: 'Bash', tool_input: { command: 'git push origin main' } }).decision).toBe('allow');
+    expect((await t.gate.check(t.ada.id, t.ping))).toMatchObject({ decision: 'allow' });
+    expect((await t.gate.check(t.ada.id, { tool_name: 'Bash', tool_input: { command: 'git push origin main' } })).decision).toBe('allow');
     expect([t.ev('gate.checked'), t.ev('approval.changed')]).toEqual([[], []]);
     t.setEnabled(true);
-    expect(t.gate.check(t.ada.id, t.ping).decision).toBe('deny');
+    expect((await t.gate.check(t.ada.id, t.ping)).decision).toBe('deny');
   });
 
-  it('turning the gate on is the owner’s, and on record: the constitution event says when, the coordinator hears what changed', () => {
+  it('turning the gate on is the owner’s, and on record: the constitution event says when, the coordinator hears what changed', async () => {
     const t = make();
     const before = t.events.lastSeq();
     t.budget.ownerSetConstitution({ gateEnabled: true });
@@ -245,9 +245,9 @@ describe('the gate’s check (K1-3, K1-7): gate.checked only for held calls', ()
     expect(t.notices(t.coordinator.id).filter((n) => n.topic === 'constitution.changed').map((n) => n.text)).toEqual([expect.stringContaining('Geri alınamaz iş kapısı kapalı → açık')]);
   });
 
-  it('a hook input it cannot read is refused (fail-closed)', () => {
+  it('a hook input it cannot read is refused (fail-closed)', async () => {
     const t = make();
-    for (const bad of [null, 'x', {}, { tool_name: 3 }]) expect(t.gate.check(t.ada.id, bad).decision).toBe('deny');
+    for (const bad of [null, 'x', {}, { tool_name: 3 }]) expect((await t.gate.check(t.ada.id, bad)).decision).toBe('deny');
   });
 });
 
@@ -275,7 +275,7 @@ describe('the tools (K1-3): approvalRequest and approvalsRead', () => {
 });
 
 describe('owner flags (K1-7): a note to the coordinator at most once an hour per request kind', () => {
-  it('300 refused tries of the same kind: 300 events, one note with the count; after the hour, a new note', () => {
+  it('300 refused tries of the same kind: 300 events, one note with the count; after the hour, a new note', async () => {
     let now = 0;
     const s = setup(8, () => now);
     const f = fakeEngine(s);

@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -17,6 +18,8 @@ export interface GateDeps {
   enabled: () => boolean;
   /** The context of one employee's calls (their desk; the live checkout; git's answers). */
   context: (employee: Pick<Employee, 'slug'>) => GateContext;
+  /** git's answers, asked asynchronously when the context lacked them (liveContext's own; absent in tests that fake it). */
+  git?: { missing(): boolean; refresh(): Promise<void> };
 }
 
 export interface HeldCall {
@@ -46,7 +49,7 @@ export class Gate {
     return this.#held.get(employeeId) ?? null;
   }
 
-  check(employeeId: string, input: unknown): GateDecision {
+  async check(employeeId: string, input: unknown): Promise<GateDecision> {
     const hook = input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
     if (!hook || typeof hook.tool_name !== 'string' || !hook.tool_name) {
       return { decision: 'deny', reason: 'OFİS KAPISI: kancanın girdisi okunamadı; çağrı yapılmadı.' };
@@ -54,7 +57,14 @@ export class Gate {
     if (!this.#d.enabled()) return { decision: 'allow', reason: 'kapı kapalı' };
     const tool = hook.tool_name;
     const employee = this.#d.roster.get(employeeId);
-    const verdict = classifyCall(tool, hook.tool_input, typeof hook.cwd === 'string' ? hook.cwd : undefined, this.#d.context(employee));
+    const classify = () => classifyCall(tool, hook.tool_input, typeof hook.cwd === 'string' ? hook.cwd : undefined, this.#d.context(employee));
+    let verdict = classify();
+    // What git had not answered yet was taken the careful way; ask it (off the event loop) and classify again —
+    // twice at most: a worktree the first answer lists may need its own.
+    for (let round = 0; round < 2 && this.#d.git?.missing(); round += 1) {
+      await this.#d.git.refresh();
+      verdict = classify();
+    }
     if (!verdict.gated) return { decision: 'allow', reason: 'serbest' };
     const passed = this.#d.approvals.pass(employeeId, tool, verdict.parts);
     const first = verdict.parts[0]!;
@@ -79,41 +89,77 @@ export class Gate {
   }
 }
 
+const run = promisify(execFile);
+
 /**
- * The real context: the live checkout's worktrees and their state come from git (cached for a second: a burst of
- * calls asks once), a repository's top folder from the nearest .git, a script's text from the disk.
+ * git's answers about the live checkout's worktrees, kept for two seconds (review round 1, Kerem: never run git in the
+ * office's event loop). A question it has no fresh answer to is answered the careful way at once — the list as it was
+ * (or empty), a worktree as dirty — and remembered; refresh() asks git for them all, in parallel, asynchronously.
  */
-export function liveContext(o: { repoRoot: string; dataDir: string; home: string; port: () => number; hosts: string[] }): (employee: Pick<Employee, 'slug'>) => GateContext {
-  const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
-  let listed: { at: number; paths: string[] } | null = null;
-  const states = new Map<string, { at: number; dirty: boolean }>();
-  const worktrees = () => {
-    if (listed && Date.now() - listed.at < 1000) return listed.paths;
-    let paths: string[] = [];
-    try {
-      paths = git(['-C', o.repoRoot, 'worktree', 'list', '--porcelain'])
-        .split('\n')
-        .filter((l) => l.startsWith('worktree '))
-        .map((l) => l.slice('worktree '.length));
-    } catch {
-      paths = [];
+export class GitState {
+  readonly #repoRoot: string;
+  readonly #ttlMs: number;
+  readonly #timeoutMs: number;
+  #list: { at: number; paths: string[] } | null = null;
+  readonly #states = new Map<string, { at: number; dirty: boolean }>();
+  #wantList = false;
+  readonly #wantDirty = new Set<string>();
+
+  constructor(repoRoot: string, o: { ttlMs?: number; timeoutMs?: number } = {}) {
+    this.#repoRoot = repoRoot;
+    this.#ttlMs = o.ttlMs ?? 2000;
+    this.#timeoutMs = o.timeoutMs ?? 2000;
+  }
+
+  worktrees(): string[] {
+    if (this.#list && Date.now() - this.#list.at < this.#ttlMs) return this.#list.paths;
+    this.#wantList = true;
+    return this.#list?.paths ?? [];
+  }
+
+  dirty(wt: string): boolean {
+    const known = this.#states.get(wt);
+    if (known && Date.now() - known.at < this.#ttlMs) return known.dirty;
+    this.#wantDirty.add(wt);
+    return true;
+  }
+
+  missing(): boolean {
+    return this.#wantList || this.#wantDirty.size > 0;
+  }
+
+  async refresh(): Promise<void> {
+    const git = (args: string[]) => run('git', args, { encoding: 'utf8', timeout: this.#timeoutMs }).then((r) => r.stdout);
+    const jobs: Array<Promise<void>> = [];
+    if (this.#wantList) {
+      this.#wantList = false;
+      jobs.push(
+        git(['-C', this.#repoRoot, 'worktree', 'list', '--porcelain'])
+          .then((out) => out.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice('worktree '.length)))
+          .catch(() => [] as string[])
+          .then((paths) => void (this.#list = { at: Date.now(), paths })),
+      );
     }
-    listed = { at: Date.now(), paths };
-    return paths;
-  };
-  const dirty = (wt: string) => {
-    const cached = states.get(wt);
-    if (cached && Date.now() - cached.at < 1000) return cached.dirty;
-    let isDirty = true;
-    try {
-      isDirty = git(['-C', wt, 'status', '--porcelain', '--untracked-files=all']).trim() !== '';
-    } catch {
-      // A worktree git cannot read: as if it held work (the careful side).
-      isDirty = true;
+    for (const wt of [...this.#wantDirty]) {
+      this.#wantDirty.delete(wt);
+      jobs.push(
+        git(['-C', wt, 'status', '--porcelain', '--untracked-files=all'])
+          .then((out) => out.trim() !== '')
+          // A worktree git cannot read: as if it held work (the careful side).
+          .catch(() => true)
+          .then((dirty) => void this.#states.set(wt, { at: Date.now(), dirty })),
+      );
     }
-    states.set(wt, { at: Date.now(), dirty: isDirty });
-    return isDirty;
-  };
+    await Promise.all(jobs);
+  }
+}
+
+/**
+ * The real context: the live checkout's worktrees and their state from git (GitState, asynchronously), a repository's
+ * top folder from the nearest .git, a script's text from the disk. Its `git` goes to the Gate.
+ */
+export function liveContext(o: { repoRoot: string; dataDir: string; home: string; port: () => number; hosts: string[] }): ((employee: Pick<Employee, 'slug'>) => GateContext) & { git: GitState } {
+  const git = new GitState(o.repoRoot);
   const toplevel = (path: string) => {
     for (let dir = resolve(path); ; dir = dirname(dir)) {
       if (existsSync(join(dir, '.git'))) return dir;
@@ -137,14 +183,14 @@ export function liveContext(o: { repoRoot: string; dataDir: string; home: string
   };
   const readScript = (path: string) => {
     try {
-      const s = statSync(path);
-      return s.isFile() && s.size <= MAX_SCRIPT_BYTES ? readFileSync(path, 'utf8') : null;
+      const st = statSync(path);
+      return st.isFile() && st.size <= MAX_SCRIPT_BYTES ? readFileSync(path, 'utf8') : null;
     } catch {
       return null;
     }
   };
   const tmpDirs = [...new Set(['/tmp', tmpdir()])];
-  return (employee) => ({
+  const context = (employee: Pick<Employee, 'slug'>): GateContext => ({
     home: o.home,
     repoRoot: o.repoRoot,
     dataDir: o.dataDir,
@@ -153,9 +199,10 @@ export function liveContext(o: { repoRoot: string; dataDir: string; home: string
     officeHosts: o.hosts,
     tmpDirs,
     toplevel,
-    worktrees,
-    dirty,
+    worktrees: () => git.worktrees(),
+    dirty: (wt) => git.dirty(wt),
     readScript,
     realpath,
   });
+  return Object.assign(context, { git });
 }

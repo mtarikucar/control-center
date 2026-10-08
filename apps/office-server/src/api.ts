@@ -34,7 +34,7 @@ export interface ApiDeps {
   /** The office tools employees call over MCP (absent: no /mcp route). */
   mcp?: { tokens: TokenRegistry; tools: McpTool[] };
   /** The gate the sessions' hook asks before a tool call (B9a; absent: no /gate/check route). Needs `mcp` (its tokens). */
-  gate?: { check(employeeId: string, input: unknown): GateDecision };
+  gate?: { check(employeeId: string, input: unknown): Promise<GateDecision> };
   /** The company layer: plans, tasks and the coordinator (absent: v1 office); `clock` is the office clock (spec §5), `agenda` the per-employee sheet (§6.1). */
   company?: {
     service: Company; tasks: TaskStore; plans: PlanStore; memory: Memory; budget: Budget; proposals: ProposalStore; clock?: { status(): ClockStatus }; agenda?: { report(): AgendaReport };
@@ -163,7 +163,7 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     if (!employeeId) throw new UnauthorizedError('Geçerli bir oturum jetonu gerekli.');
     const body = await readJson(req);
     if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
-    return sendJson(res, 200, d.gate.check(employeeId, body));
+    return sendJson(res, 200, await d.gate.check(employeeId, body));
   }
   // The owner's endpoints: anything under /api/ that changes something (the MCP tools above have their own tokens).
   if (method === 'GET' && url.pathname === '/api/owner/nonce') return sendJson(res, 200, guard.issue(req, url.pathname));

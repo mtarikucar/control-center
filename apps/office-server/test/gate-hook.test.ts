@@ -134,7 +134,7 @@ describe('hooks/gate.mjs (K2): exit 0 lets the call run, exit 2 stops it; every 
 });
 
 describe('the real context (K2): git is asked about the live checkout’s worktrees, in a throwaway repository', () => {
-  it('a clean sibling worktree may go; one with uncommitted work may not; the live checkout’s own rules stand', () => {
+  it('a clean sibling worktree may go; one with uncommitted work may not; the live checkout’s own rules stand', async () => {
     const root = tempDir('gate-k2-');
     const repo = join(root, 'control-center');
     mkdirSync(repo);
@@ -150,7 +150,15 @@ describe('the real context (K2): git is asked about the live checkout’s worktr
     const data = join(root, 'data');
     const desk = join(data, 'desks', 'mert');
     mkdirSync(desk, { recursive: true });
-    const ctx = liveContext({ repoRoot: repo, dataDir: data, home: root, port: () => 4319, hosts: [] })({ slug: 'mert' });
+    const live = liveContext({ repoRoot: repo, dataDir: data, home: root, port: () => 4319, hosts: [] });
+    const ctx = live({ slug: 'mert' });
+    // Review round 1 (Kerem, minor): git is never run in the office's event loop. Before an answer comes, a worktree is
+    // taken as dirty (the careful side) and the list as empty; the gate then asks git asynchronously and classifies again.
+    expect(ctx.worktrees()).toEqual([]);
+    expect([ctx.dirty(join(root, 'clean')), ctx.dirty(join(root, 'dirty'))]).toEqual([true, true]);
+    expect(live.git.missing()).toBe(true);
+    await live.git.refresh();
+    expect(live.git.missing()).toBe(false);
     expect(ctx.worktrees().sort()).toEqual([join(root, 'clean'), join(root, 'dirty'), repo].sort());
     expect([ctx.dirty(join(root, 'clean')), ctx.dirty(join(root, 'dirty'))]).toEqual([false, true]);
     expect(ctx.toplevel(join(repo, 'apps', 'yok'))).toBe(repo);
@@ -162,6 +170,25 @@ describe('the real context (K2): git is asked about the live checkout’s worktr
     expect(bash(`git -C ${repo} worktree remove --force ${join(root, 'clean')}`).gated).toBe(false);
     expect(bash('git checkout -b x', repo).parts.map((p) => p.kind)).toEqual(['self']);
     expect(bash('git checkout -b x', join(root, 'clean')).gated).toBe(false);
+    // The gate itself asks git when it must, and classifies again with the answer.
+    const { Gate } = await import('../src/company/gate.ts');
+    const events: unknown[] = [];
+    const fresh = liveContext({ repoRoot: repo, dataDir: data, home: root, port: () => 4319, hosts: [] });
+    const gate = new Gate({
+      approvals: { pass: () => ({ ok: false as const, missing: { kind: 'delete' as const, target: '', why: '' } }) } as never,
+      events: { append: (_: unknown, e: unknown) => events.push(e) } as never,
+      roster: { get: () => ({ slug: 'mert' }) } as never,
+      enabled: () => true,
+      context: fresh,
+      git: fresh.git,
+    });
+    // While git answers, the office's event loop runs on (a timer set before the check fires before it ends).
+    let ticked = false;
+    setTimeout(() => void (ticked = true), 0);
+    const first = gate.check('mert', { tool_name: 'Bash', tool_input: { command: `rm -rf ${join(root, 'clean')}` }, cwd: desk });
+    expect((await first).decision).toBe('allow');
+    expect(ticked).toBe(true);
+    expect((await gate.check('mert', { tool_name: 'Bash', tool_input: { command: `rm -rf ${join(root, 'dirty')}` }, cwd: desk })).decision).toBe('deny');
     // A script is read from the disk as it stands.
     writeFileSync(join(desk, 'yayin.sh'), 'git push origin main\n');
     expect(bash('bash yayin.sh').parts.map((p) => p.kind)).toEqual(['publish']);
