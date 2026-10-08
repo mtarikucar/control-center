@@ -21,14 +21,15 @@ const V9_TABLES = [...V5_TABLES, 'company_state', 'goals'].sort();
 const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
 const V13_TABLES = [...V10_TABLES, 'company_profile'].sort();
 const V14_TABLES = [...V13_TABLES, 'onboarding', 'onboarding_rounds'].sort();
+const V15_TABLES = [...V14_TABLES, 'integrations'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(14);
-    expect(tables(db)).toEqual(V14_TABLES);
+    expect(migrateUp(db)).toBe(15);
+    expect(tables(db)).toEqual(V15_TABLES);
   });
 
   it('numbers the migrations 1, 2, 3 … with no gap and no repeat (a merge that numbers two alike or skips one fails here)', () => {
@@ -41,14 +42,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(14);
-    expect(tables(db)).toEqual(V14_TABLES);
+    expect(migrateUp(db)).toBe(15);
+    expect(tables(db)).toEqual(V15_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(14);
+    expect(migrateUp(db)).toBe(15);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -288,7 +289,7 @@ describe('migrations', () => {
     const db = openDb(':memory:');
     migrateUp(db, upTo(13));
     db.prepare("INSERT INTO company_profile (id, version, section, json, assumed, by, ts) VALUES ('p1', 1, 'identity', '{}', 0, 'c', 1)").run();
-    migrateUp(db);
+    migrateUp(db, upTo(14));
     expect(appliedVersion(db)).toBe(14);
     expect(tables(db)).toEqual(V14_TABLES);
     expect(columns(db, 'onboarding')).toEqual(['id', 'description', 'status', 'started_by', 'started_at', 'finished_at']);
@@ -298,6 +299,23 @@ describe('migrations', () => {
     expect(migrateDown(db, 13)).toBe(13);
     expect(tables(db)).toEqual(V13_TABLES);
     expect(db.prepare('SELECT COUNT(*) AS n FROM company_profile').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(14);
+    expect(migrateUp(db, upTo(14))).toBe(14);
+  });
+
+  it('v15 adds the integration registry, empty (what the desks report stays in the events); v15 down restores v14 exactly', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(14));
+    db.prepare("INSERT INTO onboarding (id, description, status, started_by, started_at) VALUES ('o1', 'cümle', 'active', 'c', 1)").run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(15);
+    expect(tables(db)).toEqual(V15_TABLES);
+    expect(columns(db, 'integrations')).toEqual(['name', 'kind', 'closed', 'capabilities', 'auth_needed', 'cost_note', 'note', 'registered_by', 'registered_at', 'updated_at']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM integrations').get()).toMatchObject({ n: 0 });
+    db.prepare("INSERT INTO integrations (name, kind, registered_by, registered_at, updated_at) VALUES ('x', 'cli', 'c', 1, 1)").run();
+    expect(db.prepare('SELECT closed, capabilities FROM integrations').get()).toMatchObject({ closed: 0, capabilities: '[]' });
+    expect(migrateDown(db, 14)).toBe(14);
+    expect(tables(db)).toEqual(V14_TABLES);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM onboarding').get()).toMatchObject({ n: 1 });
+    expect(migrateUp(db)).toBe(15);
   });
 });

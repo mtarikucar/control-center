@@ -87,13 +87,27 @@ export function replayedUuid(raw: unknown): string | null {
   return typeof raw.uuid === 'string' ? raw.uuid : null;
 }
 
+/** How the CLI names a server's tools: `claude.ai Gmail` → `mcp__claude_ai_Gmail__…`. */
+export function mcpToolPrefix(server: string): string {
+  return `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__`;
+}
+
 export function normalize(raw: unknown): OfficeEvent[] {
   if (!isObj(raw)) return [];
   switch (raw.type) {
     case 'system': {
       if (raw.subtype !== 'init') return [];
       const servers = Array.isArray(raw.mcp_servers) ? raw.mcp_servers.filter(isObj) : [];
-      return [{ type: 'session.started', model: str(raw.model), mcp: servers.map((m) => ({ name: str(m.name), status: str(m.status) })) }];
+      // The session's own tool list: a server the desk's settings deny stays connected but has none of its tools in it.
+      const tools = Array.isArray(raw.tools) ? raw.tools.filter((t): t is string => typeof t === 'string') : null;
+      const count = (name: string) => tools!.filter((t) => t.startsWith(mcpToolPrefix(name))).length;
+      return [
+        {
+          type: 'session.started',
+          model: str(raw.model),
+          mcp: servers.map((m) => (tools === null ? { name: str(m.name), status: str(m.status) } : { name: str(m.name), status: str(m.status), tools: count(str(m.name)) })),
+        },
+      ];
     }
     case 'assistant':
       return blocks(raw.message).flatMap((b): OfficeEvent[] => {

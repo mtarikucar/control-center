@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type ClockStatus } from '@cc/shared';
 import { createApi } from '../src/api.ts';
 import { Agenda } from '../src/company/agenda.ts';
+import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { performanceReport } from '../src/performance.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
@@ -24,7 +25,8 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   const agenda = new Agenda({ roster: s.roster, tasks: c.tasks, schedules: c.schedules, company: c.company, budget: c.budget });
   // Wired like main.ts: the performance report reads the same database.
   const performance = { report: (r: { days?: number } = {}) => performanceReport(s.db, { since: r.days ? Date.now() - r.days * 86_400_000 : null }) };
-  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
+  const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
+  const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, integrations, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
@@ -228,6 +230,16 @@ describe('company API', () => {
     expect(t.company.profile().sections.identity).toMatchObject({ by: 'owner', assumedFields: [], fields: { name: 'Tatlı Fırın' } });
     expect((await call(t.port, 'POST', '/api/onboarding/answers', { answers: { revenue: '1M' } })).status).toBe(400);
     expect((await call(t.port, 'POST', '/api/onboarding/answers', {})).status).toBe(400);
+  });
+
+  it('shows the owner the integration registry, read-only', async () => {
+    const t = await start();
+    const c = t.company.hireCoordinator();
+    expect((await call(t.port, 'GET', '/api/integrations')).body).toEqual([]);
+    t.events.append(c.id, { type: 'session.started', model: 'm', mcp: [{ name: 'claude.ai Gmail', status: 'needs-auth' }, { name: 'office', status: 'connected' }] });
+    const list = (await call(t.port, 'GET', '/api/integrations')).body;
+    expect(list.map((i: { name: string; status: string }) => [i.name, i.status])).toEqual([['office', 'connected'], ['claude.ai Gmail', 'needs_auth']]);
+    expect(list[1].desks).toEqual([expect.objectContaining({ employeeId: c.id, status: 'needs_auth', open: false })]);
   });
 
   it('shows the owner the budget and lets them change the constitution', async () => {

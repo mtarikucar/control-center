@@ -1,7 +1,8 @@
-import { KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
+import { integrationsText, type IntegrationRegistry } from '../company/integrations.ts';
 import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
 import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
@@ -108,6 +109,8 @@ export function officeTools(o: {
   agenda: { text(employeeId?: string): string };
   /** How the work went, from the log (performanceRead); absent in tests that do not care. */
   performance?: { report(o: { days?: number }): PerformanceReport };
+  /** The integration registry (integrationsList, integrationRegister); absent in tests that do not care. */
+  integrations?: IntegrationRegistry;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -316,6 +319,20 @@ export function officeTools(o: {
           return profileHistoryText(profileSection(section), company.profileHistory(section), (id) => company.nameOf(id));
         }
         return profileText(company.profile(), section === undefined ? undefined : profileSection(section));
+      },
+    },
+    {
+      name: 'integrationsList',
+      description: 'Read the integration registry, read-only: every connector the office has, its status (connected, denied — connected but the desk’s session has none of its tools —, needs_auth, pending, failed, closed, unknown), on which desks it is open or shut and why, and what the coordinator noted (capabilities, what the owner must do, cost). It calls no connector. status or employee narrow it.',
+      inputSchema: object({ status: { type: 'string', enum: [...INTEGRATION_STATUSES] }, employee: s('Only what this person’s desk reports (id or name).') }),
+      kinds: EVERYONE,
+      run: (_ctx, args) => {
+        if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
+        const status = optStr(args, 'status');
+        if (status !== undefined && !(INTEGRATION_STATUSES as readonly string[]).includes(status)) throw new ValidationError(`durum (status) ${INTEGRATION_STATUSES.slice(0, -1).join(', ')} ya da ${INTEGRATION_STATUSES.at(-1)} olmalı.`);
+        const who = optStr(args, 'employee');
+        const list = o.integrations.list({ status: status as IntegrationStatus | undefined, employee: who === undefined ? undefined : findPerson(who).id });
+        return integrationsText(list, status !== undefined || who !== undefined);
       },
     },
     {
@@ -734,6 +751,23 @@ export function officeTools(o: {
         return entry.assumed
           ? `Profil güncellendi: ${label} (sürüm ${entry.version}; varsayım: ${entry.assumedFields.join(', ')}). Sahibi doğrulayınca bu alanları assumed: false ile yeniden yaz.`
           : `Profil güncellendi: ${label} (sürüm ${entry.version}).`;
+      },
+    },
+    {
+      name: 'integrationRegister',
+      description: `Record a connector in the integration registry by hand (coordinator): one the sessions do not show (an adapter or a CLI, give kind), or notes on one they do — capabilities, what the owner must do (authNeeded), cost, a note — or close it (closed: true; the registry marks it, B9 will shut it in sessions). Fields given are written, the others kept. Kinds: ${INTEGRATION_KINDS.join(', ')}.`,
+      inputSchema: object(
+        {
+          name: s('Connector name as the sessions report it (e.g. "claude.ai Gmail") or your own.'), kind: { type: 'string', enum: [...INTEGRATION_KINDS] }, capabilities: strings('What it can do, e.g. email.read, social.publish.'),
+          authNeeded: s('What the owner must do to make it work.'), costNote: s('What it costs.'), note: s('A note.'), closed: { type: 'boolean', description: 'Closed: not to be used.' },
+        },
+        ['name'],
+      ),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
+        const i = o.integrations.register(employee.id, { name: args.name, kind: args.kind, capabilities: args.capabilities, authNeeded: args.authNeeded, costNote: args.costNote, note: args.note, closed: args.closed });
+        return `Kayıt güncellendi: ${i.name} [${INTEGRATION_STATUS_LABELS[i.status]}].`;
       },
     },
     {

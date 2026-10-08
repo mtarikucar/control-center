@@ -35,14 +35,14 @@ describe('office tools', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name).sort();
     expect(names('member')).toEqual([
-      'askColleague', 'briefRead', 'decisionsRead', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'profileRead', 'propose', 'recordSpend', 'reviewDecide',
+      'askColleague', 'briefRead', 'decisionsRead', 'integrationsList', 'memorySearch', 'methodRead', 'myTasks', 'noteWrite', 'officeStatus', 'playbookRead', 'profileRead', 'propose', 'recordSpend', 'reviewDecide',
       'taskFinish', 'taskPark', 'taskPass', 'taskUpdate',
     ]);
     expect(names('lead').filter((n) => !names('member').includes(n))).toEqual([
       'agendaRead', 'decisionRecord', 'goalsRead', 'performanceRead', 'playbookUpdate', 'proposalDecide', 'proposalsOpen', 'scheduleCreate', 'scheduleList', 'scheduleUpdate', 'taskAssign', 'taskCreate', 'taskReprioritize', 'taskUnpark',
     ]);
     expect(names('coordinator').filter((n) => !names('lead').includes(n))).toEqual([
-      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'onboardingFinish', 'onboardingNext', 'onboardingRead', 'onboardingStart', 'planPropose', 'planRetro', 'planRevise', 'profileUpdate', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
+      'appointLead', 'briefUpdate', 'budgetStatus', 'editRoleCard', 'employeeNote', 'goalSet', 'hire', 'integrationRegister', 'onboardingFinish', 'onboardingNext', 'onboardingRead', 'onboardingStart', 'planPropose', 'planRetro', 'planRevise', 'profileUpdate', 'reportToOwner', 'restUntil', 'setModel', 'sleep', 'wake',
     ]);
     for (const tool of t.tools) expect(tool.inputSchema).toMatchObject({ type: 'object' });
   });

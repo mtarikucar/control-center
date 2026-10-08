@@ -12,6 +12,7 @@ import { Memory } from './company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
 import { Dispatcher } from './company/dispatcher.ts';
 import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
+import { IntegrationRegistry } from './company/integrations.ts';
 import { OnboardingStore } from './company/onboarding-store.ts';
 import { ProfileStore } from './company/profile-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
@@ -78,12 +79,14 @@ const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 
 // How the work went (B4): read from the log on demand, the last `days` or all time.
 const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };
+// Which connectors the office has (B3): read from the sessions' reports and the coordinator's records.
+const integrations = new IntegrationRegistry({ db, roster, events });
 
 const api = createApi(
   {
     engine, roster, events, quota,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance }) },
-    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance },
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations }) },
+    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, integrations },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );

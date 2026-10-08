@@ -1,0 +1,417 @@
+{
+ "type": "system",
+ "subtype": "init",
+ "model": "claude-haiku-5-5",
+ "claude_code_version": "2.1.293",
+ "mcp_servers": [
+  {
+   "name": "plugin:github:github",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:context7:context7",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:playwright:playwright",
+   "status": "connected",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:design:figma",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:design:linear",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:design:asana",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:design:atlassian",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:design:intercom",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:design:google calendar",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:design:gmail",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:monday",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:clickup",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:amplitude",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:amplitude-eu",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:pendo",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:fireflies",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:google calendar",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:gmail",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:product-management:similarweb",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:productivity:google calendar",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:productivity:gmail",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:engineering:pagerduty",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:engineering:datadog",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:engineering:google calendar",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:engineering:gmail",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:canva",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:hubspot",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:ahrefs",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:similarweb",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:klaviyo",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:supermetrics",
+   "status": "needs-auth",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:google calendar",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "plugin:marketing:gmail",
+   "status": "failed",
+   "source": "plugin"
+  },
+  {
+   "name": "blender",
+   "status": "connected",
+   "source": "user"
+  },
+  {
+   "name": "cad",
+   "status": "connected",
+   "source": "user"
+  },
+  {
+   "name": "claude.ai Claude Docs",
+   "status": "connected",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai jeeta",
+   "status": "pending",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Higgsfield",
+   "status": "pending",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Slack",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Expedia",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Kiwi.com",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Turkish Airlines",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Trivago",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai apify",
+   "status": "connected",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai firecrawl",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Booking.com",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai GoDaddy",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Notion",
+   "status": "connected",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Google Calendar",
+   "status": "connected",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Google Drive",
+   "status": "needs-auth",
+   "source": "claudeai"
+  },
+  {
+   "name": "claude.ai Gmail",
+   "status": "connected",
+   "source": "claudeai"
+  }
+ ],
+ "tools": [
+  "Task",
+  "Bash",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "DesignSync",
+  "Edit",
+  "EnterWorktree",
+  "ExitWorktree",
+  "ListAgents",
+  "ListMcpResourcesTool",
+  "LSP",
+  "Monitor",
+  "NotebookEdit",
+  "PushNotification",
+  "Read",
+  "ReadMcpResourceDirTool",
+  "ReadMcpResourceTool",
+  "RemoteTrigger",
+  "ReportFindings",
+  "ScheduleWakeup",
+  "SendMessage",
+  "Skill",
+  "TaskStop",
+  "ToolSearch",
+  "WebFetch",
+  "WebSearch",
+  "Workflow",
+  "Write",
+  "mcp__blender__disable_telemetry",
+  "mcp__blender__execute_blender_code",
+  "mcp__blender__generate_3d",
+  "mcp__blender__get_addon_status",
+  "mcp__blender__get_scene_info",
+  "mcp__blender__import_asset",
+  "mcp__blender__look",
+  "mcp__blender__record_trajectory_feedback",
+  "mcp__blender__search_assets",
+  "mcp__cad__build_cassette",
+  "mcp__cad__build_design",
+  "mcp__cad__cad_programs",
+  "mcp__cad__cad_status",
+  "mcp__cad__cassette_catalog",
+  "mcp__cad__create_design",
+  "mcp__cad__design_cassette",
+  "mcp__cad__design_schema",
+  "mcp__cad__export_part",
+  "mcp__cad__get_design",
+  "mcp__cad__import_cad_file",
+  "mcp__cad__measure_part",
+  "mcp__cad__run_kernel_script",
+  "mcp__cad__thread_table",
+  "mcp__cad__verify_part",
+  "mcp__claude_ai_apify__abort-actor-run",
+  "mcp__claude_ai_apify__apify--rag-web-browser",
+  "mcp__claude_ai_apify__apify--web-fetch",
+  "mcp__claude_ai_apify__call-actor",
+  "mcp__claude_ai_apify__fetch-actor-details",
+  "mcp__claude_ai_apify__fetch-apify-docs",
+  "mcp__claude_ai_apify__get-actor-run",
+  "mcp__claude_ai_apify__get-dataset-items",
+  "mcp__claude_ai_apify__get-key-value-store-record",
+  "mcp__claude_ai_apify__search-actors",
+  "mcp__claude_ai_apify__search-apify-docs",
+  "mcp__claude_ai_Claude_Docs__batch",
+  "mcp__claude_ai_Claude_Docs__create",
+  "mcp__claude_ai_Claude_Docs__delete",
+  "mcp__claude_ai_Claude_Docs__export",
+  "mcp__claude_ai_Claude_Docs__guide",
+  "mcp__claude_ai_Claude_Docs__query",
+  "mcp__claude_ai_Claude_Docs__read",
+  "mcp__claude_ai_Claude_Docs__update",
+  "mcp__claude_ai_Google_Calendar__create_event",
+  "mcp__claude_ai_Google_Calendar__delete_event",
+  "mcp__claude_ai_Google_Calendar__get_event",
+  "mcp__claude_ai_Google_Calendar__list_calendars",
+  "mcp__claude_ai_Google_Calendar__list_events",
+  "mcp__claude_ai_Google_Calendar__respond_to_event",
+  "mcp__claude_ai_Google_Calendar__search_events",
+  "mcp__claude_ai_Google_Calendar__suggest_time",
+  "mcp__claude_ai_Google_Calendar__update_event",
+  "mcp__claude_ai_Notion__notion-check-mcp-next-steps",
+  "mcp__claude_ai_Notion__notion-convert-page-to-skill",
+  "mcp__claude_ai_Notion__notion-create-attachment",
+  "mcp__claude_ai_Notion__notion-create-comment",
+  "mcp__claude_ai_Notion__notion-create-database",
+  "mcp__claude_ai_Notion__notion-create-file-upload",
+  "mcp__claude_ai_Notion__notion-create-folder",
+  "mcp__claude_ai_Notion__notion-create-pages",
+  "mcp__claude_ai_Notion__notion-create-view",
+  "mcp__claude_ai_Notion__notion-download-attachment",
+  "mcp__claude_ai_Notion__notion-download-skill",
+  "mcp__claude_ai_Notion__notion-duplicate-page",
+  "mcp__claude_ai_Notion__notion-fetch",
+  "mcp__claude_ai_Notion__notion-get-async-task",
+  "mcp__claude_ai_Notion__notion-get-comments",
+  "mcp__claude_ai_Notion__notion-get-file-download-urls",
+  "mcp__claude_ai_Notion__notion-get-session-status",
+  "mcp__claude_ai_Notion__notion-get-teams",
+  "mcp__claude_ai_Notion__notion-get-tool-access",
+  "mcp__claude_ai_Notion__notion-get-users",
+  "mcp__claude_ai_Notion__notion-list-favorite-pages",
+  "mcp__claude_ai_Notion__notion-list-private-pages",
+  "mcp__claude_ai_Notion__notion-list-recent-pages",
+  "mcp__claude_ai_Notion__notion-list-session-events",
+  "mcp__claude_ai_Notion__notion-list-shared-pages",
+  "mcp__claude_ai_Notion__notion-memory-search",
+  "mcp__claude_ai_Notion__notion-move-pages",
+  "mcp__claude_ai_Notion__notion-query-data-sources",
+  "mcp__claude_ai_Notion__notion-query-meeting-notes",
+  "mcp__claude_ai_Notion__notion-query-multiple-data-sources",
+  "mcp__claude_ai_Notion__notion-query-sessions",
+  "mcp__claude_ai_Notion__notion-read-session-event",
+  "mcp__claude_ai_Notion__notion-restore-pages",
+  "mcp__claude_ai_Notion__notion-search",
+  "mcp__claude_ai_Notion__notion-search-agents",
+  "mcp__claude_ai_Notion__notion-search-sessions",
+  "mcp__claude_ai_Notion__notion-send-message-to-session",
+  "mcp__claude_ai_Notion__notion-show-advanced-analysis-next-steps",
+  "mcp__claude_ai_Notion__notion-spawn-session",
+  "mcp__claude_ai_Notion__notion-stop-session",
+  "mcp__claude_ai_Notion__notion-update-data-source",
+  "mcp__claude_ai_Notion__notion-update-folder",
+  "mcp__claude_ai_Notion__notion-update-page",
+  "mcp__claude_ai_Notion__notion-update-view",
+  "mcp__claude_ai_Notion__notion-upload-skill",
+  "mcp__claude_ai_Notion__notion-wait-session",
+  "mcp__plugin_playwright_playwright__browser_click",
+  "mcp__plugin_playwright_playwright__browser_close",
+  "mcp__plugin_playwright_playwright__browser_console_messages",
+  "mcp__plugin_playwright_playwright__browser_drag",
+  "mcp__plugin_playwright_playwright__browser_drop",
+  "mcp__plugin_playwright_playwright__browser_emulate_media",
+  "mcp__plugin_playwright_playwright__browser_evaluate",
+  "mcp__plugin_playwright_playwright__browser_file_upload",
+  "mcp__plugin_playwright_playwright__browser_fill_form",
+  "mcp__plugin_playwright_playwright__browser_find",
+  "mcp__plugin_playwright_playwright__browser_handle_dialog",
+  "mcp__plugin_playwright_playwright__browser_hover",
+  "mcp__plugin_playwright_playwright__browser_navigate",
+  "mcp__plugin_playwright_playwright__browser_navigate_back",
+  "mcp__plugin_playwright_playwright__browser_network_request",
+  "mcp__plugin_playwright_playwright__browser_network_requests",
+  "mcp__plugin_playwright_playwright__browser_press_key",
+  "mcp__plugin_playwright_playwright__browser_resize",
+  "mcp__plugin_playwright_playwright__browser_run_code_unsafe",
+  "mcp__plugin_playwright_playwright__browser_select_option",
+  "mcp__plugin_playwright_playwright__browser_snapshot",
+  "mcp__plugin_playwright_playwright__browser_tabs",
+  "mcp__plugin_playwright_playwright__browser_take_screenshot",
+  "mcp__plugin_playwright_playwright__browser_type",
+  "mcp__plugin_playwright_playwright__browser_wait_for"
+ ]
+}
