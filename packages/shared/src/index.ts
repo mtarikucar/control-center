@@ -3,5 +3,6 @@ export * from './company.ts';
 export * from './employee.ts';
 export * from './events.ts';
 export * from './memory.ts';
+export * from './onboarding.ts';
 export * from './profile.ts';
 export * from './proposal.ts';

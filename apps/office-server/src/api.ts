@@ -151,6 +151,12 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
       const id = plan[1] ?? '';
       return sendJson(res, 200, plan[2] === 'approve' ? company.approve(id) : plan[2] === 'decline' ? company.decline(id) : company.stopPlan(id));
     }
+    // The onboarding (B1): the owner follows it and answers its questions as their own word.
+    if (method === 'GET' && url.pathname === '/api/onboarding') return sendJson(res, 200, company.onboarding());
+    if (method === 'POST' && url.pathname === '/api/onboarding/answers') {
+      const body = (await readJson(req)) as { answers?: unknown } | null;
+      return sendJson(res, 200, company.onboardingAnswer(body?.answers));
+    }
     const goalStop = GOAL_ROUTE.exec(url.pathname);
     if (method === 'POST' && goalStop) return sendJson(res, 200, company.stopGoal(goalStop[1] ?? ''));
     // The owner's buttons on the agenda sheet (spec §6.3): "Park et…", "Şimdi başlasın" (also priority 1), "Öne al".

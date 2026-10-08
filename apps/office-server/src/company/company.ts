@@ -1,6 +1,6 @@
 import { statSync } from 'node:fs';
 import { relative } from 'node:path';
-import type { CompanyProfile, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
+import type { CompanyProfile, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
 import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
@@ -13,6 +13,8 @@ import type { CompanyStateStore, GoalStore } from './goal-store.ts';
 import { checkKpis } from './kpi.ts';
 import { mergeProfile, profileSection } from './profile.ts';
 import type { ProfileStore } from './profile-store.ts';
+import { answerPatches, nextBlock, onboardingView } from './onboarding.ts';
+import type { OnboardingStore } from './onboarding-store.ts';
 import type { NoticeTopic } from './notices.ts';
 import type { ProposalStore } from './proposal-store.ts';
 import { REVIEW_ROUNDS, planMethod, reviewBrief, reviewFindings } from './review.ts';
@@ -68,6 +70,8 @@ export interface CompanyDeps {
   state?: CompanyStateStore;
   /** The company profile (B2; absent in tests that do not care). */
   profile?: ProfileStore;
+  /** The onboarding dialog (B1; absent in tests that do not care). */
+  onboarding?: OnboardingStore;
   /** Routines (stage: scheduler; absent in tests that do not care). */
   schedules?: ScheduleStore;
   /** The office clock: told when a time changed, so it re-arms (absent in tests that do not care). */
@@ -139,6 +143,17 @@ export interface GoalInput {
   kpis?: unknown;
   status?: string;
   note?: string;
+}
+
+/** onboardingNext's answer: the round asked (or still waiting for the owner), and what to assume. */
+export interface OnboardingPlan {
+  round: OnboardingRound | null;
+  ask: OnboardingQuestionView[];
+  assume: OnboardingQuestionView[];
+  complete: boolean;
+  view: OnboardingView;
+  /** The last round has no reply from the owner yet: it is given again, nothing recorded. */
+  waiting: boolean;
 }
 
 export interface ProfileInput {
@@ -1268,22 +1283,123 @@ export class Company {
    */
   profileUpdate(by: string, input: ProfileInput): ProfileEntry {
     this.#assertCoordinator(by);
-    const store = this.#profile();
     const section = profileSection(input.section);
     if (input.assumed === undefined) throw new ValidationError('assumed gerekli: bu alanlar sahibinden mi (false), varsayım mı (true)?');
     if (typeof input.assumed !== 'boolean') throw new ValidationError('assumed true ya da false olmalı.');
-    const current = store.current().sections[section];
-    const next = mergeProfile(section, current ?? { fields: {}, assumedFields: [] }, input.fields, input.assumed);
-    if (current && JSON.stringify([current.fields, current.assumedFields]) === JSON.stringify([next.fields, next.assumedFields])) return current;
-    if (!current && Object.keys(next.fields).length === 0) throw new ValidationError(`${PROFILE_SPEC[section].label} bölümü boş; yazacak bir alan ver.`);
-    const entry = store.write(section, next.fields, next.assumedFields, by);
-    this.#emit(by, { type: 'profile.updated', entry });
-    return entry;
+    return this.#writeProfile(by, [[section, input.fields]], input.assumed)[0]!;
+  }
+
+  /**
+   * Sections written together: every patch merged and checked before any is written. A section whose fields and marks
+   * stay as they are opens no version (its current entry comes back).
+   */
+  #writeProfile(by: string, patches: Array<[ProfileSection, unknown]>, assumed: boolean): ProfileEntry[] {
+    const store = this.#profile();
+    const now = store.current();
+    const merged = patches.map(([section, patch]) => {
+      const current = now.sections[section];
+      const next = mergeProfile(section, current ?? { fields: {}, assumedFields: [] }, patch, assumed);
+      const same = current !== undefined && JSON.stringify([current.fields, current.assumedFields]) === JSON.stringify([next.fields, next.assumedFields]);
+      if (!current && Object.keys(next.fields).length === 0) throw new ValidationError(`${PROFILE_SPEC[section].label} bölümü boş; yazacak bir alan ver.`);
+      return { section, current, next, same };
+    });
+    return merged.map(({ section, current, next, same }) => {
+      if (same) return current!;
+      const entry = store.write(section, next.fields, next.assumedFields, by);
+      this.#emit(by === OWNER ? null : by, { type: 'profile.updated', entry });
+      return entry;
+    });
   }
 
   #profile(): ProfileStore {
     if (!this.#d.profile) throw new ConflictError('Bu ofiste şirket profili açık değil.');
     return this.#d.profile;
+  }
+
+  // ── onboarding ────────────────────────────────────────────────────────────
+
+  /** The running (else the last) onboarding and every question's state from the profile (spec 2026-10-08-onboarding-design). */
+  onboarding(): OnboardingView {
+    return onboardingView(this.profile(), this.#d.onboarding?.latest() ?? null);
+  }
+
+  /** The owner said what the company does: the sentence is their word in the profile, and the dialog opens. */
+  onboardingStart(by: string, description: string): Onboarding {
+    this.#assertCoordinator(by);
+    const store = this.#onboarding();
+    if (store.active()) throw new ConflictError('Bir onboarding zaten sürüyor: onboardingNext ile devam et, zorunlular dolunca onboardingFinish.');
+    const sentence = clean(description, 'İş tarifi', 1000, true);
+    this.#writeProfile(by, [['identity', { summary: sentence }]], false);
+    const started = store.create(sentence, by);
+    this.#emit(by, { type: 'onboarding.changed', change: 'started', onboarding: started });
+    return started;
+  }
+
+  /**
+   * The next block of questions, recorded as a round, and the questions to fill by assumption. While the last round
+   * has no reply from the owner it comes back as it is (`waiting`) and nothing is recorded: showing a block again is
+   * not asking it twice (review, Kerem round 1).
+   */
+  onboardingNext(by: string, o: { optional?: boolean } = {}): OnboardingPlan {
+    this.#assertCoordinator(by);
+    const active = this.#activeOnboarding();
+    const plan = this.#onboardingPlan(active, o.optional === true);
+    if (plan.waiting || plan.ask.length === 0) return plan;
+    const round: OnboardingRound = { round: active.rounds.length + 1, questions: plan.ask.map((q) => q.id), askedAt: this.#now(), replied: false };
+    const announced = this.#emit(by, { type: 'onboarding.changed', change: 'round', onboarding: { ...active, rounds: [...active.rounds, round] }, round });
+    this.#onboarding().addRound(active.id, round, announced.seq);
+    return { ...plan, round, view: this.onboarding() };
+  }
+
+  /** What onboardingNext would give, recording nothing (onboardingRead). */
+  onboardingPeek(by: string, o: { optional?: boolean } = {}): OnboardingPlan {
+    this.#assertCoordinator(by);
+    return this.#onboardingPlan(this.#activeOnboarding(), o.optional === true);
+  }
+
+  #onboardingPlan(active: Onboarding, optional: boolean): OnboardingPlan {
+    const view = onboardingView(this.profile(), active);
+    const block = nextBlock(view, optional);
+    const last = active.rounds.at(-1);
+    if (last && !last.replied) {
+      const ask = view.questions.filter((v) => last.questions.includes(v.id) && v.state !== 'answered');
+      if (ask.length > 0) return { round: last, ask, assume: block.assume, complete: view.complete, view, waiting: true };
+    }
+    return { round: null, ...block, complete: view.complete, view, waiting: false };
+  }
+
+  /** The owner answers questions directly (API): every answer checked first, then written as their own word; the coordinator hears. */
+  onboardingAnswer(answers: unknown): OnboardingView {
+    const active = this.#activeOnboarding();
+    const { ids, patches } = answerPatches(answers);
+    this.#writeProfile(OWNER, [...patches], false);
+    const coordinator = this.coordinator();
+    if (coordinator) this.#d.notices.add(coordinator.id, 'onboarding.answered', `Sahibi onboarding sorularını cevapladı: ${ids.join(', ')}. onboardingNext ile devam et.`);
+    // This event is the owner's reply to the round asked before it: the view is read after it.
+    this.#emit(coordinator?.id ?? null, { type: 'onboarding.changed', change: 'answered', onboarding: active });
+    return this.onboarding();
+  }
+
+  /** Ends the onboarding once no required question is open (KÖ1's "profile complete" event). */
+  onboardingFinish(by: string): OnboardingView {
+    this.#assertCoordinator(by);
+    const active = this.#activeOnboarding();
+    const open = onboardingView(this.profile(), active).questions.filter((v) => v.required && v.state === 'open').map((v) => v.id);
+    if (open.length) throw new ValidationError(`Zorunlu sorular cevapsız: ${open.join(', ')}. onboardingNext ile sor ya da varsayımla doldur (profileUpdate, assumed: true).`);
+    const done = this.#onboarding().finish(active.id);
+    this.#emit(by, { type: 'onboarding.changed', change: 'finished', onboarding: done });
+    return onboardingView(this.profile(), done);
+  }
+
+  #onboarding(): OnboardingStore {
+    if (!this.#d.onboarding) throw new ConflictError('Bu ofiste onboarding açık değil.');
+    return this.#d.onboarding;
+  }
+
+  #activeOnboarding(): Onboarding {
+    const active = this.#onboarding().active();
+    if (!active) throw new ConflictError('Sürmekte olan bir onboarding yok: sahibi işini anlatınca onboardingStart ile başla.');
+    return active;
   }
 
   // ── brief ─────────────────────────────────────────────────────────────────
@@ -1403,7 +1519,7 @@ export class Company {
     this.#emit(task.assignee, { type: 'task.changed', change, task });
   }
 
-  #emit(employeeId: string | null, event: OfficeEvent): void {
-    this.#d.events.append(employeeId, event);
+  #emit(employeeId: string | null, event: OfficeEvent): StoredEvent {
+    return this.#d.events.append(employeeId, event);
   }
 }

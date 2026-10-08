@@ -1,7 +1,8 @@
 import { KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
-import { methodText } from '../company/craft.ts';
+import { methodText, onboardingGuideText } from '../company/craft.ts';
+import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
 import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
 import type { TaskStore } from '../company/store.ts';
@@ -733,6 +734,45 @@ export function officeTools(o: {
         return entry.assumed
           ? `Profil güncellendi: ${label} (sürüm ${entry.version}; varsayım: ${entry.assumedFields.join(', ')}). Sahibi doğrulayınca bu alanları assumed: false ile yeniden yaz.`
           : `Profil güncellendi: ${label} (sürüm ${entry.version}).`;
+      },
+    },
+    {
+      name: 'onboardingStart',
+      description: 'Start the onboarding (coordinator) when the owner tells what the company does: their sentence goes into the profile as their word and the dialog opens; the reply is the guide to follow.',
+      inputSchema: object({ description: s('The owner’s own sentence about what the company does.') }, ['description']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        company.onboardingStart(employee.id, str(args, 'description'));
+        return `Onboarding başladı: iş tarifi profile sahibinin sözü olarak yazıldı (identity.summary).\n\n${onboardingGuideText()}`;
+      },
+    },
+    {
+      name: 'onboardingNext',
+      description: 'The next onboarding questions to ask the owner in one message (coordinator): at most five, required first, your guesses to confirm; and the questions asked twice without an answer, to fill by assumption. A round counts once the owner replied after it; until then this gives the same round again and records nothing. optional: true brings the optional questions once the required are in.',
+      inputSchema: object({ optional: { type: 'boolean', description: 'Also the optional questions (once the required are in).' } }),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        return nextText(company.onboardingNext(employee.id, { optional: bool(args, 'optional') }));
+      },
+    },
+    {
+      name: 'onboardingRead',
+      description: 'Where the onboarding stands (coordinator), recording nothing: the questions answered, assumed and open, the round still waiting for the owner or the one that would come next, and what to fill by assumption. Use it to look again, e.g. after your session restarted.',
+      inputSchema: object({ optional: { type: 'boolean', description: 'Show the optional questions that would come (once the required are in).' } }),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => nextText(company.onboardingPeek(employee.id, { optional: bool(args, 'optional') }), 'read'),
+    },
+    {
+      name: 'onboardingFinish',
+      description: 'End the onboarding (coordinator) once no required question is open: answered by the owner or filled by assumption (marked). The reply counts the assumptions to tell the owner.',
+      inputSchema: object({}),
+      kinds: COORDINATOR,
+      run: ({ employee }) => {
+        const view = company.onboardingFinish(employee.id);
+        const req = view.questions.filter((v) => v.required);
+        const assumed = req.filter((v) => v.state === 'assumed').map((v) => v.id);
+        const owners = req.length - assumed.length;
+        return `Onboarding bitti: zorunlu ${req.length} sorunun ${ofThem(owners)} sahibinden${assumed.length ? `, ${ofThem(assumed.length)} varsayım (${assumed.join(', ')}). Varsayımları sahibine kısaca bildir; doğrularsa profileUpdate(…, assumed: false).` : '.'}`;
       },
     },
     {

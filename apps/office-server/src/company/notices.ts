@@ -76,6 +76,8 @@ export const NOTICE_TOPICS = {
   'agenda.owner_changed': 'info',
   /** Digest off: the daily report reminder as a notice of its own (with the digest on it is a line of the digest). */
   'report.reminder': 'decision',
+  /** The owner answered onboarding questions on screen: go on with the dialog. */
+  'onboarding.answered': 'decision',
 } as const satisfies Record<string, NoticeKind>;
 
 export type NoticeKind = 'decision' | 'info';
