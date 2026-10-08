@@ -533,7 +533,7 @@ describe('board — done streams and a plan that runs on', () => {
     t.finish(can!.id, ui.id);
     t.advance(10 * MIN);
     // Both that wait for it started (one done): named; “butun”, which waits for them, is implied.
-    expect(flags()).toEqual(['  ! temel: görevi yok ama ona bağlı cekirdek, arayuz başladı — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç', chain]);
+    expect(flags()).toEqual(['  ! temel: görevi yok ama ona bağlı cekirdek, arayuz başladı — iş yapıldıysa akışı kaldır (planRevise), yoksa görev aç', chain]);
     // Given its task (the coordinator's own, waiting), then done: no line.
     const base = t.task(t.coordinator.id, 'Temel', { planId: p.id, streamId: 'temel' });
     expect(flags()).toEqual([chain]);
@@ -555,8 +555,8 @@ describe('board — done streams and a plan that runs on', () => {
     t.company.start(t.task(bora!.id, 'C işi', { planId: p.id, streamId: 'c' }).id);
     t.advance(20 * MIN);
     expect(t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'))).toEqual([
-      '  ! a: görevi yok ama ona bağlı c başladı (sahibi Can boşta, 20 dk) — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç',
-      '  ! b: görevi yok ama ona bağlı c başladı — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç',
+      '  ! a: görevi yok ama ona bağlı c başladı (sahibi Can boşta, 20 dk) — iş yapıldıysa akışı kaldır (planRevise), yoksa görev aç',
+      '  ! b: görevi yok ama ona bağlı c başladı — iş yapıldıysa akışı kaldır (planRevise), yoksa görev aç',
       '  ! tek kişide 2 açık akış (Bora): b, c — bağımlı: b → c',
     ]);
   });

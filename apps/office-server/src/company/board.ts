@@ -409,7 +409,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
           flags.push({ rank, text: `${x.id}: önündeki ${x.dependsOn.join(', ')} bitti, görevi yok (${who}) — görev aç ya da akışı kaldır` });
         } else if (after.length > 0) {
           const who = lacking ? ` (${lacking[1]})` : idle ? ` (sahibi ${owner!.name} boşta, ${idle})` : '';
-          flags.push({ rank, text: `${x.id}: görevi yok ama ona bağlı ${after.join(', ')} başladı${who} — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç` });
+          flags.push({ rank, text: `${x.id}: görevi yok ama ona bağlı ${after.join(', ')} başladı${who} — iş yapıldıysa akışı kaldır (planRevise), yoksa görev aç` });
         } else if (lacking) flags.push({ rank: 0, text: `${x.id}: ${lacking[0]}` });
         else if (idle && (x.status === 'active' || x.status === 'blocked')) flags.push({ rank: 1, text: `${x.id}: sahibi ${owner!.name} boşta (${idle})` });
         else if (idle && ready) flags.push({ rank: 1, text: `${x.id}: başlayabilir, sahibi ${owner!.name} boşta (${idle})` });
