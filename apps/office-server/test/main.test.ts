@@ -140,7 +140,7 @@ describe('office-server process', () => {
 });
 
 /**
- * main.ts's wiring (task 3ab606f2, Kerem's proposal 5b4f1c89): the features below enter the dispatcher and the engine as
+ * main.ts's wiring (task 3ab606f2, Kerem's proposal 5b4f1c89; B9a's test is on the branch that has the gate): the features below enter the dispatcher and the engine as
  * optional dependencies given only in main.ts, so their own tests build them by hand and stay green if main.ts drops
  * them. Each test opens the real office process (fake claude, a temporary data folder) on a database prepared before
  * it opens, and looks at what only main.ts's wiring makes happen.
@@ -233,6 +233,37 @@ describe('main.ts wiring: the office process', () => {
     expect(closed('ada')).toContain(send);
     expect(closed('bora')).not.toContain(send);
     expect(closed('bora')).toContain('mcp__claude_ai_Google_Calendar__create_event');
+    await stop(office);
+  }, 30_000);
+
+  it('B9a: with the gate on, a session’s settings carry the hook, and the hook run as the session runs it gets the gate’s answer (`gate` given to the engine and the API)', async () => {
+    const { dir, db, ada } = prepared();
+    new ConstitutionStore(db).set({ gateEnabled: true });
+    db.close();
+    const log = join(tempDir(), 'argv.jsonl');
+    const office = startOffice(dir, { FAKE_CLAUDE_ARGV_LOG: log });
+    const port = await portOf(office);
+    await call(port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'merhaba' });
+    await until(() => existsSync(log) && readFileSync(log, 'utf8').trim() !== '', 15_000);
+    const start = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[0]!) as { args: string[]; cwd: string; gate: { url: string | null; token: string | null } };
+    const settings = JSON.parse(start.args[start.args.indexOf('--settings') + 1]!) as { hooks?: { PreToolUse?: Array<{ hooks: Array<{ command: string }> }> } };
+    const hook = settings.hooks?.PreToolUse?.[0]?.hooks[0]?.command ?? '';
+    expect(hook).toContain('gate.mjs');
+    expect(start.gate.url).toBe(`http://127.0.0.1:${port}/gate/check`);
+    /** The hook as Claude Code runs it: its command through the shell, the call on stdin, the session's environment. */
+    const ask = (command: string) =>
+      new Promise<{ code: number | null; stderr: string }>((resolve) => {
+        const child = spawn(hook, { shell: true, cwd: start.cwd, env: { ...process.env, OFFICE_GATE_URL: start.gate.url ?? '', OFFICE_GATE_TOKEN: start.gate.token ?? '' } });
+        let stderr = '';
+        child.stderr.on('data', (d) => (stderr += d));
+        child.on('exit', (code) => resolve({ code, stderr }));
+        child.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', cwd: start.cwd, tool_name: 'Bash', tool_input: { command } }));
+      });
+    // A harmless call runs; one that cannot be taken back waits for the owner (with the gate off both would run).
+    expect(await ask('ls')).toEqual({ code: 0, stderr: '' });
+    const push = await ask('git push origin main');
+    expect(push.code).toBe(2);
+    expect(push.stderr).toContain('OFİS KAPISI');
     await stop(office);
   }, 30_000);
 });
