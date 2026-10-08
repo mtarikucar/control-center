@@ -1,12 +1,16 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ConstitutionStore } from '../src/company/budget-store.ts';
 import { DecisionStore, NoteStore } from '../src/company/memory-store.ts';
+import { TaskStore } from '../src/company/store.ts';
 import { migrateUp, openDb } from '../src/db.ts';
 import { MIGRATIONS } from '../src/migrations.ts';
+import { Roster } from '../src/roster.ts';
 import { FAKE_CLAUDE, tempDir, until } from './helpers.ts';
 import { pageHeaders } from './owner-helpers.ts';
 
@@ -16,9 +20,9 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
-function startOffice(dataDir: string) {
+function startOffice(dataDir: string, env: Record<string, string> = {}) {
   const child = spawn(process.execPath, [MAIN], {
-    env: { ...process.env, OFFICE_DATA_DIR: dataDir, OFFICE_PORT: '0', OFFICE_CLAUDE_COMMAND: JSON.stringify([process.execPath, FAKE_CLAUDE]), FAKE_CLAUDE_STATE: tempDir() },
+    env: { ...process.env, OFFICE_DATA_DIR: dataDir, OFFICE_PORT: '0', OFFICE_CLAUDE_COMMAND: JSON.stringify([process.execPath, FAKE_CLAUDE]), FAKE_CLAUDE_STATE: tempDir(), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -133,4 +137,102 @@ describe('office-server process', () => {
     office.child.kill('SIGINT');
     await office.exited;
   });
+});
+
+/**
+ * main.ts's wiring (task 3ab606f2, Kerem's proposal 5b4f1c89): the features below enter the dispatcher and the engine as
+ * optional dependencies given only in main.ts, so their own tests build them by hand and stay green if main.ts drops
+ * them. Each test opens the real office process (fake claude, a temporary data folder) on a database prepared before
+ * it opens, and looks at what only main.ts's wiring makes happen.
+ */
+describe('main.ts wiring: the office process', () => {
+  /** A database the office will open: migrated, one employee asleep (the dispatcher wakes them when there is work). */
+  function prepared(o: { capabilities?: string[] } = {}) {
+    const dir = tempDir();
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db);
+    const roster = new Roster(db, 8);
+    const ada = roster.create({ name: 'Ada', role: 'Metin yazarı', capabilityIds: o.capabilities });
+    roster.update(ada.id, { lifecycle: 'sleeping' });
+    return { dir, db, ada, tasks: new TaskStore(db) };
+  }
+  const work = (assignee: string, title: string, o: { done?: string[]; requires?: string[] } = {}) =>
+    ({ planId: null, title, description: 'Kablolama testi.', done: o.done ?? [], requester: 'owner', assignee, priority: 1, dependsOn: [], chainDepth: 0, requires: o.requires });
+  async function portOf(office: ReturnType<typeof startOffice>): Promise<number> {
+    await until(() => /hazır: http:\/\/127\.0\.0\.1:\d+/.test(office.output()), 10_000);
+    return Number(/hazır: http:\/\/127\.0\.0\.1:(\d+)/.exec(office.output())?.[1]);
+  }
+  /** A task as the office wrote it, read beside the running office. */
+  function taskRow(dir: string, id: string): { status: string; note: string | null } {
+    const db = new DatabaseSync(join(dir, 'office.db'), { readOnly: true });
+    try {
+      return db.prepare('SELECT status, note FROM tasks WHERE id = ?').get(id) as { status: string; note: string | null };
+    } finally {
+      db.close();
+    }
+  }
+  async function stop(office: ReturnType<typeof startOffice>) {
+    office.child.kill('SIGINT');
+    expect(await office.exited).toBe(0);
+  }
+
+  it('B12: the task message the office hands out carries the related memory (`related` given to the dispatcher)', async () => {
+    const { dir, db, ada, tasks } = prepared();
+    new NoteStore(db).create({ by: 'koordinatör', title: 'Pastane Ada marka dili', text: 'Sıcak ve samimi; ünlem yok, emoji en çok bir.', tags: [], source: null });
+    const task = tasks.create(work(ada.id, 'Pastane Ada için Instagram metni', { done: ['marka diline uygun üç gönderi'] }));
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    await until(() => taskRow(dir, task.id).status !== 'waiting', 15_000);
+    const events: Array<{ event: { type: string; text?: string } }> = await call(port, 'GET', `/api/employees/${ada.id}/events?after=0`);
+    const messages = events.filter((e) => e.event.type === 'message.user').map((e) => e.event.text ?? '');
+    const delivery = messages.find((m) => m.includes('Pastane Ada için Instagram metni')) ?? '';
+    expect(delivery, messages.join('\n---\n')).toContain('## İlgili hafıza');
+    // The note is under the section, not only somewhere in the message.
+    expect(delivery.slice(delivery.indexOf('## İlgili hafıza'))).toContain('Pastane Ada marka dili');
+    await stop(office);
+  }, 30_000);
+
+  it('B8: with the precheck on, a task needing a capability its desk lacks is held, not handed out (`precheck` given to the dispatcher)', async () => {
+    const { dir, db, ada, tasks } = prepared();
+    new ConstitutionStore(db).set({ capabilityPrecheckEnabled: true });
+    const task = tasks.create(work(ada.id, 'Müşteriye teklif e-postasını gönder', { requires: ['email.send'] }));
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    await until(() => taskRow(dir, task.id).status !== 'waiting', 15_000);
+    const row = taskRow(dir, task.id);
+    expect(row.status).toBe('blocked');
+    expect(row.note).toContain('Yetenek ön-kontrolü');
+    expect(row.note).toContain('email.send');
+    const events: Array<{ event: { type: string; text?: string } }> = await call(port, 'GET', `/api/employees/${ada.id}/events?after=0`);
+    expect(events.some((e) => e.event.type === 'message.user' && (e.event.text ?? '').includes('Müşteriye teklif e-postasını gönder'))).toBe(false);
+    await stop(office);
+  }, 30_000);
+
+  it('B9b: a session opens with the role’s closed tools in --disallowedTools, per role (`sessionDeny` given to the engine)', async () => {
+    const { dir, db, ada } = prepared();
+    const bora = new Roster(db, 8).create({ name: 'Bora', role: 'Hesap yöneticisi', capabilityIds: ['email.send'] });
+    db.close();
+    const log = join(tempDir(), 'argv.jsonl');
+    const office = startOffice(dir, { FAKE_CLAUDE_ARGV_LOG: log });
+    const port = await portOf(office);
+    await call(port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'merhaba' });
+    await call(port, 'POST', `/api/employees/${bora.id}/messages`, { text: 'merhaba' });
+    const starts = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; cwd: string }) : []);
+    await until(() => starts().length >= 2, 15_000);
+    /** What one desk's session closes: the values of its one --disallowedTools flag. */
+    const closed = (slug: string) => {
+      const args = starts().find((s) => s.cwd.endsWith(`/${slug}`))!.args;
+      const at = args.indexOf('--disallowedTools');
+      const end = args.findIndex((a, i) => i > at && a.startsWith('--'));
+      return args.slice(at + 1, end < 0 ? undefined : end);
+    };
+    const send = 'mcp__claude_ai_Gmail__send_message';
+    // Ada's role opens no outward capability: sending mail is closed; Bora's opens email.send, the rest stays closed.
+    expect(closed('ada')).toContain(send);
+    expect(closed('bora')).not.toContain(send);
+    expect(closed('bora')).toContain('mcp__claude_ai_Google_Calendar__create_event');
+    await stop(office);
+  }, 30_000);
 });
