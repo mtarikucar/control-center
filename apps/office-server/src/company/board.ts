@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { DEFAULT_CONSTITUTION, OWNER, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, OWNER, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { QuotaTracker } from '../quota.ts';
 import type { Roster } from '../roster.ts';
@@ -82,8 +82,8 @@ const LIMITS: readonly Limits[] = [
   { lines: 4, names: 4, details: 3, streams: 4, flags: 3, blocks: 3, titleChars: 32, noteChars: 40, messages: 1, messageChars: 80 },
   { lines: 3, names: 3, details: 2, streams: 3, flags: 2, blocks: 2, titleChars: 24, noteChars: 30, messages: 1, messageChars: 60 },
 ];
-/** Characters a board should stay under (the spec's 4 000, with room). */
-const BUDGET = 3800;
+/** Characters a board should stay under (the spec's 4 000, with a little room). */
+const BUDGET = 3900;
 /** Goal and plan headings in section 2. */
 const ENTRIES = 10;
 /** What “Ne değişti” reads from the log; over this many, the newest. */
@@ -126,6 +126,9 @@ function span(ms: number): string {
   if (hours >= 48) return `${Math.floor(hours / 24)} gün`;
   return `${hours} sa${minutes % 60 ? ` ${minutes % 60} dk` : ''}`;
 }
+
+/** "2 000" — thousands apart, as the board writes counts. */
+const thousands = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
 /** "1,5" — days with one decimal, Turkish style. */
 const days = (n: number) => (Math.round(n * 10) / 10).toString().replace('.', ',');
@@ -172,7 +175,10 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
   /** The agenda's estimated end of each open task in progress or queued. */
   const ends = new Map<string, number>();
   for (const a of agendaOf.values()) for (const x of a.entries) if (x.taskId && x.until !== null) ends.set(x.taskId, x.until);
-  const log = d.events.since(o.since, CHANGE_TYPES, LOG_LIMIT);
+  // One more than the cap: a full read says the log was cut.
+  const read = d.events.since(o.since, CHANGE_TYPES, LOG_LIMIT + 1);
+  const cut = read.length > LOG_LIMIT;
+  const log = cut ? read.slice(1) : read;
 
   const when = (ms: number) => formatWhen(ms, now).replace(/^bugün /, '');
   const ago = (ms: number) => `${span(now - ms)} önce`;
@@ -183,6 +189,33 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     } catch {
       return null;
     }
+  };
+
+  /** Hired and never given work: idle since the hire. */
+  const neverWorked = (p: { id: string; since: number }) => p.since === byId.get(p.id)?.createdAt;
+  const idleMarks = (p: { id: string; since: number }, longIdle: number): string => {
+    const marks = [neverWorked(p) && p.since > o.since ? 'yeni' : null, longIdle > 0 && now - p.since >= longIdle ? 'uzun süredir' : null].filter(Boolean);
+    return marks.length ? ` (${marks.join(', ')})` : '';
+  };
+
+  /** Tasks blocked now that moved into blocked since the last cycle (a note on one already blocked is not a move). */
+  const intoBlocked = (): Set<string> => {
+    const moved = new Set<string>();
+    const last = new Map<string, TaskStatus | null>();
+    for (const { event: e } of log) {
+      if (e.type !== 'task.changed') continue;
+      const id = e.task.id;
+      if (e.task.status === 'blocked' && openById.get(id)?.status === 'blocked' && !moved.has(id)) {
+        let before = last.get(id);
+        if (before === undefined) {
+          const prev = d.events.lastAt('task.changed', o.since, { taskId: id });
+          before = prev?.event.type === 'task.changed' ? prev.event.task.status : null;
+        }
+        if (before !== 'blocked') moved.add(id);
+      }
+      last.set(id, e.task.status);
+    }
+    return moved;
   };
 
   const kickoff = goals.length === 0 || goals.some((g) => !live.some((p) => p.goalId === g.id));
@@ -223,7 +256,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
 
     /** Open work that got stuck since: blocked in the window, past its due date in it, or reminded in it and not at it. */
     const newStalls = (): string[] => {
-      const blocked = new Set(log.flatMap(({ event: e }) => (e.type === 'task.changed' && e.change === 'updated' && e.task.status === 'blocked' ? [e.task.id] : [])));
+      const blocked = intoBlocked();
       const items = metrics.stuck.items.flatMap((s) => {
         const t = openById.get(s.taskId);
         if (!t) return [];
@@ -236,7 +269,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     };
 
     const newlyIdle = (): string[] => {
-      const names = metrics.busy.idle.filter((p) => p.since > o.since).map((p) => p.name);
+      const names = metrics.busy.idle.filter((p) => p.since > o.since && !neverWorked(p)).map((p) => p.name);
       return names.length ? [`- Boşa çıktı: ${cap(names, L.names, 'kişi').join(', ')}`] : [];
     };
 
@@ -285,7 +318,16 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       return [said.length === 1 ? `- Sahibinin mesajı: ${shown}` : `- Sahibinin mesajları (${said.length}${said.length > L.messages ? `, son ${L.messages}` : ''}): ${shown}`];
     };
 
-    const changed = (): string[] => [...deliveries(), ...newStalls(), ...newlyIdle(), ...teamChanges(), ...constraints(), ...planMoves(), ...ownerMessages()];
+    const streamsDone = (): string[] => {
+      const items = live.flatMap((p) => {
+        const { tasks, streams } = planData.get(p.id)!;
+        // Done, and its last task closed since the last cycle: said once.
+        return streams.filter((x) => x.status === 'done' && Math.max(0, ...tasks.filter((t) => t.streamId === x.id).map((t) => t.finishedAt ?? 0)) > o.since).map((x) => `${x.id} (plan ${title(p)})`);
+      });
+      return items.length ? [`- Akış bitti: ${cap(items, L.names, 'akış').join('; ')}`] : [];
+    };
+
+    const changed = (): string[] => [...(cut ? [`- (günlüğün yalnız son ${thousands(LOG_LIMIT)} olayı okundu)`] : []), ...deliveries(), ...streamsDone(), ...newStalls(), ...newlyIdle(), ...teamChanges(), ...constraints(), ...planMoves(), ...ownerMessages()];
 
     // ── 2. goals and plans ────────────────────────────────────────────────────
 
@@ -297,28 +339,40 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       return counted.length ? `${counted.filter((t) => t.status === 'done').length}/${counted.length} iş` : 'görevi yok';
     };
 
-    /** Where the plan's structure and the office disagree (spec §3.4), stream by stream, then streams piled on one person. */
-    const comparisons = (p: Plan, streams: readonly PlanStreamView[]): string[] => {
-      const flags: string[] = [];
+    /**
+     * Where the plan's structure and the office disagree (spec §3.4), the most actionable first so a cap keeps them: a
+     * stream with no usable owner (to hire, let go, cannot take work), then one whose owner is idle, then the next
+     * stream's missing tasks and a plan whose streams are all done, then streams piled on one person.
+     */
+    const comparisons = (p: Plan, streams: readonly PlanStreamView[], tasks: readonly Task[]): string[] => {
+      const flags: Array<{ rank: number; text: string }> = [];
       const status = new Map(streams.map((x) => [x.id, x.status]));
+      const hasWork = (id: string) => tasks.some((t) => t.streamId === id && t.kind !== 'review' && t.status !== 'cancelled');
       for (const x of streams) {
-        if (x.status === 'done') {
-          flags.push(`${x.id}: bütün işleri kapandı, plan sürüyor — akış bitti mi, eksik iş var mı?`);
-          continue;
-        }
-        if (toHire(x.owner)) {
-          flags.push(`${x.id}: sahibi yok (${x.owner})`);
-          continue;
-        }
-        const owner = byId.get(x.owner);
-        if (!owner) flags.push(`${x.id}: sahibi bulunamadı (${x.owner})`);
-        else if (owner.lifecycle === 'archived') flags.push(`${x.id}: sahibi ${owner.name} işten ayrıldı`);
-        else if (UNAVAILABLE.includes(owner.lifecycle)) flags.push(`${x.id}: sahibi ${owner.name} iş alamıyor (${UNAVAILABLE_TR[owner.lifecycle] ?? owner.lifecycle})`);
-        else if (idleSince.has(owner.id)) {
-          const idle = span(now - idleSince.get(owner.id)!);
-          if (x.status === 'active' || x.status === 'blocked') flags.push(`${x.id}: sahibi ${owner.name} boşta (${idle})`);
-          else if (p.status === 'approved' && x.dependsOn.every((dep) => status.get(dep) === 'done')) flags.push(`${x.id}: başlayabilir, sahibi ${owner.name} boşta (${idle})`);
-        }
+        if (x.status === 'done') continue;
+        const owner = toHire(x.owner) ? undefined : byId.get(x.owner);
+        // Why no one can carry it: as a flag, and short for inside a line.
+        const lacking: [string, string] | null = toHire(x.owner)
+          ? [`sahibi yok (${x.owner})`, `sahibi yok, ${x.owner}`]
+          : !owner
+            ? [`sahibi bulunamadı (${x.owner})`, 'sahibi bulunamadı']
+            : owner.lifecycle === 'archived'
+              ? [`sahibi ${owner.name} işten ayrıldı`, `sahibi ${owner.name} ayrıldı`]
+              : UNAVAILABLE.includes(owner.lifecycle)
+                ? [`sahibi ${owner.name} iş alamıyor (${UNAVAILABLE_TR[owner.lifecycle] ?? owner.lifecycle})`, `sahibi ${owner.name} iş alamıyor`]
+                : null;
+        const idle = owner && !lacking && idleSince.has(owner.id) ? span(now - idleSince.get(owner.id)!) : null;
+        const ready = p.status === 'approved' && x.status === 'planned' && x.dependsOn.every((dep) => status.get(dep) === 'done');
+        if (ready && x.dependsOn.length > 0 && !hasWork(x.id)) {
+          const who = lacking ? lacking[1] : idle ? `sahibi ${owner!.name} boşta, ${idle}` : `sahibi ${owner!.name}`;
+          flags.push({ rank: lacking ? 0 : idle ? 1 : 2, text: `${x.id}: önündeki ${x.dependsOn.join(', ')} bitti, görevi yok (${who}) — görev aç ya da akışı kaldır` });
+        } else if (lacking) flags.push({ rank: 0, text: `${x.id}: ${lacking[0]}` });
+        else if (idle && (x.status === 'active' || x.status === 'blocked')) flags.push({ rank: 1, text: `${x.id}: sahibi ${owner!.name} boşta (${idle})` });
+        else if (idle && ready) flags.push({ rank: 1, text: `${x.id}: başlayabilir, sahibi ${owner!.name} boşta (${idle})` });
+      }
+      if (streams.length > 0 && streams.every((x) => x.status === 'done')) {
+        const left = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
+        flags.push({ rank: 2, text: `bütün akışlar bitti, plan sürüyor — ${left ? `${left} açık iş akışsız` : 'açık rutin var'}` });
       }
       const ancestors = ancestry(streams);
       const byOwner = new Map<string, PlanStreamView[]>();
@@ -329,9 +383,10 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
         // More ancestors comes later: a topological order of the linked ones.
         const order = [...linked].sort((a, b) => ancestors(a.id).size - ancestors(b.id).size);
         const how = linked.length ? `bağımlı: ${order.map((x) => x.id).join(' → ')}` : 'paralel yürüyemez';
-        flags.push(`tek kişide ${own.length} açık akış (${nameOf(owner)}): ${own.map((x) => x.id).join(', ')} — ${how}`);
+        flags.push({ rank: 3, text: `tek kişide ${own.length} açık akış (${nameOf(owner)}): ${own.map((x) => x.id).join(', ')} — ${how}` });
       }
-      return flags;
+      // A stable sort: the plan's own order within a rank.
+      return flags.sort((a, b) => a.rank - b.rank).map((f) => f.text);
     };
 
     /** A plan's heading (after `lead`), then — when `detail` — its streams and the comparisons. */
@@ -343,7 +398,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const owner = (who: string) => (toHire(who) ? who : nameOf(who));
       const streamLines = streams.map((x) => `${x.id} (${owner(x.owner)}): ${STREAM_TR[x.status]}, ${work(tasks.filter((t) => t.streamId === x.id))}${x.dependsOn.length ? `, önce ${x.dependsOn.join(', ')}` : ''}`);
       lines.push(...cap(streamLines, L.streams, 'akış').map((l) => `  · ${l}`));
-      lines.push(...cap(comparisons(p, streams), L.flags, 'uyarı').map((l) => `  ! ${l}`));
+      lines.push(...cap(comparisons(p, streams, tasks), L.flags, 'uyarı').map((l) => `  ! ${l}`));
       return lines;
     };
 
@@ -410,7 +465,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const longIdle = summary.constitution.idleCapacityHours * HOUR;
       const group = (label: string, items: string[], max: number) => (items.length ? [`- ${label} (${items.length}): ${cap(items, max, 'kişi').join('; ')}`] : []);
       return [
-        ...group('Boşta', b.idle.map((p) => `${p.name} — ${span(now - p.since)}${longIdle > 0 && now - p.since >= longIdle ? ' (uzun süredir)' : ''}`), L.names),
+        ...group('Boşta', b.idle.map((p) => `${p.name} — ${span(now - p.since)}${idleMarks(p, longIdle)}`), L.names),
         ...group('İş alamıyor', b.unavailable.map((p) => unavailable(byId.get(p.id)!)), L.names),
         ...group('Elinde iş, başında değil', b.holding.map((p) => holding(p.id, p.why)), L.details),
         ...group('İşte', b.atWork.map((p) => atWork(p.id)), L.details),

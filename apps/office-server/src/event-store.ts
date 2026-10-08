@@ -71,11 +71,12 @@ export class EventStore {
     return rows.map(toStored).reverse();
   }
 
-  /** The last event of this type logged at or before `ts`; null: none. */
-  lastAt(type: OfficeEventType, ts: number): StoredEvent | null {
+  /** The last event of this type logged at or before `ts` — with `taskId`, the last about that task; null: none. */
+  lastAt(type: OfficeEventType, ts: number, o: { taskId?: string } = {}): StoredEvent | null {
+    const about = o.taskId === undefined ? '' : " AND json_extract(payload, '$.task.id') = ?";
     const row = this.#db
-      .prepare('SELECT seq, employee_id, ts, payload FROM events WHERE type = ? AND ts <= ? ORDER BY ts DESC, seq DESC LIMIT 1')
-      .get(type, ts) as unknown as Row | undefined;
+      .prepare(`SELECT seq, employee_id, ts, payload FROM events WHERE type = ? AND ts <= ?${about} ORDER BY ts DESC, seq DESC LIMIT 1`)
+      .get(...(o.taskId === undefined ? [type, ts] : [type, ts, o.taskId])) as unknown as Row | undefined;
     return row ? toStored(row) : null;
   }
 

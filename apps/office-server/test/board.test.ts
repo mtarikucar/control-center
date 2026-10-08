@@ -208,7 +208,9 @@ describe('board — 1. Ne değişti', () => {
     t.advance(10 * MIN);
     const lines = t.section(t.board({ since }).text, 1).split('\n');
     expect(lines).toContain('- Yeni takılmalar: “Kurulum” (Bora, takıldı: erişim yok); “Rapor” (Ece, son tarih geçti 09:20); “Çeviri” (Mert, hatırlatmaya rağmen ilerlemiyor)');
-    expect(lines).toContain('- Boşa çıktı: Ada, Selin');
+    // A new hire never had work: not “became idle”; the people section marks them new.
+    expect(lines).toContain('- Boşa çıktı: Ada');
+    expect(t.section(t.board({ since }).text, 3).split('\n')[1]).toBe('- Boşta (3): Can — 25 dk; Ada — 10 dk; Selin — 10 dk (yeni)');
     expect(lines).toContain('- Ekip: Selin işe alındı; Eski ayrıldı');
     expect(lines.join('\n')).not.toMatch(/Eski takılma|Can/);
     expect(late.id).toBeTruthy();
@@ -250,6 +252,42 @@ describe('board — 1. Ne değişti', () => {
     expect(lines).toContain('- Plan ve hedef: “Satış” hedefi açıldı; “Teklifler” planı onaylandı');
     expect(lines).toContain('- Sahibinin mesajı: 09:15 “Kota sınırını %60’a çektim; önce mobil sürümü bitirelim, sonra masaüstüne geçeriz. Bu arada fiyat sayfası da beklemesin…”');
     expect(lines.join('\n')).not.toMatch(/Eski plan|eski mesaj|sistem notu|Ada’ya özel/);
+  });
+
+  it('a note on a task already blocked is not a new stall; only the move into blocked is', () => {
+    const t = make();
+    const [bora, can, ece] = ['Bora', 'Can', 'Ece'].map((n) => t.person(n));
+    const old = t.task(bora!.id, 'Eski takılma');
+    t.company.start(old.id);
+    t.company.update(bora!.id, old.id, { blocked: true, note: 'ilk' });
+    t.advance(MIN);
+    const again = t.task(ece!.id, 'Tekrar takılan');
+    t.company.start(again.id);
+    t.company.update(ece!.id, again.id, { blocked: true, note: 'önce' });
+    t.advance(MIN);
+    const fresh = t.task(can!.id, 'Yeni takılan');
+    t.company.start(fresh.id);
+    t.advance(10 * MIN);
+    const since = t.now();
+    t.advance(5 * MIN);
+    t.company.update(bora!.id, old.id, { note: 'hâlâ bekliyor' });
+    t.company.update(can!.id, fresh.id, { blocked: true, note: 'anahtar yok' });
+    t.company.update(can!.id, fresh.id, { note: 'anahtar hâlâ yok' });
+    t.company.update(ece!.id, again.id, { blocked: false });
+    t.company.update(ece!.id, again.id, { blocked: true, note: 'yine' });
+    const line = t.section(t.board({ since }).text, 1).split('\n').find((l) => l.startsWith('- Yeni takılmalar'));
+    expect(line).toBe('- Yeni takılmalar: “Tekrar takılan” (Ece, takıldı: yine); “Yeni takılan” (Can, takıldı: anahtar hâlâ yok)');
+  });
+
+  it('a log read that hits its cap says so at the head of the section', () => {
+    const t = make();
+    for (let i = 0; i < 2001; i += 1) t.events.append(t.coordinator.id, { type: 'message.user', text: `mesaj ${i}`, source: 'owner' });
+    expect(t.section(t.board({ since: T0 - 1 }).text, 1).split('\n')[1]).toBe('- (günlüğün yalnız son 2 000 olayı okundu)');
+    const u = make();
+    for (let i = 0; i < 1999; i += 1) u.events.append(u.coordinator.id, { type: 'message.user', text: `mesaj ${i}`, source: 'owner' });
+    // 1 999 messages and make()'s own budget.changed: exactly the cap, all of it read.
+    expect(u.events.since(T0 - 1, ['message.user', 'budget.changed'], 5000)).toHaveLength(2000);
+    expect(u.section(u.board({ since: T0 - 1 }).text, 1)).not.toContain('günlüğün yalnız');
   });
 
   it('only what was logged after the last cycle started: the same events before it are left out', () => {
@@ -310,11 +348,11 @@ describe('board — 2. Hedefler ve planlar', () => {
         '  · doc (alınacak: yazar): planlı, görevi yok',
         '  · arsiv (Eski): planlı, görevi yok',
         '  · ceviri (Mert): planlı, görevi yok',
-        '  ! api: bütün işleri kapandı, plan sürüyor — akış bitti mi, eksik iş var mı?',
-        '  ! mobil: sahibi Can boşta (1 sa 30 dk)',
+        // The most actionable first: no usable owner, then an idle owner, then the rest.
         '  ! doc: sahibi yok (alınacak: yazar)',
         '  ! arsiv: sahibi Eski işten ayrıldı',
         '  ! ceviri: sahibi Mert iş alamıyor (limit doldu)',
+        '  ! mobil: sahibi Can boşta (1 sa 30 dk)',
         '  ! tek kişide 2 açık akış (Ada): ui, test — bağımlı: ui → test',
         '- Hedef “Satış”: süren planı yok — planPropose ile goalId vererek başlat ya da goalSet ile kapat',
         '- Hedefsiz plan “Bakım” (sürüyor; görevi yok)',
@@ -343,8 +381,7 @@ describe('board — 2. Hedefler ve planlar', () => {
     t.advance(20 * MIN);
     const flags = t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'));
     expect(flags).toEqual([
-      '  ! api: bütün işleri kapandı, plan sürüyor — akış bitti mi, eksik iş var mı?',
-      '  ! ui: başlayabilir, sahibi Can boşta (20 dk)',
+      '  ! ui: önündeki api bitti, görevi yok (sahibi Can boşta, 20 dk) — görev aç ya da akışı kaldır',
       '  ! tek kişide 2 açık akış (Ada): doc, seo — paralel yürüyemez',
     ]);
     expect(can).toBeTruthy();
@@ -371,6 +408,86 @@ describe('board — 2. Hedefler ve planlar', () => {
         '  · liste (Ada): planlı, görevi yok',
       ].join('\n'),
     );
+  });
+});
+
+describe('board — done streams and a plan that runs on', () => {
+  it('a stream’s last task closes while the stream after it has no task yet: the plan runs on, no kickoff, the planned streams listed, the action named', () => {
+    const t = make();
+    const [ada] = ['Ada', 'Can'].map((n) => t.person(n));
+    const g = t.goal('Lansman');
+    const p = t.plan('Site', {
+      goalId: g.id,
+      streams: [
+        { id: 'api', title: 'API', owner: 'Ada' },
+        { id: 'ui', title: 'Arayüz', owner: 'Can', dependsOn: ['api'] },
+        { id: 'test', title: 'Test', owner: 'alınacak: testçi', dependsOn: ['ui'] },
+      ],
+    });
+    const api = t.task(ada!.id, 'Uç noktalar', { planId: p.id, streamId: 'api' });
+    t.company.start(api.id);
+    t.finish(ada!.id, api.id);
+    t.advance(15 * MIN);
+    const b = t.board();
+    expect(t.plans.get(p.id).status).toBe('approved');
+    expect(b.kickoff).toBe(false);
+    expect(t.section(b.text, 2)).toBe(
+      [
+        '## 2. Hedefler ve planlar',
+        '- Hedef “Lansman” → plan “Site” (sürüyor; 1/1 iş bitti)',
+        '  · api (Ada): bitti, 1/1 iş',
+        '  · ui (Can): planlı, görevi yok, önce api',
+        '  · test (alınacak: testçi): planlı, görevi yok, önce ui',
+        '  ! test: sahibi yok (alınacak: testçi)',
+        '  ! ui: önündeki api bitti, görevi yok (sahibi Can boşta, 15 dk) — görev aç ya da akışı kaldır',
+      ].join('\n'),
+    );
+  });
+
+  it('a stream that became done is told once, in what changed since the last cycle', () => {
+    const t = make();
+    const ada = t.person('Ada');
+    const p = t.plan('Site', { streams: [{ id: 'api', title: 'API', owner: 'Ada' }, { id: 'ui', title: 'Arayüz', owner: 'Ada', dependsOn: ['api'] }] });
+    const api = t.task(ada.id, 'Uç noktalar', { planId: p.id, streamId: 'api' });
+    t.task(ada.id, 'Ekranlar', { planId: p.id, streamId: 'ui' });
+    t.advance(10 * MIN);
+    const before = t.now();
+    t.advance(5 * MIN);
+    t.company.start(api.id);
+    t.finish(ada.id, api.id);
+    t.advance(5 * MIN);
+    expect(t.section(t.board({ since: before }).text, 1)).toContain('- Akış bitti: api (plan “Site”)');
+    const next = t.now();
+    t.advance(5 * MIN);
+    expect(t.section(t.board({ since: next }).text, 1)).not.toContain('Akış bitti');
+    // Not repeated as a comparison either: nothing to act on.
+    expect(t.section(t.board({ since: next }).text, 2)).not.toContain('  !');
+  });
+
+  it('every stream done while the plan still runs: one line for the plan', () => {
+    const t = make();
+    const ada = t.person('Ada');
+    const p = t.plan('Site', { streams: [{ id: 'api', title: 'API', owner: 'Ada' }] });
+    const api = t.task(ada.id, 'Uç noktalar', { planId: p.id, streamId: 'api' });
+    t.task(ada.id, 'Akışsız iş', { planId: p.id });
+    t.company.start(api.id);
+    t.finish(ada.id, api.id);
+    expect(t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'))).toEqual(['  ! bütün akışlar bitti, plan sürüyor — 1 açık iş akışsız']);
+  });
+
+  it('under the cap the most actionable comparisons stay: no usable owner, then an idle owner', () => {
+    const t = make(16);
+    for (const n of ['Ada', 'Can', 'Ece', 'Deniz', 'Selin']) t.person(n);
+    const streams = [
+      ...['a1', 'a2', 'a3'].map((id) => ({ id, title: id, owner: 'Ada' })),
+      ...['h1', 'h2', 'h3', 'h4', 'h5'].map((id) => ({ id, title: id, owner: 'alınacak: yazar' })),
+      ...['Can', 'Ece', 'Deniz', 'Selin'].map((owner, i) => ({ id: `b${i + 1}`, title: owner, owner })),
+    ];
+    t.plan('Site', { streams });
+    const flags = t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'));
+    expect(flags.slice(0, 5)).toEqual(['h1', 'h2', 'h3', 'h4', 'h5'].map((id) => `  ! ${id}: sahibi yok (alınacak: yazar)`));
+    expect(flags.slice(5, 8)).toEqual(['a1', 'a2', 'a3'].map((id) => `  ! ${id}: başlayabilir, sahibi Ada boşta (0 dk)`));
+    expect(flags.slice(8)).toEqual(['  ! … ve 5 uyarı daha']);
   });
 });
 
@@ -765,6 +882,7 @@ describe('board — a realistic office', () => {
 
 ## 1. Ne değişti (son turdan beri)
 - Teslim: “Şema ve uç noktalar” — Ada → onaylandı (Can)
+- Akış bitti: api (plan “Web sitesi”)
 - Yeni takılmalar: “Ödeme entegrasyonu” (Can, takıldı: sağlayıcı anahtarı yok)
 - Boşa çıktı: Ada
 - Kısıt: Ofisin kota sınırı %75 → %60; sahibinin kota payı devreye girdi
@@ -776,7 +894,6 @@ describe('board — a realistic office', () => {
   · ui (Ece): planlı, 0/1 iş, önce api
   · test (Bora): planlı, 0/1 iş, önce ui
   · icerik (alınacak: metin yazarı): planlı, görevi yok
-  ! api: bütün işleri kapandı, plan sürüyor — akış bitti mi, eksik iş var mı?
   ! icerik: sahibi yok (alınacak: metin yazarı)
 - Hedef “Satış ortaklıkları”: süren planı yok — planPropose ile goalId vererek başlat ya da goalSet ile kapat
 

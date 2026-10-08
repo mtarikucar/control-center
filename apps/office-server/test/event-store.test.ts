@@ -94,6 +94,20 @@ describe('EventStore', () => {
     expect(s.lastAt('company.paused', 999)).toBeNull();
   });
 
+  it('finds the last change of one task at or before a time', () => {
+    let clock = 1000;
+    const s = store(() => clock);
+    const task = (id: string, status: 'waiting' | 'blocked') => ({ id, status }) as unknown as import('@cc/shared').Task;
+    s.append('e1', { type: 'task.changed', change: 'created', task: task('a', 'waiting') });
+    const blocked = s.append('e1', { type: 'task.changed', change: 'updated', task: task('a', 'blocked') });
+    s.append('e2', { type: 'task.changed', change: 'created', task: task('b', 'waiting') });
+    clock = 2000;
+    s.append('e1', { type: 'task.changed', change: 'updated', task: task('a', 'waiting') });
+    expect(s.lastAt('task.changed', 1500, { taskId: 'a' })).toEqual(blocked);
+    expect(s.lastAt('task.changed', 1500, { taskId: 'c' })).toBeNull();
+    expect(s.lastAt('task.changed', 1500)?.event).toMatchObject({ task: { id: 'b' } });
+  });
+
   it('reports lastSeq, 0 when empty', () => {
     const s = store();
     expect(s.lastSeq()).toBe(0);
