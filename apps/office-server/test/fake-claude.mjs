@@ -135,7 +135,14 @@ async function heldUntil(suffix) {
  */
 async function backgroundJob(taskId, toolUseId) {
   await heldUntil('.bg');
+  // FAKE_CLAUDE_BG_CRASH: claude dies while the job runs ('running') or after it ended, before its follow-up turn ('notified').
+  const crash = () => {
+    process.stderr.write('boom: crash beside a background job\n');
+    process.exit(3);
+  };
+  if (process.env.FAKE_CLAUDE_BG_CRASH === 'running') crash();
   if (!process.env.FAKE_CLAUDE_BG_SILENT) out({ type: 'system', subtype: 'task_notification', task_id: taskId, tool_use_id: toolUseId, status: 'completed', output_file: '', summary: 'arka plan işi bitti' });
+  if (process.env.FAKE_CLAUDE_BG_CRASH === 'notified') crash();
   if (process.env.FAKE_CLAUDE_BG_NO_FOLLOWUP) return;
   chain = chain.then(async () => {
     await sleep(50); // the model takes a moment to answer

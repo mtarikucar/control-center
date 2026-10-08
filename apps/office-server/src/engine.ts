@@ -427,15 +427,17 @@ export class Engine {
   returnFromTerminal(id: string): Employee {
     const employee = this.#roster.get(id);
     if (employee.lifecycle !== 'in_terminal') throw new ConflictError('Bu çalışan terminalde değil.');
-    // Taken there at work (a turn, or a job it left running): closing the session for the terminal cut that work.
+    // Taken there at work (a turn, or a job it left running) closing the session for the terminal cut that work; taken
+    // there interrupted, the office restart had cut it before.
     const opened = this.#events.latest(id, 'lifecycle.changed')?.event;
-    const cut = opened?.type === 'lifecycle.changed' && opened.to === 'in_terminal' && opened.from === 'working';
+    const from = opened?.type === 'lifecycle.changed' && opened.to === 'in_terminal' ? opened.from : null;
+    const note = from === 'working' ? CONTINUE_AFTER_TERMINAL : from === 'interrupted' ? CONTINUE_AFTER_RESTART : null;
     // Back at the desk and ready: the office picks the same session up again (an idle process spends no tokens).
     this.#runtime(id).crashes = [];
     const back = this.#start(employee, 'terminalden ofise döndü');
-    if (!cut) return back;
+    if (!note) return back;
     // It hears so and goes on: working, as its process is.
-    this.send(id, CONTINUE_AFTER_TERMINAL, 'system');
+    this.send(id, note, 'system');
     return this.#roster.get(id);
   }
 
@@ -667,8 +669,8 @@ export class Engine {
 
   #onExit(id: string, code: number | null, signal: NodeJS.Signals | null, stderr: string): void {
     const rt = this.#runtime(id);
-    const wasTurnActive = rt.turnActive;
-    const resumeWork = wasTurnActive && rt.consumedInTurn;
+    // Work was under way: a turn that took its message in, a job beside the turns, or one that ended and waits to be read.
+    const resumeWork = (rt.turnActive && rt.consumedInTurn) || rt.background.size > 0 || rt.followUpTimer !== null;
     const unread = rt.unread.splice(0);
     rt.consumedInTurn = false;
     rt.proc = null;

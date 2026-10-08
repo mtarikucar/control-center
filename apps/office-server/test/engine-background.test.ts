@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EngineOptions } from '../src/engine.ts';
-import { CONTINUE_AFTER_TERMINAL } from '../src/engine.ts';
+import { CONTINUE_AFTER_CRASH, CONTINUE_AFTER_RESTART, CONTINUE_AFTER_TERMINAL } from '../src/engine.ts';
 import { ConflictError } from '../src/errors.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup, tempDir, until, waitFor } from './helpers.ts';
@@ -135,5 +135,65 @@ describe('Engine — back from the terminal', () => {
     await until(() => t.engine.ready(e.id));
     expect(typesOf(t, e.id, before)).not.toContain('message.user');
     expect(typesOf(t, e.id, before)).not.toContain('turn.started');
+  });
+});
+
+describe('Engine — work cut beside a background job', () => {
+  it('claude dies while a background job runs: started again, it hears to go on', async () => {
+    const t = make({ FAKE_CLAUDE_BG_CRASH: 'running' });
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'BACKGROUND mutasyon koşusu', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    t.release(e.sessionId, '.bg');
+    const told = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.user', { after: first.seq, timeoutMs: 3000 });
+    expect(told.event).toEqual({ type: 'message.user', text: CONTINUE_AFTER_CRASH, source: 'system' });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: told.seq });
+    expect(t.roster.get(e.id).lifecycle).toBe('idle');
+  });
+
+  it('claude dies after the job ended, before the turn that reads it: it hears to go on', async () => {
+    const t = make({ FAKE_CLAUDE_BG_CRASH: 'notified' });
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'BACKGROUND', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    t.release(e.sessionId, '.bg');
+    const told = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'message.user', { after: first.seq, timeoutMs: 3000 });
+    expect(told.event).toEqual({ type: 'message.user', text: CONTINUE_AFTER_CRASH, source: 'system' });
+  });
+
+  it('a crash while idle with nothing running starts the session again and sends nothing (as before)', async () => {
+    const t = make({ FAKE_CLAUDE_BG_CRASH: 'running', FAKE_CLAUDE_BG_SILENT: '1', FAKE_CLAUDE_BG_NO_FOLLOWUP: '1' });
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'BACKGROUND', 'system');
+    const first = await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    // The office never saw the job: to it the session crashed while idle.
+    expect(t.roster.get(e.id).lifecycle).toBe('idle');
+    t.release(e.sessionId, '.bg');
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'error' && x.event.message.includes('beklenmedik'), { after: first.seq });
+    await until(() => t.engine.ready(e.id));
+    expect(typesOf(t, e.id, first.seq)).not.toContain('message.user');
+  });
+});
+
+describe('Engine — interrupted, then the terminal', () => {
+  it('an employee the office restart interrupted, taken to the terminal: back at the desk it hears to go on', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Mert', role: 'r' });
+    t.engine.send(e.id, 'SLOW job', 'system');
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'tool.started');
+    await t.engine.shutdown();
+    // The office starts again: a fresh engine on the same roster and log.
+    const second = fakeEngine(t);
+    cleanups.unshift(second.cleanup);
+    second.engine.recover();
+    expect(t.roster.get(e.id).lifecycle).toBe('interrupted');
+
+    expect((await second.engine.openInTerminal(e.id)).employee.lifecycle).toBe('in_terminal');
+    const before = t.events.lastSeq();
+    expect(second.engine.returnFromTerminal(e.id).lifecycle).toBe('working');
+    const told = t.events.list({ after: before, employeeId: e.id }).find((x) => x.event.type === 'message.user');
+    expect(told?.event).toEqual({ type: 'message.user', text: CONTINUE_AFTER_RESTART, source: 'system' });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished', { after: before });
+    expect(t.roster.get(e.id).lifecycle).toBe('idle');
   });
 });
