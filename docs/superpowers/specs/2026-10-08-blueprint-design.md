@@ -153,6 +153,9 @@ kural için B3 kaydının son oturum satırını okur:
 - `mcp__sunucu` kuralı: masada sunucu `denied` → doğrulandı. Araçlarıyla açık → **TUTMADI**. Bağlı değil (yetki
   bekliyor, hata) → araç yok. Oturum yok → henüz doğrulanmadı.
 - `mcp__sunucu__araç` kuralı: masanın araç adları (B7) bu aracı içermiyor → doğrulandı.
+- `mcp__sunucu__*` (joker) kuralı: CLI bunu sunucunun kendisi gibi uygular (Kerem'in K3'ü, claude 2.1.293). Okuma da onu
+  sunucu kuralı gibi okur: sunucu tanınıyorsa "tanınmıyor" demez. Masada sunucunun aracı yoksa doğrulandı, varsa
+  TUTMADI. Kısmi joker (`send_*`) bir araç adı gibi okunur, yani tanınmaz (görev 8d67d8ba).
 - `Bash(…)` ve diğer kalıplar: listeyle doğrulanamaz, çağrı anında reddedilir (pilot §8, K3 kanıtlı). Okuma bunu
   açıkça yazar.
 - **Tanınmayan ad (inceleme turu 1):** sunucu kuralının sunucusu hiçbir oturumda görülmemiş ve sözlükte yoksa, ya da
@@ -228,3 +231,5 @@ Yeni tablolar; mevcut tablolara dokunulmaz. Eski planların blueprint'i yoktur; 
   - **[küçük]** Revizyonda kurulu rutin ve görevler iki kez sayılıyordu (§2).
   - **[küçük]** Kapalı kibin sınırı notta ve kartta yoktu (§4).
   - **[küçük]** Dosyanın oturumdan önce yazıldığı yalnız zamanlamayla korunuyordu; doğrudan test (§4).
+- **Sürüm 3 (görev 8d67d8ba, Kerem'in B5 onay notu).** Joker araç kuralı (`mcp__sunucu__*`) okumada ve kartta
+  "tanınmıyor" görünüyordu; artık sunucu kuralı gibi okunuyor (§4).
