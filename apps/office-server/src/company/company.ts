@@ -313,6 +313,9 @@ export class Company {
     });
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
+    // What the session closes follows the capabilities (B9b): a change starts it again (now if idle, else after its turn).
+    const sorted = (list: string[] | undefined) => [...(list ?? [])].sort().join(',');
+    if (sorted(next.capabilities) !== sorted(current.capabilities)) this.#d.reload?.(id);
     return next;
   }
   /** The coordinator (or the owner) moves someone to another model; their session goes on with it, memory kept. */

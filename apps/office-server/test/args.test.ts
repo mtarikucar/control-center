@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { employeeSettings, sessionArgs, sideQuestionArgs, terminalCommand } from '../src/claude/args.ts';
+import { DISALLOWED_TOOLS, employeeSettings, sessionArgs, sideQuestionArgs, terminalCommand } from '../src/claude/args.ts';
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -64,4 +64,27 @@ describe('claude args', () => {
     // The list must come before the session id so nothing is swallowed into it.
     expect(args.indexOf('--session-id')).toBeGreaterThan(i + 5);
   });
+
+  it('B9b: the employee’s own closed tools go into the same one --disallowedTools flag, after the scheduler', () => {
+    const deny = ['mcp__claude_ai_Gmail__send_message', 'mcp__claude_ai_Higgsfield'];
+    const args = sessionArgs({ model: 'haiku', sessionId: 's', resume: false, home: '/home/test', disallowed: deny });
+    expect(args.filter((a) => a === '--disallowedTools')).toHaveLength(1);
+    const i = args.indexOf('--disallowedTools');
+    expect(args.slice(i + 1, i + 8)).toEqual(['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'RemoteTrigger', ...deny]);
+    expect(args.indexOf('--session-id')).toBeGreaterThan(i + 7);
+  });
+
+  it('B9b: with nothing of the employee’s closed the arguments are what they were', () => {
+    const base = { model: 'haiku' as const, sessionId: 's', resume: false, home: '/home/test' };
+    expect(sessionArgs({ ...base, disallowed: [] })).toEqual(sessionArgs(base));
+  });
+
+  it('closes no built-in tool of Claude Code’s but its scheduler (moved from lockdown.real, whose session is now locked)', () => {
+    const args = sessionArgs({ model: 'haiku', sessionId: 's', resume: false, home: '/home/test' });
+    const i = args.indexOf('--disallowedTools');
+    const end = args.findIndex((a, j) => j > i && a.startsWith('--'));
+    expect(args.slice(i + 1, end)).toEqual([...DISALLOWED_TOOLS]);
+    for (const builtin of ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'NotebookEdit']) expect(args).not.toContain(builtin);
+  });
 });
+

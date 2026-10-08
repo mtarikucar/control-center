@@ -7,6 +7,7 @@ import { ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import { mcpToolPrefix } from '../claude/normalize.ts';
+import { capabilityVocabulary, toolClass } from './capabilities.ts';
 import { clean, lines } from './text.ts';
 
 /**
@@ -124,6 +125,26 @@ export class IntegrationRegistry {
     return integration;
   }
 
+  /**
+   * Every connector tool name any session ever reported (B9b): what sessions close is made from these, not only from
+   * the latest reports — a tool closed everywhere is reported nowhere any more and would open again.
+   */
+  seenToolNames(): string[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT DISTINCT json_extract(m.value, '$.name') AS server, t.value AS tool
+         FROM events e, json_each(e.payload, '$.mcp') m, json_each(m.value, '$.toolNames') t
+         WHERE e.type = 'session.started'`,
+      )
+      .all() as unknown as Array<{ server: string; tool: string }>;
+    return [...new Set(rows.map((r) => `${mcpToolPrefix(r.server)}${r.tool}`))].sort();
+  }
+
+  /** The connectors the coordinator closed in the registry: their sessions close them whole (B9b). */
+  closedServers(): string[] {
+    return (this.#db.prepare('SELECT name FROM integrations WHERE closed = 1 ORDER BY name').all() as unknown as Array<{ name: string }>).map((r) => r.name);
+  }
+
   /** Every name any session reported (first and last time), and per name the current desks' latest reports. */
   #observed(): { seen: Map<string, { first: number; last: number }>; desks: Map<string, IntegrationDesk[]> } {
     const rows = this.#db.prepare("SELECT employee_id, ts, payload FROM events WHERE type = 'session.started' ORDER BY seq").all() as unknown as Array<{ employee_id: string | null; ts: number; payload: string }>;
@@ -170,10 +191,10 @@ export class IntegrationRegistry {
 }
 
 const REASON: Record<DeskConnection, string> = {
-  connected: 'bağlı', denied: 'masa ayarı: oturumda aracı yok', needs_auth: 'yetki bekliyor', pending: 'bağlanıyor', failed: 'hata', unknown: 'bilinmeyen durum',
+  connected: 'bağlı', denied: 'oturumda aracı yok (masa ayarı ya da rolün kapatması)', needs_auth: 'yetki bekliyor', pending: 'bağlanıyor', failed: 'hata', unknown: 'bilinmeyen durum',
 };
 
-function line(i: Integration): string {
+function line(i: Integration, seen?: readonly string[]): string {
   const parts: string[] = [];
   if (i.desks.length === 0) parts.push(`güncel hiçbir masada yok${i.lastSeen ? ` (son görülme: ${new Date(i.lastSeen).toLocaleString('tr-TR')})` : ' (hiçbir oturumda görülmedi)'}`);
   else {
@@ -181,7 +202,16 @@ function line(i: Integration): string {
     const shut = i.desks.filter((d) => !d.open).map((d) => `${d.name} (${d.closedBy === 'registry' ? 'kayıtta kapalı' : d.status === 'unknown' ? `bilinmeyen durum: ${d.raw}` : REASON[d.status]})`);
     parts.push([open.length ? `açık: ${open.join(', ')}` : '', shut.length ? `kapalı: ${shut.join(', ')}` : ''].filter(Boolean).join('; '));
   }
-  if (i.registryClosed) parts.push('kayıtta kapalı, oturumlarda kapatma B9’da');
+  // What sessions close (B9b, session-deny.ts), from every tool name the office knows of this connector.
+  const prefix = mcpToolPrefix(i.name);
+  const known = [...new Set([...capabilityVocabulary().capabilities.flatMap((c) => c.tools), ...(seen ?? [])])].filter((t) => t.startsWith(prefix));
+  if (i.registryClosed) parts.push(`kayıtta kapalı, oturumda kapalı (${known.length} araç)`);
+  else if (i.kind !== 'office') {
+    const unclassified = known.filter((t) => toolClass(t).kind === 'unclassified').length;
+    const outward = known.filter((t) => { const c = toolClass(t); return c.kind === 'classified' && c.outward; }).length;
+    if (unclassified > 0) parts.push(`oturumda kapalı: ${unclassified} sınıflandırılmamış araç`);
+    if (outward > 0) parts.push(`dışa dönük ${outward} araç yalnız yeteneği olan rollerde açık`);
+  }
   if (i.capabilities.length) parts.push(`yetenekler: ${i.capabilities.join(', ')}`);
   if (i.authNeeded) parts.push(`yetki: ${i.authNeeded}`);
   if (i.costNote) parts.push(`maliyet: ${i.costNote}`);
@@ -190,11 +220,12 @@ function line(i: Integration): string {
 }
 
 /** What integrationsList shows: the count per status, then one line per connector with where it is open or shut and why. */
-export function integrationsText(list: Integration[], filtered: boolean): string {
+/** `seen`: every tool name a session ever reported (seenToolNames), for what sessions close of each connector. */
+export function integrationsText(list: Integration[], filtered: boolean, seen: readonly string[] = []): string {
   if (list.length === 0) return filtered ? 'Süzgece uyan bağlantı yok.' : 'Henüz hiçbir masa bağlantı bildirmedi ve elle kayıt yok.';
   const counts = INTEGRATION_STATUSES.map((s) => [s, list.filter((i) => i.status === s).length] as const).filter(([, n]) => n > 0);
   return [
     `# Bağlantılar (${list.length}: ${counts.map(([s, n]) => `${INTEGRATION_STATUS_LABELS[s]} ${n}`).join(', ')}) — salt okunur; hiçbir bağlayıcı çağrılmadı.`,
-    ...list.map(line),
+    ...list.map((i) => line(i, seen)),
   ].join('\n');
 }

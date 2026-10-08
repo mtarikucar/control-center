@@ -143,7 +143,7 @@ export function coverage(integrations: Integration[], wanted: string[], employee
 
 function shutReason(d: IntegrationDesk): string {
   if (d.closedBy === 'registry') return 'kayıtta kapalı';
-  if (d.closedBy === 'desk') return 'masa ayarı: oturumda aracı yok';
+  if (d.closedBy === 'desk') return 'oturumda aracı yok (masa ayarı ya da rolün kapatması)';
   return INTEGRATION_STATUS_LABELS[d.status];
 }
 

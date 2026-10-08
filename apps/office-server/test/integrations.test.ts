@@ -139,8 +139,8 @@ describe('Integration registry — a desk whose settings deny a connector (revie
     expect(t.integrations.get('claude.ai Jeeta').desks.every((d) => !d.open && d.closedBy === 'desk')).toBe(true);
     expect(t.integrations.list({ status: 'denied' }).map((i) => i.name)).toEqual(['claude.ai Jeeta']);
     const text = await t.call(t.ada, 'integrationsList');
-    expect(text).toContain('• claude.ai Gmail [bağlı] (claude.ai bağlayıcısı) — açık: Can; kapalı: Ada (masa ayarı: oturumda aracı yok)');
-    expect(text).toContain('• claude.ai Jeeta [masada kapalı] (claude.ai bağlayıcısı) — kapalı: Ada (masa ayarı: oturumda aracı yok), Can (masa ayarı: oturumda aracı yok)');
+    expect(text).toContain('• claude.ai Gmail [bağlı] (claude.ai bağlayıcısı) — açık: Can; kapalı: Ada (oturumda aracı yok (masa ayarı ya da rolün kapatması))');
+    expect(text).toContain('• claude.ai Jeeta [masada kapalı] (claude.ai bağlayıcısı) — kapalı: Ada (oturumda aracı yok (masa ayarı ya da rolün kapatması)), Can (oturumda aracı yok (masa ayarı ya da rolün kapatması))');
     // Closed in the registry while the session still has the tools: the JSON says so (closedBy, tools).
     const closed = t.integrations.register(t.coordinator.id, { name: 'claude.ai Notion', closed: true });
     expect(closed.desks.map((d) => [d.name, d.tools, d.open, d.closedBy])).toEqual([['Ada', 46, false, 'registry'], ['Can', 46, false, 'registry']]);
@@ -161,7 +161,7 @@ describe('Integration registry — reading it', () => {
     expect(all).toContain('• office [bağlı] (ofis) — açık: Ada, Can');
     expect(all).toContain('• plugin:design:figma [yetki bekliyor] (eklenti) — kapalı: Ada (yetki bekliyor), Can (yetki bekliyor)');
     // Each desk says its own reason: the registry where the session has it, the server state where it does not.
-    expect(all).toContain('• claude.ai Gmail [kapalı] (claude.ai bağlayıcısı) — kapalı: Ada (kayıtta kapalı), Can (yetki bekliyor); kayıtta kapalı, oturumlarda kapatma B9’da');
+    expect(all).toContain('• claude.ai Gmail [kapalı] (claude.ai bağlayıcısı) — kapalı: Ada (kayıtta kapalı), Can (yetki bekliyor); kayıtta kapalı, oturumda kapalı (15 araç)');
     expect(all).toContain('• claude.ai Slack [bilinmiyor] (claude.ai bağlayıcısı) — kapalı: Ada (bilinmeyen durum: starting)');
     expect(all).toMatch(/• blender \[bilinmiyor\] \(yerel MCP\) — güncel hiçbir masada yok \(son görülme: .+\)/);
     const pending = await t.call(t.ada, 'integrationsList', { status: 'needs_auth' });

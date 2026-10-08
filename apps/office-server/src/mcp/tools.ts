@@ -108,7 +108,7 @@ export function officeTools(o: {
   characters: () => string[];
   memory: Memory;
   budget: Budget;
-  engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown; sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }> };
+  engine: { sleep(id: string): Promise<unknown>; wake(id: string): unknown; sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }>; reload?(id: string): void };
   /** Every plan, newest first (goalsRead lists each goal's plans). */
   plans: () => Plan[];
   /** Who does what when, as Turkish text (agendaRead). */
@@ -349,7 +349,7 @@ export function officeTools(o: {
         if (status !== undefined && !(INTEGRATION_STATUSES as readonly string[]).includes(status)) throw new ValidationError(`durum (status) ${INTEGRATION_STATUSES.slice(0, -1).join(', ')} ya da ${INTEGRATION_STATUSES.at(-1)} olmalı.`);
         const who = optStr(args, 'employee');
         const list = o.integrations.list({ status: status as IntegrationStatus | undefined, employee: who === undefined ? undefined : findPerson(who).id });
-        return integrationsText(list, status !== undefined || who !== undefined);
+        return integrationsText(list, status !== undefined || who !== undefined, o.integrations.seenToolNames());
       },
     },
     {
@@ -905,7 +905,7 @@ export function officeTools(o: {
     },
     {
       name: 'integrationRegister',
-      description: `Record a connector in the integration registry by hand (coordinator): one the sessions do not show (an adapter or a CLI, give kind), or notes on one they do — capabilities, what the owner must do (authNeeded), cost, a note — or close it (closed: true; the registry marks it, B9 will shut it in sessions). Fields given are written, the others kept. Kinds: ${INTEGRATION_KINDS.join(', ')}.`,
+      description: `Record a connector in the integration registry by hand (coordinator): one the sessions do not show (an adapter or a CLI, give kind), or notes on one they do — capabilities, what the owner must do (authNeeded), cost, a note — or close it (closed: true; every session starts again with it shut). Fields given are written, the others kept. Kinds: ${INTEGRATION_KINDS.join(', ')}.`,
       inputSchema: object(
         {
           name: s('Connector name as the sessions report it (e.g. "claude.ai Gmail") or your own.'), kind: { type: 'string', enum: [...INTEGRATION_KINDS] }, capabilities: strings('What it can do, e.g. email.read, social.publish.'),
@@ -916,7 +916,10 @@ export function officeTools(o: {
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
         if (!o.integrations) throw new ConflictError('Bu ofiste entegrasyon kaydı yok.');
+        const wasClosed = o.integrations.closedServers().includes(str(args, 'name').trim());
         const i = o.integrations.register(employee.id, { name: args.name, kind: args.kind, capabilities: args.capabilities, authNeeded: args.authNeeded, costNote: args.costNote, note: args.note, closed: args.closed });
+        // Closed or opened in the registry (B9b): every session starts again (now if idle, else after its turn) with it shut or open.
+        if (i.registryClosed !== wasClosed) for (const e of roster.list()) if (e.lifecycle !== 'archived') o.engine.reload?.(e.id);
         // Kept as written (B3); only the vocabulary's ids take part in a match (B7).
         const unknown = args.capabilities === undefined ? [] : unknownCapabilities(i.capabilities);
         const warn = unknown.length ? `\nSözlükte olmayan yetenek: ${unknown.join(', ')} — eşleşmede kullanılmaz (sözlük: capabilitiesRead).` : '';
