@@ -421,4 +421,23 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS onboarding_rounds;
       DROP TABLE IF EXISTS onboarding;`,
   },
+  {
+    version: 15,
+    name: 'integration registry: what the coordinator records by hand',
+    // What each desk's session reports is not copied here: it is read from the session.started events.
+    up: `
+      CREATE TABLE IF NOT EXISTS integrations (
+        name TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        closed INTEGER NOT NULL DEFAULT 0,
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        auth_needed TEXT,
+        cost_note TEXT,
+        note TEXT,
+        registered_by TEXT NOT NULL,
+        registered_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );`,
+    down: `DROP TABLE IF EXISTS integrations;`,
+  },
 ];

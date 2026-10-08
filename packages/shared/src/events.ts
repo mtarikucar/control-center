@@ -1,6 +1,7 @@
 import type { BudgetSummary, Spend } from './budget.ts';
 import type { ClockStatus, Goal, GoalChange, Plan, PlanChange, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
 import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
+import type { Integration } from './integration.ts';
 import type { Decision } from './memory.ts';
 import type { Onboarding, OnboardingChange, OnboardingRound } from './onboarding.ts';
 import type { ProfileEntry } from './profile.ts';
@@ -68,6 +69,8 @@ export type OfficeEvent =
   | { type: 'brief.updated' }
   /** A section of the company profile changed; `entry` is the section as it now stands. */
   | { type: 'profile.updated'; entry: ProfileEntry }
+  /** The coordinator registered or changed a connector by hand (B3). */
+  | { type: 'integration.changed'; integration: Integration }
   /** The onboarding moved; `round` with change 'round': the questions just asked (KÖ1 counts them). */
   | { type: 'onboarding.changed'; change: OnboardingChange; onboarding: Onboarding; round?: OnboardingRound }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
