@@ -49,6 +49,14 @@ describe('migrations: an applied version must be the code’s migration of that 
     );
   });
 
+  it('also the one right below the last applied: B7’s 17 went live before B6’s 16', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, [...MIGRATIONS, B7_17]);
+    expect(() => migrateUp(db, [...MIGRATIONS, B6_16, B7_17])).toThrow(
+      'v16 kodda “role templates: which one an employee was hired from” ama canlıda uygulanmamış; sonraki bir göç uygulandığı için hiç çalışmazdı: göç sırası bozuk.',
+    );
+  });
+
   it('migrateDown refuses too: it would run another migration’s down on this database', () => {
     const db = openDb(':memory:');
     migrateUp(db, [...MIGRATIONS, B26_AS_16]);
