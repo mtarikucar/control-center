@@ -64,6 +64,10 @@ describe('api', () => {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchFn);
+    // A read on its own never asks for a nonce.
+    await api.metrics();
+    expect(fetchFn.mock.calls.map(([path]) => String(path))).toEqual(['/api/metrics']);
+    fetchFn.mockClear();
     await api.send('e1', 'bir');
     await api.fire('e1');
     await api.metrics();
