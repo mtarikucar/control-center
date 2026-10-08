@@ -363,8 +363,8 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     /**
      * Where the plan's structure and the office disagree (spec §3.4), the most actionable first so a cap keeps them: an
      * approved plan that never got a task, a stream with no usable owner (to hire, let go, cannot take work), then one
-     * whose owner is idle, then the next stream's missing tasks and a plan whose streams are all done, then streams
-     * piled on one person.
+     * whose owner is idle, then the next stream's missing tasks — or a stream left without any while what waits for it
+     * started — and a plan whose streams are all done, then streams piled on one person.
      */
     const comparisons = (p: Plan, streams: readonly PlanStreamView[], tasks: readonly Task[]): string[] => {
       const flags: Array<{ rank: number; text: string }> = [];
@@ -375,6 +375,13 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       }
       const status = new Map(streams.map((x) => [x.id, x.status]));
       const hasWork = (id: string) => tasks.some((t) => t.streamId === id && t.kind !== 'review' && t.status !== 'cancelled');
+      const ancestors = ancestry(streams);
+      const started = streams.filter((x) => x.status !== 'planned');
+      /** The streams waiting for this one, directly or down the chain, that started — the first of them (the rest wait for those). */
+      const startedAfter = (id: string): string[] => {
+        const after = started.filter((y) => ancestors(y.id).has(id));
+        return after.filter((y) => !after.some((z) => z !== y && ancestors(y.id).has(z.id))).map((y) => y.id);
+      };
       for (const x of streams) {
         if (x.status === 'done') continue;
         const owner = toHire(x.owner) ? undefined : byId.get(x.owner);
@@ -390,9 +397,15 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
                 : null;
         const idle = owner && !lacking && idleSince.has(owner.id) ? span(now - idleSince.get(owner.id)!) : null;
         const ready = p.status === 'approved' && x.status === 'planned' && x.dependsOn.every((dep) => status.get(dep) === 'done');
+        const rank = lacking ? 0 : idle ? 1 : 2;
+        // Left without work while what waits for it went on: its part was done outside a task, or never done.
+        const after = hasWork(x.id) ? [] : startedAfter(x.id);
         if (ready && x.dependsOn.length > 0 && !hasWork(x.id)) {
           const who = lacking ? lacking[1] : idle ? `sahibi ${owner!.name} boşta, ${idle}` : `sahibi ${owner!.name}`;
-          flags.push({ rank: lacking ? 0 : idle ? 1 : 2, text: `${x.id}: önündeki ${x.dependsOn.join(', ')} bitti, görevi yok (${who}) — görev aç ya da akışı kaldır` });
+          flags.push({ rank, text: `${x.id}: önündeki ${x.dependsOn.join(', ')} bitti, görevi yok (${who}) — görev aç ya da akışı kaldır` });
+        } else if (after.length > 0) {
+          const who = lacking ? ` (${lacking[1]})` : idle ? ` (sahibi ${owner!.name} boşta, ${idle})` : '';
+          flags.push({ rank, text: `${x.id}: görevi yok ama ona bağlı ${after.join(', ')} başladı${who} — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç` });
         } else if (lacking) flags.push({ rank: 0, text: `${x.id}: ${lacking[0]}` });
         else if (idle && (x.status === 'active' || x.status === 'blocked')) flags.push({ rank: 1, text: `${x.id}: sahibi ${owner!.name} boşta (${idle})` });
         else if (idle && ready) flags.push({ rank: 1, text: `${x.id}: başlayabilir, sahibi ${owner!.name} boşta (${idle})` });
@@ -401,7 +414,6 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
         const left = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
         flags.push({ rank: 2, text: `bütün akışlar bitti, plan sürüyor — ${left ? `${left} açık iş akışsız` : 'açık rutin var'}` });
       }
-      const ancestors = ancestry(streams);
       const byOwner = new Map<string, PlanStreamView[]>();
       for (const x of streams) if (x.status !== 'done' && byId.has(x.owner)) byOwner.set(x.owner, [...(byOwner.get(x.owner) ?? []), x]);
       for (const [owner, own] of byOwner) {

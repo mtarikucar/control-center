@@ -499,6 +499,58 @@ describe('board — done streams and a plan that runs on', () => {
     expect(t.section(t.board({ since: next }).text, 2)).not.toContain('  !');
   });
 
+  it('a stream left without work while one that waits for it has started (its part done outside a task): one line naming the first started ones and both ways out; not while they wait, not once the stream has its task', () => {
+    const t = make();
+    const [ada, can] = ['Ada', 'Can'].map((n) => t.person(n));
+    const g = t.goal('Araç');
+    const p = t.plan('Araç', {
+      goalId: g.id,
+      streams: [
+        { id: 'temel', title: 'Temel', owner: 'Koordinatör' },
+        { id: 'cekirdek', title: 'Çekirdek', owner: 'Ada', dependsOn: ['temel'] },
+        { id: 'arayuz', title: 'Arayüz', owner: 'Can', dependsOn: ['temel'] },
+        { id: 'butun', title: 'Bütün', owner: 'Ada', dependsOn: ['cekirdek', 'arayuz'] },
+      ],
+    });
+    const flags = () => t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'));
+    const chain = '  ! tek kişide 2 açık akış (Ada): cekirdek, butun — bağımlı: cekirdek → butun';
+    const core = t.task(ada!.id, 'Çekirdek', { planId: p.id, streamId: 'cekirdek' });
+    const ui = t.task(can!.id, 'Arayüz', { planId: p.id, streamId: 'arayuz' });
+    // What waits for it has its tasks but has not started: nothing to say yet.
+    expect(flags()).toEqual([chain]);
+    t.company.start(core.id);
+    t.company.start(ui.id);
+    t.finish(can!.id, ui.id);
+    t.advance(10 * MIN);
+    // Both that wait for it started (one done): named; “butun”, which waits for them, is implied.
+    expect(flags()).toEqual(['  ! temel: görevi yok ama ona bağlı cekirdek, arayuz başladı — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç', chain]);
+    // Given its task (the coordinator's own, waiting), then done: no line.
+    const base = t.task(t.coordinator.id, 'Temel', { planId: p.id, streamId: 'temel' });
+    expect(flags()).toEqual([chain]);
+    t.company.start(base.id);
+    t.finish(t.coordinator.id, base.id);
+    expect(flags()).toEqual([chain]);
+  });
+
+  it('a stream left without work behind one that started further down the chain: flagged too, ranked with the next stream’s missing tasks (its idle owner first)', () => {
+    const t = make();
+    const [, , bora] = ['Ada', 'Can', 'Bora'].map((n) => t.person(n));
+    const p = t.plan('Zincir', {
+      streams: [
+        { id: 'a', title: 'A', owner: 'Can' },
+        { id: 'b', title: 'B', owner: 'Bora', dependsOn: ['a'] },
+        { id: 'c', title: 'C', owner: 'Bora', dependsOn: ['b'] },
+      ],
+    });
+    t.company.start(t.task(bora!.id, 'C işi', { planId: p.id, streamId: 'c' }).id);
+    t.advance(20 * MIN);
+    expect(t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'))).toEqual([
+      '  ! a: görevi yok ama ona bağlı c başladı (sahibi Can boşta, 20 dk) — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç',
+      '  ! b: görevi yok ama ona bağlı c başladı — iş yapıldıysa akışı planRevise ile kaldır, yapılmadıysa görevini aç',
+      '  ! tek kişide 2 açık akış (Bora): b, c — bağımlı: b → c',
+    ]);
+  });
+
   it('every stream done while the plan still runs: one line for the plan', () => {
     const t = make();
     const ada = t.person('Ada');
@@ -837,10 +889,11 @@ describe('board — short', () => {
     expect(ada).toBeTruthy();
     const { t: big, since } = bigOffice();
     const text = big.board({ since }).text;
-    // Over the budget with the first limits: four lines of a list, four streams of a plan.
-    expect(t.section(text, 1).split('\n').filter((l) => l.startsWith('- Teslim'))).toHaveLength(4);
-    expect(text).toContain('- … ve 16 teslim daha');
-    expect(text).toContain('  · … ve 2 akış daha');
+    // Over the budget with the first two limits (most of each plan's chained streams have no task while a later one
+    // started: flagged): three lines of a list, three streams of a plan.
+    expect(t.section(text, 1).split('\n').filter((l) => l.startsWith('- Teslim'))).toHaveLength(3);
+    expect(text).toContain('- … ve 17 teslim daha');
+    expect(text).toContain('  · … ve 3 akış daha');
   });
 
   it('offices without proposals or a usage reader still get a board', () => {
