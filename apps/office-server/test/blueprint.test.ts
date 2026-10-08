@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { kpiText, type Employee } from '@cc/shared';
@@ -6,7 +6,7 @@ import { Agenda } from '../src/company/agenda.ts';
 import { BlueprintStore } from '../src/company/blueprint-store.ts';
 import { Blueprints } from '../src/company/blueprint.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
-import { deskDir } from '../src/desk.ts';
+import { deskDir, writeDeskDeny } from '../src/desk.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { companyFor, METHOD } from './company-helpers.ts';
@@ -242,8 +242,10 @@ describe('Blueprint — installing it', () => {
     const c = t.coordinator.id;
     // Before the install: Efe hired by hand, the approval rule already in the playbook (other words), the goal already set.
     const efe = t.company.hire(c, { name: 'efe', role: 'El ile alınmış editör.', model: 'sonnet' });
-    t.memory.updatePlaybook(c, { topic: 'Yayın onay kuralı', text: 'Şirketin kendi sözü.' });
+    t.memory.updatePlaybook(c, { topic: 'yayın onay kuralı', text: 'Şirketin kendi sözü.' });
     const goal = t.company.goalSet(c, { title: 'Haftalık takvim zamanında', why: 'Önceden açıldı.', done: ['x'] });
+    // Room for the two the install hires: Efe is adopted, not counted.
+    t.budget.setConstitution({ maxEmployees: 4 });
     const { plan } = t.blueprints.propose(c, BP());
     expect(plan.risks).toContain('Var olan kullanılacak: Efe (çalışan), “Yayın onay kuralı” (el kitabı), “Haftalık takvim zamanında” (hedef)');
     t.company.approve(plan.id);
@@ -251,7 +253,7 @@ describe('Blueprint — installing it', () => {
     expect(Object.fromEntries(report.steps.map((x) => [x.step, x.result]))).toMatchObject({ 'role:editor': 'adopted', 'playbook:Yayın onay kuralı': 'adopted', 'goal:h1': 'adopted' });
     expect(report.steps.find((x) => x.step === 'role:editor')!.ref).toBe(efe.id);
     expect(t.roster.list().filter((e) => e.name.toLocaleLowerCase('tr') === 'efe')).toHaveLength(1);
-    expect(t.memory.playbookTopic('Yayın onay kuralı')).toMatchObject({ text: 'Şirketin kendi sözü.', version: 1 });
+    expect(t.memory.playbookTopic('Yayın onay kuralı')).toMatchObject({ topic: 'yayın onay kuralı', text: 'Şirketin kendi sözü.', version: 1 });
     expect(t.company.goals().map((g) => g.id)).toEqual([goal.id]);
     // The adopted Efe reviews the tasks; his desk is not closed by the install (it was not the install's hire).
     expect(t.tasks.list({ planId: plan.id }).every((x) => x.reviewer === efe.id)).toBe(true);
@@ -262,6 +264,29 @@ describe('Blueprint — installing it', () => {
     const again = t.blueprints.apply(c, plan.id);
     expect(again.steps.every((x) => x.result === 'adopted')).toBe(true);
     expect(t.snapshot()).toEqual(before);
+  });
+
+  it('review focus: a closed goal of the same title is not adopted — the install opens the goal anew', () => {
+    const t = make();
+    t.profile();
+    const c = t.coordinator.id;
+    const old = t.company.goalSet(c, { title: 'Haftalık takvim zamanında', why: 'Eskiden.', done: ['x'] });
+    t.company.goalSet(c, { goalId: old.id, status: 'dropped' });
+    const { plan } = t.blueprints.propose(c, BP());
+    t.company.approve(plan.id);
+    const report = t.blueprints.apply(c, plan.id);
+    expect(report.steps.find((x) => x.step === 'goal:h1')).toMatchObject({ result: 'done' });
+    expect(t.company.goals().filter((g) => g.status === 'active').map((g) => g.title)).toEqual(['Haftalık takvim zamanında']);
+    expect(report.steps.find((x) => x.step === 'goal:h1')!.ref).not.toBe(old.id);
+  });
+
+  it('closing a desk keeps what its settings already say: other keys and rules stay, the new rules join', () => {
+    const t = make();
+    const dir = join(deskDir(t.dataDir, 'ornek'), '.claude');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ model: 'haiku', permissions: { allow: ['Read'], deny: ['mcp__a'] } }));
+    writeDeskDeny(t.dataDir, 'ornek', ['mcp__a', 'mcp__b']);
+    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'))).toEqual({ model: 'haiku', permissions: { allow: ['Read'], deny: ['mcp__a', 'mcp__b'] } });
   });
 
   it('a revision installs what is new and skips the rest; a step taken out is shown as no longer in the blueprint', () => {
