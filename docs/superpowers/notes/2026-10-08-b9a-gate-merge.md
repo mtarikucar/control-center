@@ -116,7 +116,9 @@ Ofis yeniden açılınca göç v21 uygulanır. Kapı kapalı başlar, açmak iç
     - canlı DB'ye salt-okunur işareti görünmeyen erişimler (9). Biri `backfill-task-cost.ts --apply`: doğru takılma;
     - adı çalışınca belli olan komutlar, `xargs sed -i`, `| bash`.
   - Write, Edit, WebFetch, Read ve ofis araçlarında takılan yok.
-- **B8 + B9b + B9a birleşik düzen:** geçici bir worktree'de denendi (`outputs/b9a-gate/combined-merge.txt`).
+- **B8 + B9b + B9a birleşik düzen:** geçici bir worktree'de denendi, çakışmalar §3'teki gibi uzlaştırıldı.
+  - `pnpm test` çıkış 0: sunucu 917 geçti, 17 atlandı; web 200 geçti.
+  - `pnpm typecheck` temiz (`outputs/b9a-gate/combined-merge.txt`).
 
 ## 6. Geri alma
 
@@ -134,9 +136,20 @@ Ofis yeniden açılınca göç v21 uygulanır. Kapı kapalı başlar, açmak iç
   - `approvals.test.ts`, `gate-api.test.ts`, `gate-hook.test.ts` (K2: gerçek alt süreç ve geçici git deposu);
   - `args.test.ts`, `engine-gate.test.ts`, `db.test.ts` (v21), `owner-guard.test.ts` (`OWNER_ROUTES`);
   - web: `ApprovalCard.test.tsx`, `reducers.test.ts`.
-- K3 kilitli: `test/gate.real.test.ts` (`OFFICE_SMOKE=1`; `outputs/b9a-gate/k3-real.txt`).
-- Mutasyon: geçici worktree, `setsid` (`outputs/b9a-gate/mutation-checks.txt`).
-- `pnpm test` ve `pnpm typecheck` (`outputs/b9a-gate/full-tests.txt`, `typecheck.txt`).
+- K3 kilitli: `test/gate.real.test.ts` (`OFFICE_SMOKE=1`; `outputs/b9a-gate/k3-real.txt`). 3/3 geçti, CLI'nin bildirdiği
+  maliyet $0.0030; abonelik kotasından, para harcanmadı.
+  - **Akış:** kapı → `approvalRequest` → sayfa başlıklarıyla onay → "pong" → kapı.
+  - **Eşleyici:** kanca ofis araçlarını hiç görmedi; olumsuz ileri bakış Claude Code'da çalışıyor.
+  - **Masa ayarı:** masadaki `disableAllHooks: true` kancayı kapatamadı.
+  - **Bash:** kanca ayardayken Bash oturumda kalıyor.
+  - **Çift `--disallowedTools`:** ikisi de uygulanıyor.
+  - `lockdown.real` kilitsiz açıldığı için (sahibinin bağlayıcıları oturuma girer) çalıştırılmadı. Aynı soruyu
+    soran kilitli eşdeğeri K3'ün içinde.
+- Mutasyon: geçici worktree, `setsid`; 76 mutanttan 75'i yakalandı (`outputs/b9a-gate/mutation-checks.txt`).
+  - Kalan G7 eşdeğer: o kod yoluna hiç ulaşılmıyor. Aynı davranışı taklit eden G7b yakalandı.
+  - Koşudan önce ve sonra worktree temiz (`git status --porcelain` boş).
+- `pnpm test` ve `pnpm typecheck` çıkış 0: sunucu 890 geçti, 16 atlandı; web 200 geçti (`outputs/b9a-gate/full-tests.txt`,
+  `typecheck.txt`).
 
 ## 8. Kalan risk (tasarım §8; süreç ayrımı olmadan dürüst sınır)
 
