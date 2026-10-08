@@ -99,15 +99,15 @@ Cevap: `“Zamanında hazır oranı” okuması kaydedildi: %92; hedef ≥ %90: 
 ```
 | KPI | Hedef | Son okuma | Önceki | Durum |
 |---|---|---|---|---|
-| Zamanında hazır oranı | ≥ %90 | %92 (2026-10-08 14:00) | %85 (2026-10-01 09:00) | tuttu |
-| Onay oranı | ≥ %70 | %66.7 (2026-10-08 14:05, ofis) | — | tutmadı |
+| Zamanında hazır oranı | ≥ %90 | %92 (9 Eki 2026 09:00) | %85 (8 Eki 2026 09:00) | tuttu |
+| Onay oranı | ≥ %70 | %66.7 (9 Eki 2026 10:00, ofis) | — | tutmadı |
 | Rapor gecikmesi | ≤ 0 gün | okuma yok | — | kpiRecord ile yaz |
 ```
 
 Planın hedefi yoksa ya da hedefin KPI'sı yoksa retro notu ve cevap öncekiyle aynıdır.
 
 `goalsRead`: okuması olan KPI'lar için KPI satırının altına bir satır eklenir:
-`son okuma: Zamanında hazır oranı %92 (2026-10-08 14:00, tuttu); Onay oranı veri yok (2026-10-08 14:05)`.
+`son okuma: Onay oranı veri yok (15 Eki 2026 09:00); Zamanında hazır oranı %85 (8 Eki 2026 09:00, tutmadı)` (KPI sırasıyla; değerler bir ondalığa yuvarlanır, tarih `formatStamp`).
 Hiç okuması olmayan hedefin çıktısı öncekiyle aynıdır.
 
 ## 7. Göç numarası ve birleştirme sırası (koordinatör kararı, 2026-10-08)

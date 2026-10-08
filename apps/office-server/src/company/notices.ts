@@ -14,6 +14,8 @@ export const NOTICE_TOPICS = {
   /** A plan has no open task left: assess it (planRetro), write the lessons, report, go on (spec §5.4). */
   'plan.retro': 'decision',
   'task.blocked': 'decision',
+  /** A KPI read by hand is due (B26's measuring routine): read it and write it with kpiRecord. */
+  'kpi.due': 'decision',
   /** Still open after the office's reminder: the queue behind it is stuck. */
   'task.stalled': 'decision',
   /** A started (or blocked) task went to someone else: its holder must stop working on it. */

@@ -9,6 +9,7 @@ import { profileFieldsHelp, profileHistoryText, profileSection, profileText } fr
 import type { TaskStore } from '../company/store.ts';
 import { formatPerformance, type PerformanceReport } from '../performance.ts';
 import { cronLabel, formatWhen, parseCron } from '../company/time.ts';
+import type { KpiReadings } from '../company/kpi-readings.ts';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
@@ -111,6 +112,8 @@ export function officeTools(o: {
   performance?: { report(o: { days?: number }): PerformanceReport };
   /** The integration registry (integrationsList, integrationRegister); absent in tests that do not care. */
   integrations?: IntegrationRegistry;
+  /** KPI measurement (B26: kpiRecord, goalsRead's last readings); absent in tests that do not care. */
+  kpis?: KpiReadings;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -620,8 +623,9 @@ export function officeTools(o: {
       inputSchema: object({ planId: s('The plan id.'), wentWell: s('What went well.'), stuck: s('What got stuck or went wrong.'), change: s('What to do differently next time.'), methodSuggestion: s('A change to the work-type method that would help any company (optional).') }, ['planId', 'wentWell', 'stuck', 'change']),
       kinds: COORDINATOR,
       run: ({ employee }, args) => {
-        const { suggestion } = company.retro(employee.id, str(args, 'planId'), { wentWell: str(args, 'wentWell'), stuck: str(args, 'stuck'), change: str(args, 'change'), methodSuggestion: optStr(args, 'methodSuggestion') });
-        return `Değerlendirme şirket notlarına yazıldı${suggestion ? ' (yöntem önerisi ayrıca)' : ''}. Şirkete özgü dersleri playbookUpdate ile el kitabına işle, sonra reportToOwner ile sahibine kısaca raporla.`;
+        const { suggestion, kpiTable } = company.retro(employee.id, str(args, 'planId'), { wentWell: str(args, 'wentWell'), stuck: str(args, 'stuck'), change: str(args, 'change'), methodSuggestion: optStr(args, 'methodSuggestion') });
+        const done = `Değerlendirme şirket notlarına yazıldı${suggestion ? ' (yöntem önerisi ayrıca)' : ''}. Şirkete özgü dersleri playbookUpdate ile el kitabına işle, sonra reportToOwner ile sahibine kısaca raporla.`;
+        return kpiTable ? `${done}\n\nKPI'lar:\n${kpiTable}` : done;
       },
     },
     {
@@ -681,9 +685,22 @@ export function officeTools(o: {
           .map((g) => {
             const own = plansOf(g.id).map((p) => `   - ${p.title} [${p.status}]`).join('\n');
             const kpis = g.kpis.length ? `\n   KPI: ${g.kpis.map(kpiText).join('; ')}` : '';
-            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${kpis}${own ? `\n${own}` : ''}`;
+        const read = g.kpis.length ? o.kpis?.lastReadings(g) : null;
+        const readings = read ? `\n   son okuma: ${read}` : '';
+            return `• ${g.id} “${g.title}” [${g.status}] — neden: ${g.why}\n   bitti: ${g.done.join('; ')}${kpis}${readings}${own ? `\n${own}` : ''}`;
           })
           .join('\n');
+      },
+    },
+    {
+      name: 'kpiRecord',
+      description:
+        "Write a reading of a goal's KPI that is read by hand or from a connection (coordinator), e.g. when the office says one is due: the goal, the KPI's name and the number you read (a % is 0–100), with a short note on where it came from. KPIs from the office's own metrics are read by the office; do not write them.",
+      inputSchema: object({ goalId: s('The goal id.'), kpi: s("The KPI's name, as goalsRead shows it."), value: { type: 'number', description: "The value read, in the KPI's unit (may be negative unless it is a %)." }, note: s('Where the number came from (optional).') }, ['goalId', 'kpi', 'value']),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.kpis) throw new ConflictError('Bu ofiste KPI ölçümü yok.');
+        return o.kpis.record(employee.id, { goalId: str(args, 'goalId'), kpi: str(args, 'kpi'), value: args.value, note: optStr(args, 'note') }).text;
       },
     },
     {

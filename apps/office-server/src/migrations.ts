@@ -440,4 +440,28 @@ export const MIGRATIONS: Migration[] = [
       );`,
     down: `DROP TABLE IF EXISTS integrations;`,
   },
+  {
+    // B26 (feat/kpi-readings): 16 on its branch. It is merged only after core-3 (v16–v18) and then becomes 19
+    // (coordinator's decision; design note 2026-10-08-kpi-readings-design §7). Merged alone, core-3's 16 would be skipped.
+    version: 16,
+    name: 'KPI readings',
+    // Each reading keeps the target, direction and unit it was measured against; a NULL value: no data in the window.
+    up: `
+    CREATE TABLE IF NOT EXISTS kpi_readings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      goal_id TEXT NOT NULL,
+      kpi TEXT NOT NULL,
+      value REAL,
+      unit TEXT NOT NULL,
+      target REAL NOT NULL,
+      direction TEXT NOT NULL,
+      source TEXT NOT NULL,
+      period_start INTEGER,
+      recorded_at INTEGER NOT NULL,
+      recorded_by TEXT NOT NULL,
+      note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS kpi_readings_goal ON kpi_readings (goal_id, recorded_at);`,
+    down: `DROP TABLE IF EXISTS kpi_readings;`,
+  },
 ];

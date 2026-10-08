@@ -63,6 +63,10 @@ export interface PlanMetrics extends GroupMetrics {
   title: string;
 }
 
+export interface GoalMetrics extends GroupMetrics {
+  id: string;
+}
+
 export interface PerformanceReport {
   /** Window start (epoch ms); null: all time. */
   since: number | null;
@@ -72,6 +76,8 @@ export interface PerformanceReport {
   employees: EmployeeMetrics[];
   plans: PlanMetrics[];
   tasks: TaskMetrics[];
+  /** Only when asked for (B26's office KPIs): each goal's work over the tasks of its plans, empty groups too. */
+  goals?: GoalMetrics[];
 }
 
 interface TaskRow {
@@ -130,7 +136,7 @@ export function deliveredSince(db: DatabaseSync, since: number): { done: number;
   return { done: done.length, firstPassRate: firstPassRate(done.map((t) => firstPassOf(decisions.get(t.id) ?? []))) };
 }
 
-export function performanceReport(db: DatabaseSync, o: { since?: number | null; now?: number } = {}): PerformanceReport {
+export function performanceReport(db: DatabaseSync, o: { since?: number | null; now?: number; goals?: Array<{ id: string; planIds: string[] }> } = {}): PerformanceReport {
   const since = o.since ?? null;
   const until = o.now ?? Date.now();
   const from = since ?? Number.NEGATIVE_INFINITY;
@@ -242,6 +248,14 @@ export function performanceReport(db: DatabaseSync, o: { since?: number | null; 
     .filter((p) => p.turns > 0 || p.done > 0 || p.open > 0)
     .sort((a, b) => b.usd - a.usd);
 
+  // A goal's work: the tasks of its plans, counted as a plan's are.
+  const goals = o.goals?.map((g): GoalMetrics => {
+    const inGoal = (t: TaskMetrics) => t.planId !== null && g.planIds.includes(t.planId);
+    const own = tasks.filter(inGoal).map((t) => perTask.get(t.id));
+    const spent = { usd: sum(own.map((c) => c?.windowUsd ?? 0)), tokens: sum(own.map((c) => c?.windowTokens ?? 0)), turns: sum(own.map((c) => c?.windowTurns ?? 0)) };
+    return { id: g.id, ...group(work.filter(inGoal), spent) };
+  });
+
   // Straight from the events, apart from the replay: the reconciliation means something.
   const all = db
     .prepare(
@@ -259,6 +273,7 @@ export function performanceReport(db: DatabaseSync, o: { since?: number | null; 
     employees,
     plans,
     tasks: tasks.filter((t) => open(t) || (t.status === 'done' && inWindow(row.get(t.id)!.finished_at!)) || (perTask.get(t.id)?.windowTurns ?? 0) > 0),
+    ...(goals ? { goals } : {}),
   };
 }
 

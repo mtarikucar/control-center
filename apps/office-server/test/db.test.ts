@@ -22,14 +22,16 @@ const V10_TABLES = [...V9_TABLES, 'schedules'].sort();
 const V13_TABLES = [...V10_TABLES, 'company_profile'].sort();
 const V14_TABLES = [...V13_TABLES, 'onboarding', 'onboarding_rounds'].sort();
 const V15_TABLES = [...V14_TABLES, 'integrations'].sort();
+// B26 (feat/kpi-readings): 16 on its branch; merged after core-3 (v16–v18) it becomes 19 (design note §7).
+const V16_TABLES = [...V15_TABLES, 'kpi_readings'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(15);
-    expect(tables(db)).toEqual(V15_TABLES);
+    expect(migrateUp(db)).toBe(16);
+    expect(tables(db)).toEqual(V16_TABLES);
   });
 
   it('numbers the migrations 1, 2, 3 … with no gap and no repeat (a merge that numbers two alike or skips one fails here)', () => {
@@ -42,14 +44,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(15);
-    expect(tables(db)).toEqual(V15_TABLES);
+    expect(migrateUp(db)).toBe(16);
+    expect(tables(db)).toEqual(V16_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db)).toBe(16);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -306,7 +308,7 @@ describe('migrations', () => {
     const db = openDb(':memory:');
     migrateUp(db, upTo(14));
     db.prepare("INSERT INTO onboarding (id, description, status, started_by, started_at) VALUES ('o1', 'cümle', 'active', 'c', 1)").run();
-    migrateUp(db);
+    migrateUp(db, upTo(15));
     expect(appliedVersion(db)).toBe(15);
     expect(tables(db)).toEqual(V15_TABLES);
     expect(columns(db, 'integrations')).toEqual(['name', 'kind', 'closed', 'capabilities', 'auth_needed', 'cost_note', 'note', 'registered_by', 'registered_at', 'updated_at']);
@@ -316,6 +318,23 @@ describe('migrations', () => {
     expect(migrateDown(db, 14)).toBe(14);
     expect(tables(db)).toEqual(V14_TABLES);
     expect(db.prepare('SELECT COUNT(*) AS n FROM onboarding').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(15);
+    expect(migrateUp(db, upTo(15))).toBe(15);
+  });
+
+  it('v16 adds the KPI readings, empty; v16 down restores v15 exactly and keeps the goals and their KPIs', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(15));
+    db.prepare(`INSERT INTO goals (id, title, why, done, kpis, status, created_by, created_at) VALUES ('g1', 'h', 'n', '["d"]', '[{"name":"k"}]', 'active', 'c', 1)`).run();
+    migrateUp(db);
+    expect(appliedVersion(db)).toBe(16);
+    expect(tables(db)).toEqual(V16_TABLES);
+    expect(columns(db, 'kpi_readings')).toEqual(['id', 'goal_id', 'kpi', 'value', 'unit', 'target', 'direction', 'source', 'period_start', 'recorded_at', 'recorded_by', 'note']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM kpi_readings').get()).toMatchObject({ n: 0 });
+    // No value is a reading too: the office found nothing to measure in the window.
+    db.prepare("INSERT INTO kpi_readings (goal_id, kpi, value, unit, target, direction, source, recorded_at, recorded_by) VALUES ('g1', 'k', NULL, '%', 70, 'atLeast', 'office', 2, 'office')").run();
+    expect(migrateDown(db, 15)).toBe(15);
+    expect(tables(db)).toEqual(V15_TABLES);
+    expect({ ...(db.prepare('SELECT title, kpis FROM goals').get() as object) }).toEqual({ title: 'h', kpis: '[{"name":"k"}]' });
+    expect(migrateUp(db)).toBe(16);
   });
 });
