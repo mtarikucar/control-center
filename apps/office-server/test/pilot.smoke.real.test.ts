@@ -7,6 +7,7 @@ import type { Employee, StoredEvent } from '@cc/shared';
 import { DISALLOWED_TOOLS, gateHookCommand, sessionArgs } from '../src/claude/args.ts';
 import { sessionDeny } from '../src/company/session-deny.ts';
 import { deskDir } from '../src/desk.ts';
+import { formatPilotMetrics, pilotMetrics } from '../src/pilot-metrics.ts';
 import { METHOD } from './company-helpers.ts';
 import { tempDir, until } from './helpers.ts';
 import { pageHeaders } from './owner-helpers.ts';
@@ -24,8 +25,9 @@ import { LOCKED_TOOLS } from './real-session.ts';
  * the firing, not the work). Step 6 runs last: moving the clock days ahead must not touch steps 7–8.
  * The management cycle runs as live: the coordinator gets its board between the steps (a plan approved, a hand-in, a
  * review, the clock moved), so a word to it waits for that turn to end; the record lists every cycle.
- * SMOKE_OUT=<file> writes the record (steps, KÖ, cost, cycles, sessions, journal). PILOT_SPENT_BEFORE_USD: what earlier
- * runs of the task spent; the ceiling counts it.
+ * SMOKE_OUT=<file> writes the record (steps, KÖ, C5-5's table of KÖ1–KÖ11 on this run's database, cost, cycles, sessions,
+ * journal); PILOT_DB_OUT=<file> keeps a copy of that database (synthetic only) to run scripts/pilot-metrics.ts on again.
+ * PILOT_SPENT_BEFORE_USD: what earlier runs of the task spent; the ceiling counts it.
  */
 const enabled = process.env.OFFICE_SMOKE === '1';
 const PACKAGE = process.env.PILOT_BLUEPRINT ?? fileURLToPath(new URL('./fixtures/pilot-ajans/blueprint.json', import.meta.url));
@@ -81,6 +83,7 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
 
     if (!(SPENT_BEFORE >= 0 && SPENT_BEFORE < COST_CAP_USD)) throw new Error(`PILOT_SPENT_BEFORE_USD geçersiz ya da tavanı doldurmuş: ${process.env.PILOT_SPENT_BEFORE_USD}`);
     const o: PilotOffice = await pilotOffice({ spentBefore: SPENT_BEFORE });
+    const since = o.now();
     const record: StepRecord[] = [];
     /** Each KÖ the run measures: its threshold met or not. A measurement, not a gate: the steps go on either way. */
     const kö: Array<{ id: string; measured: string; met: boolean }> = [];
@@ -346,6 +349,14 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
       const cycles = events().flatMap((e) => (e.event.type === 'management.cycle' ? [e.event] : []));
       const lost = events().filter((e) => e.event.type === 'management.cycle.lost').length;
       const tasks = o.tasks.list({ limit: 1000 });
+      // Step 9 of the readiness plan: C5-5's script on this run's database, its level K3.
+      let table: string;
+      try {
+        table = formatPilotMetrics(pilotMetrics(o.db, { since, until: o.now() + 1, level: 'K3' }));
+      } catch (err) {
+        table = `pilotMetrics hata verdi: ${err instanceof Error ? err.message : String(err)}`;
+      }
+      if (process.env.PILOT_DB_OUT) o.db.exec(`VACUUM INTO '${process.env.PILOT_DB_OUT.replaceAll("'", "''")}'`);
       const lines = [
         `# Pilot K3 kaydı — ${new Date().toISOString()}`,
         `bu koşu: $${total.toFixed(4)}; önceki koşular: $${SPENT_BEFORE.toFixed(4)}; toplam $${(SPENT_BEFORE + total).toFixed(4)} (tavan $${COST_CAP_USD}), tur: ${turns(0)}`,
@@ -359,6 +370,9 @@ describe.skipIf(!enabled)('pilot end to end with the real claude CLI (C5-4; lock
         ...kö.map((k) => `| ${k.id} | ${k.measured} | ${k.met ? 'tuttu' : 'TUTMADI'} |`),
         '',
         ...record.flatMap((r) => [`## ${r.step}`, ...r.checks.map((c) => `- ${c}`), ...(r.error ? [`- HATA: ${r.error}`] : []), '']),
+        '## KÖ1–KÖ11: C5-5 pilotMetrics, bu koşunun veritabanı (K3)',
+        table,
+        '',
         `## Yönetim döngüleri (${cycles.length}; kapanan ${cycles.filter((c) => c.closed).length}; panosu ulaşmayan ${lost})`,
         ...cycles.map((c) => `- ${c.closed ? 'kapandı' : 'KAPANMADI'}; model ${c.model ?? '?'}; $${(c.costUsd ?? 0).toFixed(4)}; tetikleyiciler: ${c.triggers.map((t) => `${t.kind}${t.note ? ` (${t.note})` : ''}`).join(', ')}; değişiklikler: ${c.changes.join('; ') || '-'}`),
         '',
