@@ -940,7 +940,10 @@ export class Company {
     const desk = this.#planDesk(plan);
     this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). Görevleri aç ve dağıt.`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
-    return plan;
+    // An approved revision may leave nothing to do (it dropped the last unfinished stream): the plan finishes now. As
+    // under full autonomy only a plan with streams: one without them and without tasks is only starting.
+    if ((plan.streams?.length ?? 0) > 0) this.#maybeFinishPlan(planId);
+    return this.#d.plans.get(planId);
   }
 
   decline(planId: string): Plan {
@@ -951,7 +954,9 @@ export class Company {
       const desk = this.#planDesk(kept);
       this.#d.notices.add(desk, 'plan.revision_declined', `Sahibi “${current.title}” revizyonunu onaylamadı; plan onaylı sürümüyle (sürüm ${kept.version}) sürüyor.`);
       this.#emit(desk, { type: 'plan.changed', change: 'kept', plan: kept });
-      return kept;
+      // Its streams' work may have closed while the revision waited: the approved plan, with nothing left, finishes now.
+      if ((kept.streams?.length ?? 0) > 0) this.#maybeFinishPlan(planId);
+      return this.#d.plans.get(planId);
     }
     const plan = this.#d.plans.update(planId, { status: 'declined' });
     const desk = this.#planDesk(plan);

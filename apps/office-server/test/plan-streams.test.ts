@@ -172,6 +172,42 @@ describe('plan streams', () => {
     expect(retros()).toBe(1);
   });
 
+  it('“plans to the owner”: the owner approving a revision that leaves nothing to do finishes the plan; declining one that restores a plan with nothing left finishes it too', () => {
+    const t = make('plans');
+    const retros = () => t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'plan.retro').length;
+    const streams = [{ id: 'api', title: 'API', owner: 'Ada' }, { id: 'ui', title: 'Arayüz', owner: 'Can', dependsOn: ['api'] }];
+    const close = (who: string, id: string) => {
+      t.company.start(id);
+      t.company.finish(who, id, { summary: 'tamam', outputs: [], learned: '' });
+    };
+    // The coordinator drops the stream that never got a task, as the board says; the owner approves.
+    const a = t.company.propose(t.coordinator.id, { ...DRAFT, streams });
+    // A plan just approved is only starting, with streams or without (hasRunningPlan above).
+    expect(t.company.approve(a.id).status).toBe('approved');
+    close(t.ada.id, t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Uç noktalar', planId: a.id, streamId: 'api' }).id);
+    expect(t.plans.get(a.id).status).toBe('approved');
+    t.company.revise(t.coordinator.id, a.id, { streams: [streams[0]] });
+    expect(t.plans.get(a.id).status).toBe('draft');
+    let before = retros();
+    t.company.approve(a.id);
+    expect(t.plans.get(a.id).status).toBe('done');
+    expect(retros()).toBe(before + 1);
+    expect(t.company.hasRunningPlan()).toBe(false);
+    // The last task closes while a revision waits for the owner; declining it brings back the approved plan, with nothing left.
+    const b = t.company.propose(t.coordinator.id, { ...DRAFT, title: 'Uygulama', streams });
+    t.company.approve(b.id);
+    close(t.ada.id, t.company.createTask(t.coordinator.id, { assignee: t.ada.id, title: 'Uç noktalar', planId: b.id, streamId: 'api' }).id);
+    const ui = t.company.createTask(t.coordinator.id, { assignee: t.can.id, title: 'Ekranlar', planId: b.id, streamId: 'ui' });
+    t.company.start(ui.id);
+    t.company.revise(t.coordinator.id, b.id, { days: 2 });
+    t.company.finish(t.can.id, ui.id, { summary: 'tamam', outputs: [], learned: '' });
+    expect(t.plans.get(b.id).status).toBe('draft');
+    before = retros();
+    expect(t.company.decline(b.id).status).toBe('done');
+    expect(t.events.list({ limit: 1000 }).flatMap((e) => (e.event.type === 'plan.changed' && e.event.plan.id === b.id ? [e.event.change] : [])).slice(-2)).toEqual(['kept', 'done']);
+    expect(retros()).toBe(before + 1);
+  });
+
   it('a revision under full autonomy: a finished plan stays finished only while every stream is done; dropping the last unfinished stream finishes a running plan', () => {
     const t = make();
     const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [{ id: 'api', title: 'API', owner: 'Ada' }] });

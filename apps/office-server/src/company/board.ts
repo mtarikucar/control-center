@@ -233,6 +233,9 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
   const kickoff = goals.length === 0 || !live.some((p) => p.goalId !== null && goals.some((g) => g.id === p.goalId));
   // Each plan's tasks and streams, read once however often the board is drawn.
   const planData = new Map(live.map((p) => [p.id, { tasks: d.tasks.list({ planId: p.id, limit: 100_000 }), streams: d.company.planStreams(p.id) }]));
+  /** Each plan's live routines (active or paused): open work that keeps it running. */
+  const routines = new Map<string, number>();
+  for (const s of d.company.schedules()) if (s.planId && s.status !== 'stopped') routines.set(s.planId, (routines.get(s.planId) ?? 0) + 1);
   const header = `Yönetim panosu · ${formatStamp(now)} · ${o.since > 0 ? `son tur ${when(o.since)} (${ago(o.since)})` : 'ilk tur'}`;
 
   /** The board drawn with these limits. */
@@ -413,7 +416,8 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       }
       if (streams.length > 0 && streams.every((x) => x.status === 'done')) {
         const left = tasks.filter((t) => OPEN_STATUSES.includes(t.status)).length;
-        flags.push({ rank: 2, text: `bütün akışlar bitti, plan sürüyor — ${left ? `${left} açık iş akışsız` : 'açık rutin var'}` });
+        const why = left ? `plan sürüyor — ${left} açık iş akışsız` : routines.has(p.id) ? 'plan sürüyor — açık rutin var' : 'açık iş yok — plan kapanmalı';
+        flags.push({ rank: 2, text: `bütün akışlar bitti, ${why}` });
       }
       const byOwner = new Map<string, PlanStreamView[]>();
       for (const x of streams) if (x.status !== 'done' && byId.has(x.owner)) byOwner.set(x.owner, [...(byOwner.get(x.owner) ?? []), x]);

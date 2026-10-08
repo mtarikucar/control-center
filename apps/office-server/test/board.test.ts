@@ -572,6 +572,35 @@ describe('board — done streams and a plan that runs on', () => {
     expect(t.section(t.board().text, 2).split('\n').filter((l) => l.startsWith('  !'))).toEqual(['  ! bütün akışlar bitti, plan sürüyor — 1 açık iş akışsız']);
   });
 
+  it('every stream done and no open task: a live routine keeps the plan running and says so; with none it is said that the plan should close', () => {
+    const t = make();
+    const ada = t.person('Ada');
+    /** The comparison lines under one plan's heading. */
+    const flags = (id: string) => {
+      const lines = t.section(t.board().text, 2).split('\n');
+      const from = lines.findIndex((l) => l.includes(`plan “${t.plans.get(id).title}”`)) + 1;
+      const end = lines.findIndex((l, i) => i >= from && !l.startsWith('  '));
+      return lines.slice(from, end < 0 ? undefined : end).filter((l) => l.startsWith('  !'));
+    };
+    const done = (planId: string) => {
+      const x = t.task(ada.id, 'Uç noktalar', { planId, streamId: 'api' });
+      t.company.start(x.id);
+      t.finish(ada.id, x.id);
+    };
+    const stream = [{ id: 'api', title: 'API', owner: 'Ada' }];
+    const g = t.goal('Lansman');
+    const measured = t.plan('Ölçüm', { goalId: g.id, streams: stream });
+    t.company.createSchedule(t.coordinator.id, { title: 'Günlük ölçüm', assignee: ada.id, cron: '0 9 * * *', planId: measured.id });
+    done(measured.id);
+    expect(t.plans.get(measured.id).status).toBe('approved');
+    expect(flags(measured.id)).toEqual(['  ! bütün akışlar bitti, plan sürüyor — açık rutin var']);
+    // A plan an older office left running with nothing in it (its streams done, no task, no routine).
+    const stuck = t.plan('Site', { goalId: g.id, streams: stream });
+    done(stuck.id);
+    t.plans.update(stuck.id, { status: 'approved' });
+    expect(flags(stuck.id)).toEqual(['  ! bütün akışlar bitti, açık iş yok — plan kapanmalı']);
+  });
+
   it('under the cap the most actionable comparisons stay: no usable owner, then an idle owner', () => {
     const t = make(16);
     for (const n of ['Ada', 'Can', 'Ece', 'Deniz', 'Selin']) t.person(n);
