@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { toolClass } from './company/capabilities.ts';
+import { toolClass, type ToolClass } from './company/capabilities.ts';
 import { formatStamp, nextCron, parseCron } from './company/time.ts';
 import { EventStore } from './event-store.ts';
 import { performanceReport, type PerformanceReport } from './performance.ts';
@@ -76,11 +76,12 @@ function shellCommands(line: string, depth = 0): string[] {
  * outward, or no capability at all (the vocabulary is an allow-list); the office's own tools and Claude Code's built-ins
  * never. `classify` is B7's toolClass; if it cannot read the vocabulary, the pilot §7 name pattern stands in.
  */
-export function outwardCall(name: string, input: unknown, classify: (name: string) => { outward?: boolean } = toolClass): boolean {
+export function outwardCall(name: string, input: unknown, classify: (name: string) => ToolClass = toolClass): boolean {
   if (name === 'Bash') return shellCommands(String((input as { command?: unknown } | null)?.command ?? '')).some((c) => OUTWARD_SHELL.test(c));
   if (!name.startsWith('mcp__') || name.startsWith('mcp__office__')) return false;
   try {
-    return classify(name).outward === true;
+    const c = classify(name);
+    return 'outward' in c && c.outward;
   } catch {
     return OUTWARD_TOOL.test(name.split('__').at(-1) ?? '');
   }
