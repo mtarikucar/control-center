@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type MemoryHit, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
@@ -9,7 +9,7 @@ import { integrationsText, type IntegrationRegistry } from '../company/integrati
 import { nextText, ofThem } from '../company/onboarding.ts';
 import type { Memory } from '../company/memory.ts';
 import { profileFieldsHelp, profileHistoryText, profileSection, profileText } from '../company/profile.ts';
-import { memoryKinds, queryWords } from '../company/search.ts';
+import { hitLine, memoryKinds, queryWords } from '../company/search.ts';
 import type { TaskStore } from '../company/store.ts';
 import { formatPerformance, type PerformanceReport } from '../performance.ts';
 import { cronLabel, formatWhen, parseCron, parseSince } from '../company/time.ts';
@@ -21,9 +21,6 @@ import type { McpTool } from './protocol.ts';
 const EVERYONE: EmployeeKind[] = ['member', 'lead', 'coordinator'];
 const COORDINATOR: EmployeeKind[] = ['coordinator'];
 const LEADS: EmployeeKind[] = ['lead', 'coordinator'];
-const HIT_KIND: Record<MemoryHit['kind'], string> = { note: 'not', decision: 'karar', playbook: 'el kitabı', task: 'teslim', profile: 'profil' };
-/** Where to read the whole record: a playbook topic and a profile section have their own tools; the rest an id. */
-const hitRef = (h: MemoryHit) => (h.kind === 'playbook' ? `playbookRead konu: ${h.id}` : h.kind === 'profile' ? `profileRead bölüm: ${h.id}` : h.id);
 const day = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 
 type Args = Record<string, unknown>;
@@ -406,7 +403,7 @@ export function officeTools(o: {
         const hits = memory.search(query, { limit: num(args, 'limit') ?? 10, kinds: memoryKinds(args.kinds), since: since === undefined ? undefined : parseSince(since, Date.now()), by: employee.id });
         if (hits.length === 0) return 'Şirket hafızasında bununla ilgili bir şey yok.';
         const total = queryWords(query).length;
-        return hits.map((h) => `• [${HIT_KIND[h.kind]}${h.partial ? `, kısmi ${h.matched}/${total}` : ''}] ${h.title} (${day(h.ts)}, ${hitRef(h)}): ${h.snippet}`).join('\n');
+        return hits.map((h) => hitLine(h, total)).join('\n');
       },
     },
     {

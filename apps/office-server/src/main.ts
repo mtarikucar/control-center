@@ -21,6 +21,7 @@ import { ProfileStore } from './company/profile-store.ts';
 import { ProposalStore } from './company/proposal-store.ts';
 import { Pulse } from './company/pulse.ts';
 import { dueLabel, Scheduling } from './company/scheduling.ts';
+import { relatedMemory } from './company/related-memory.ts';
 import { SearchIndex } from './company/search.ts';
 import { NoticeStore, PlanStore, ScheduleStore, TaskStore } from './company/store.ts';
 import { KpiReadings } from './company/kpi-readings.ts';
@@ -99,7 +100,8 @@ company.attachClock(clock);
 // KPI measurement (B26): the office reads its own KPIs from the metrics (B4) and asks the coordinator for the rest.
 const kpis = new KpiReadings({ db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(db, o) });
 company.attachKpis(kpis);
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis });
+// B12: each task message carries what the memory holds for it (the index read, no memory.searched event).
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, related: (task) => relatedMemory(searchIndex, task) });
 // Who does what when (spec §6.1): reads only, for the sheet and agendaRead.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 

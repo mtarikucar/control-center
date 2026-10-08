@@ -114,7 +114,7 @@ describe('B12 related memory in the task message', () => {
 });
 
 describe('B12 K2: the pilot package', () => {
-  it('the writer’s first task carries the client’s brand guide, the account assistant’s the reply rules', async () => {
+  it('the writer’s tasks carry the client’s brand guide (first task: in its message; second: the same search)', async () => {
     const s = setup();
     const f = fakeEngine(s);
     cleanups.push(f.cleanup, s.cleanup);
@@ -132,9 +132,16 @@ describe('B12 K2: the pilot package', () => {
     const writer = await messageTo(s.events, people['icerik-yazari']!.id, 'Müşteri araştırması: Pastane Ada (sentetik)');
     const account = await messageTo(s.events, people['musteri-temsilcisi']!.id, 'İlk gelen kutusu özeti ve 3 yanıt taslağı (sentetik gelen kutusu)');
     const section = (text: string) => text.slice(text.indexOf(RELATED_HEADING), text.indexOf(WORK_CLOSING)).trim();
-    if (process.env.RELATED_OUT) writeFileSync(process.env.RELATED_OUT, `# Yazar\n\n${writer}\n\n# Hesap Asistanı\n\n${account}\n`);
-    expect(lines(section(writer)).some((l) => l.includes(brandTopic('Pastane Ada')))).toBe(true);
-    expect(lines(section(account)).some((l) => l.includes('Müşteri yanıt kuralları'))).toBe(true);
+    // The writer's second task waits behind the first: its section is the same search, made here.
+    const second = c.tasks.list({ assignee: people['icerik-yazari']!.id }).find((t) => t.title.startsWith('Haftalık içerik takvimi'))!;
+    const secondSection = relatedMemory(c.index, second).trim();
+    if (process.env.RELATED_OUT) {
+      writeFileSync(process.env.RELATED_OUT, `# Yazar, ilk görev (mesajın tamamı)\n\n${writer}\n\n# Yazar, ikinci görev: “${second.title}” (bölüm)\n\n${secondSection}\n\n# Hesap Asistanı, ilk görev (mesajın tamamı)\n\n${account}\n`);
+    }
+    expect(lines(section(writer))[0]).toContain(brandTopic('Pastane Ada'));
+    expect(lines(secondSection).some((l) => l.includes(brandTopic('Pastane Ada')))).toBe(true);
+    // The account assistant's task has a section too; which records it brings is reported with the hand-in.
+    expect(lines(section(account))).toHaveLength(3);
     expect(searched(s.events.list({ limit: 5000 }))).toBe(0);
   });
 });

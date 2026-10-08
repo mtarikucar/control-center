@@ -52,6 +52,18 @@ export function memoryKinds(value: unknown): MemoryKind[] | undefined {
   return list.length ? (list as MemoryKind[]) : undefined;
 }
 
+const HIT_KIND: Record<MemoryKind, string> = { note: 'not', decision: 'karar', playbook: 'el kitabı', task: 'teslim', profile: 'profil' };
+/** Where to read the whole record: a playbook topic and a profile section have their own tools; the rest an id. */
+const hitRef = (h: MemoryHit) => (h.kind === 'playbook' ? `playbookRead konu: ${h.id}` : h.kind === 'profile' ? `profileRead bölüm: ${h.id}` : h.id);
+
+/**
+ * A hit as memorySearch shows it: `• [kind] Title (day, where to read it): snippet`; a partial one `[kind, kısmi n/total]`
+ * (`total`: the query's words, queryWords). The task message's related memory (B12) uses the same lines.
+ */
+export function hitLine(h: MemoryHit, total: number): string {
+  return `• [${HIT_KIND[h.kind]}${h.partial ? `, kısmi ${h.matched}/${total}` : ''}] ${h.title} (${new Date(h.ts).toISOString().slice(0, 10)}, ${hitRef(h)}): ${h.snippet}`;
+}
+
 export const noteDoc = (n: Note): SearchDoc => ({ kind: 'note', ref: String(n.id), title: n.title, body: n.text, tags: n.tags, ts: n.ts });
 
 /** The body is what the search showed before B11, so a decision's snippet reads the same. */
