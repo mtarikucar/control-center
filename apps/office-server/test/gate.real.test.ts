@@ -24,6 +24,8 @@ import { officeTools } from '../src/mcp/tools.ts';
 import { QuotaTracker } from '../src/quota.ts';
 import { setup, tempDir, until } from './helpers.ts';
 import { pageHeaders } from './owner-helpers.ts';
+import { spawn } from 'node:child_process';
+import { sessionArgs } from '../src/claude/args.ts';
 import { LOCKED_ARGS, LOCKED_TOOLS, realInit } from './real-session.ts';
 
 /**
@@ -165,6 +167,41 @@ describe.skipIf(!enabled)('B9a with the real claude CLI (locked: the office’s 
       await api.close();
       s.cleanup();
     }
+  });
+
+  it('with the gate’s hook in the settings, Bash is still in the session (the gate holds calls, it takes no tool away) — no connector of the owner’s (--strict-mcp-config), killed at init', { timeout: 120_000 }, async () => {
+    // lockdown.real.test.ts asks the same of a session without --strict-mcp-config (the owner's connectors come in);
+    // this one keeps them out and carries the gate's hook.
+    const args = ['--strict-mcp-config', ...sessionArgs({ model: 'haiku', sessionId: crypto.randomUUID(), resume: false, hook: gateHookCommand() })];
+    const child = spawn('claude', args, { cwd: tempDir('gate-k3-bash-'), stdio: ['pipe', 'pipe', 'ignore'] });
+    let tools = null as string[] | null;
+    const done = new Promise<void>((resolve) => {
+      let buf = '';
+      child.stdout.on('data', (chunk: Buffer) => {
+        buf += chunk.toString('utf8');
+        for (const line of buf.split('\n')) {
+          try {
+            const o = JSON.parse(line) as { type?: string; subtype?: string; tools?: string[] };
+            if (o.type === 'system' && o.subtype === 'init' && o.tools) {
+              tools = o.tools;
+              child.kill('SIGKILL');
+              resolve();
+            }
+          } catch {
+            // partial line
+          }
+        }
+      });
+    });
+    child.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: 'Reply with the single word ok.' } })}\n`);
+    await Promise.race([done, new Promise((r) => setTimeout(r, 90_000))]);
+    child.kill('SIGKILL');
+    const seen: string[] = tools ?? [];
+    console.log(`GERÇEK INIT (kanca ayarda, bağlayıcısız): ${seen.join(', ')}`);
+    expect(tools).not.toBeNull();
+    expect(seen).toContain('Bash');
+    for (const own of ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'RemoteTrigger']) expect(seen).not.toContain(own);
+    expect(seen.filter((t) => t.startsWith('mcp__'))).toEqual([]);
   });
 
   it('two --disallowedTools flags (the lock’s and the office’s own) both hold: neither list’s tools are in the session', { timeout: 120_000 }, async () => {
