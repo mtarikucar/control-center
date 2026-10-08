@@ -37,6 +37,8 @@ export const NOTICE_TOPICS = {
   'role.coordinator': 'decision',
   'role.changed': 'info',
   'reserve.changed': 'decision',
+  /** The owner changed the constitution: what changed, old → new; the coordinator re-plans its running work. */
+  'constitution.changed': 'decision',
   /** The monthly cap or a plan's budget was exceeded: the coordinator brings it to the owner. */
   'spend.over': 'decision',
   /** Someone hit the pass chain or the daily task limit and was told to leave the work to the coordinator. */

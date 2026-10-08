@@ -118,6 +118,9 @@ Koordinatör projenin proje yöneticisidir; proje sizin her adımı söylemenizi
   bitince (değerlendirme), bir hedefin süren planı kalmayınca, hedefler sürerken biri "Boşta kapasite uyarısı" saatinden
   (varsayılan 2) uzun süredir işsizken (her boşlukta bir kez, hepsi tek notta), hiç hedef ve iş yokken (en fazla "Nabız
   aralığı" saatte bir). Değerli iş yoksa koordinatör iş icat etmez, `restUntil` ile gerekçesini yazıp dinlenir.
+- **Anayasa değişince:** Anayasa sekmesinden bir sınırı değiştirdiğinizde koordinatör neyin değiştiğini eski → yeni
+  olarak tek notta duyar (kota payınız "Ofisin kota sınırı %75 → %60" diye) ve süren planlarını yeni sınırlara göre
+  gözden geçirir.
 - **Sizin denetiminiz:** her süren planda ve her aktif hedefte **Durdur** (açık görevler iptal olur); üst çubukta
   **Şirketi duraklat / Sürdür** (duraklatılmışken ofis kimseye iş ve not vermez; siz yine yazabilirsiniz).
 

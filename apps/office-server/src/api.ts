@@ -214,7 +214,7 @@ async function route(d: ApiDeps, opts: ApiOptions, server: Server, req: Incoming
     if (method === 'POST' && url.pathname === '/api/constitution') {
       const body = await readJson(req);
       if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
-      return sendJson(res, 200, budget.setConstitution(body as Record<string, unknown>));
+      return sendJson(res, 200, budget.ownerSetConstitution(body as Record<string, unknown>));
     }
     if (method === 'GET' && url.pathname === '/api/proposals') return sendJson(res, 200, visibleProposals(d.company.proposals));
     const decide = PROPOSAL_ROUTE.exec(url.pathname);

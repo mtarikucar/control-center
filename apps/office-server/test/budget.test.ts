@@ -112,6 +112,39 @@ describe('Budget — constitution', () => {
   });
 });
 
+describe('Budget — the owner’s constitution change reaches the coordinator', () => {
+  const changed = (t: ReturnType<typeof make>, id: string) => t.notices.pending(id).filter((n) => n.topic === 'constitution.changed');
+
+  it('W3: one decision notice naming what changed, old → new, the owner’s share as the office’s limit', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    t.budget.ownerSetConstitution({ ownerReservePct: 40, maxEmployees: 6, pulseHours: 6 });
+    expect(changed(t, c.id)).toHaveLength(1);
+    expect(changed(t, c.id)[0]!.kind).toBe('decision');
+    expect(changed(t, c.id)[0]!.text).toBe('Sahibi anayasayı değiştirdi: Çalışan sınırı 8 → 6; Ofisin kota sınırı %75 → %60. Süren planlarını yeni sınırlara göre gözden geçir.');
+    t.budget.ownerSetConstitution({
+      monthlyUsdCap: 100, digestHours: [18, 8], digestEnabled: true, autonomy: 'free', coordinatorModels: { owner: 'opus' }, idleCapacityHours: 4,
+    });
+    expect(changed(t, c.id)[1]!.text).toBe(
+      'Sahibi anayasayı değiştirdi: Aylık para sınırı (USD) yok → 100; Özet saatleri 9, 17 → 8, 18; Koordinatör modelleri sonnet / sonnet / haiku → opus / sonnet / haiku; Özet kapalı → açık; Serbestlik planlar sahibine → tam serbest; Boşta kapasite uyarısı (saat) 2 → 4. Süren planlarını yeni sınırlara göre gözden geçir.',
+    );
+  });
+
+  it('W3: no notice when nothing changed (the form sends every field), without a coordinator, for a refused change, or for a change that is not the owner’s', () => {
+    const t = make();
+    t.budget.ownerSetConstitution({ ownerReservePct: 50 });
+    const c = t.company.hireCoordinator();
+    expect(changed(t, c.id)).toEqual([]);
+    t.budget.ownerSetConstitution({ ...t.budget.constitution() });
+    expect(changed(t, c.id)).toEqual([]);
+    expect(() => t.budget.ownerSetConstitution({ maxEmployees: 6, ownerReservePct: 95 })).toThrow(/Anayasa/);
+    expect(t.budget.constitution().maxEmployees).toBe(8);
+    expect(changed(t, c.id)).toEqual([]);
+    t.budget.setConstitution({ ownerReservePct: 30 });
+    expect(changed(t, c.id)).toEqual([]);
+  });
+});
+
 describe('Budget — the owner’s reserve', () => {
   it('is in force at 100 − the owner’s share, tells the coordinator once each way, and ends when the window resets', () => {
     const t = make();

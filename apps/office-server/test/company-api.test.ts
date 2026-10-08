@@ -251,6 +251,10 @@ describe('company API', () => {
     expect((await call(t.port, 'POST', '/api/constitution', { ownerReservePct: 40 })).body).toMatchObject({ ownerReservePct: 40 });
     expect((await call(t.port, 'POST', '/api/constitution', { ownerReservePct: 400 })).status).toBe(400);
     expect((await call(t.port, 'GET', '/api/office')).body.budget).toMatchObject({ constitution: { ownerReservePct: 40 } });
+    // W3: the owner's change reaches the coordinator once, in the office's terms.
+    expect(t.notices.pending(c.id).filter((n) => n.topic === 'constitution.changed').map((n) => n.text)).toEqual([
+      'Sahibi anayasayı değiştirdi: Ofisin kota sınırı %75 → %60. Süren planlarını yeni sınırlara göre gözden geçir.',
+    ]);
   });
 
   it('shows the owner what waits for them and lets them approve or reject it', async () => {

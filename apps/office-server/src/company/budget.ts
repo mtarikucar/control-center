@@ -64,6 +64,22 @@ function digestHours(value: unknown): number[] {
   return [...new Set(value as number[])].sort((a, b) => a - b);
 }
 
+const AUTONOMY_LABELS: Record<Autonomy, string> = { free: 'tam serbest', plans: 'planlar sahibine' };
+
+/** A setting as the coordinator reads it when the owner changes it: its label and value; the owner's share as the office's limit. */
+function described(key: keyof Constitution, c: Constitution): [label: string, value: string] {
+  if (key === 'ownerReservePct') return ['Ofisin kota sınırı', `%${100 - c.ownerReservePct}`];
+  if (key === 'digestHours') return ['Özet saatleri', c.digestHours.join(', ')];
+  if (key === 'autonomy') return ['Serbestlik', AUTONOMY_LABELS[c.autonomy]];
+  if (key === 'coordinatorModels' || key === 'difficultyModels') {
+    const map: Record<string, string> = c[key];
+    return [MODEL_MAPS[key].label, MODEL_MAPS[key].keys.map((k) => map[k]).join(' / ')];
+  }
+  if (Object.hasOwn(SWITCHES, key)) return [SWITCHES[key as SwitchKey], c[key] ? 'açık' : 'kapalı'];
+  const value = c[key as NumberKey];
+  return [RULES[key as NumberKey].label, value === null ? 'yok' : String(value)];
+}
+
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toString()}`;
 
 /** A window whose reset time has passed is a fresh window: 0 %. */
@@ -127,7 +143,10 @@ export class Budget {
     return this.#d.constitution.get();
   }
 
-  /** The owner changes the constitution; every value is checked before anything is written. */
+  /**
+   * A change to the constitution; every value is checked before anything is written. The owner's changes come through
+   * ownerSetConstitution, which also tells the coordinator.
+   */
   setConstitution(patch: Record<string, unknown>): Constitution {
     const checked: Partial<Constitution> = {};
     for (const [key, value] of Object.entries(patch)) {
@@ -164,6 +183,26 @@ export class Budget {
     const next = this.#d.constitution.set(checked);
     this.#announce();
     this.checkReserve();
+    return next;
+  }
+
+  /**
+   * The owner changes the constitution (the screen's form, which sends every field): the coordinator hears what really
+   * changed, old → new, in one decision notice, so it can re-plan its running work. Nothing changed, or no coordinator:
+   * no notice.
+   */
+  ownerSetConstitution(patch: Record<string, unknown>): Constitution {
+    const before = this.constitution();
+    const next = this.setConstitution(patch);
+    const changes = (Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>).flatMap((key) => {
+      const [label, was] = described(key, before);
+      const is = described(key, next)[1];
+      return was === is ? [] : [`${label} ${was} → ${is}`];
+    });
+    const coordinator = this.#d.roster.list().find((e) => e.kind === 'coordinator');
+    if (coordinator && changes.length) {
+      this.#d.notices.add(coordinator.id, 'constitution.changed', `Sahibi anayasayı değiştirdi: ${changes.join('; ')}. Süren planlarını yeni sınırlara göre gözden geçir.`);
+    }
     return next;
   }
 
