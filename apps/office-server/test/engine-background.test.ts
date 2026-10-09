@@ -124,6 +124,19 @@ describe('Engine — back from the terminal', () => {
     expect(told?.event).toMatchObject({ text: CONTINUE_AFTER_TERMINAL, source: 'system' });
   });
 
+  it('K1 (Kerem, ac2f06d): taken to the terminal in the middle of a turn a role hint moved to a stronger model, back at the desk the work goes on on that model, as after a crash or a limit', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Koordinatör', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system', { model: 'sonnet', role: true });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    expect(t.engine.send(e.id, 'SLOW yönetim turu', 'system', { model: 'opus', role: true })).toBe('opus');
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'tool.started');
+    await t.engine.openInTerminal(e.id);
+    expect(t.engine.returnFromTerminal(e.id).lifecycle).toBe('working');
+    const modelOf = (args: string[]) => args[args.indexOf('--model') + 1];
+    expect((await readArgv(t.argvLog, 3)).filter((a) => !a.args.includes('json')).map((a) => modelOf(a.args))).toEqual(['sonnet', 'opus', 'opus']);
+  });
+
   it('taken to the terminal while idle: back at the desk it is idle and nothing is sent (as before)', async () => {
     const t = make();
     const e = t.engine.hire({ name: 'Mert', role: 'r' });

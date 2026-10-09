@@ -140,6 +140,8 @@ interface Runtime {
    * if the process exits or that turn fails, the switch failed (e.g. the account cannot use the model).
    */
   switchedFrom: ModelAlias | null;
+  /** The model its session ran on when it was taken to the terminal at work (K1): the work goes on on it when it is back. */
+  terminalModel: ModelAlias | null;
   /** Messages written since the switch, sent again on the old model if the switch fails. */
   sinceSwitch: Pending[];
   /** A tool ran in the turn now open: the session did work on its model (a failure then is not the model's). */
@@ -468,6 +470,8 @@ export class Engine {
       const employee = this.#roster.get(id);
       this.#assertReachable(employee);
       if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; terminalde açılacak bir oturum yok.');
+      const rt = this.#runtime(id);
+      rt.terminalModel = this.#sessionModel(employee, rt);
       await this.#halt(id);
       const updated = this.#setLifecycle(this.#roster.get(id), 'in_terminal', 'terminalde açıldı');
       return { command: terminalCommand(deskDir(this.#dataDir, employee.slug), employee.sessionId), employee: updated };
@@ -483,11 +487,16 @@ export class Engine {
     const from = opened?.type === 'lifecycle.changed' && opened.to === 'in_terminal' ? opened.from : null;
     const note = from === 'working' ? CONTINUE_AFTER_TERMINAL : from === 'interrupted' ? CONTINUE_AFTER_RESTART : null;
     // Back at the desk and ready: the office picks the same session up again (an idle process spends no tokens).
-    this.#runtime(id).crashes = [];
+    const rt = this.#runtime(id);
+    rt.crashes = [];
+    const kept = rt.terminalModel;
+    rt.terminalModel = null;
+    // Work cut by the terminal goes on on the model it ran on, as after a crash or a limit (K1); back idle, their own.
+    if (note && kept) rt.model = kept === employee.model ? null : kept;
     const back = this.#start(employee, 'terminalden ofise döndü');
     if (!note) return back;
-    // It hears so and goes on: working, as its process is.
-    this.send(id, note, 'system');
+    // It hears so and goes on: working, as its process is — the office's own "continue", on the session's model.
+    this.#deliver(id, note, 'system', {}, true);
     return this.#roster.get(id);
   }
 
@@ -943,6 +952,7 @@ export class Engine {
         switchingTo: null,
         model: null,
         switchedFrom: null,
+        terminalModel: null,
         sinceSwitch: [],
         toolsInTurn: false,
         lastText: '',
