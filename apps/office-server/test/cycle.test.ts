@@ -591,7 +591,8 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     for (const reasoning of ['her şey yolunda', 'değişiklik yok', 'Değişiklik yok, çünkü', 'değişiklik yok, çünkü …']) {
       await expect(close({ changes: [], reasoning })).rejects.toThrow('gerekçeyi “değişiklik yok, çünkü …” diye yaz');
     }
-    // A result came before the close, with more queued: the same turn goes on.
+    // A result came before the close, with more queued: the engine's turn goes on and so does the cycle — but the queued
+    // turn is a message written meanwhile, its cost is not the cycle's (review K4).
     t.result(t.coord.id, 0.2, { queuedTurns: 1 });
     expect(await close({ changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi' })).toBe('Yönetim turu kapandı: 2 değişiklik kaydedildi.');
     await expect(close({ changes: [], reasoning: NO_CHANGE })).rejects.toThrow('zaten kapandı');
@@ -599,9 +600,21 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     t.endTurn(t.coord.id, 0.5);
     await expect(close({ changes: [], reasoning: NO_CHANGE })).rejects.toThrow('Açık bir yönetim turu yok');
     expect(t.records()).toEqual([
-      { type: 'management.cycle', closed: true, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.7, model: 'fable' },
+      { type: 'management.cycle', closed: true, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.2, model: 'fable' },
     ]);
     expect(t.started()).toEqual([{ type: 'management.cycle.started', triggers: [{ kind: 'start', at: T0, note: '', seq: null }], since: 0, unclosedWarning: false }]);
+  });
+
+  it('review K4 (Kerem, fa815b73): the owner writes while the cycle’s turn runs — their message’s turn is not the cycle’s, its cost stays out of the record', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    t.task(ada.id, 'Yaz');
+    t.boot();
+    await t.call(t.coord, 'cycleClose', { changes: [], reasoning: NO_CHANGE });
+    // The board's turn gives its result with the owner's message queued behind it; then that message's turn ends the engine's.
+    t.result(t.coord.id, 0.3, { queuedTurns: 1 });
+    t.endTurn(t.coord.id, 0.5);
+    expect(t.records().map((r) => [r.closed, r.costUsd])).toEqual([[true, 0.3]]);
   });
 
   it('a cycle turn that ends without cycleClose is logged not closed once, with its cost; the next board warns; no cycle comes from it', async () => {

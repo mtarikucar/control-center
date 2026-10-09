@@ -106,8 +106,9 @@ export type OfficeEvent =
   | { type: 'management.cycle.lost'; startedAt: number; reason: string }
   /**
    * A management cycle's record (§3.3), logged when the turn that carried the board ends: closed with cycleClose (its
-   * changes, reasoning and what to look at next) or not closed (the turn ended without it). `costUsd`: what the turn's
-   * results cost (null: none came — a restart in the middle records what was known); `model`: the model the cycle was
+   * changes, reasoning and what to look at next) or not closed (the turn ended without it). `costUsd`: what the board's
+   * own turn's results cost — not those of messages queued behind it (null: none came — a restart in the middle records
+   * what was known); `model`: the model the cycle was
    * routed to (null until the model routing). `endedAt`: when its turn ended — at a restart, the coordinator's last work
    * in it (null: none after the board, so not known); absent from an older office's records, whose logged time is it.
    */

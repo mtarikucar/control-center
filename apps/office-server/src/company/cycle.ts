@@ -65,6 +65,11 @@ interface OpenCycle {
   close: CycleClose | null;
   /** The model the cycle runs on (§3.5): the engine's word at delivery, the old one if the switch failed (absent: kept by an older office). */
   model?: ModelAlias | null;
+  /**
+   * The board's own turn gave its result with more queued: what follows are the turns of messages written meanwhile (the
+   * owner's), not the cycle's — their cost stays out of its record (review K4). The cycle still ends as the engine's turn does.
+   */
+  ownTurnDone?: boolean;
 }
 
 /** What a cycle opens with: the board, and why it opened. */
@@ -362,7 +367,8 @@ export class ManagementCycle {
       return;
     }
     if (ev.type === 'turn.finished') {
-      this.#saveOpen({ ...open, costUsd: Math.round(((open.costUsd ?? 0) + ev.costUsd) * 1e6) / 1e6 });
+      const cost = open.ownTurnDone ? open.costUsd : Math.round(((open.costUsd ?? 0) + ev.costUsd) * 1e6) / 1e6;
+      this.#saveOpen({ ...open, costUsd: cost, ownTurnDone: open.ownTurnDone || ev.queuedTurns > 0 });
       this.#resultIn = ev.queuedTurns === 0;
       return;
     }

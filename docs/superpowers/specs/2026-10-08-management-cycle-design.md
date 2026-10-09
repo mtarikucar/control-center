@@ -122,7 +122,9 @@ bağımsızdır: koordinatörün rol modeli her zaman uygulanır.
 | **Sıradan** | Diğer her şey: bir çalışanın önerisine, sorusuna, inceleme yönlendirmesine yanıt; sahibine kısa cevap | Sonnet |
 
 - Anayasadaki `coordinatorModels` `{ owner, decision, digest }` yerine `{ kickoff, cycle, routine }` olur; varsayılan
-  `{ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }`. Eski anahtarlar okunurken yenisine çevrilir.
+  `{ kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }`. Eski anahtarlar başka turlar içindi, karşılıkları yok:
+  okunurken atılır, yerlerine varsayılanlar gelir (`normalizeConstitution`). Eski anahtarlarla kalmış bir anayasada
+  koordinatör bu yüzden varsayılan modellerle çalışır; başka modeller isteniyorsa sahibi yeni anahtarları yazar.
 - Model değişimi bugünkü mekanizmayla olur (oturum `--resume` ile başka modelde yeniden açılır; hafıza korunur);
   önbellek süresi (`cacheTtlMinutes`) içinde aynı modelde art arda gelen turlar oturumu yeniden açmaz.
 - Başlangıç turunda koordinatör plan önerince sonraki turlar normal akışa döner.
@@ -169,7 +171,7 @@ bağımsızdır: koordinatörün rol modeli her zaman uygulanır.
 
 - Birim: tetikler ve toplama penceresi (sahte saat), kalp atışı koşulları, duraklatma ve kota payı, pano içeriği
   (her bölüm, kısa tutma), `cycleClose` kaydı ve "kapanmadı" yolu, akışların plan ve görevlere bağlanması, model
-  yönlendirme kuralları, eski `coordinatorModels` anahtarlarının çevrilmesi.
+  yönlendirme kuralları, eski `coordinatorModels` anahtarlarının atılması.
 - Ekonomi karşılaştırma kaydı: yeni tetikler koordinatöre giden mesajları değiştirir; kayıt bilerek yenilenir ve hangi
   mesajların neden değiştiği yazılır.
 - Gerçek claude (isteğe bağlı): sahte bir şirkette iki çalışan, bir zincirli plan; biri boşa çıkınca yönetim turunun
