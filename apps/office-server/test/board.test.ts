@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { EmployeeKind, Task } from '@cc/shared';
+import { OWNER, type EmployeeKind, type Goal, type Plan, type Task } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
 import { buildBoard } from '../src/company/board.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -48,10 +48,10 @@ function make(desks = 8) {
 }
 
 describe('board — shape', () => {
-  it('a fresh office (the coordinator alone): every section with “yok”, no active goal, kickoff', () => {
+  it('a fresh office (the coordinator alone): every section with “yok”, no active goal; nothing asks for a project start yet, so no kickoff', () => {
     const t = make();
     const b = t.board({ since: 0 });
-    expect(b.kickoff).toBe(true);
+    expect(b.kickoff).toBe(false);
     expect(b.text).toBe(
       [
         'Yönetim panosu · 8 Eki 2026 09:00 · ilk tur',
@@ -110,50 +110,158 @@ describe('board — shape', () => {
   });
 });
 
-describe('board — kickoff', () => {
-  it('no active goal: kickoff', () => {
-    const t = make();
-    t.plan('Hedefsiz plan');
-    expect(t.board().kickoff).toBe(true);
-  });
-
-  it('every active goal has a running plan (approved, or waiting for the owner): no kickoff', () => {
+describe('board — kickoff: a real project start (spec §3.5; waiting with no plan is none)', () => {
+  it('every active goal has a running plan (approved, or waiting for the owner): no kickoff, whatever came since', () => {
     const t = make();
     const a = t.goal('Lansman');
     t.plan('Site', { goalId: a.id });
-    expect(t.board().kickoff).toBe(false);
+    t.events.append(t.coordinator.id, { type: 'message.user', text: 'Yeni iş: mağaza', source: 'owner' });
+    expect(t.board({ since: 0 }).kickoff).toBe(false);
     t.budget.setConstitution({ autonomy: 'plans' });
     const b = t.goal('Satış');
     t.plan('Teklifler', { goalId: b.id });
     expect(t.plans.list().find((p) => p.title === 'Teklifler')?.status).toBe('draft');
-    expect(t.board().kickoff).toBe(false);
+    expect(t.board({ since: 0 }).kickoff).toBe(false);
   });
 
-  it('no active goal has a running plan — the only one has none yet, its plan finished, was declined or stopped: kickoff; another goal waiting for its plan while one runs: no kickoff', () => {
+  it('no goal’s work under way, and since the last cycle the owner’s message, a goal set, closed or stopped, or a plan finished, declined or stopped: kickoff', () => {
     const t = make();
     const ada = t.person('Ada');
-    const a = t.goal('Lansman');
-    expect(t.board().kickoff).toBe(true);
-    const site = t.plan('Site', { goalId: a.id });
-    expect(t.board().kickoff).toBe(false);
-    // A second goal set to be planned later while the first one's plan runs: the work is under way, no project start.
-    const b = t.goal('Satış');
-    expect(t.board().kickoff).toBe(false);
-    expect(t.section(t.board().text, 2)).toContain('- Hedef “Satış”: süren planı yok');
-    // The running plan finishes: no goal has a running plan.
-    const only = t.task(ada.id, 'tek iş', { planId: site.id });
+    /** Something happens a minute on; the board a minute after it, since just before it (a cycle that came for it). */
+    const after = (fn: () => void) => {
+      t.advance(MIN);
+      const since = t.now() - 1;
+      fn();
+      t.advance(MIN);
+      return t.board({ since }).kickoff;
+    };
+    // The owner's message to the coordinator; not the office's own message, nor the owner's to someone else.
+    expect(after(() => void t.events.append(t.coordinator.id, { type: 'message.user', text: 'Yeni iş: mağaza', source: 'owner' }))).toBe(true);
+    expect(after(() => void t.events.append(t.coordinator.id, { type: 'message.user', text: 'not', source: 'system' }))).toBe(false);
+    expect(after(() => void t.events.append(ada.id, { type: 'message.user', text: 'merhaba', source: 'owner' }))).toBe(false);
+    // A goal set: its first plan is to be made.
+    let a = null as Goal | null;
+    expect(after(() => void (a = t.goal('Lansman')))).toBe(true);
+    // Its plan runs: no start — a second goal waiting for its plan beside it is the cycle's work.
+    let site = null as Plan | null;
+    expect(after(() => void (site = t.plan('Site', { goalId: a!.id })))).toBe(false);
+    let b = null as Goal | null;
+    expect(after(() => void (b = t.goal('Satış')))).toBe(false);
+    // The running plan finishes: a new plan or goal is needed.
+    const only = t.task(ada.id, 'tek iş', { planId: site!.id });
     t.company.start(only.id);
-    t.finish(ada.id, only.id);
-    expect(t.plans.get(site.id).status).toBe('done');
-    expect(t.board().kickoff).toBe(true);
-    // A plan waiting for the owner runs too; declined or stopped, it does not.
+    expect(after(() => void t.finish(ada.id, only.id))).toBe(true);
+    expect(t.plans.get(site!.id).status).toBe('done');
+    // A plan waiting for the owner runs; declined or stopped, its goal needs another.
     t.budget.setConstitution({ autonomy: 'plans' });
-    t.company.decline(t.plan('Teklifler', { goalId: b.id }).id);
-    expect(t.board().kickoff).toBe(true);
-    const next = t.plan('Teklifler 2', { goalId: b.id });
-    expect(t.board().kickoff).toBe(false);
-    t.company.stopPlan(next.id);
-    expect(t.board().kickoff).toBe(true);
+    let offers = null as Plan | null;
+    expect(after(() => void (offers = t.plan('Teklifler', { goalId: b!.id })))).toBe(false);
+    expect(after(() => void t.company.decline(offers!.id))).toBe(true);
+    let again = null as Plan | null;
+    expect(after(() => void (again = t.plan('Teklifler 2', { goalId: b!.id })))).toBe(false);
+    expect(after(() => void t.company.stopPlan(again!.id))).toBe(true);
+    // A goal closed by the coordinator, or stopped by the owner: the next one is to be found.
+    expect(after(() => void t.company.goalSet(t.coordinator.id, { goalId: a!.id, status: 'done' }))).toBe(true);
+    expect(after(() => void t.company.stopGoal(b!.id))).toBe(true);
+  });
+
+  it('waiting is no start: no goal, or goals with no running plan, and nothing new that asks for one — the owner awaited, a rest, the office moving on', () => {
+    const t = make();
+    const ada = t.person('Ada');
+    // No goal and nothing in the log (an idle pulse, a rest's end): no start.
+    expect(t.board({ since: 0 }).kickoff).toBe(false);
+    t.advance(MIN);
+    t.plan('Hedefsiz plan');
+    t.advance(MIN);
+    expect(t.board({ since: T0 }).kickoff).toBe(false);
+    // A goal set: the cycle after it is a start; the coordinator rests and waits for the owner instead of planning.
+    const before = t.now();
+    t.advance(MIN);
+    t.goal('Ürün çekirdeği');
+    t.advance(MIN);
+    expect(t.board({ since: before }).kickoff).toBe(true);
+    const since = t.now();
+    t.company.restUntil(t.coordinator.id, 2, 'Sahibinin kararı bekleniyor');
+    t.advance(HOUR);
+    // The office moves on meanwhile — a task, a hand-in, someone idle again, the office's own note — and nothing asks
+    // for a new plan: every cycle of the wait (the heartbeat, the rest's end) is no start.
+    const x = t.task(ada.id, 'Rapor');
+    t.company.start(x.id);
+    t.finish(ada.id, x.id);
+    t.events.append(t.coordinator.id, { type: 'message.user', text: 'Ofisten notlar', source: 'system' });
+    t.advance(2 * HOUR);
+    const b = t.board({ since });
+    expect(t.section(b.text, 2)).toContain('- Hedef “Ürün çekirdeği”: süren planı yok');
+    expect(b.kickoff).toBe(false);
+  });
+});
+
+describe('board — its shape: what it says, the clock left out (a heartbeat with nothing new is passed by)', () => {
+  const turn = (costUsd: number) =>
+    ({ type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd, numTurns: 1, queuedTurns: 0, sessionUsage: null, sessionCostUsd: 0 }) as const;
+
+  /** An office at work: a goal and its plan, Ada at a task, Can idle, Ece's task parked, Selin's in review, some money spent. */
+  function busy() {
+    const t = make();
+    const [ada, can, ece, selin] = ['Ada', 'Can', 'Ece', 'Selin'].map((n) => t.person(n));
+    const g = t.goal('Lansman');
+    const p = t.plan('Site', { goalId: g.id });
+    const x = t.task(ada!.id, 'Uç noktalar', { planId: p.id });
+    t.company.start(x.id);
+    const y = t.task(ece!.id, 'Ödeme', { planId: p.id });
+    t.company.parkTask(ece!.id, y.id, '+1d', 'Sağlayıcının cevabı bekleniyor');
+    const z = t.task(selin!.id, 'Metin', { planId: p.id, reviewer: can!.id });
+    t.company.start(z.id);
+    t.finish(selin!.id, z.id);
+    t.budget.recordSpend(ada!.id, { service: 'alan adı', usd: 12, purpose: 'site' });
+    t.events.append(ada!.id, turn(0.4));
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.2, resetsAt: T0 + 5 * HOUR }, sevenDay: { utilization: 0.5, resetsAt: T0 + 100 * HOUR }, updatedAt: T0 });
+    t.advance(50 * MIN);
+    return { t, ada: ada!, can: can!, ece: ece!, selin: selin!, g, p, x, y, z };
+  }
+
+  it('the same office later has the same shape: times, spans, money, the quota’s and Claude’s use are not what the board says', () => {
+    const { t, ada } = busy();
+    const since = T0 + MIN;
+    const before = t.board({ since });
+    // Fifty minutes on: Ada's estimate passed long ago, Can idle longer, more use and money, the quota climbed.
+    t.events.append(ada.id, turn(1.7));
+    t.events.append(ada.id, turn(0.3));
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.45, resetsAt: T0 + 5 * HOUR }, sevenDay: { utilization: 0.52, resetsAt: T0 + 100 * HOUR }, updatedAt: t.now() });
+    t.advance(50 * MIN);
+    const later = t.board({ since });
+    expect(later.text).not.toBe(before.text);
+    expect(later.shape).toBe(before.shape);
+    // The previous cycle not closed: a line for the coordinator, not a change of the office.
+    expect(t.board({ since, unclosedWarning: true }).shape).toBe(before.shape);
+    // The shape is drawn at full detail, whatever limits the board's text needed.
+    expect(later.shape).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('anything the board says differently is another shape: a task’s state, a new task, the owner’s message, a mark the clock brings', () => {
+    const { t, ada, can, p, y } = busy();
+    const since = T0 + MIN;
+    const shapes = [t.board({ since }).shape];
+    const look = () => shapes.push(t.board({ since }).shape);
+    // Ece's parked task comes back by the owner's hand.
+    t.company.unparkTask(OWNER, y.id);
+    look();
+    // A new task of the plan for Can; the owner's message to the coordinator. (A second task waiting in Can's queue
+    // outside a plan is not on the board — its text stays the same, and so does its shape.)
+    const text = t.board({ since }).text;
+    t.task(can.id, 'Notlar');
+    expect(t.board({ since }).text).toBe(text);
+    expect(t.board({ since }).shape).toBe(shapes.at(-1));
+    t.task(can.id, 'Testler', { planId: p.id });
+    look();
+    t.events.append(t.coordinator.id, { type: 'message.user', text: 'Yarın demo var', source: 'owner' });
+    look();
+    // Hours on, Ada idle since her task closed: the board marks her “uzun süredir”.
+    t.finish(ada.id, t.tasks.list({ assignee: ada.id, statuses: ['in_progress'] })[0]!.id);
+    look();
+    t.advance(3 * HOUR);
+    look();
+    expect(new Set(shapes).size).toBe(shapes.length);
   });
 });
 

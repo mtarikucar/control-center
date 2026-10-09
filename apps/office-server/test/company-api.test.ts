@@ -33,7 +33,7 @@ async function start(o: { cacheTtlMinutes?: () => number; clock?: { status(): Cl
   const integrations = new IntegrationRegistry({ db: s.db, roster: s.roster, events: s.events });
   const metrics = { report: () => officeMetrics({ db: s.db, roster: s.roster, tasks: c.tasks, state: c.state }, Date.now()) };
   // The management cycle as main.ts builds it, but with a fixed board and no office clock: the tests open and end cycles.
-  const cycle = new ManagementCycle({ events: s.events, state: c.state, company: c.company, roster: s.roster, tasks: c.tasks, budget: c.budget, board: () => ({ text: 'Yönetim panosu', kickoff: false }) });
+  const cycle = new ManagementCycle({ events: s.events, state: c.state, company: c.company, roster: s.roster, tasks: c.tasks, budget: c.budget, board: () => ({ text: 'Yönetim panosu', kickoff: false, shape: 'pano' }) });
   const blueprints = new Blueprints({ company: c.company, roster: s.roster, tasks: c.tasks, plans: c.plans, schedules: c.schedules, memory: c.memory, store: new BlueprintStore(s.db), integrations, constitution: () => c.budget.constitution() });
   const api = createApi({ engine: f.engine, roster: s.roster, events: s.events, quota, company: { service: c.company, tasks: c.tasks, plans: c.plans, memory: c.memory, budget: c.budget, proposals: c.proposals, agenda, performance, metrics, integrations, blueprints, management: cycle, ...(o.clock ? { clock: o.clock } : {}) } }, { allowedOrigins: [] });
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));

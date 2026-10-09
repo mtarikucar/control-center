@@ -14,8 +14,14 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 /** Triggers within this long of the first one waiting go into the same cycle (§3.1, “toplama penceresi”). */
 export const CYCLE_WINDOW_MS = 2 * MIN;
-/** While work is open a cycle comes at least this often, events or not (§3.1, “kalp atışı”). */
+/**
+ * While work is open the office looks this often, events or not (§3.1, “kalp atışı”): within the hour the CLI keeps
+ * the coordinator's prompt cache (it writes it for an hour, whatever cacheTtlMinutes says), so a cycle it opens finds
+ * the cache warm. Keep it at or under 60 minutes: a later turn writes the whole context anew (≈ $3, 3fe9707b).
+ */
 export const HEARTBEAT_MS = 45 * MIN;
+/** Heartbeats in a row passed by for a board with nothing new; the next one opens the cycle whatever the board says. */
+export const MAX_SKIPS = 3;
 /** The management log's length when none is asked for, and the most it gives (§3.3, the owner's Yönetim tab). */
 export const LOG_DEFAULT = 50;
 export const LOG_MAX = 200;
@@ -25,10 +31,14 @@ export const CYCLE_CHECK_MS = 30_000;
 const MAX_TRIGGERS = 50;
 
 /**
- * What lasts across a restart (company_state): the last start, the triggers waiting, the cycle open, an unclosed one, and
- * the end of the last rest already turned into a trigger.
+ * What lasts across a restart (company_state): the last start, the triggers waiting, the cycle open, an unclosed one,
+ * the end of the last rest already turned into a trigger; the board's shape as the last cycle's turn left it, the
+ * heartbeats passed by since, and the last of them.
  */
-const KEY = { lastStart: 'cycle.lastStartAt', pending: 'cycle.pending', open: 'cycle.open', unclosed: 'cycle.unclosed', restEnded: 'cycle.restEndedAt' } as const;
+const KEY = {
+  lastStart: 'cycle.lastStartAt', pending: 'cycle.pending', open: 'cycle.open', unclosed: 'cycle.unclosed', restEnded: 'cycle.restEndedAt',
+  shape: 'cycle.shape', skips: 'cycle.skips', skippedAt: 'cycle.skippedAt',
+} as const;
 
 const PLAN_TR: Partial<Record<string, string>> = { approved: 'onaylandı', declined: 'onaylanmadı', kept: 'revizyonu onaylanmadı', done: 'bitti', stopped: 'sahibince durduruldu' };
 
@@ -105,7 +115,8 @@ function onDesk(ev: OfficeEvent): boolean {
 }
 
 const closedStatus = (s: TaskStatus) => s === 'done' || s === 'cancelled';
-const windowOf = (t: CycleTrigger) => (t.kind === 'start' ? 0 : CYCLE_WINDOW_MS);
+/** A start and a heartbeat (looked at by the clock already) open at once; anything else waits for the window. */
+const windowOf = (t: CycleTrigger) => (t.kind === 'start' || t.kind === 'heartbeat' ? 0 : CYCLE_WINDOW_MS);
 const same = (a: CycleTrigger, b: CycleTrigger) => a.kind === b.kind && a.note === b.note;
 const identical = (a: CycleTrigger, b: CycleTrigger) => same(a, b) && a.at === b.at && a.seq === b.seq;
 
@@ -121,8 +132,9 @@ function parse<T>(raw: string | null, fallback: T): T {
 /**
  * The coordinator's management cycle (spec 2026-10-08-management-cycle-design §3.1, §3.3, §5): the office watches the
  * event log and says when a cycle is due — the work changed (a hand-in, a review decision, someone left with no work, a
- * plan's or a goal's status, a constraint, a stall), at the latest every HEARTBEAT_MS while work is open, once when the
- * office starts with work open; with no goal and no open work every pulseHours (0: never), but not while the
+ * plan's or a goal's status, a constraint, a stall), at the latest every HEARTBEAT_MS while work is open — but a
+ * heartbeat whose board says what it said when the last cycle's turn ended is passed by and logged, at most MAX_SKIPS
+ * in a row —, once when the office starts with work open; with no goal and no open work every pulseHours (0: never), but not while the
  * coordinator rests (restUntil), and once when its rest ends. Triggers close together go into one cycle
  * (CYCLE_WINDOW_MS from the first). Nothing the coordinator does itself is a trigger: what is logged under its desk (but
  * for what the owner or the office logs there) and whatever happens inside its own tool calls (`acting`). Nothing while
@@ -224,7 +236,7 @@ export class ManagementCycle {
     const triggers: CycleTrigger[] = pending.length > 0 ? pending : [{ kind: 'heartbeat', at: now, note: '', seq: null }];
     const since = this.#lastStart();
     const unclosedWarning = this.#d.state.get(KEY.unclosed) === 'true';
-    let board: Board;
+    let board: Pick<Board, 'text' | 'kickoff'>;
     try {
       board = this.#d.board({ since, now, unclosedWarning });
     } catch (err) {
@@ -274,6 +286,9 @@ export class ManagementCycle {
     this.#saveOpen(null);
     this.#resultIn = false;
     if (!open.close) this.#d.state.set(KEY.unclosed, 'true');
+    // The board as the turn left it (what the coordinator did in it included): the next heartbeat is measured against it.
+    this.#d.state.set(KEY.shape, this.#shape(open.startedAt));
+    this.#d.state.set(KEY.skips, null);
     this.#d.events.append(this.#d.company.coordinator()?.id ?? null, {
       type: 'management.cycle', closed: open.close !== null, startedAt: open.startedAt, endedAt, triggers: open.triggers, ...(open.close ?? { changes: [], reasoning: '', next: null }), costUsd: open.costUsd,
       model: open.model ?? null,
@@ -471,16 +486,50 @@ export class ManagementCycle {
     if (this.#openWork()) this.#workAt = now;
     else this.#quietAt = now;
     this.#restEnd(now);
+    this.#beat(now);
     if (this.due()) this.#notify();
   }
 
   /**
-   * While work is open, HEARTBEAT_MS after the last cycle; with no goal and no open work, pulseHours after it (0: never)
-   * and never while the coordinator rests. Never in the owner's reserve.
+   * The heartbeat while work is open (§3.1), at the clock's look: HEARTBEAT_MS after the last cycle, the last heartbeat
+   * passed by, or the work's start. Its board measured against the one the last cycle's turn left: the same — and that
+   * cycle closed — it is passed by and logged (management.cycle.skipped), at most MAX_SKIPS in a row; otherwise it waits
+   * as a trigger and the cycle opens. Never in the owner's reserve, while paused, in a cycle or with triggers waiting.
+   */
+  #beat(now: number): void {
+    const c = this.#d.company.coordinator();
+    if (!c || this.#d.company.paused() || this.#open() || this.#pending().length > 0) return;
+    if (this.#d.budget?.reserveActive() || !this.#openWork()) return;
+    const last = Math.max(this.#lastStart(), this.#quietAt, Number(this.#d.state.get(KEY.skippedAt) ?? '0') || 0);
+    if (now - last < HEARTBEAT_MS) return;
+    const skips = Number(this.#d.state.get(KEY.skips) ?? '0') || 0;
+    const shape = this.#d.state.get(KEY.shape);
+    if (skips < MAX_SKIPS && shape && this.#d.state.get(KEY.unclosed) !== 'true' && this.#shape(this.#lastStart(), now) === shape) {
+      this.#d.state.set(KEY.skippedAt, String(now));
+      this.#d.state.set(KEY.skips, String(skips + 1));
+      this.#d.events.append(c.id, { type: 'management.cycle.skipped', since: this.#lastStart(), skips: skips + 1 });
+      return;
+    }
+    this.#push({ kind: 'heartbeat', at: now, note: '', seq: null });
+  }
+
+  /** The board's shape now, since `since` (null when it cannot be built: nothing is passed by on it). */
+  #shape(since: number, now: number = this.#now()): string | null {
+    try {
+      const { shape } = this.#d.board({ since, now });
+      return typeof shape === 'string' ? shape : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * With no goal and no open work, pulseHours after the last cycle (0: never) and never while the coordinator rests;
+   * while work is open the clock's look brings the heartbeat (#beat). Never in the owner's reserve.
    */
   #heartbeatDue(now: number): boolean {
     if (this.#d.budget?.reserveActive()) return false;
-    if (this.#openWork()) return now - Math.max(this.#lastStart(), this.#quietAt) >= HEARTBEAT_MS;
+    if (this.#openWork()) return false;
     const hours = (this.#d.budget?.constitution() ?? DEFAULT_CONSTITUTION).pulseHours;
     const rest = this.#d.state.restUntil();
     if (hours <= 0 || now < rest) return false;

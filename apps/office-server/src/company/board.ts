@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { OWNER, normalizeConstitution, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
+import { OWNER, normalizeConstitution, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEvent, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { QuotaTracker } from '../quota.ts';
 import type { Roster } from '../roster.ts';
@@ -47,8 +48,17 @@ export interface BoardOptions {
 
 export interface Board {
   text: string;
-  /** No active goal, or no active goal with a running plan (spec §3.5: the kickoff model). */
+  /**
+   * A project start (spec §3.5: the kickoff model): no goal's work under way — no active goal, or none with a running
+   * plan — and since the last cycle something that asks for one (asksForStart). Waiting with no plan is none.
+   */
   kickoff: boolean;
+  /**
+   * What the board says, its clocks left out (sha256 of the board drawn at full detail, with times, spans, money and
+   * the quota's and Claude's use as “…”, without the unclosed warning): the same shape later says the same thing. A
+   * heartbeat whose board has the shape the last cycle's turn left is passed by (management cycle, ece24b5e).
+   */
+  shape: string;
 }
 
 const UNCLOSED = 'UYARI: Önceki tur cycleClose ile kapanmadı. Bu turu cycleClose ile kapat; değişiklik yoksa nedenini yaz (“değişiklik yok, çünkü …”).';
@@ -56,6 +66,20 @@ const UNCLOSED = 'UYARI: Önceki tur cycleClose ile kapanmadı. Bu turu cycleClo
 const noGoal = (idle: boolean) =>
   `Aktif hedef yok${idle ? ' ve açık iş yok' : ''}: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla) ve ilk planını hemen başlat (planPropose, goalId ile).`;
 const NO_PLAN = 'süren planı yok — planPropose ile goalId vererek başlat ya da goalSet ile kapat';
+
+/** Plan changes after which its goal needs a plan again: it finished, or will not run. */
+const PLAN_ENDS: ReadonlySet<PlanChange> = new Set(['done', 'declined', 'stopped']);
+
+/**
+ * What asks for a project start (spec §3.5): the owner's message to the coordinator, a goal set, closed or stopped,
+ * a plan that ended. Anything else — a hand-in, a task, the office's own notes, time passing — leaves a wait a wait.
+ */
+function asksForStart(e: OfficeEvent, by: string | null, coordinatorId: string | null): boolean {
+  if (e.type === 'message.user') return e.source === 'owner' && coordinatorId !== null && by === coordinatorId;
+  if (e.type === 'goal.changed') return e.change !== 'updated';
+  if (e.type === 'plan.changed') return PLAN_ENDS.has(e.change);
+  return false;
+}
 
 /**
  * How much each list may show. The board stays short (spec §3.2: 2–4 thousand characters): every list is capped and
@@ -191,8 +215,15 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
   const cut = read.length > LOG_LIMIT;
   const log = cut ? read.slice(1) : read;
 
-  const when = (ms: number) => formatWhen(ms, now).replace(/^bugün /, '');
-  const ago = (ms: number) => `${span(now - ms)} önce`;
+  /** Drawing the shape: what moves with the clock alone — times, spans, money spent, the quota's and Claude's use — is “…”. */
+  let blur = false;
+  const dim = (text: string) => (blur ? '…' : text);
+  const when = (ms: number) => dim(formatWhen(ms, now).replace(/^bugün /, ''));
+  const ago = (ms: number) => dim(`${span(now - ms)} önce`);
+  /** How long since `ms`. */
+  const lasted = (ms: number) => dim(span(now - ms));
+  /** Money spent or used (an estimate, a cap or a proposal's price is not the clock's). */
+  const spentUsd = (n: number) => dim(money(n));
   const nameOf = (id: string) => (id === OWNER ? 'sahibi' : (byId.get(id)?.name ?? id));
   const taskOf = (id: string): Task | null => {
     try {
@@ -229,14 +260,17 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     return moved;
   };
 
-  // A project start only when no goal's work is under way: a goal set to be planned later beside a running one is not one.
-  const kickoff = goals.length === 0 || !live.some((p) => p.goalId !== null && goals.some((g) => g.id === p.goalId));
+  // A project start only when no goal's work is under way — a goal set to be planned later beside a running one is not
+  // one — and something since the last cycle asks for one. Waiting with no plan (for the owner, for work elsewhere, a
+  // rest) is no start: its cycles are the cycle model's (ece24b5e: 9 of 10 project-start turns measured were such waits).
+  const underWay = goals.length > 0 && live.some((p) => p.goalId !== null && goals.some((g) => g.id === p.goalId));
+  const kickoff = !underWay && log.some(({ event: e, employeeId }) => asksForStart(e, employeeId, coordinator?.id ?? null));
   // Each plan's tasks and streams, read once however often the board is drawn.
   const planData = new Map(live.map((p) => [p.id, { tasks: d.tasks.list({ planId: p.id, limit: 100_000 }), streams: d.company.planStreams(p.id) }]));
   /** Each plan's live routines (active or paused): open work that keeps it running. */
   const routines = new Map<string, number>();
   for (const s of d.company.schedules()) if (s.planId && s.status !== 'stopped') routines.set(s.planId, (routines.get(s.planId) ?? 0) + 1);
-  const header = `Yönetim panosu · ${formatStamp(now)} · ${o.since > 0 ? `son tur ${when(o.since)} (${ago(o.since)})` : 'ilk tur'}`;
+  const header = () => `Yönetim panosu · ${dim(formatStamp(now))} · ${o.since > 0 ? `son tur ${when(o.since)} (${ago(o.since)})` : 'ilk tur'}`;
 
   /** The board drawn with these limits. */
   const render = (L: Limits): string => {
@@ -399,7 +433,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
               : UNAVAILABLE.includes(owner.lifecycle)
                 ? [`sahibi ${owner.name} iş alamıyor (${UNAVAILABLE_TR[owner.lifecycle] ?? owner.lifecycle})`, `sahibi ${owner.name} iş alamıyor`]
                 : null;
-        const idle = owner && !lacking && idleSince.has(owner.id) ? span(now - idleSince.get(owner.id)!) : null;
+        const idle = owner && !lacking && idleSince.has(owner.id) ? lasted(idleSince.get(owner.id)!) : null;
         const ready = p.status === 'approved' && x.status === 'planned' && x.dependsOn.every((dep) => status.get(dep) === 'done');
         const rank = lacking ? 0 : idle ? 1 : 2;
         // Left without work while what waits for it went on: its part was done outside a task, or never done.
@@ -518,7 +552,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const longIdle = summary.constitution.idleCapacityHours * HOUR;
       const group = (label: string, items: string[], max: number) => (items.length ? [`- ${label} (${items.length}): ${cap(items, max, 'kişi').join('; ')}`] : []);
       return [
-        ...group('Boşta', b.idle.map((p) => `${p.name}${p.title ? ` (${clip(p.title, ROLE_CHARS)})` : ''} — ${span(now - p.since)}${idleMarks(p, longIdle)}`), L.names),
+        ...group('Boşta', b.idle.map((p) => `${p.name}${p.title ? ` (${clip(p.title, ROLE_CHARS)})` : ''} — ${lasted(p.since)}${idleMarks(p, longIdle)}`), L.names),
         ...group('İş alamıyor', b.unavailable.map((p) => unavailable(byId.get(p.id)!)), L.names),
         ...group('Elinde iş, başında değil', b.holding.map((p) => holding(p.id, p.why)), L.details),
         ...group('İşte', b.atWork.map((p) => atWork(p.id)), L.details),
@@ -589,7 +623,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       for (const t of open.filter((x) => !seen.has(x.id) && x.status === 'review')) {
         const review = open.find((r) => r.kind === 'review' && r.reviewOf === t.id);
         const reviewer = review?.assignee ?? t.reviewer;
-        items.push({ kind: 'incelemede', text: `İncelemede: ${title(t)} (${nameOf(t.assignee)} → ${reviewer ? nameOf(reviewer) : 'inceleyici'})${review ? `, ${span(now - review.createdAt)}` : ''}` });
+        items.push({ kind: 'incelemede', text: `İncelemede: ${title(t)} (${nameOf(t.assignee)} → ${reviewer ? nameOf(reviewer) : 'inceleyici'})${review ? `, ${lasted(review.createdAt)}` : ''}` });
       }
       const shown = items.slice(0, L.lines).map((i) => `- ${i.text}`);
       const hidden = items.slice(L.lines);
@@ -604,21 +638,21 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const r = summary.reserve;
       const c = summary.constitution;
       const pct = (p: number | null) => (p === null ? '—' : `%${p}`);
-      const quota = r.fiveHourPct === null && r.sevenDayPct === null ? 'henüz okunmadı' : `5 saat ${pct(r.fiveHourPct)}, 7 gün ${pct(r.sevenDayPct)}`;
+      const quota = r.fiveHourPct === null && r.sevenDayPct === null ? 'henüz okunmadı' : `5 saat ${dim(pct(r.fiveHourPct))}, 7 gün ${dim(pct(r.sevenDayPct))}`;
       const lines = [`- Kota: ${quota}; ofisin sınırı %${r.limitPct} (sahibinin payı %${c.ownerReservePct})${r.active ? '; PAY DEVREDE: yalnız öncelik 1 işler başlıyor' : ''}`];
       const used = d.quota?.officeSince(now - DAY);
       const spent = d.budget.spending().filter((s) => s.ts >= now - DAY).reduce((n, s) => n + s.usd, 0);
-      const claude = used ? `Claude ~${money(used.costUsd)} (${used.turns} tur); ` : '';
-      lines.push(`- Son 24 saat: ${claude}kayıtlı harcama ${money(spent)}; bu ay ${money(summary.month.usd)}${c.monthlyUsdCap !== null ? ` / sınır ${money(c.monthlyUsdCap)}` : ''}`);
+      const claude = used ? `Claude ~${spentUsd(used.costUsd)} (${dim(String(used.turns))} tur); ` : '';
+      lines.push(`- Son 24 saat: ${claude}kayıtlı harcama ${spentUsd(spent)}; bu ay ${spentUsd(summary.month.usd)}${c.monthlyUsdCap !== null ? ` / sınır ${money(c.monthlyUsdCap)}` : ''}`);
       // Running plans with an estimate or some use, against it.
       const use = (p: Plan) => summary.plans[p.id] ?? { spentUsd: 0, claudeUsd: 0 };
       const worth = live.filter((p) => p.status === 'approved' && (p.usd !== null || p.days !== null || p.quotaPct !== null || use(p).spentUsd > 0 || use(p).claudeUsd > 0));
       const planLine = (p: Plan): string => {
         const b = use(p);
         const elapsed = (now - (p.approvedAt ?? p.createdAt)) / DAY;
-        const usd = `harcama ${money(b.spentUsd)}${p.usd !== null ? ` / tahmin ${money(p.usd)}${b.spentUsd > p.usd ? ' (aşıldı)' : ''}` : ''}`;
-        const time = p.days !== null ? `${days(elapsed)} / ${days(p.days)} gün${elapsed > p.days ? ' (aşıldı)' : ''}` : `${days(elapsed)} gün`;
-        return `Plan ${title(p)}: Claude ~${money(b.claudeUsd)}; ${usd}; ${time}${p.quotaPct !== null ? `; tahmini kota %${p.quotaPct}` : ''}`;
+        const usd = `harcama ${spentUsd(b.spentUsd)}${p.usd !== null ? ` / tahmin ${money(p.usd)}${b.spentUsd > p.usd ? ' (aşıldı)' : ''}` : ''}`;
+        const time = p.days !== null ? `${dim(days(elapsed))} / ${days(p.days)} gün${elapsed > p.days ? ' (aşıldı)' : ''}` : `${dim(days(elapsed))} gün`;
+        return `Plan ${title(p)}: Claude ~${spentUsd(b.claudeUsd)}; ${usd}; ${time}${p.quotaPct !== null ? `; tahmini kota %${p.quotaPct}` : ''}`;
       };
       lines.push(...cap(worth.map(planLine), L.details, 'plan').map((l) => `- ${l}`));
       return lines;
@@ -657,8 +691,8 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       ['Kaynak', resources()],
       ['Açık kararlar', decisions()],
     ];
-    const blocks = [header, ...sections.map(([heading, body], i) => `## ${i + 1}. ${heading}\n${body.length ? body.join('\n') : '- yok'}`)];
-    return (o.unclosedWarning ? [UNCLOSED, ...blocks] : blocks).join('\n\n');
+    const blocks = [header(), ...sections.map(([heading, body], i) => `## ${i + 1}. ${heading}\n${body.length ? body.join('\n') : '- yok'}`)];
+    return (o.unclosedWarning && !blur ? [UNCLOSED, ...blocks] : blocks).join('\n\n');
   };
 
   let text = '';
@@ -666,5 +700,8 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     text = render(limits);
     if (text.length <= BUDGET) break;
   }
-  return { text, kickoff };
+  // At full detail whatever limits the text needed: its length moves with the clock's words.
+  blur = true;
+  const shape = createHash('sha256').update(render(LIMITS[0]!)).digest('hex');
+  return { text, kickoff, shape };
 }

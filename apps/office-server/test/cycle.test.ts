@@ -321,12 +321,14 @@ describe('management cycle — triggers and the window', () => {
     expect(t.kinds(2)).toContain('delivery');
   });
 
-  it('the heartbeat: 45 minutes after the last cycle while work is open, and never without open work', async () => {
+  it('the heartbeat: 45 minutes after the last cycle while work is open (its board says something new: an unchanged one is passed by, below), and never without open work', async () => {
     const t = make();
     t.goal();
     t.boot();
     await t.closeCycle();
-    t.advance(HEARTBEAT_MS - MIN);
+    t.advance(MIN);
+    t.events.append(t.coord.id, { type: 'message.user', text: 'Yarın bakarım', source: 'owner' });
+    t.advance(HEARTBEAT_MS - 2 * MIN);
     expect(t.started()).toHaveLength(1);
     t.advance(MIN + 30 * SEC);
     expect(t.started()).toHaveLength(2);
@@ -497,8 +499,8 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     expect(message.text).toContain('Teslim: “Yaz” — Ada → bitti');
     expect(message.text).not.toContain('Görev bitti:');
     expect(message.text).toContain('cycleClose');
-    // No active goal: the board says kickoff, so the cycle goes on the project-start model, as a role hint.
-    expect(message).toMatchObject({ model: 'fable', role: true });
+    // No active goal, but nothing asks for a project start (a hand-in, a plan approved): the cycle model, as a role hint.
+    expect(message).toMatchObject({ model: 'opus', role: true });
     expect(t.notices.pending(t.coord.id)).toEqual([]);
   });
 
@@ -600,7 +602,7 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     t.endTurn(t.coord.id, 0.5);
     await expect(close({ changes: [], reasoning: NO_CHANGE })).rejects.toThrow('Açık bir yönetim turu yok');
     expect(t.records()).toEqual([
-      { type: 'management.cycle', closed: true, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.2, model: 'fable' },
+      { type: 'management.cycle', closed: true, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: ['Ada’nın işi ikiye bölündü', 'Can işe alındı'], reasoning: 'zincir tek kişideydi', next: 'Can’ın ilk teslimi', costUsd: 0.2, model: 'opus' },
     ]);
     expect(t.started()).toEqual([{ type: 'management.cycle.started', triggers: [{ kind: 'start', at: T0, note: '', seq: null }], since: 0, unclosedWarning: false }]);
   });
@@ -623,7 +625,7 @@ describe('management cycle — the delivery (§3.6) and cycleClose (§3.3)', () 
     const x = t.task(ada.id, 'Yaz');
     t.boot();
     t.endTurn(t.coord.id, 0.42);
-    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42, model: 'fable' }]);
+    expect(t.records()).toEqual([{ type: 'management.cycle', closed: false, startedAt: T0, endedAt: T0, triggers: [{ kind: 'start', at: T0, note: '', seq: null }], changes: [], reasoning: '', next: null, costUsd: 0.42, model: 'opus' }]);
     t.advance(30 * MIN);
     expect(t.started()).toHaveLength(1);
     t.finish(ada.id, x.id);
@@ -1019,24 +1021,25 @@ describe('management cycle — the pulse’s facts are the board’s (§3.6)', (
     expect(t.boards()).toHaveLength(2);
     expect(t.boards()[1]!.text).toContain('  ! onaylı ama hiç görevi açılmadı (onay 45 dk önce) — görevlerini taskCreate ile aç ya da yerine yeni plan öner');
     await t.closeCycle();
-    // Ada has had no work for longer than idleCapacityHours (2): marked on the board, with her title.
+    // Nothing new at the next heartbeat: passed by. Ada has had no work for longer than idleCapacityHours (2) at the
+    // one after: marked on the board, with her title — something new, so its cycle opens.
     t.advance(HEARTBEAT_MS);
-    await t.closeCycle();
+    expect(t.boards()).toHaveLength(2);
     t.advance(HEARTBEAT_MS);
-    expect(t.boards()).toHaveLength(4);
-    expect(t.boards()[3]!.text).toContain('- Boşta (1): Ada (Geliştirici) — 2 sa 15 dk (uzun süredir)');
+    expect(t.boards()).toHaveLength(3);
+    expect(t.boards()[2]!.text).toContain('- Boşta (1): Ada (Geliştirici) — 2 sa 15 dk (uzun süredir)');
     await t.closeCycle();
     // The owner stops the goal: no goal and no work, on the board of the cycle that follows.
     t.company.stopGoal(g.id);
     t.advance(CYCLE_WINDOW_MS + 30 * SEC);
-    expect(t.boards()).toHaveLength(5);
-    expect(t.boards()[4]!.text).toContain('- Aktif hedef yok ve açık iş yok: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla)');
+    expect(t.boards()).toHaveLength(4);
+    expect(t.boards()[3]!.text).toContain('- Aktif hedef yok ve açık iş yok: şirket özetindeki misyona ve vizyona bakıp sıradaki hedefi aç (goalSet: neden ve ölçülebilir bitti tanımıyla)');
     await t.closeCycle();
     // Hours on (past pulseHours): no work, so the idle heartbeat brings the board, never a notice from the pulse.
     t.advance(7 * HOUR);
-    expect(t.boards()).toHaveLength(6);
-    expect(t.kinds(5)).toEqual(['heartbeat']);
-    expect(t.boards()[5]!.text).toContain('- Aktif hedef yok ve açık iş yok: ');
+    expect(t.boards()).toHaveLength(5);
+    expect(t.kinds(4)).toEqual(['heartbeat']);
+    expect(t.boards()[4]!.text).toContain('- Aktif hedef yok ve açık iş yok: ');
     await t.closeCycle();
     expect(pulseNotices(t)).toEqual([]);
     for (const m of t.toCoordinator()) expect(m.text).not.toMatch(/Boşta kapasite|hedefinin süren planı yok|Aktif hedef yok ve açık iş yok\. /);
@@ -1088,5 +1091,188 @@ describe('management cycle — no service, no change', () => {
     for (const fn of deferred.splice(0)) fn();
     expect(sent).toEqual(['Ofisten notlar:\n- Görev bitti: “Yaz” (Ada): tamam']);
     expect(t.started()).toHaveLength(0);
+  });
+});
+
+describe('management cycle — a heartbeat with nothing new is passed by (ece24b5e)', () => {
+  type Skipped = Extract<OfficeEvent, { type: 'management.cycle.skipped' }>;
+  const skipped = (t: ReturnType<typeof make>) => t.log().flatMap((e) => (e.event.type === 'management.cycle.skipped' ? [{ ts: e.ts, employeeId: e.employeeId, ...(e.event as Skipped) }] : []));
+
+  /**
+   * The office the measurement saw (3fe9707b): work open — a goal with no running plan, Ada's task parked until the
+   * owner answers — and nothing moving. Its first cycle ran and was closed.
+   */
+  async function waiting() {
+    const t = make();
+    const ada = t.person('Ada');
+    const g = t.goal();
+    const x = t.task(ada.id, 'Sözleşme');
+    t.company.parkTask(ada.id, x.id, '+2d', 'Sahibinin kararı bekleniyor');
+    t.boot();
+    expect(t.boards()).toHaveLength(1);
+    await t.closeCycle('değişiklik yok, çünkü sahibinin kararı bekleniyor');
+    return { t, ada, g, x };
+  }
+
+  it('the board unchanged since the last cycle’s turn: the heartbeat is passed by and logged, three in a row at most — the fourth opens the cycle; each look HEARTBEAT_MS (≤ 60 min, the cache’s hour) after the last', async () => {
+    const { t } = await waiting();
+    expect(HEARTBEAT_MS).toBeLessThanOrEqual(60 * MIN);
+    const last = t.now();
+    for (let i = 1; i <= 3; i += 1) {
+      t.advance(HEARTBEAT_MS);
+      expect(t.boards()).toHaveLength(1);
+      expect(skipped(t)).toHaveLength(i);
+    }
+    // Logged on the coordinator's desk, with the cycle they were measured against and how many in a row.
+    expect(skipped(t).map((s) => [s.ts - last, s.since, s.skips, s.employeeId])).toEqual([1, 2, 3].map((n) => [n * HEARTBEAT_MS, last, n, t.coord.id]));
+    // No turn, no record, no warning: nothing went to the coordinator.
+    expect(t.toCoordinator()).toHaveLength(1);
+    expect(t.records()).toHaveLength(1);
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(t.kinds(1)).toEqual(['heartbeat']);
+    expect(t.log().filter((e) => e.event.type === 'management.cycle.started').at(-1)!.ts - last).toBe(4 * HEARTBEAT_MS);
+    expect(skipped(t)).toHaveLength(3);
+    await t.closeCycle('değişiklik yok, çünkü sahibinin kararı bekleniyor');
+    // The count starts again after a cycle: the next unchanged heartbeat is passed by.
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(skipped(t).at(-1)).toMatchObject({ skips: 1 });
+  });
+
+  it('a board that says something new opens the heartbeat’s cycle: what is no trigger — the owner’s message, a task given — still changes it; the clock, use and money alone do not', async () => {
+    const { t, ada } = await waiting();
+    t.result(ada.id, 1.2);
+    t.budget.recordSpend(t.coord.id, { service: 'alan adı', usd: 12, purpose: 'site' });
+    t.advance(HEARTBEAT_MS);
+    expect(skipped(t)).toHaveLength(1);
+    // The owner writes to the coordinator (its own turn, not a cycle): the next heartbeat brings the board.
+    t.events.append(t.coord.id, { type: 'message.user', text: 'Yarın karar veririm', source: 'owner' });
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(t.kinds(1)).toEqual(['heartbeat']);
+    expect(t.boards()[1]!.text).toContain('Sahibinin mesajı');
+    await t.closeCycle();
+    // A task the owner gives Ada is no trigger either; the heartbeat sees it.
+    t.company.createTask(OWNER, { assignee: ada.id, title: 'Fiyat sayfası' });
+    t.settle();
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(3);
+    expect(skipped(t)).toHaveLength(1);
+  });
+
+  it('a change opens its cycle at once, whatever the heartbeats passed by; the next heartbeat compares with the board that cycle’s turn left (regression)', async () => {
+    const { t, ada } = await waiting();
+    t.advance(HEARTBEAT_MS);
+    t.advance(HEARTBEAT_MS);
+    expect(skipped(t)).toHaveLength(2);
+    // Ada hands in a task: the cycle comes after the window, not at the next heartbeat.
+    const y = t.task(ada.id, 'Rapor');
+    t.settle();
+    t.advance(10 * MIN);
+    t.finish(ada.id, y.id);
+    const at = t.now();
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.boards()).toHaveLength(2);
+    expect(t.kinds(1)).toContain('delivery');
+    expect(t.log().filter((e) => e.event.type === 'management.cycle.started').at(-1)!.ts - at).toBeLessThanOrEqual(CYCLE_WINDOW_MS + 30 * SEC);
+    // In its turn the coordinator gives Ada the next task: the board as the turn ends is the one to compare with.
+    t.task(ada.id, 'Sunum');
+    t.settle();
+    await t.closeCycle();
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(skipped(t).at(-1)).toMatchObject({ skips: 1 });
+  });
+
+  it('a cycle not closed is never passed by: the next heartbeat opens and its board warns', async () => {
+    const { t } = await waiting();
+    t.advance(4 * HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    // The turn ends without cycleClose.
+    t.endTurn(t.coord.id);
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(3);
+    expect(t.boards()[2]!.text).toMatch(/^UYARI: Önceki tur cycleClose ile kapanmadı/);
+  });
+
+  it('in the owner’s reserve no heartbeat comes, so none is passed by either; with no work the idle pulse is not passed by', async () => {
+    const { t } = await waiting();
+    t.setQuota({ status: 'allowed', fiveHour: { utilization: 0.9, resetsAt: T0 + 10 * HOUR }, sevenDay: null, updatedAt: T0 });
+    t.budget.checkReserve();
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    await t.closeCycle();
+    t.advance(4 * HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(skipped(t)).toHaveLength(0);
+
+    const idle = make();
+    idle.boot();
+    idle.advance(6 * HOUR + 30 * SEC);
+    expect(idle.boards()).toHaveLength(1);
+    await idle.closeCycle();
+    idle.advance(6 * HOUR);
+    expect(idle.boards()).toHaveLength(2);
+    expect(skipped(idle)).toHaveLength(0);
+  });
+});
+
+describe('management cycle — the project-start model only at a real start (ece24b5e)', () => {
+  it('waiting with a goal and no running plan runs on the cycle model; the owner’s new message and a plan that finished bring the project-start model', async () => {
+    const t = make();
+    const ada = t.person('Ada');
+    const g = t.goal();
+    t.boot();
+    // The goal was just set: its first plan is to be made.
+    expect(t.boards()[0]).toMatchObject({ model: 'fable', role: true });
+    await t.closeCycle('değişiklik yok, çünkü sahibinin kararı bekleniyor');
+    // The heartbeat while waiting (the fourth; three were passed by): opus.
+    t.advance(4 * HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(t.boards()[1]).toMatchObject({ model: 'opus', role: true });
+    await t.closeCycle('değişiklik yok, çünkü sahibinin kararı bekleniyor');
+    // A hand-in while waiting (a task outside any plan) opens a cycle: still no start.
+    const x = t.task(ada.id, 'Rapor');
+    t.settle();
+    t.finish(ada.id, x.id);
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.boards()).toHaveLength(3);
+    expect(t.boards()[2]).toMatchObject({ model: 'opus', role: true });
+    await t.closeCycle();
+    // The owner's new message: the next cycle is a start.
+    t.events.append(t.coord.id, { type: 'message.user', text: 'Yeni iş: mağaza açalım', source: 'owner' });
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(4);
+    expect(t.boards()[3]).toMatchObject({ model: 'fable', role: true });
+    // In that turn the coordinator starts the goal's plan and gives Ada its one task.
+    const plan = t.company.propose(t.coord.id, { method: METHOD, title: 'Mağaza', goal: 'g', approach: 'a', goalId: g.id });
+    const y = t.task(ada.id, 'Vitrin', { planId: plan.id });
+    t.settle();
+    await t.closeCycle();
+    // The plan runs: a hand-in is a cycle on opus.
+    t.finish(ada.id, y.id);
+    t.advance(CYCLE_WINDOW_MS + 30 * SEC);
+    // Its last task closed the plan: the goal needs a new plan, a start.
+    expect(t.plans.get(plan.id).status).toBe('done');
+    expect(t.boards()).toHaveLength(5);
+    expect(t.boards()[4]).toMatchObject({ model: 'fable', role: true });
+    await t.closeCycle('değişiklik yok, çünkü sahibine soruldu');
+    // Then waiting again: opus.
+    t.advance(4 * HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(6);
+    expect(t.boards()[5]).toMatchObject({ model: 'opus', role: true });
+  });
+
+  it('no goal and no work: the idle pulse and a rest’s end are no start', async () => {
+    const t = make();
+    t.boot();
+    t.advance(6 * HOUR + 30 * SEC);
+    expect(t.boards()).toHaveLength(1);
+    expect(t.boards()[0]).toMatchObject({ model: 'opus', role: true });
+    await t.call(t.coord, 'restUntil', { hours: 3, reason: 'Sahibinin cevabı bekleniyor' });
+    await t.closeCycle('değişiklik yok, çünkü sahibinin cevabı bekleniyor');
+    t.advance(3 * HOUR + CYCLE_WINDOW_MS + 30 * SEC);
+    expect(t.kinds(1)).toEqual(['rest']);
+    expect(t.boards()[1]).toMatchObject({ model: 'opus', role: true });
   });
 });

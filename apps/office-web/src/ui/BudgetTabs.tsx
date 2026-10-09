@@ -139,7 +139,7 @@ const FIELDS: Field[] = [
     selects: [['kickoff', 'Başlangıç'], ['cycle', 'Yönetim turu'], ['routine', 'Sıradan']],
   },
   { key: 'difficultyModels', label: 'Zorluk modelleri', hint: 'Kolay / orta / zor / kritik görev (ör. haiku / sonnet / opus / fable).', models: ['easy', 'medium', 'hard', 'critical'] },
-  { key: 'cacheTtlMinutes', label: 'Önbellek süresi (dk)', hint: 'Bir oturum son turundan bu kadar sonra daha ucuz modele geçebilir; daha önce geçmez.' },
+  { key: 'cacheTtlMinutes', label: 'Önbellek süresi (dk)', hint: 'Bir oturum son turundan bu kadar sonra daha ucuz modele geçebilir; daha önce geçmez. Claude Code önbelleği yine bir saat tutar; bu ayar onu değiştirmez.' },
   { key: 'digestEnabled', label: 'Özet açık', hint: 'Kapalıyken bilgi notları da karar notu gibi hemen gelir.', toggle: true },
   { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır; koordinatörün tur modelleri yine uygulanır.', toggle: true },
   { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },

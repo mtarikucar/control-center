@@ -105,6 +105,12 @@ export type OfficeEvent =
    */
   | { type: 'management.cycle.lost'; startedAt: number; reason: string }
   /**
+   * The heartbeat came while work was open and the board said what it said when the last cycle's turn ended (its
+   * clocks aside): no cycle, no turn. `since`: that cycle's start; `skips`: heartbeats passed by in a row, this one
+   * included (at most three: the next opens a cycle whatever the board says). Not a cycle, so not in the log.
+   */
+  | { type: 'management.cycle.skipped'; since: number; skips: number }
+  /**
    * A management cycle's record (§3.3), logged when the turn that carried the board ends: closed with cycleClose (its
    * changes, reasoning and what to look at next) or not closed (the turn ended without it). `costUsd`: what the board's
    * own turn's results cost — not those of messages queued behind it (null: none came — a restart in the middle records

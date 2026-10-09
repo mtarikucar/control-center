@@ -77,7 +77,9 @@ saatleri ve hangi işin hangi modelde koşacağı.
   - `modelPolicyEnabled` — **model ipuçları:** açıkken çalışanların model ipuçları uygulanır (görev zorluğunun modeli,
     görevler arasında kendi modeli); kapalıyken herkes kendi modelinde çalışır (koordinatörün tur modelleri yine
     uygulanır). Model değişiminde süreç kapanıp `--resume --model` ile yeniden açılır (hafıza sürer). Daha güçlü modele
-    hemen, daha zayıfa yalnız son turdan `cacheTtlMinutes` (5 dk) sonra geçilir. Hesabın kullanamadığı bir modelde
+    hemen, daha zayıfa yalnız son turdan `cacheTtlMinutes` (5 dk) sonra geçilir. Not: Claude Code oturumun önbelleğini
+    bir saat tutar; `cacheTtlMinutes` yalnız ofisin "ne zaman ucuz modele geçilir" kuralıdır, CLI'nin önbellek süresini
+    değiştirmez (yönetim turunun kalp atışı bu yüzden 45 dakikadır: açılan tur önbelleği sıcak bulur). Hesabın kullanamadığı bir modelde
     oturum eski modelle sürer ve mesaj yeniden gönderilir (`model.switch.failed`).
   - `difficultyModelsEnabled` — **görev zorluğu:** görevlerin bir zorluğu olabilir (`taskCreate`/`taskPass`/
     `taskAssign` → `difficulty`: kolay, orta, zor, kritik); görev başlarken çalışan o zorluğun modeline geçer
