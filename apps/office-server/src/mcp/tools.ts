@@ -171,7 +171,12 @@ export function officeTools(o: {
   /** " Akışlar: API → Ada; Arayüz → alınacak: tasarımcı (önce: API)." — how the office understood the streams ('' for none). */
   const streamsLine = (plan: Plan): string => {
     const list = plan.streams ?? [];
-    if (list.length === 0) return '';
+    // Streams written in the approach text only (seen live, 2026-10-09): the board compares only the streams field.
+    if (list.length === 0) {
+      return (plan.steps?.length ?? 0) >= 2
+        ? ' Bu planın akışları yok: işi birden çok kişi ya da adım yürütüyorsa akışları planRevise ile streams alanına yaz (id, title, owner, dependsOn); yönetim panosu planı ancak bu alandaki akışlarla gerçekle karşılaştırır.'
+        : '';
+    }
     const titleOf = (id: string) => list.find((x) => x.id === id)?.title ?? id;
     const owner = (who: string) => (who.startsWith(`${STREAM_TO_HIRE}:`) ? who : company.nameOf(who));
     return ` Akışlar: ${list.map((x) => `${x.title} → ${owner(x.owner)}${x.dependsOn.length ? ` (önce: ${x.dependsOn.map(titleOf).join(', ')})` : ''}`).join('; ')}.`;

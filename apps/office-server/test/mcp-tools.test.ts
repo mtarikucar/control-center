@@ -290,6 +290,19 @@ describe('office tools — task difficulty', () => {
     expect(schema.required).toContain('method');
   });
 
+  it('a plan of several steps proposed without streams: the reply asks for them in the streams field (the board compares only those); one step, or streams given, no such line', async () => {
+    const t = make();
+    const c = t.company.hireCoordinator('sonnet');
+    const NUDGE = 'Bu planın akışları yok: işi birden çok kişi ya da adım yürütüyorsa akışları planRevise ile streams alanına yaz (id, title, owner, dependsOn); yönetim panosu planı ancak bu alandaki akışlarla gerçekle karşılaştırır.';
+    expect(await t.call(c, 'planPropose', { method: METHOD, title: 'Çok adımlı', goal: 'g', approach: 'a', steps: ['tasarım', 'uygulama'] })).toContain(NUDGE);
+    expect(await t.call(c, 'planPropose', { method: METHOD, title: 'Tek adım', goal: 'g', approach: 'a', steps: ['tek iş'] })).not.toContain('akışları yok');
+    const ada = t.company.hire(c.id, { name: 'Ada', role: 'r' });
+    expect(await t.call(c, 'planPropose', { method: METHOD, title: 'Akışlı', goal: 'g', approach: 'a', steps: ['a', 'b'], streams: [{ id: 'api', title: 'API', owner: ada.id }] })).not.toContain('akışları yok');
+    // A revision that still has none hears it again.
+    const plan = t.plans.list().find((p) => p.title === 'Çok adımlı')!;
+    expect(await t.call(c, 'planRevise', { planId: plan.id, days: 2 })).toContain(NUDGE);
+  });
+
   it('planPropose and planRevise take the plan’s streams; taskCreate links a task to one of them', async () => {
     const t = make();
     const c = t.company.hireCoordinator('sonnet');
