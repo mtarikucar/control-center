@@ -1545,7 +1545,8 @@ export class Company {
     const kept = new Set(next.map((s) => s.id));
     const dropped = (plan.streams ?? []).filter((s) => !kept.has(s.id));
     if (dropped.length === 0) return;
-    const tasks = this.#d.tasks.list({ planId: plan.id });
+    // Every task of the plan's streams, as planStreams reads them: not the task list's first 1000.
+    const tasks = this.#d.tasks.streamTaskStatuses([plan.id]);
     const held = dropped.find((s) => tasks.some((t) => t.streamId === s.id));
     if (held) {
       throw new ConflictError(`“${held.title}” akışına bağlı görevler var; akış plandan çıkarılamaz. Adını, sahibini ya da bağımlılıklarını değiştirebilir, bölmek için yanına yeni akışlar ekleyebilirsin.`);

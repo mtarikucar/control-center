@@ -84,6 +84,21 @@ describe('plan streams', () => {
     expect(revised.streams?.map((s) => [s.id, s.title, s.owner])).toEqual([['api', 'API ve veri', t.can.id], ['ui', 'Arayüz', 'alınacak: tasarımcı']]);
   });
 
+  it('review K2 (Kerem, fa815b73): a plan with more than 1000 tasks — the stream of its newest task keeps its status and cannot be dropped', async () => {
+    const t = make();
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [...STREAMS, { id: 'doc', title: 'Belgeler', owner: 'Can' }] });
+    const task = { planId: plan.id, description: '', done: [], requester: t.coordinator.id, assignee: t.can.id, priority: 3, dependsOn: [], chainDepth: 0 };
+    for (let i = 0; i < 1000; i++) t.tasks.create({ ...task, title: `Belge ${i}`, streamId: 'doc' });
+    // Later than all of them (the list is in creation order): the 1001st.
+    await new Promise((r) => setTimeout(r, 5));
+    const api = t.tasks.create({ ...task, title: 'Uç noktalar', assignee: t.ada.id, streamId: 'api' });
+    t.tasks.update(api.id, { status: 'in_progress' });
+    // planStreams reads every task of the streams (2fc8640): the API stream is under way.
+    expect(t.company.planStreams(plan.id).find((s) => s.id === 'api')?.status).toBe('active');
+    expect(() => t.company.revise(t.coordinator.id, plan.id, { streams: [STREAMS[1]!, { id: 'doc', title: 'Belgeler', owner: 'Can' }].map((s) => ({ ...s, dependsOn: [] })) })).toThrow(/“API” akışına bağlı görevler var/);
+    expect(t.plans.get(plan.id).streams?.map((s) => s.id)).toEqual(['api', 'ui', 'doc']);
+  });
+
   it('a revision that resends the owner of a stream who was let go says they left and the stream needs a new owner', () => {
     const t = make();
     const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: STREAMS });
