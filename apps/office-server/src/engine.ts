@@ -47,6 +47,20 @@ interface Totals {
 }
 const NO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
 
+/** What the gate's hook reads from a session's environment (B9a). */
+const GATE_ENV = ['OFFICE_GATE_URL', 'OFFICE_GATE_TOKEN'] as const;
+
+/**
+ * A claude's environment: the engine's (or the process's), with the gate's variables only from this office's own gate.
+ * An office started inside another office's session — an employee's `pnpm test`, a rehearsal — runs with that
+ * session's gate address and token in its environment; passed on, its sessions would carry another office's token.
+ */
+export function sessionEnv(base: NodeJS.ProcessEnv, gate?: { url: string; token: string }): NodeJS.ProcessEnv {
+  const env = { ...base };
+  for (const key of GATE_ENV) delete env[key];
+  return gate ? { ...env, OFFICE_GATE_URL: gate.url, OFFICE_GATE_TOKEN: gate.token } : env;
+}
+
 export interface EngineOptions {
   roster: Roster;
   events: EventStore;
@@ -63,7 +77,8 @@ export interface EngineOptions {
   mcp?: { url: () => string; tokens: TokenRegistry };
   /**
    * The gate (B9a): the hook's command for the sessions' settings and where it asks. The session's environment gets
-   * OFFICE_GATE_URL and OFFICE_GATE_TOKEN (the session's own office token). Needs `mcp`.
+   * OFFICE_GATE_URL and OFFICE_GATE_TOKEN (the session's own office token). Needs `mcp`. Without it no session gets
+   * them, whatever the environment holds (sessionEnv).
    */
   gate?: { url: () => string; hook: string };
   /** How long a session's prompt cache stays warm (the constitution's cacheTtlMinutes; default 5). */
@@ -392,7 +407,7 @@ export class Engine {
         command: this.#command,
         args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
         cwd: prepareDesk(this.#dataDir, employee),
-        env: this.#env,
+        env: sessionEnv(this.#env ?? process.env),
         input,
         timeoutMs: this.#sideQuestionTimeoutMs,
       });
@@ -594,7 +609,7 @@ export class Engine {
         command: this.#command,
         args: sessionArgs({ model: rt.model ?? employee.model, sessionId: employee.sessionId, resume: employee.sessionStarted, home: this.#home, mcpConfig, hook: gate?.hook, disallowed: this.#sessionDeny?.(employee) }),
         cwd: prepareDesk(this.#dataDir, employee),
-        env: gate ? { ...(this.#env ?? process.env), OFFICE_GATE_URL: gate.url(), OFFICE_GATE_TOKEN: token } : this.#env,
+        env: sessionEnv(this.#env ?? process.env, gate && token ? { url: gate.url(), token } : undefined),
       },
       {
         onJson: (obj) => this.#onJson(employee.id, obj),
