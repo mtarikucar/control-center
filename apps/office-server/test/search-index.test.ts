@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { MemoryKind } from '@cc/shared';
 import { CompanyStateStore } from '../src/company/goal-store.ts';
 import { DecisionStore, NoteStore, PlaybookStore } from '../src/company/memory-store.ts';
@@ -135,11 +135,34 @@ describe('SearchIndex (B11)', () => {
     return times.sort((a, b) => a - b)[2]!;
   };
 
-  it('answers a five-word query over 10,000 notes and 2,000 finished tasks in under 50 ms', () => {
-    expect(median(corpus(false), 'k0003 k0040 k0700 yokkelime başkayok')).toBeLessThan(50);
+  // Building a corpus (12,000 upserts) is the slow part, not the search: it goes in each block's beforeAll under its own
+  // wide limit, so a busy machine cannot push the test past the suite's 15 s (task 9802762c). The search's budget is
+  // still 50 / 200 ms of CPU time, median of five. Each corpus is closed after its own block, not by the afterEach above.
+  const CORPUS_TIMEOUT_MS = 60_000;
+  const built = (worst: boolean) => {
+    const own: Array<() => unknown> = [];
+    let t: ReturnType<typeof make> | null = null;
+    beforeAll(() => {
+      t = corpus(worst);
+      own.push(...cleanups.splice(0));
+    }, CORPUS_TIMEOUT_MS);
+    afterAll(async () => {
+      for (const c of own.splice(0)) await c();
+    });
+    return () => t!;
+  };
+
+  describe('over 10,000 notes and 2,000 finished tasks', () => {
+    const t = built(false);
+    it('answers a five-word query in under 50 ms', () => {
+      expect(median(t(), 'k0003 k0040 k0700 yokkelime başkayok')).toBeLessThan(50);
+    });
   });
 
-  it('answers it in under 200 ms even when every record has the query’s words', () => {
-    expect(median(corpus(true), 'kota inceleme göç yokkelime başkayok')).toBeLessThan(200);
+  describe('when every record has the query’s words', () => {
+    const t = built(true);
+    it('answers it in under 200 ms', () => {
+      expect(median(t(), 'kota inceleme göç yokkelime başkayok')).toBeLessThan(200);
+    });
   });
 });
