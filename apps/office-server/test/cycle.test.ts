@@ -1096,6 +1096,29 @@ describe('management cycle — no service, no change', () => {
 });
 
 describe('management cycle — a heartbeat with nothing new is passed by (ece24b5e)', () => {
+  it('every open task waits for a later time (parked, or not to start before then): no heartbeat until the first of them comes back — nothing can move before it (2026-10-09: the office parked all its work until the quota window)', async () => {
+    const t = make({ skips: 'office' });
+    const ada = t.person('Ada');
+    const can = t.person('Can');
+    const g = t.goal();
+    const plan = t.company.propose(t.coord.id, { method: METHOD, title: 'Canlı', goal: 'g', approach: 'a', goalId: g.id });
+    t.boot();
+    await t.call(t.coord, 'taskCreate', { assignee: ada.id, title: 'Doğrulama', planId: plan.id, startAfter: '+48h' });
+    const kod = t.task(can.id, 'Kod', { planId: plan.id });
+    t.settle();
+    await t.call(t.coord, 'taskPark', { taskId: kod.id, until: '+24h', reason: 'kota penceresi' });
+    await t.closeCycle('değişiklik yok, çünkü kota penceresi bekleniyor');
+    const boards = t.boards().length;
+    // Twenty heartbeats (15 hours): none opens a cycle while everything waits.
+    for (let i = 0; i < 20; i++) t.advance(HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(boards);
+    // Can's park comes back after 24 hours: the work moves again, and the heartbeat looks at it.
+    t.advance(10 * HOUR);
+    t.settle();
+    t.advance(HEARTBEAT_MS);
+    expect(t.boards().length).toBeGreaterThan(boards);
+  });
+
   it('as the office runs it, nothing is passed by: with the coordinator’s whole conversation in one session a skipped look makes the next cycle cold (≈ $3) — dearer than the warm empty ones it saves (review)', async () => {
     const t = make({ skips: 'office' });
     t.goal();
@@ -1120,7 +1143,9 @@ describe('management cycle — a heartbeat with nothing new is passed by (ece24b
     const ada = t.person('Ada');
     const g = t.goal();
     const x = t.task(ada.id, 'Sözleşme');
-    t.company.parkTask(ada.id, x.id, '+2d', 'Sahibinin kararı bekleniyor');
+    t.settle();
+    // Held on the owner's decision, not parked to a time: the heartbeat still looks at an office like this.
+    t.company.update(ada.id, x.id, { blocked: true, note: 'Sahibinin kararı bekleniyor' });
     t.boot();
     expect(t.boards()).toHaveLength(1);
     await t.closeCycle('değişiklik yok, çünkü sahibinin kararı bekleniyor');

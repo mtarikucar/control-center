@@ -504,12 +504,13 @@ export class ManagementCycle {
    * The heartbeat while work is open (§3.1), at the clock's look: HEARTBEAT_MS after the last cycle, the last heartbeat
    * passed by, or the work's start. Its board measured against the one the last cycle's turn left: the same — and that
    * cycle closed — it is passed by and logged (management.cycle.skipped), at most MAX_SKIPS in a row; otherwise it waits
-   * as a trigger and the cycle opens. Never in the owner's reserve, while paused, in a cycle or with triggers waiting.
+   * as a trigger and the cycle opens. Never in the owner's reserve, while paused, in a cycle, with triggers waiting, or
+   * while every open task waits for a later time.
    */
   #beat(now: number): void {
     const c = this.#d.company.coordinator();
     if (!c || this.#d.company.paused() || this.#open() || this.#pending().length > 0) return;
-    if (this.#d.budget?.reserveActive() || !this.#openWork()) return;
+    if (this.#d.budget?.reserveActive() || !this.#openWork() || this.#allWaiting(now)) return;
     const last = Math.max(this.#lastStart(), this.#quietAt, Number(this.#d.state.get(KEY.skippedAt) ?? '0') || 0);
     if (now - last < HEARTBEAT_MS) return;
     const skips = Number(this.#d.state.get(KEY.skips) ?? '0') || 0;
@@ -564,6 +565,15 @@ export class ManagementCycle {
     if (until <= 0 || now < until || this.#d.state.get(KEY.restEnded) === String(until)) return;
     this.#d.state.set(KEY.restEnded, String(until));
     if (this.#d.company.coordinator()) this.#push({ kind: 'rest', at: now, note: 'dinlenme bitti', seq: null });
+  }
+
+  /**
+   * Every open task waits for a later time — parked, or not to start before then: nothing can move until the first of
+   * them comes back, so no heartbeat looks at it (events still open cycles). False with no open task at all.
+   */
+  #allWaiting(now: number): boolean {
+    const open = this.#d.tasks.list({ statuses: OPEN_STATUSES, limit: 100_000 });
+    return open.length > 0 && open.every((t) => t.status === 'parked' || (t.status === 'waiting' && (t.notBefore ?? 0) > now));
   }
 
   /** An active goal or an open task. */
