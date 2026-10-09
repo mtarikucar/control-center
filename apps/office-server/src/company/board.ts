@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { OWNER, normalizeConstitution, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEvent, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { QuotaTracker } from '../quota.ts';
+import type { KpiReadings } from './kpi-readings.ts';
 import type { Roster } from '../roster.ts';
 import type { Agenda } from './agenda.ts';
 import { UNAVAILABLE } from './availability.ts';
@@ -36,6 +37,8 @@ export interface BoardDeps {
   proposals?: Pick<ProposalStore, 'list'>;
   /** The office's Claude use (absent: the last day's use is not shown). */
   quota?: Pick<QuotaTracker, 'officeSince'>;
+  /** The goals' KPI readings (absent in offices without them: no KPI line). */
+  kpis?: Pick<KpiReadings, 'boardLine'>;
 }
 
 export interface BoardOptions {
@@ -490,18 +493,21 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
     };
 
     const goalsAndPlans = (): string[] => {
-      const entries: Array<{ plan: Plan | null; lead: string }> = [];
+      const entries: Array<{ plan: Plan | null; lead: string; kpi?: string }> = [];
       for (const g of goals) {
         const own = live.filter((p) => p.goalId === g.id);
-        if (own.length === 0) entries.push({ plan: null, lead: `Hedef ${title(g)}: ${NO_PLAN}` });
-        for (const p of own) entries.push({ plan: p, lead: `Hedef ${title(g)} → plan` });
+        // The goal's KPIs once, under its first line (K3): last readings, verdicts, the readings due.
+        const kpi = d.kpis?.boardLine(g, now) || undefined;
+        if (own.length === 0) entries.push({ plan: null, lead: `Hedef ${title(g)}: ${NO_PLAN}`, kpi });
+        own.forEach((p, i) => entries.push({ plan: p, lead: `Hedef ${title(g)} → plan`, kpi: i === 0 ? kpi : undefined }));
       }
       for (const p of live.filter((x) => !x.goalId || !goals.some((g) => g.id === x.goalId))) entries.push({ plan: p, lead: 'Hedefsiz plan' });
       const lines = goals.length === 0 ? [`- ${noGoalLine()}`] : [];
       let blocks = 0;
-      for (const { plan, lead } of entries.slice(0, ENTRIES)) {
+      for (const { plan, lead, kpi } of entries.slice(0, ENTRIES)) {
         if (!plan) lines.push(`- ${lead}`);
         else lines.push(...planBlock(lead, plan, (blocks += 1) <= L.blocks));
+        if (kpi) lines.push(`  · KPI: ${clip(kpi, L.noteChars * 3)}`);
       }
       if (entries.length > ENTRIES) lines.push(`- … ve ${entries.length - ENTRIES} hedef ya da plan daha (goalsRead)`);
       return lines;

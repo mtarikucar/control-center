@@ -125,7 +125,7 @@ const precheck = new CapabilityPrecheck({ company, tasks, roster, integrations, 
 // Who does what when (spec §6.1): reads only, for the sheet, agendaRead and the management board.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 // The coordinator's management cycle (management cycle §3.1): when the board is due, built from the office's services.
-const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota };
+const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota, kpis };
 const cycle = new ManagementCycle({ events, state, company, roster, tasks, budget, clock, board: (o) => buildBoard(boardDeps, o) });
 // B12: each task message carries what the memory holds for it (the index read, no memory.searched event).
 const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, related: (task) => relatedMemory(searchIndex, task), precheck, cycle });

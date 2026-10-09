@@ -35,7 +35,7 @@ function make(desks = 8) {
     return s.roster.update(e.id, { lifecycle: 'idle' });
   };
   const coordinator = person('Koordinatör', { kind: 'coordinator', title: 'Koordinatör' });
-  const deps = { db: s.db, events: s.events, roster: s.roster, company: c.company, tasks: c.tasks, plans: c.plans, state: c.state, agenda, budget: c.budget, proposals: c.proposals, quota };
+  const deps = { db: s.db, events: s.events, roster: s.roster, company: c.company, tasks: c.tasks, plans: c.plans, state: c.state, agenda, budget: c.budget, proposals: c.proposals, quota, kpis: c.kpis };
   const board = (o: { since?: number; unclosedWarning?: boolean } = {}) => buildBoard(deps, { since: o.since ?? T0, now: clock, unclosedWarning: o.unclosedWarning });
   /** One section of the board, heading included. */
   const section = (text: string, n: number) => text.split('\n\n').find((b) => b.startsWith(`## ${n}.`)) ?? '';
@@ -107,6 +107,32 @@ describe('board — shape', () => {
     t.board({ since: 0, unclosedWarning: true });
     t.board();
     expect(JSON.stringify(dump())).toBe(before);
+  });
+});
+
+describe('board — a goal’s KPIs (K3, Kerem’s management cycle review)', () => {
+  const ON_TIME = { name: 'Zamanında hazır oranı', target: 90, direction: 'atLeast', unit: '%', source: 'manual', cadence: 'weekly' };
+  const DELAY = { name: 'Rapor gecikmesi', target: 0, direction: 'atMost', unit: 'gün', source: 'manual', cadence: 'daily' };
+
+  it('the goal’s line carries each KPI’s last reading and whether it met its target, and a KPI read by hand whose period passed is due', () => {
+    const t = make();
+    const g = t.company.goalSet(t.coordinator.id, { title: 'Kaliteli teslim', why: 'misyon', done: ['tamam'], kpis: [ON_TIME, DELAY] });
+    t.plan('Teslim', { goalId: g.id });
+    t.kpis.record(t.coordinator.id, { goalId: g.id, kpi: ON_TIME.name, value: 92 });
+    const goals = () => t.section(t.board({ since: 0 }).text, 2);
+    expect(goals()).toContain('  · KPI: Zamanında hazır oranı ≥ %90: son %92 (8 Eki 2026 09:00, tuttu); Rapor gecikmesi ≤ 0 gün: okuma yok');
+    expect(goals()).not.toContain('ölçüm zamanı');
+    // A day on: the daily one read by hand never was — its reading is due; the weekly one is not yet.
+    t.advance(25 * HOUR);
+    expect(goals()).toContain('Rapor gecikmesi ≤ 0 gün: okuma yok — ölçüm zamanı geçti, kpiRecord ile yaz');
+    expect(goals()).not.toContain('tuttu) — ölçüm');
+  });
+
+  it('a goal without KPIs gets no KPI line', () => {
+    const t = make();
+    const g = t.goal('Sade hedef');
+    t.plan('Sade plan', { goalId: g.id });
+    expect(t.section(t.board({ since: 0 }).text, 2)).not.toContain('KPI:');
   });
 });
 

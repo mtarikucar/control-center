@@ -160,6 +160,25 @@ export class KpiReadings {
     return parts.join('; ');
   }
 
+  /**
+   * The management board's line for a goal (K3): each KPI with its target, its last reading and whether it met it, and —
+   * for one read by hand whose period has passed since that reading (or the goal's opening) — that its reading is due,
+   * as the routine (measure) counts it. Empty when the goal has no KPIs.
+   */
+  boardLine(goal: Goal, now: number = this.#now()): string {
+    if (goal.kpis.length === 0) return '';
+    const readings = this.#readingsOf(goal.id);
+    return goal.kpis
+      .map((kpi) => {
+        const last = this.#of(readings, kpi).at(-1);
+        const due = kpi.source !== 'office' && now - (last?.recordedAt ?? goal.createdAt) >= KPI_PERIOD_MS[kpi.cadence];
+        const verdict = last && last.value !== null ? `, ${met(kpi, last.value) ? 'tuttu' : 'tutmadı'}` : '';
+        const read = last ? `son ${valueText(last)} (${formatStamp(last.recordedAt)}${verdict})` : 'okuma yok';
+        return `${kpi.name} ${targetText(kpi)}: ${read}${due ? ' — ölçüm zamanı geçti, kpiRecord ile yaz' : ''}`;
+      })
+      .join('; ');
+  }
+
   /** The office's value over the goal's plans' work in the KPI's window; a rate is shown as a %. */
   #readOffice(goal: Goal, kpi: Kpi, now: number): void {
     const period = KPI_PERIOD_MS[kpi.cadence];
