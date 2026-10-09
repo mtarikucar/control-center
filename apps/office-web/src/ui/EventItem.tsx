@@ -118,7 +118,7 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
         </div>
       );
     case 'company.paused':
-      return <div className="note">{e.paused ? 'Şirket duraklatıldı' : 'Şirket sürdürüldü'}</div>;
+      return <div className="note">{e.paused ? (e.reason ? `Şirket duraklatıldı: ${e.reason}` : 'Şirket duraklatıldı') : 'Şirket sürdürüldü'}</div>;
     case 'task.changed': {
       if (e.change === 'in_review') return <div className="note">Görev incelemede: {e.task.title}</div>;
       if (e.change === 'reviewed') {

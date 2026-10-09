@@ -149,6 +149,7 @@ const FIELDS: Field[] = [
   { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
   { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre bu aralıkla yönetim turu açılır (dinlenirken açılmaz, dinlenme bitince bir tur açılır); 0 = hiç.' },
   { key: 'idleCapacityHours', label: 'Boşta kapasite uyarısı (saat)', hint: 'Bu kadar saattir işi olmayan çalışanlar yönetim panosunda “uzun süredir” diye işaretlenir; 0 = hiç.' },
+  { key: 'weeklyStopPct', label: 'Haftalık kota durdurma sınırı (%)', hint: 'Hesabın 7 günlük Claude kotası bu yüzdeye ulaşınca ofis kendini duraklatır (o hafta bir kez); sürdürmek sizde. 0 = kapalı.' },
   { key: 'defaultTaskMinutes', label: 'Varsayılan görev süresi (dk)', hint: 'Geçmişi olmayan bir işin ajandadaki tahmini süresi (5–480).' },
   { key: 'minScheduleMinutes', label: 'Rutin aralığı en az (dk)', hint: 'Bir rutin bundan daha sık çalışamaz (1–1440).' },
   { key: 'maxSchedules', label: 'En fazla rutin', hint: 'Aynı anda en çok bu kadar rutin (durdurulanlar sayılmaz); 0 = hiç.' },

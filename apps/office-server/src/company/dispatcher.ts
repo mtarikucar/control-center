@@ -41,6 +41,8 @@ export interface DispatcherDeps {
   pulse?: { check(): unknown };
   /** KPI measurement (B26), run on each tick after the pulse. */
   kpis?: { measure(): unknown };
+  /** The owner's weekly line (QuotaStop): the office pauses itself when the week's quota reaches it. */
+  quotaStop?: { check(): unknown };
   /** The capability precheck (B8): holds a task whose required capability the desk lacks. Absent: none. */
   precheck?: { hold(task: Task): boolean; release(): void };
   /** The office clock (spec §5): the tick becomes one of its jobs and every due run sweeps. Absent: the old interval. */
@@ -139,8 +141,14 @@ export class Dispatcher {
     };
   }
 
-  /** One office tick: the reserve, the report reminder (digest off), the pulse (no cycle wired), a sweep. */
+  /** One office tick: the weekly line, the reserve, the report reminder (digest off), the pulse (no cycle wired), a sweep. */
   tick(): void {
+    // The weekly line first: once it pauses the company nothing below hands out work.
+    try {
+      this.#d.quotaStop?.check();
+    } catch {
+      // As the pulse: the next tick tries again.
+    }
     this.#d.budget?.checkReserve();
     if (!this.#rules().digestEnabled) this.#remindReport();
     this.#pulse();

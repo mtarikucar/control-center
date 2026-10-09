@@ -65,7 +65,8 @@ export type OfficeEvent =
   | { type: 'task.changed'; change: TaskChange; task: Task }
   | { type: 'plan.changed'; change: PlanChange; plan: Plan }
   | { type: 'goal.changed'; change: GoalChange; goal: Goal }
-  | { type: 'company.paused'; paused: boolean }
+  /** `reason`: why, when the office paused itself (the owner's weekly line); absent for the owner's own pause and resume. */
+  | { type: 'company.paused'; paused: boolean; reason?: string }
   | { type: 'schedule.changed'; change: ScheduleChange; schedule: Schedule }
   /** The clock woke more than two minutes after the time it was armed for (sleep, a clock change). */
   | { type: 'clock.jumped'; expectedAt: number; actualAt: number }

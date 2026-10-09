@@ -80,6 +80,8 @@ describe('EventItem', () => {
     expect(screen.getByText('Hedef durduruldu: Lansman')).toBeTruthy();
     rerender(<EventItem stored={{ seq: 3, employeeId: 'c', ts: 0, event: { type: 'company.paused', paused: true } }} />);
     expect(screen.getByText('Şirket duraklatıldı')).toBeTruthy();
+    rerender(<EventItem stored={{ seq: 4, employeeId: 'c', ts: 0, event: { type: 'company.paused', paused: true, reason: 'Haftalık Claude kotası %90 (sınır %90): ofis kendini duraklattı; sürdürmek sahibinde.' } }} />);
+    expect(screen.getByText('Şirket duraklatıldı: Haftalık Claude kotası %90 (sınır %90): ofis kendini duraklattı; sürdürmek sahibinde.')).toBeTruthy();
   });
 
   it('notes parks, returns and routines in the feed', () => {

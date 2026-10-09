@@ -7,7 +7,7 @@ import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
   constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17],
     coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
-    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
+    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
   reserve: { active: true, limitPct: 75, fiveHourPct: 82, sevenDayPct: 40 },
   month: { key: '2026-10', usd: 31.5 },
   plans: { p1: { spentUsd: 25, claudeUsd: 3.2 } },
@@ -149,6 +149,16 @@ describe('ConstitutionTab', () => {
     expect(screen.getByText('Hiç hedef ve iş yokken koordinatöre bu aralıkla yönetim turu açılır (dinlenirken açılmaz, dinlenme bitince bir tur açılır); 0 = hiç.')).toBeTruthy();
     expect(screen.getByText('Bu kadar saattir işi olmayan çalışanlar yönetim panosunda “uzun süredir” diye işaretlenir; 0 = hiç.')).toBeTruthy();
     expect(screen.queryByText(/en çok bu sıklıkla hatırlatılır|her boşlukta bir kez/)).toBeNull();
+  });
+
+  it('edits the weekly stop line (the owner’s weekly quota line; 0 = off)', async () => {
+    render(<ConstitutionTab />);
+    const field = screen.getByLabelText('Haftalık kota durdurma sınırı (%)') as HTMLInputElement;
+    expect(field.value).toBe('90');
+    expect(screen.getByText('Hesabın 7 günlük Claude kotası bu yüzdeye ulaşınca ofis kendini duraklatır (o hafta bir kez); sürdürmek sizde. 0 = kapalı.')).toBeTruthy();
+    fireEvent.change(field, { target: { value: '85' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ weeklyStopPct: 85 }));
   });
 
   it('edits the idle-capacity warning hours', async () => {

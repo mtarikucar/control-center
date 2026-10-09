@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createApi } from './api.ts';
 import { Agenda } from './company/agenda.ts';
 import { buildBoard } from './company/board.ts';
+import { QuotaStop } from './company/quota-stop.ts';
 import { Budget } from './company/budget.ts';
 import { ConstitutionStore, SpendStore } from './company/budget-store.ts';
 import { manifestCharacters } from './company/characters.ts';
@@ -128,7 +129,9 @@ const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota, kpis };
 const cycle = new ManagementCycle({ events, state, company, roster, tasks, budget, clock, board: (o) => buildBoard(boardDeps, o) });
 // B12: each task message carries what the memory holds for it (the index read, no memory.searched event).
-const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, related: (task) => relatedMemory(searchIndex, task), precheck, cycle });
+// The owner's weekly line (constitution weeklyStopPct): the office pauses itself when the week's quota reaches it.
+const quotaStop = new QuotaStop({ quota, constitution: () => budget.constitution(), company, state, notices });
+const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, quotaStop, related: (task) => relatedMemory(searchIndex, task), precheck, cycle });
 
 // How the work went (B4): read from the log on demand, the last `days` or all time.
 const performance = { report: (o: { days?: number }) => performanceReport(db, { since: o.days ? Date.now() - o.days * 86_400_000 : null }) };

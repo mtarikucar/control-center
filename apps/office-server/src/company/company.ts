@@ -1246,10 +1246,10 @@ export class Company {
     return until;
   }
 
-  /** The owner pauses the whole company (spec §6.4): nothing is handed out until resume. */
-  pause(): void {
+  /** The owner pauses the whole company (spec §6.4): nothing is handed out until resume. `reason`: the office's own pause (QuotaStop). */
+  pause(reason?: string): void {
     this.#state().setPaused(true);
-    this.#emit(this.coordinator()?.id ?? null, { type: 'company.paused', paused: true });
+    this.#emit(this.coordinator()?.id ?? null, { type: 'company.paused', paused: true, ...(reason ? { reason } : {}) });
   }
 
   resume(): void {

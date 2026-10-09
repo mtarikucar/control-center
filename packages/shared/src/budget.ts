@@ -70,6 +70,11 @@ export interface Constitution {
    * stretch); 0 = never.
    */
   idleCapacityHours: number;
+  /**
+   * The owner's weekly line, %: when the account's 7-day Claude quota reaches it the office pauses itself, once per
+   * weekly window (resuming is the owner's); 0 = off. The owner shares the account and keeps the rest for their own work.
+   */
+  weeklyStopPct: number;
   /** The agenda's estimate for a task with no history, minutes (spec §6.1). */
   defaultTaskMinutes: number;
   /** A routine may not fire more often than this, minutes (spec §4.4). */
@@ -99,6 +104,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   activeGoals: 10,
   pulseHours: 6,
   idleCapacityHours: 2,
+  weeklyStopPct: 90,
   defaultTaskMinutes: 45,
   minScheduleMinutes: 60,
   maxSchedules: 20,

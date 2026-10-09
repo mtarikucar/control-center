@@ -57,6 +57,9 @@ saatleri ve hangi işin hangi modelde koşacağı.
 - **Sahibinin payı:** 5 saatlik ya da haftalık kullanım `100 − pay` sınırına gelince ofis yalnız öncelik 1 işleri
   başlatır, boştakileri uyutur ve koordinatöre haber verir; süren işler kesilmez, pencere açılınca kendiliğinden döner.
   Üst çubukta "Sahibinin payı korunuyor" yazar.
+- **Haftalık durdurma sınırı (`weeklyStopPct`, varsayılan %90):** hesabın 7 günlük Claude kotası bu yüzdeye gelince
+  ofis kendini duraklatır (gerekçesi akışta görünür, koordinatöre not düşer); o haftalık pencerede bir kez durur, siz
+  sürdürürseniz o hafta yeniden durdurmaz. 0 kapatır. Sahibinin payından farkı: süren işleri bitirip tümden durur.
 - **Para:** çalışanlar dış harcamayı `recordSpend` ile bildirir. Aylık sınır ya da planın onaylı parası aşılırsa uyarı
   çıkar ve koordinatör sahibine getirir. **Bütçe** sekmesi her planın harcadığını, Claude kullanımını ve onaylanan parayı
   yan yana gösterir.

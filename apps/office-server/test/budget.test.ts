@@ -129,6 +129,16 @@ describe('Budget — constitution', () => {
     }
     expect(t.budget.constitution().idleCapacityHours).toBe(48);
   });
+
+  it('the weekly stop line: 90 % by default, 0 (off) to 100 whole percent, validated in Turkish', () => {
+    const t = make();
+    expect(t.budget.constitution().weeklyStopPct).toBe(90);
+    expect(t.budget.setConstitution({ weeklyStopPct: 0 }).weeklyStopPct).toBe(0);
+    expect(t.budget.setConstitution({ weeklyStopPct: 100 }).weeklyStopPct).toBe(100);
+    for (const bad of [-1, 101, 89.5, '90', null]) {
+      expect(() => t.budget.setConstitution({ weeklyStopPct: bad }), String(bad)).toThrow('Anayasa: Haftalık kota durdurma sınırı (%) 0 ile 100 arasında bir tam sayı olmalı.');
+    }
+  });
 });
 
 describe('Budget — the owner’s constitution change reaches the coordinator', () => {

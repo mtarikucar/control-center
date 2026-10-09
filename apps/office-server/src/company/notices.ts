@@ -41,6 +41,8 @@ export const NOTICE_TOPICS = {
   'role.coordinator': 'decision',
   'role.changed': 'info',
   'reserve.changed': 'decision',
+  /** The office paused itself at the owner's weekly line: nothing to decide while paused, so it waits for the board. */
+  'quota.weekly_stop': 'info',
   /** The owner changed the constitution: what changed, old → new; the coordinator re-plans its running work. */
   'constitution.changed': 'decision',
   /** The monthly cap or a plan's budget was exceeded: the coordinator brings it to the owner. */
