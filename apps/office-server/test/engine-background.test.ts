@@ -137,6 +137,24 @@ describe('Engine — back from the terminal', () => {
     expect((await readArgv(t.argvLog, 3)).filter((a) => !a.args.includes('json')).map((a) => modelOf(a.args))).toEqual(['sonnet', 'opus', 'opus']);
   });
 
+  it('K1 across an office restart: taken to the terminal on a stronger turn model, the office restarts, back at the desk the work goes on on that model (review)', async () => {
+    const t = make();
+    const e = t.engine.hire({ name: 'Koordinatör', role: 'r', model: 'sonnet' });
+    t.engine.send(e.id, 'merhaba', 'system', { model: 'sonnet', role: true });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'turn.finished');
+    t.engine.send(e.id, 'SLOW yönetim turu', 'system', { model: 'opus', role: true });
+    await waitFor(t.events, (x) => x.employeeId === e.id && x.event.type === 'tool.started');
+    await t.engine.openInTerminal(e.id);
+    // The office restarts: a new engine over the same roster and log.
+    await t.engine.shutdown();
+    const again = fakeEngine(t);
+    cleanups.push(again.cleanup);
+    again.engine.recover();
+    expect(again.engine.returnFromTerminal(e.id).lifecycle).toBe('working');
+    const modelOf = (args: string[]) => args[args.indexOf('--model') + 1];
+    expect((await readArgv(again.argvLog, 1)).filter((a) => !a.args.includes('json')).map((a) => modelOf(a.args))).toEqual(['opus']);
+  });
+
   it('taken to the terminal while idle: back at the desk it is idle and nothing is sent (as before)', async () => {
     const t = make();
     const e = t.engine.hire({ name: 'Mert', role: 'r' });

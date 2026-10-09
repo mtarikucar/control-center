@@ -16,12 +16,18 @@ const HOUR = 60 * MIN;
 export const CYCLE_WINDOW_MS = 2 * MIN;
 /**
  * While work is open the office looks this often, events or not (§3.1, “kalp atışı”): within the hour the CLI keeps
- * the coordinator's prompt cache (it writes it for an hour, whatever cacheTtlMinutes says), so a cycle it opens finds
- * the cache warm. Keep it at or under 60 minutes: a later turn writes the whole context anew (≈ $3, 3fe9707b).
+ * the coordinator's prompt cache (it writes it for an hour, whatever cacheTtlMinutes says). A look whose board says
+ * nothing new is passed by (MAX_SKIPS) and costs nothing; the cycle that opens after skips may find the cache cold
+ * (a cold turn writes the whole context anew, ≈ $3, 3fe9707b) — still cheaper than three warm turns that change nothing.
  */
 export const HEARTBEAT_MS = 45 * MIN;
-/** Heartbeats in a row passed by for a board with nothing new; the next one opens the cycle whatever the board says. */
-export const MAX_SKIPS = 3;
+/**
+ * Heartbeats in a row passed by for a board with nothing new (the next one opens the cycle whatever the board says) — 0,
+ * none, as the office runs today: the coordinator's whole conversation lives in one session, so a skipped look makes the
+ * next cycle cold (≈ $3 for a 400k context) — dearer than the warm empty turns it saves (≈ $0.25 each). Worth turning on
+ * (maxSkips) once its sessions are small. The machinery stays tested with 3.
+ */
+export const MAX_SKIPS = 0;
 /** The management log's length when none is asked for, and the most it gives (§3.3, the owner's Yönetim tab). */
 export const LOG_DEFAULT = 50;
 export const LOG_MAX = 200;
@@ -37,7 +43,7 @@ const MAX_TRIGGERS = 50;
  */
 const KEY = {
   lastStart: 'cycle.lastStartAt', pending: 'cycle.pending', open: 'cycle.open', unclosed: 'cycle.unclosed', restEnded: 'cycle.restEndedAt',
-  shape: 'cycle.shape', skips: 'cycle.skips', skippedAt: 'cycle.skippedAt',
+  shape: 'cycle.shape', skips: 'cycle.skips', skippedAt: 'cycle.skippedAt', endSeq: 'cycle.endSeq',
 } as const;
 
 const PLAN_TR: Partial<Record<string, string>> = { approved: 'onaylandı', declined: 'onaylanmadı', kept: 'revizyonu onaylanmadı', done: 'bitti', stopped: 'sahibince durduruldu' };
@@ -54,6 +60,8 @@ export interface CycleDeps {
   budget?: { reserveActive(): boolean; constitution(): Constitution };
   /** The office clock: the due check is one of its jobs; its runs report the tasks that just passed their due date. */
   clock?: { every(name: string, ms: number, fn: () => void): void; onRan(fn: (report: DueReport) => void): void };
+  /** Heartbeats in a row a board with nothing new may pass by (default MAX_SKIPS). */
+  maxSkips?: number;
   now?: () => number;
 }
 
@@ -238,7 +246,7 @@ export class ManagementCycle {
     const unclosedWarning = this.#d.state.get(KEY.unclosed) === 'true';
     let board: Pick<Board, 'text' | 'kickoff'>;
     try {
-      board = this.#d.board({ since, now, unclosedWarning });
+      board = this.#d.board({ since, now, unclosedWarning, startAfter: Number(this.#d.state.get(KEY.endSeq) ?? '0') || 0 });
     } catch (err) {
       // The board never stops the office: the cycle goes on, and the coordinator reads the office with its tools.
       const message = (err instanceof Error ? err.message : String(err)).slice(0, 300);
@@ -289,10 +297,12 @@ export class ManagementCycle {
     // The board as the turn left it (what the coordinator did in it included): the next heartbeat is measured against it.
     this.#d.state.set(KEY.shape, this.#shape(open.startedAt));
     this.#d.state.set(KEY.skips, null);
-    this.#d.events.append(this.#d.company.coordinator()?.id ?? null, {
+    const record = this.#d.events.append(this.#d.company.coordinator()?.id ?? null, {
       type: 'management.cycle', closed: open.close !== null, startedAt: open.startedAt, endedAt, triggers: open.triggers, ...(open.close ?? { changes: [], reasoning: '', next: null }), costUsd: open.costUsd,
       model: open.model ?? null,
     });
+    // Where the turn ended in the log: what asks for a project start is looked for after it (the board's startAfter).
+    this.#d.state.set(KEY.endSeq, String(record.seq));
   }
 
   /**
@@ -504,7 +514,7 @@ export class ManagementCycle {
     if (now - last < HEARTBEAT_MS) return;
     const skips = Number(this.#d.state.get(KEY.skips) ?? '0') || 0;
     const shape = this.#d.state.get(KEY.shape);
-    if (skips < MAX_SKIPS && shape && this.#d.state.get(KEY.unclosed) !== 'true' && this.#shape(this.#lastStart(), now) === shape) {
+    if (skips < (this.#d.maxSkips ?? MAX_SKIPS) && shape && this.#d.state.get(KEY.unclosed) !== 'true' && this.#shape(this.#lastStart(), now) === shape) {
       this.#d.state.set(KEY.skippedAt, String(now));
       this.#d.state.set(KEY.skips, String(skips + 1));
       this.#d.events.append(c.id, { type: 'management.cycle.skipped', since: this.#lastStart(), skips: skips + 1 });

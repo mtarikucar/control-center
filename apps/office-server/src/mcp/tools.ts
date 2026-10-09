@@ -174,7 +174,7 @@ export function officeTools(o: {
     // Streams written in the approach text only (seen live, 2026-10-09): the board compares only the streams field.
     if (list.length === 0) {
       return (plan.steps?.length ?? 0) >= 2
-        ? ' Bu planın akışları yok: işi birden çok kişi ya da adım yürütüyorsa akışları planRevise ile streams alanına yaz (id, title, owner, dependsOn); yönetim panosu planı ancak bu alandaki akışlarla gerçekle karşılaştırır.'
+        ? ' Bu planın birden çok adımı var ama yapılandırılmış akışı yok: paralel ya da sıralı iş kollarını streams alanında ver (id, title, owner, dependsOn) — yeni planda planPropose içinde, bu plan için planRevise ile; yönetim panosu planı ancak bu alandaki akışlarla gerçekle karşılaştırır.'
         : '';
     }
     const titleOf = (id: string) => list.find((x) => x.id === id)?.title ?? id;

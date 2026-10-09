@@ -59,7 +59,8 @@ export type OfficeEvent =
       /** When rejected: the reset of the window that is actually limiting (may be a per-model weekly one). */
       limitResetsAt?: number | null;
     }
-  | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string }
+  /** `model`: taken to the terminal (to: in_terminal), the model its session ran on — the work goes on on it when back (K1). */
+  | { type: 'lifecycle.changed'; from: Lifecycle; to: Lifecycle; reason: string; model?: ModelAlias }
   /** Jobs of the session (their descriptions) held the employee working alone past the cap: free for tasks again, the jobs run on. */
   | { type: 'background.overdue'; jobs: string[]; limitMs: number }
   | { type: 'task.changed'; change: TaskChange; task: Task }

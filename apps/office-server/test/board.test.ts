@@ -122,9 +122,11 @@ describe('board — a goal’s KPIs (K3, Kerem’s management cycle review)', ()
     const goals = () => t.section(t.board({ since: 0 }).text, 2);
     expect(goals()).toContain('  · KPI: Zamanında hazır oranı ≥ %90: son %92 (8 Eki 2026 09:00, tuttu); Rapor gecikmesi ≤ 0 gün: okuma yok');
     expect(goals()).not.toContain('ölçüm zamanı');
-    // A day on: the daily one read by hand never was — its reading is due; the weekly one is not yet.
+    // A day on: the daily one read by hand never was — its reading is due (listed first); the weekly one is not yet.
     t.advance(25 * HOUR);
-    expect(goals()).toContain('Rapor gecikmesi ≤ 0 gün: okuma yok — ölçüm zamanı geçti, kpiRecord ile yaz');
+    expect(goals()).toContain('  · KPI: Rapor gecikmesi ≤ 0 gün: okuma yok — ölçüm zamanı geçti, kpiRecord ile yaz; Zamanında hazır oranı ≥ %90: son %92');
+    // Right under the goal's line, before the plan's streams.
+    expect(goals().split('\n')[2]).toMatch(/^  · KPI: /);
     expect(goals()).not.toContain('tuttu) — ölçüm');
   });
 

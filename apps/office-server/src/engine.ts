@@ -140,8 +140,6 @@ interface Runtime {
    * if the process exits or that turn fails, the switch failed (e.g. the account cannot use the model).
    */
   switchedFrom: ModelAlias | null;
-  /** The model its session ran on when it was taken to the terminal at work (K1): the work goes on on it when it is back. */
-  terminalModel: ModelAlias | null;
   /** Messages written since the switch, sent again on the old model if the switch fails. */
   sinceSwitch: Pending[];
   /** A tool ran in the turn now open: the session did work on its model (a failure then is not the model's). */
@@ -470,10 +468,10 @@ export class Engine {
       const employee = this.#roster.get(id);
       this.#assertReachable(employee);
       if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; terminalde açılacak bir oturum yok.');
-      const rt = this.#runtime(id);
-      rt.terminalModel = this.#sessionModel(employee, rt);
+      // The model its session ran on, kept in the log (it outlives an office restart): the work goes on on it (K1).
+      const model = this.#sessionModel(employee, this.#runtime(id));
       await this.#halt(id);
-      const updated = this.#setLifecycle(this.#roster.get(id), 'in_terminal', 'terminalde açıldı');
+      const updated = this.#setLifecycle(this.#roster.get(id), 'in_terminal', 'terminalde açıldı', model);
       return { command: terminalCommand(deskDir(this.#dataDir, employee.slug), employee.sessionId), employee: updated };
     });
   }
@@ -484,14 +482,14 @@ export class Engine {
     // Taken there at work (a turn, or a job it left running) closing the session for the terminal cut that work; taken
     // there interrupted, the office restart had cut it before.
     const opened = this.#events.latest(id, 'lifecycle.changed')?.event;
-    const from = opened?.type === 'lifecycle.changed' && opened.to === 'in_terminal' ? opened.from : null;
+    const taken = opened?.type === 'lifecycle.changed' && opened.to === 'in_terminal' ? opened : null;
+    const from = taken?.from ?? null;
     const note = from === 'working' ? CONTINUE_AFTER_TERMINAL : from === 'interrupted' ? CONTINUE_AFTER_RESTART : null;
     // Back at the desk and ready: the office picks the same session up again (an idle process spends no tokens).
     const rt = this.#runtime(id);
     rt.crashes = [];
-    const kept = rt.terminalModel;
-    rt.terminalModel = null;
     // Work cut by the terminal goes on on the model it ran on, as after a crash or a limit (K1); back idle, their own.
+    const kept = taken?.model ?? null;
     if (note && kept) rt.model = kept === employee.model ? null : kept;
     const back = this.#start(employee, 'terminalden ofise döndü');
     if (!note) return back;
@@ -917,10 +915,10 @@ export class Engine {
     if (employee.lifecycle === 'in_terminal') throw new ConflictError('Bu çalışan şu an terminalde; önce ofise geri al.');
   }
 
-  #setLifecycle(employee: Employee, to: Lifecycle, reason: string): Employee {
+  #setLifecycle(employee: Employee, to: Lifecycle, reason: string, model?: ModelAlias): Employee {
     if (employee.lifecycle === to) return employee;
     const updated = this.#roster.update(employee.id, { lifecycle: to });
-    this.#emit(employee.id, { type: 'lifecycle.changed', from: employee.lifecycle, to, reason });
+    this.#emit(employee.id, { type: 'lifecycle.changed', from: employee.lifecycle, to, reason, ...(model ? { model } : {}) });
     return updated;
   }
 
@@ -952,7 +950,6 @@ export class Engine {
         switchingTo: null,
         model: null,
         switchedFrom: null,
-        terminalModel: null,
         sinceSwitch: [],
         toolsInTurn: false,
         lastText: '',

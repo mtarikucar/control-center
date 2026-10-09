@@ -37,7 +37,8 @@ const NO_CHANGE = 'değişiklik yok, çünkü iş planda yürüyor';
 type Started = Extract<OfficeEvent, { type: 'management.cycle.started' }>;
 type CycleRecord = Extract<OfficeEvent, { type: 'management.cycle' }>;
 
-function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFails?: boolean; pulse?: boolean } = {}) {
+/** `skips`: heartbeats passed by in a row (these tests' default 3; 'office': what main.ts runs with). */
+function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFails?: boolean; pulse?: boolean; skips?: number | 'office' } = {}) {
   let clock = T0;
   const now = () => clock;
   const s = setup(12, now);
@@ -109,7 +110,7 @@ function make(o: { autonomy?: 'free' | 'plans'; coordinator?: boolean; boardFail
   /** The office starts: the cycle service, the dispatcher and the clock, wired as in main.ts. */
   const boot = () => {
     const officeClock = new Clock({ scheduling: c.freshScheduling(), state: c.state, events: s.events, now, timers: { set: () => 0, clear: () => undefined } });
-    const cycle = new ManagementCycle({ events: s.events, state: c.state, company: c.company, roster: s.roster, tasks: c.tasks, budget: c.budget, clock: officeClock, now, board: (bo) => {
+    const cycle = new ManagementCycle({ events: s.events, state: c.state, company: c.company, roster: s.roster, tasks: c.tasks, budget: c.budget, clock: officeClock, now, ...(o.skips === 'office' ? {} : { maxSkips: o.skips ?? 3 }), board: (bo) => {
         if (o.boardFails) throw new Error('disk dolu');
         return buildBoard(boardDeps, bo);
       } });
@@ -1095,6 +1096,18 @@ describe('management cycle — no service, no change', () => {
 });
 
 describe('management cycle — a heartbeat with nothing new is passed by (ece24b5e)', () => {
+  it('as the office runs it, nothing is passed by: with the coordinator’s whole conversation in one session a skipped look makes the next cycle cold (≈ $3) — dearer than the warm empty ones it saves (review)', async () => {
+    const t = make({ skips: 'office' });
+    t.goal();
+    t.boot();
+    await t.closeCycle();
+    for (let i = 1; i <= 3; i++) {
+      t.advance(HEARTBEAT_MS);
+      expect(t.boards()).toHaveLength(i + 1);
+      await t.closeCycle();
+    }
+  });
+
   type Skipped = Extract<OfficeEvent, { type: 'management.cycle.skipped' }>;
   const skipped = (t: ReturnType<typeof make>) => t.log().flatMap((e) => (e.event.type === 'management.cycle.skipped' ? [{ ts: e.ts, employeeId: e.employeeId, ...(e.event as Skipped) }] : []));
 
@@ -1218,6 +1231,20 @@ describe('management cycle — a heartbeat with nothing new is passed by (ece24b
 });
 
 describe('management cycle — the project-start model only at a real start (ece24b5e)', () => {
+  it('what the coordinator did inside a cycle’s own turn asks for no start: a goal it set there and left waiting runs on the cycle model afterwards (review: judged from the last cycle’s end)', async () => {
+    const t = make();
+    t.goal();
+    t.boot();
+    expect(t.boards()[0]).toMatchObject({ model: 'fable', role: true });
+    // A few minutes into that turn the coordinator sets another goal, plans nothing and waits for the owner.
+    t.advance(3 * MIN);
+    t.company.goalSet(t.coord.id, { title: 'Yeni yön', why: 'misyon', done: ['tamam'] });
+    await t.closeCycle('değişiklik yok, çünkü sahibinin kararı bekleniyor');
+    t.advance(4 * HEARTBEAT_MS);
+    expect(t.boards()).toHaveLength(2);
+    expect(t.boards()[1]).toMatchObject({ model: 'opus', role: true });
+  });
+
   it('waiting with a goal and no running plan runs on the cycle model; the owner’s new message and a plan that finished bring the project-start model', async () => {
     const t = make();
     const ada = t.person('Ada');

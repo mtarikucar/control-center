@@ -31,6 +31,8 @@ export class QuotaStop {
   /** Looks at the week's use; true when it paused the company now. */
   check(): boolean {
     const limit = this.#d.constitution().weeklyStopPct;
+    // The account's 7-day window as the quota tracker reads it (claude/normalize.ts; without unified windows it may be the
+    // busiest model's weekly window — still the week the owner shares).
     const week = this.#d.quota.state()?.sevenDay ?? null;
     const now = this.#now();
     if (limit <= 0 || !week || week.resetsAt <= now) return false;
@@ -38,10 +40,14 @@ export class QuotaStop {
     if (pct < limit) return false;
     const window = String(week.resetsAt);
     if (this.#d.state.get(KEY) === window) return false;
-    this.#d.state.set(KEY, window);
     // Paused already (the owner's own pause): the line is marked as met, so their resume in this window is not undone.
-    if (this.#d.company.paused()) return false;
+    if (this.#d.company.paused()) {
+      this.#d.state.set(KEY, window);
+      return false;
+    }
     this.#d.company.pause(`Haftalık Claude kotası %${pct} (sınır %${limit}): ofis kendini duraklattı; sürdürmek sahibinde.`);
+    // Marked once the pause took: a pause that failed is tried again at the next look.
+    this.#d.state.set(KEY, window);
     const c = this.#d.company.coordinator();
     if (c) {
       this.#d.notices.add(c.id, 'quota.weekly_stop', `Haftalık Claude kotası %${pct} oldu (sınır %${limit}): şirket duraklatıldı. Sahibi sürdürünce devam et; o zamana kadar kota harcayan iş açma.`);

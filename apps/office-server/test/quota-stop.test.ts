@@ -90,6 +90,21 @@ describe('QuotaStop — the office stops itself at the owner’s weekly line', (
     expect(t.pauses).toEqual([]);
   });
 
+  it('a pause that fails leaves the week unmarked: the next look tries again (review)', () => {
+    let fail = true;
+    const stop = new QuotaStop({
+      quota: { state: () => ({ status: 'allowed', fiveHour: null, sevenDay: { utilization: 0.95, resetsAt: T0 + 50 * HOUR }, updatedAt: T0 }) },
+      constitution: () => DEFAULT_CONSTITUTION,
+      company: { paused: () => false, pause: () => { if (fail) throw new Error('disk dolu'); }, coordinator: () => null },
+      state: (() => { const m = new Map<string, string>(); return { get: (k: string) => m.get(k) ?? null, set: (k: string, v: string | null) => void (v === null ? m.delete(k) : m.set(k, v)) }; })(),
+      notices: { add: () => undefined },
+      now: () => T0,
+    });
+    expect(() => stop.check()).toThrow('disk dolu');
+    fail = false;
+    expect(stop.check()).toBe(true);
+  });
+
   it('0 switches it off; no quota reading yet, or a window already past its reset, is no reason to stop', () => {
     const off = make({ pct: 99, limit: 0 });
     expect(off.stop.check()).toBe(false);

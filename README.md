@@ -82,7 +82,9 @@ saatleri ve hangi işin hangi modelde koşacağı.
     uygulanır). Model değişiminde süreç kapanıp `--resume --model` ile yeniden açılır (hafıza sürer). Daha güçlü modele
     hemen, daha zayıfa yalnız son turdan `cacheTtlMinutes` (5 dk) sonra geçilir. Not: Claude Code oturumun önbelleğini
     bir saat tutar; `cacheTtlMinutes` yalnız ofisin "ne zaman ucuz modele geçilir" kuralıdır, CLI'nin önbellek süresini
-    değiştirmez (yönetim turunun kalp atışı bu yüzden 45 dakikadır: açılan tur önbelleği sıcak bulur). Hesabın kullanamadığı bir modelde
+    değiştirmez. Yönetim turunun kalp atışı 45 dakikadır (saatin içinde, önbellek sıcak kalır). Panosu değişmeyen turu
+    atlama mekanizması var ama kapalı (`maxSkips` 0): koordinatörün bütün konuşması tek oturumda olduğundan atlanan
+    turdan sonra açılan tur soğuk (≈ 3 $) olur, boş sıcak turlardan (≈ 0,25 $) pahalıdır. Hesabın kullanamadığı bir modelde
     oturum eski modelle sürer ve mesaj yeniden gönderilir (`model.switch.failed`).
   - `difficultyModelsEnabled` — **görev zorluğu:** görevlerin bir zorluğu olabilir (`taskCreate`/`taskPass`/
     `taskAssign` → `difficulty`: kolay, orta, zor, kritik); görev başlarken çalışan o zorluğun modeline geçer

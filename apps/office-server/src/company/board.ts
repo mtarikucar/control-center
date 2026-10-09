@@ -47,6 +47,11 @@ export interface BoardOptions {
   now: number;
   /** The previous cycle ended without cycleClose: one warning line at the very top. */
   unclosedWarning?: boolean;
+  /**
+   * The log's sequence number when the previous cycle's turn ended: only what came after it asks for a project start —
+   * what the coordinator did inside that turn (a goal it set and left waiting) does not (0: since `since`).
+   */
+  startAfter?: number;
 }
 
 export interface Board {
@@ -267,7 +272,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
   // one — and something since the last cycle asks for one. Waiting with no plan (for the owner, for work elsewhere, a
   // rest) is no start: its cycles are the cycle model's (ece24b5e: 9 of 10 project-start turns measured were such waits).
   const underWay = goals.length > 0 && live.some((p) => p.goalId !== null && goals.some((g) => g.id === p.goalId));
-  const kickoff = !underWay && log.some(({ event: e, employeeId }) => asksForStart(e, employeeId, coordinator?.id ?? null));
+  const kickoff = !underWay && log.some(({ seq, event: e, employeeId }) => seq > (o.startAfter ?? 0) && asksForStart(e, employeeId, coordinator?.id ?? null));
   // Each plan's tasks and streams, read once however often the board is drawn.
   const planData = new Map(live.map((p) => [p.id, { tasks: d.tasks.list({ planId: p.id, limit: 100_000 }), streams: d.company.planStreams(p.id) }]));
   /** Each plan's live routines (active or paused): open work that keeps it running. */
@@ -505,9 +510,10 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const lines = goals.length === 0 ? [`- ${noGoalLine()}`] : [];
       let blocks = 0;
       for (const { plan, lead, kpi } of entries.slice(0, ENTRIES)) {
-        if (!plan) lines.push(`- ${lead}`);
-        else lines.push(...planBlock(lead, plan, (blocks += 1) <= L.blocks));
-        if (kpi) lines.push(`  · KPI: ${clip(kpi, L.noteChars * 3)}`);
+        const block = plan ? planBlock(lead, plan, (blocks += 1) <= L.blocks) : [`- ${lead}`];
+        // Right under the goal's line, before the plan's streams (it is the goal's, not a stream).
+        if (kpi) block.splice(1, 0, `  · KPI: ${clip(kpi, L.noteChars * 3)}`);
+        lines.push(...block);
       }
       if (entries.length > ENTRIES) lines.push(`- … ve ${entries.length - ENTRIES} hedef ya da plan daha (goalsRead)`);
       return lines;

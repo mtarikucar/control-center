@@ -168,15 +168,15 @@ export class KpiReadings {
   boardLine(goal: Goal, now: number = this.#now()): string {
     if (goal.kpis.length === 0) return '';
     const readings = this.#readingsOf(goal.id);
-    return goal.kpis
-      .map((kpi) => {
-        const last = this.#of(readings, kpi).at(-1);
-        const due = kpi.source !== 'office' && now - (last?.recordedAt ?? goal.createdAt) >= KPI_PERIOD_MS[kpi.cadence];
-        const verdict = last && last.value !== null ? `, ${met(kpi, last.value) ? 'tuttu' : 'tutmadı'}` : '';
-        const read = last ? `son ${valueText(last)} (${formatStamp(last.recordedAt)}${verdict})` : 'okuma yok';
-        return `${kpi.name} ${targetText(kpi)}: ${read}${due ? ' — ölçüm zamanı geçti, kpiRecord ile yaz' : ''}`;
-      })
-      .join('; ');
+    const parts = goal.kpis.map((kpi) => {
+      const last = this.#of(readings, kpi).at(-1);
+      const due = kpi.source !== 'office' && now - (last?.recordedAt ?? goal.createdAt) >= KPI_PERIOD_MS[kpi.cadence];
+      const verdict = last && last.value !== null ? `, ${met(kpi, last.value) ? 'tuttu' : 'tutmadı'}` : '';
+      const read = last ? `son ${valueText(last)} (${formatStamp(last.recordedAt)}${verdict})` : 'okuma yok';
+      return { due, text: `${kpi.name} ${targetText(kpi)}: ${read}${due ? ' — ölçüm zamanı geçti, kpiRecord ile yaz' : ''}` };
+    });
+    // The due ones first: a short board clips the line's end, never what asks for a reading.
+    return [...parts.filter((p) => p.due), ...parts.filter((p) => !p.due)].map((p) => p.text).join('; ');
   }
 
   /** The office's value over the goal's plans' work in the KPI's window; a rate is shown as a %. */
