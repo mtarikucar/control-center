@@ -10,6 +10,15 @@ export interface FakeEngine {
   cleanup: () => Promise<void>;
 }
 
+/**
+ * The environment the test runs in, less the gate's: run from inside an office session (an employee's `pnpm test`), the
+ * session's own OFFICE_GATE_URL and OFFICE_GATE_TOKEN would reach the fake sessions as if this engine had set them.
+ */
+function testEnv(): NodeJS.ProcessEnv {
+  const { OFFICE_GATE_URL: _url, OFFICE_GATE_TOKEN: _token, ...env } = process.env;
+  return env;
+}
+
 export function fakeEngine(s: TestSetup, opts: { env?: Record<string, string>; engine?: Partial<EngineOptions> } = {}): FakeEngine {
   const state = tempDir('fake-claude-');
   const argvLog = join(state, 'argv.jsonl');
@@ -18,7 +27,7 @@ export function fakeEngine(s: TestSetup, opts: { env?: Record<string, string>; e
     events: s.events,
     dataDir: s.dataDir,
     claudeCommand: [process.execPath, FAKE_CLAUDE],
-    env: { ...process.env, FAKE_CLAUDE_STATE: state, FAKE_CLAUDE_ARGV_LOG: argvLog, ...opts.env },
+    env: { ...testEnv(), FAKE_CLAUDE_STATE: state, FAKE_CLAUDE_ARGV_LOG: argvLog, ...opts.env },
     home: '/home/test',
     ...opts.engine,
   });

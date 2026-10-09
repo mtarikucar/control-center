@@ -130,6 +130,27 @@ describe('board — a goal’s KPIs (K3, Kerem’s management cycle review)', ()
     expect(goals()).not.toContain('tuttu) — ölçüm');
   });
 
+  it('a goal with two plans gets its KPI line once, under its first plan', () => {
+    const t = make();
+    const g = t.company.goalSet(t.coordinator.id, { title: 'Kaliteli teslim', why: 'misyon', done: ['tamam'], kpis: [ON_TIME] });
+    t.plan('Teslim', { goalId: g.id });
+    t.plan('Rapor', { goalId: g.id });
+    const lines = t.section(t.board({ since: 0 }).text, 2).split('\n');
+    expect(lines.filter((l) => l.startsWith('  · KPI:'))).toHaveLength(1);
+    const kpi = lines.findIndex((l) => l.startsWith('  · KPI:'));
+    expect(lines.findIndex((l) => l.includes('plan “Rapor”'))).toBeGreaterThan(kpi);
+  });
+
+  it('a KPI the office reads itself is never due on the board: the routine reads it, no kpiRecord is asked for', () => {
+    const t = make();
+    const g = t.company.goalSet(t.coordinator.id, { title: 'Hızlı teslim', why: 'misyon', done: ['tamam'], kpis: [{ name: 'İlk geçişte onay', target: 80, direction: 'atLeast', source: 'office', metric: 'firstPassRate', cadence: 'daily' }] });
+    t.plan('Teslim', { goalId: g.id });
+    t.advance(3 * 24 * HOUR);
+    const goals = t.section(t.board({ since: 0 }).text, 2);
+    expect(goals).toContain('  · KPI: İlk geçişte onay');
+    expect(goals).not.toContain('ölçüm zamanı geçti');
+  });
+
   it('a goal without KPIs gets no KPI line', () => {
     const t = make();
     const g = t.goal('Sade hedef');
