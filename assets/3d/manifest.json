@@ -1,0 +1,283 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "work_desk",
+      "kind": "furniture",
+      "file": "furniture/work_desk.glb",
+      "height": 0.75
+    },
+    {
+      "id": "ergonomic_chair",
+      "kind": "furniture",
+      "file": "furniture/ergonomic_chair.glb",
+      "height": 1
+    },
+    {
+      "id": "desktop_monitor",
+      "kind": "furniture",
+      "file": "furniture/desktop_monitor.glb",
+      "height": 0.45
+    },
+    {
+      "id": "laptop",
+      "kind": "furniture",
+      "file": "furniture/laptop.glb",
+      "height": 0.25
+    },
+    {
+      "id": "server_rack",
+      "kind": "furniture",
+      "file": "furniture/server_rack.glb",
+      "height": 2
+    },
+    {
+      "id": "espresso_machine",
+      "kind": "furniture",
+      "file": "furniture/espresso_machine.glb",
+      "height": 0.45
+    },
+    {
+      "id": "large_plant_pot",
+      "kind": "furniture",
+      "file": "furniture/large_plant_pot.glb",
+      "height": 1.3
+    },
+    {
+      "id": "teal_lounge_sofa",
+      "kind": "furniture",
+      "file": "furniture/teal_lounge_sofa.glb",
+      "height": 0.9
+    },
+    {
+      "id": "reception_desk",
+      "kind": "furniture",
+      "file": "furniture/reception_desk.glb",
+      "height": 1.1
+    },
+    {
+      "id": "meeting_table_chairs",
+      "kind": "furniture",
+      "file": "furniture/meeting_table_chairs.glb",
+      "height": 1
+    },
+    {
+      "id": "whiteboard",
+      "kind": "furniture",
+      "file": "furniture/whiteboard.glb",
+      "height": 1.3
+    },
+    {
+      "id": "lounge_coffee_table",
+      "kind": "furniture",
+      "file": "furniture/lounge_coffee_table.glb",
+      "height": 0.45
+    },
+    {
+      "id": "bookshelf",
+      "kind": "furniture",
+      "file": "furniture/bookshelf.glb",
+      "height": 2
+    },
+    {
+      "id": "coffee_counter_sink",
+      "kind": "furniture",
+      "file": "furniture/coffee_counter_sink.glb",
+      "height": 1
+    },
+    {
+      "id": "orange_bar_stool",
+      "kind": "furniture",
+      "file": "furniture/orange_bar_stool.glb",
+      "height": 0.75
+    },
+    {
+      "id": "low_credenza",
+      "kind": "furniture",
+      "file": "furniture/low_credenza.glb",
+      "height": 0.7
+    },
+    {
+      "id": "floor_lamp",
+      "kind": "furniture",
+      "file": "furniture/floor_lamp.glb",
+      "height": 1.7
+    },
+    {
+      "id": "filing_pedestal",
+      "kind": "furniture",
+      "file": "furniture/filing_pedestal.glb",
+      "height": 0.7
+    },
+    {
+      "id": "geometric_wall_art",
+      "kind": "furniture",
+      "file": "furniture/geometric_wall_art.glb",
+      "height": 1.2
+    },
+    {
+      "id": "coder",
+      "kind": "character",
+      "name": "Kodcu",
+      "file": "characters/coder/base.glb",
+      "height": 1.7,
+      "clips": {
+        "idle": "characters/coder/idle.glb",
+        "walk": "characters/coder/walk.glb",
+        "sit": "characters/coder/sit.glb",
+        "sitDown": "characters/coder/sitDown.glb",
+        "typing": "characters/coder/typing.glb",
+        "talkSeated": "characters/coder/talkSeated.glb",
+        "drink": "characters/coder/drink.glb",
+        "talk": "characters/coder/talk.glb"
+      }
+    },
+    {
+      "id": "tablet",
+      "kind": "character",
+      "name": "Tabletli",
+      "file": "characters/tablet/base.glb",
+      "height": 1.7,
+      "clips": {
+        "idle": "characters/tablet/idle.glb",
+        "walk": "characters/tablet/walk.glb",
+        "sit": "characters/tablet/sit.glb",
+        "sitDown": "characters/tablet/sitDown.glb",
+        "typing": "characters/tablet/typing.glb",
+        "talkSeated": "characters/tablet/talkSeated.glb",
+        "drink": "characters/tablet/drink.glb",
+        "talk": "characters/tablet/talk.glb"
+      }
+    },
+    {
+      "id": "manager",
+      "kind": "character",
+      "name": "Yönetici",
+      "file": "characters/manager/base.glb",
+      "height": 1.7,
+      "clips": {
+        "idle": "characters/manager/idle.glb",
+        "walk": "characters/manager/walk.glb",
+        "sit": "characters/manager/sit.glb",
+        "sitDown": "characters/manager/sitDown.glb",
+        "typing": "characters/manager/typing.glb",
+        "talkSeated": "characters/manager/talkSeated.glb",
+        "drink": "characters/manager/drink.glb",
+        "talk": "characters/manager/talk.glb"
+      }
+    },
+    {
+      "id": "designer",
+      "kind": "character",
+      "name": "Tasarımcı",
+      "file": "characters/designer/base.glb",
+      "height": 1.7,
+      "clips": {
+        "idle": "characters/designer/idle.glb",
+        "walk": "characters/designer/walk.glb",
+        "sit": "characters/designer/sit.glb",
+        "sitDown": "characters/designer/sitDown.glb",
+        "typing": "characters/designer/typing.glb",
+        "talkSeated": "characters/designer/talkSeated.glb",
+        "drink": "characters/designer/drink.glb",
+        "talk": "characters/designer/talk.glb"
+      }
+    },
+    {
+      "id": "desk_plant",
+      "kind": "furniture",
+      "file": "furniture/desk_plant.glb",
+      "height": 0.26
+    },
+    {
+      "id": "desk_planter",
+      "kind": "furniture",
+      "file": "furniture/desk_planter.glb",
+      "height": 0.3
+    },
+    {
+      "id": "plant_shelf",
+      "kind": "furniture",
+      "file": "furniture/plant_shelf.glb",
+      "height": 1.8
+    },
+    {
+      "id": "pendant_lamp",
+      "kind": "furniture",
+      "file": "furniture/pendant_lamp.glb",
+      "height": 0.55
+    },
+    {
+      "id": "table_lamp",
+      "kind": "furniture",
+      "file": "furniture/table_lamp.glb",
+      "height": 0.42
+    },
+    {
+      "id": "armchair",
+      "kind": "furniture",
+      "file": "furniture/armchair.glb",
+      "height": 0.85
+    },
+    {
+      "id": "pouf",
+      "kind": "furniture",
+      "file": "furniture/pouf.glb",
+      "height": 0.42
+    },
+    {
+      "id": "cafe_shelf",
+      "kind": "furniture",
+      "file": "furniture/cafe_shelf.glb",
+      "height": 0.62
+    },
+    {
+      "id": "hanging_plant",
+      "kind": "furniture",
+      "file": "furniture/hanging_plant.glb",
+      "height": 0.9
+    },
+    {
+      "id": "snake_plant",
+      "kind": "furniture",
+      "file": "furniture/snake_plant.glb",
+      "height": 1
+    },
+    {
+      "id": "desk_lamp",
+      "kind": "furniture",
+      "file": "furniture/desk_lamp.glb",
+      "height": 0.4
+    },
+    {
+      "id": "wall_shelf",
+      "kind": "furniture",
+      "file": "furniture/wall_shelf.glb",
+      "height": 0.55
+    },
+    {
+      "id": "water_cooler",
+      "kind": "furniture",
+      "file": "furniture/water_cooler.glb",
+      "height": 1.3
+    },
+    {
+      "id": "printer",
+      "kind": "furniture",
+      "file": "furniture/printer.glb",
+      "height": 1
+    },
+    {
+      "id": "coat_rack",
+      "kind": "furniture",
+      "file": "furniture/coat_rack.glb",
+      "height": 1.8
+    },
+    {
+      "id": "fiddle_plant",
+      "kind": "furniture",
+      "file": "furniture/fiddle_plant.glb",
+      "height": 1.6
+    }
+  ]
+}
