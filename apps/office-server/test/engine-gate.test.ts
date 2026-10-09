@@ -46,12 +46,12 @@ describe('Engine — the gate in a session (B9a)', () => {
     const ada = f.engine.hire({ name: 'Ada', role: 'r' });
     const [session] = await readArgv(f.argvLog, 1);
     expect(session!.gate).toEqual({ url: null, token: null });
-    // A side question runs its own claude: the same environment.
+    // A side question runs a claude of its own (`--output-format json`; the session's is stream-json): the same environment.
     f.engine.send(ada.id, 'merhaba', 'owner');
     await until(() => s.events.list({ employeeId: ada.id, limit: 100 }).some((e) => e.event.type === 'turn.finished'), 8000);
     expect((await f.engine.sideQuestion(ada.id, 'ne yapıyorsun?')).ok).toBe(true);
-    const side = (await readArgv(f.argvLog, 2)).find((a) => a.args.includes('-p'));
-    expect(side?.gate).toEqual({ url: null, token: null });
+    const side = (await readArgv(f.argvLog, 2)).filter((a) => a.args[a.args.indexOf('--output-format') + 1] === 'json');
+    expect(side.map((a) => a.gate)).toEqual([{ url: null, token: null }]);
   });
 
   it('with its own gate a session gets its own office’s address and token, never the outer office’s', async () => {
