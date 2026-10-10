@@ -9,6 +9,9 @@ import { codexItem, codexQuota, codexUsage } from '../src/codex/normalize.ts';
 import { parseRoleTemplate } from '../src/company/role-templates.ts';
 import { CODEX_SESSION_FILE, codexSession } from '../src/codex/process.ts';
 import { setup, tempDir, until, waitFor } from './helpers.ts';
+import { createApi } from '../src/api.ts';
+import { QuotaTracker } from '../src/quota.ts';
+import { pageHeaders } from './owner-helpers.ts';
 
 const fake = fileURLToPath(new URL('./fake-codex.mjs', import.meta.url));
 const cleanup: Array<() => unknown> = [];
@@ -43,16 +46,17 @@ describe('Codex office integration', () => {
     expect(codexItem({ type: 'agentMessage', text: 'hello' }, false)).toEqual([]);
     expect(codexItem({ type: 'commandExecution', id: 'x', status: 'completed', exitCode: 1 }, true)).toMatchObject([{ type: 'tool.finished', isError: true }]);
   });
-  it('initializes, reads the account model, disables inherited connectors, and writes a native role card', async () => {
+  it('inherits native integrations and permissions, reads all catalog pages, and writes a role card', async () => {
     const t = make(), e = t.engine.hire({ name: 'Ada', role: 'Yazılım geliştir', model: 'fable' });
     const started = await waitFor(t.events, s => s.event.type === 'session.started');
-    expect(started.event).toMatchObject({ model: 'test-codex / medium', mcp: [{ name: 'office', status: 'connected', tools: 2 }] });
+    expect(started.event).toMatchObject({ model: 'test-codex / medium', mcp: [{ name: 'office', status: 'connected', tools: 2 }, { name: 'personal', status: 'connected', tools: 1 }] });
     const cwd = join(t.dataDir, 'desks', e.slug);
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toContain('Yazılım geliştir');
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).not.toContain('@office-guide.md');
     expect(codexSession(cwd)).toBe('codex-thread-1');
     const start = transcript(t.log).find(m => m.method === 'thread/start');
-    expect(start?.params).toMatchObject({ model: 'test-codex', sandbox: 'read-only', approvalPolicy: 'untrusted', approvalsReviewer: 'user', config: { 'features.image_generation': true, 'mcp_servers.personal.enabled': false, 'plugins.test@plugin.enabled': false } });
+    expect(start?.params).toMatchObject({ model: 'test-codex', sandbox: 'workspace-write', approvalPolicy: 'on-request', approvalsReviewer: 'user' });
+    expect(start?.params.config).toEqual({ 'features.image_generation': true });
     expect(t.engine.runtime()).toEqual({ provider: 'codex', mode: 'mixed', costAvailable: false });
   });
   it('delivers multiple messages once, accounts for per-turn tokens, and resumes the same native thread', async () => {
@@ -85,7 +89,7 @@ describe('Codex office integration', () => {
     const file = join(t.dataDir, 'desks', e.slug, CODEX_SESSION_FILE), original = readFileSync(file, 'utf8');
     expect(await t.engine.sideQuestion(e.id, 'durum')).toEqual({ ok: true, answer: 'echo:durum' });
     expect(readFileSync(file, 'utf8')).toBe(original);
-    expect(transcript(t.log).find(m => m.method === 'thread/fork')?.params).toMatchObject({ threadId: 'codex-thread-1', ephemeral: true, excludeTurns: true, config: { 'features.image_generation': false } });
+    expect(transcript(t.log).find(m => m.method === 'thread/fork')?.params).toMatchObject({ threadId: 'codex-thread-1', ephemeral: true, excludeTurns: true, sandbox: 'read-only', approvalPolicy: 'untrusted', config: { 'features.image_generation': false, 'features.apps': false, 'features.multi_agent': false, 'mcp_servers.personal.enabled': false, 'plugins.test@plugin.enabled': false } });
     const handoff = await t.engine.openInTerminal(e.id);
     expect(handoff.command).toContain('codex resume'); expect(handoff.command).toContain('codex-thread-1');
   });
@@ -118,5 +122,45 @@ describe('Codex office integration', () => {
     ]);
     expect(codexItem({ ...item, failure: { type: 'usageLimitExceeded' } }, true)).toMatchObject([{ type: 'tool.finished', isError: true, output: 'Görsel üretilemedi: usageLimitExceeded' }]);
     expect(codexItem({ ...item, savedPath: undefined }, true)).toHaveLength(1);
+  });
+  it('waits for owner connector answers, keeps them out of request events, and rejects replay or another employee', async () => {
+    const t = make(), e = t.engine.hire({ name: 'Ada', role: 'r' });
+    await turn(t, e.id, 'ready');
+    const other = t.engine.hire({name:'Other',role:'r'});
+    for (const prompt of ['ELICIT', 'PERMISSIONS', 'QUESTION']) {
+      const after = t.events.lastSeq(); t.engine.send(e.id, prompt);
+      const stored = await waitFor(t.events, s => s.employeeId === e.id && s.event.type === 'codex.request', {after});
+      const pending = t.engine.codexRequests(e.id)[0]!;
+      expect(stored.event).toEqual({type:'codex.request',requestId:pending.id,provider:'codex'});
+      expect(() => t.engine.answerCodexRequest(other.id, pending.id, 'accept', {})).toThrow();
+      if (prompt === 'QUESTION') expect(() => t.engine.answerCodexRequest(e.id, pending.id, 'accept', {})).toThrow(/yanıt/);
+      const content = prompt === 'ELICIT' ? {choice:'selected'} : prompt === 'QUESTION' ? {q:{answers:['answer']}} : {filesystem:{read:['/unrequested']}};
+      t.engine.answerCodexRequest(e.id, pending.id, 'accept', content);
+      await waitFor(t.events, s => s.employeeId === e.id && s.event.type === 'turn.finished', {after});
+      expect(t.engine.codexRequests(e.id)).toEqual([]);
+      expect(() => t.engine.answerCodexRequest(e.id, pending.id, 'accept', content)).toThrow(/etkin/);
+      if (prompt === 'PERMISSIONS') expect(transcript(t.log).filter(m => m.result?.permissions).at(-1)?.result).toEqual({permissions:{network:{enabled:true}},scope:'turn'});
+    }
+    const after = t.events.lastSeq(); t.engine.send(e.id, 'ELICIT');
+    await waitFor(t.events, s => s.employeeId === e.id && s.event.type === 'codex.request', {after});
+    await t.engine.stop(e.id);
+    expect(t.engine.codexRequests(e.id)).toEqual([]);
+  });
+  it('protects live connector replies with the owner guard and returns conflict after completion', async () => {
+    const t = make(), e = t.engine.hire({name:'Ada',role:'r'});
+    const api = createApi({...t,quota:new QuotaTracker(t.db,t.events)}, {allowedOrigins:[]});
+    await new Promise<void>(r => api.server.listen(0,'127.0.0.1',r)); cleanup.push(() => api.close());
+    const port = (api.server.address() as {port:number}).port;
+    const url = `http://127.0.0.1:${port}/api/employees/${e.id}/codex-requests`;
+    await turn(t,e.id,'ready');
+    const after = t.events.lastSeq(); t.engine.send(e.id,'ELICIT');
+    await waitFor(t.events,s => s.event.type === 'codex.request',{after});
+    const pending = await (await fetch(url)).json();
+    const body = JSON.stringify({requestId:pending[0].id,action:'decline'});
+    expect((await fetch(url,{method:'POST',headers:{'content-type':'application/json',origin:'https://evil.example'},body})).status).toBe(403);
+    expect(t.engine.codexRequests(e.id)).toHaveLength(1);
+    const headers = {...await pageHeaders(port),'content-type':'application/json'};
+    expect((await fetch(url,{method:'POST',headers,body})).status).toBe(200);
+    expect((await fetch(url,{method:'POST',headers,body})).status).toBe(409);
   });
 });

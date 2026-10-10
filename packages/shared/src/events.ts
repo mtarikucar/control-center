@@ -49,6 +49,8 @@ export type OfficeEvent = { provider?: AgentProvider } & (
   | { type: 'message.user'; text: string; source: 'owner' | 'system' }
   | { type: 'message.assistant'; text: string }
   | { type: 'image.generated'; path: string; prompt: string }
+  /** Request contents and owner responses stay in the live process, not the event log. */
+  | { type: 'codex.request'; requestId: string }
   | { type: 'tool.started'; toolUseId: string; name: string; input: unknown }
   | { type: 'tool.finished'; toolUseId: string; isError: boolean; output: string }
   | { type: 'side.question'; text: string }

@@ -11,7 +11,7 @@ import { TokenRegistry } from '../src/mcp/tokens.ts';
 import { setup, waitFor } from './helpers.ts';
 
 /** Opt in: uses the signed-in Codex account for one bounded turn in an isolated test desk. */
-it.skipIf(process.env.OFFICE_CODEX_SMOKE !== '1')('real Codex writes a deliverable through the office gate and calls its authenticated office MCP', async () => {
+it.skipIf(process.env.OFFICE_CODEX_SMOKE !== '1')('real Codex writes a deliverable with native permissions and calls its authenticated office MCP', async () => {
   const s = setup(), tokens = new TokenRegistry();
   let pings = 0, approvals = 0;
   const server = createServer(async (req, res) => {
@@ -32,7 +32,8 @@ it.skipIf(process.env.OFFICE_CODEX_SMOKE !== '1')('real Codex writes a deliverab
     engine.send(e.id, 'Bu yalnız bağlantı testidir: masandaki smoke.txt dosyasına yalnız CONTROL_CENTER_CODEX_OK yaz (apply_patch kullan, shell kullanma). Sonra office diagnosticPing aracını çağır ve sonucunu aynen yanıtla. Başka iş yapma.');
     const done = await waitFor(s.events, x => x.event.type === 'turn.finished', { timeoutMs: 180000 });
     expect(done.event).toMatchObject({ ok: true });
-    expect(pings, JSON.stringify(s.events.list().map(x => x.event))).toBe(1); expect(approvals).toBeGreaterThan(0);
+    expect(pings, JSON.stringify(s.events.list().map(x => x.event))).toBe(1);
+    // Native workspace-write may not need an approval for this file; routing is covered by the fake gate tests.
     expect(readFileSync(join(s.dataDir, 'desks', e.slug, 'smoke.txt'), 'utf8').trim()).toBe('CONTROL_CENTER_CODEX_OK');
     expect(s.events.list().some(x => x.event.type === 'message.assistant' && x.event.text.includes('CONTROL_CENTER_CODEX_OK'))).toBe(true);
   } finally { await engine.shutdown(); await new Promise<void>(resolve => server.close(() => resolve())); s.db.close(); s.cleanup(); }

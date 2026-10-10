@@ -27,7 +27,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     case 'initialize': initialized = true; reply(m.id, {}); break;
     case 'initialized': break;
     case 'account/read': reply(m.id, { account: { type: 'chatgpt' }, requiresOpenaiAuth: true }); break;
-    case 'config/read': reply(m.id, { config: { model: 'test-codex', mcp_servers: { personal: { url: 'https://example.invalid' } }, plugins: { 'test@plugin': { enabled: true } } } }); break;
+    case 'config/read': reply(m.id, { config: { model: 'test-codex', approval_policy: 'on-request', sandbox_mode: 'workspace-write', mcp_servers: { personal: { url: 'https://example.invalid' } }, plugins: { 'test@plugin': { enabled: true } } } }); break;
     case 'model/list': reply(m.id, { data: [{ id: 'test-codex', model: 'test-codex', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: ['low', 'medium', 'high'].map(reasoningEffort => ({ reasoningEffort })) }] }); break;
     case 'thread/start': case 'thread/resume': case 'thread/fork':
       if (m.method === 'thread/fork' && p.ephemeral && !p.excludeTurns) { send({ id: m.id, error: { message: 'ephemeral paginated thread/fork requires excludeTurns: true' } }); break; }
@@ -37,13 +37,20 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         if (existsSync(saved)) ({ turns, total } = JSON.parse(readFileSync(saved, 'utf8')));
       }
       reply(m.id, { thread: { id: thread }, model: p.model ?? 'test-codex' }); break;
-    case 'mcpServerStatus/list': reply(m.id, { data: thread === 'codex-fork-1' ? [] : [{ name: 'office', runtimeStatus: 'ready', tools: { taskFinish: {}, taskPark: {} }, authStatus: 'notLoggedIn' }] }); break;
+    case 'mcpServerStatus/list': reply(m.id, { data: thread === 'codex-fork-1' ? [] : p.cursor ? [{ name: 'personal', runtimeStatus: 'connected', tools: { read: {} } }] : [{ name: 'office', runtimeStatus: 'ready', tools: { taskFinish: {}, taskPark: {} }, authStatus: 'notLoggedIn' }], nextCursor: thread !== 'codex-fork-1' && !p.cursor ? 'page2' : null }); break;
     case 'account/rateLimits/read': reply(m.id, { rateLimits: { primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 2000000000 }, secondary: { usedPercent: 20, windowDurationMins: 10080, resetsAt: 2000100000 } } }); break;
     case 'turn/start': {
       const text = p.input[0].text;
       if (active) { reply(m.id, { turn: { id: active } }); finish(`steered:${text}`); break; }
       active = `turn-${++turns}`; reply(m.id, { turn: { id: active } }); notify('turn/started', { turn: { id: active } });
       if (text === 'SLOW') break;
+      if (['ELICIT', 'PERMISSIONS', 'QUESTION'].includes(text)) {
+        const id = 900 + turns;
+        approvals.set(id, result => finish(JSON.stringify(result)));
+        const method = text === 'ELICIT' ? 'mcpServer/elicitation/request' : text === 'PERMISSIONS' ? 'item/permissions/requestApproval' : 'item/tool/requestUserInput';
+        send({ id, method, params: { threadId: thread, turnId: active, ...(text === 'ELICIT' ? {mode:'form',serverName:'personal',message:'Choose',requestedSchema:{type:'object',properties:{choice:{type:'string'}},required:['choice']}} : text === 'PERMISSIONS' ? {permissions:{network:{enabled:true}},reason:'Read website'} : {questions:[{id:'q',question:'Which?',options:null,isSecret:true}]}) }});
+        break;
+      }
       if (text === 'COMMAND' || text === 'WRITE') {
         const isCommand = text === 'COMMAND', item = isCommand ? { type: 'commandExecution', id: 'tool-1', command: 'echo test', cwd: process.cwd(), status: 'inProgress' } : { type: 'fileChange', id: 'tool-1', changes: [{ path: `${process.cwd()}/output.txt`, diff: '+test' }], status: 'inProgress' };
         notify('item/started', { item });

@@ -81,7 +81,7 @@ const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
 const APPROVAL_ROUTE = /^\/api\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|deny)$/;
 const EMPLOYEE_ROUTE =
-  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file|provider))?$/;
+  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file|provider|codex-requests))?$/;
 
 /** What the owner sees of the proposals: everything still open or waiting for them, and the last 30 decided. */
 function visibleProposals(store: ProposalStore) {
@@ -336,6 +336,13 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
   if (match) {
     const id = match[1] ?? '';
     const action = match[2];
+    if (method === 'GET' && action === 'codex-requests') return sendJson(res, 200, d.engine.codexRequests(id));
+    if (method === 'POST' && action === 'codex-requests') {
+      const body = await readJson(req) as { requestId?: unknown; action?: unknown; content?: unknown } | null;
+      if (typeof body?.requestId !== 'string' || typeof body?.action !== 'string') throw new ValidationError('İstek ve yanıt gerekli.');
+      d.engine.answerCodexRequest(id, body.requestId, body.action, body.content);
+      return sendJson(res, 200, { ok: true });
+    }
     if (method === 'DELETE' && action === undefined) {
       // The company asks for a hand-over first (spec §3.4); "?now=1" — or an office without the company — fires at once.
       if (d.company && url.searchParams.get('now') !== '1') return sendJson(res, 202, { handover: d.company.service.beginHandover(id) });

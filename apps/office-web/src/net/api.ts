@@ -67,6 +67,8 @@ export function resetOwnerNonce(): void {
 }
 
 export const api = {
+  codexRequests: (id: string) => request<Array<{ id: string; method: string; params: Record<string, unknown> }>>('GET', `${employee(id)}/codex-requests`),
+  answerCodexRequest: (id: string, requestId: string, action: string, content?: unknown) => request('POST', `${employee(id)}/codex-requests`, { requestId, action, content }),
   office: () => request<OfficeSnapshot>('GET', '/api/office'),
   hire: (input: HireInput) => request<Employee>('POST', '/api/employees', input),
   approvePlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/approve`),

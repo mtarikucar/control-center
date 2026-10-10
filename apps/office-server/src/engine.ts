@@ -408,6 +408,19 @@ export class Engine {
     }
   }
 
+  codexRequests(id: string) {
+    this.#roster.get(id);
+    const proc = this.#runtimes.get(id)?.proc;
+    return proc instanceof CodexProcess ? proc.requests() : [];
+  }
+
+  answerCodexRequest(id: string, requestId: string, action: string, content: unknown): void {
+    this.#roster.get(id);
+    const proc = this.#runtimes.get(id)?.proc;
+    if (!(proc instanceof CodexProcess)) throw new ConflictError('Etkin Codex oturumu bulunamadı.');
+    proc.answerRequest(requestId, action, content);
+  }
+
   async sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }> {
     const question = text.trim();
     if (!question) throw new ValidationError('Soru boş olamaz.');

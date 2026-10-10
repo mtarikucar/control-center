@@ -108,7 +108,9 @@ sağlayıcı seçebilir, sahibinin mevcut çalışan seçimini kendiliğinden de
 
 ## Onaylar ve bağlantılar
 
-Oturumlar `read-only` sandbox ve `untrusted` onay politikasıyla açılır. Codex'in gönderdiği komut
+Normal çalışanlar kullanıcının Codex `approval_policy` ve `sandbox_mode` ayarlarını kullanır;
+ayar yoksa `on-request` / `workspace-write` uygulanır. Yan soru kopyaları `read-only` / `untrusted`
+kalır ve bağlantıları, Imagegen'i, alt ajanları kapatır. Codex'in gönderdiği komut
 ve dosya değişikliği onay istekleri, çalışanın kendi jetonuyla `/gate/check` üzerinden mevcut ofis
 kapısına gider. Kapı izin verirse tek çağrı kabul edilir; kapıya erişilemiyorsa çağrı reddedilir.
 Kapının tuttuğu iş için model mevcut `approvalRequest` aracını kullanır; sahibi Şirket/Onaylar'dan
@@ -116,14 +118,26 @@ karar verir. Anayasa'daki `gateEnabled` ofis kapısının sınıflandırmasını
 
 Ofisin kendi MCP araçları zaten rol ve yetki kontrolünden geçtiği için bu sunucunun araç politikası
 `approve` olarak ayarlanır. Jeton yalnız alt sürecin ortamında durur; komut argümanında yer almaz.
-Kişisel Codex MCP sunucuları, uygulama bağlantıları ve eklentileri çalışan oturumunda kapatılır.
-Claude bağlantıları Codex'e otomatik taşınmaz; bu sürümde dış bağlantıları isteyen görevler,
-yetenek ön kontrolü açıkken mevcut eksik yetenek davranışına tabidir.
+Kişisel Codex MCP sunucuları, uygulama bağlantıları, becerileri ve etkin eklentileri normal çalışan
+oturumunda aynen yüklenir; kullanıcının kapattığı eklentiler zorla açılmaz. Mevcut Codex kimlik
+doğrulaması kullanılır. Tüm bağlantı kataloğu sayfaları okunur; oturum kartı hazır, giriş bekleyen,
+kapalı veya açılamayan bağlantıları gösterir. Claude bağlantıları Codex'e otomatik taşınmaz.
+
+Bağlantı formu/URL isteği, Codex soruları ve ek izin istekleri çalışan sohbetinde yanıtlanır.
+İstek yanıtları owner korumalı endpoint üzerinden yalnız ilgili canlı oturuma gider; istek kimlikleri
+tekrar kullanılamaz. Ek izin yalnız istenen kapsamda, o tur için verilir. Form içeriği ve yanıtlar
+ofis olay günlüğüne yazılmaz (Codex veya bağlantı kendi kayıt politikasını uygular). Oturum kapanınca
+bekleyen istekler geçersiz olur. Yeni hesap girişi gerekiyorsa bağlantının giriş adımı tamamlanmalıdır.
+
+Bu, normal yerel Codex app-server oturumunun yeteneklerini taşır. Codex masaüstünün kendi sekme,
+sesli görüşme ve sohbet yönetimi gibi yalnız uygulama içinde sunduğu özelliklere tam arayüz eşitliği
+iddia edilmez; yerel Codex kataloğunda kapalı olan masaüstü sunucuları kapalı görünür.
 
 Codex onay istekleri Claude'un her araç çağrısını gören PreToolUse kancasının eşdeğeri değildir.
 Sandbox içinde zaten izinli salt okuma işlemleri ve Codex'in yerel/kurumsal yürütme kuralları ayrıca
 geçerlidir. Ofis kapısı bir işletim sistemi güvenlik sınırı değildir; aynı kullanıcıya ait süreçleri
-birbirinden ayırmaz. Dış bağlantı ve tam kanca politikası eşitliği bu entegrasyonun kapsamı dışındadır.
+birbirinden ayırmaz. Dış bağlantılar kendi Codex izinlerini kullanır; Claude kanca politikasıyla tam
+eşitlik yoktur. Yerel Codex'te `never` veya tam erişim seçilmişse çalışan da bu tercihi kullanır.
 
 ## Kullanım ve maliyet
 
@@ -154,7 +168,7 @@ pnpm --filter @cc/office-server test -- test/codex.smoke.real.test.ts
 ofis aracıyla görev verir; Codex dosya üretip taskFinish ile teslim eder, ofis dosyayı arşivler. İki hesabın da
 giriş yapmış olması gerekir ve iki kısa tur kullanım yapar. Her iki tanı şirketten ayrı geçici veri kullanır.
 
-Test, geçici bir masada teslim dosyası yazar, kapıdan onay alır ve jetonlu yerel MCP aracını çağırır;
+Test, geçici bir masada teslim dosyası yazar ve jetonlu yerel MCP aracını çağırır;
 gerçek şirket verilerini kullanmaz. App-server sürümleri değişebildiği için test edilen sürüm:
 `codex-cli 0.162.0-alpha.17.2`. Protokolün kaynakları:
 [Codex App Server](https://learn.chatgpt.com/docs/app-server) ve

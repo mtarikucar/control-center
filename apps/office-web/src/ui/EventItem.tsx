@@ -4,6 +4,7 @@ import { lifecycleLabel, modelName } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 import { ApprovalCard } from './ApprovalCard.tsx';
+import { CodexRequestCard } from './CodexRequestCard.tsx';
 
 const PLAN_CHANGE: Record<PlanChange, string> = {
   proposed: 'önerildi',
@@ -31,6 +32,8 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
   const codex = e.provider === 'codex';
   const time = <time>{formatClock(stored.ts)}</time>;
   switch (e.type) {
+    case 'codex.request':
+      return <CodexRequestCard employeeId={stored.employeeId ?? ''} requestId={e.requestId} />;
     case 'message.user':
       return (
         <div className={`msg ${e.source}`}>
@@ -97,7 +100,9 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note error">{e.message}</div>;
     case 'session.started': {
       const failed = e.mcp.filter((m) => m.status === 'failed');
-      if (codex) return <div className="note">Oturum başladı · {e.model}{failed.length ? ` · ${failed.map(m => m.name).join(', ')} bağlantısı açılamadı` : ''}</div>;
+      if (codex) return <details className="note"><summary>Oturum başladı · {e.model} · {e.mcp.filter(m => m.status === 'connected').length} bağlantı hazır</summary>
+        {e.mcp.map(m => <div key={m.name}>{m.name}: {m.status === 'connected' ? `${m.tools ?? 0} araç hazır` : m.status === 'needs-auth' ? 'Giriş gerekiyor' : m.status === 'disabled' ? 'Codex ayarlarında kapalı' : 'Bağlantı açılamadı'}</div>)}
+      </details>;
       if (failed.length === 0) return null;
       return (
         <details className="note warn">
