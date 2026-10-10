@@ -366,6 +366,7 @@ export interface CycleCloseWords {
 
 /** A recorded management cycle (a `management.cycle` event), as the owner's Yönetim tab reads it (§3.3). */
 export interface ManagementCycleRecord extends CycleCloseWords {
+  provider?: 'claude' | 'codex';
   /** The event's seq. */
   seq: number;
   startedAt: number;
@@ -382,6 +383,7 @@ export interface ManagementCycleRecord extends CycleCloseWords {
 
 /** The cycle the coordinator is in: the board went out, its turn has not ended. */
 export interface OpenManagementCycle {
+  provider?: 'claude' | 'codex';
   startedAt: number;
   triggers: CycleTrigger[];
   model: ModelAlias | null;

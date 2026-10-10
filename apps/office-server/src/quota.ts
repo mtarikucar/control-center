@@ -1,4 +1,4 @@
-import type { EmployeeUsage, QuotaState, QuotaWindow, StoredEvent, UsageTotals } from '@cc/shared';
+import type { AgentProvider, EmployeeUsage, QuotaState, QuotaWindow, StoredEvent, UsageTotals } from '@cc/shared';
 import type { Db } from './db.ts';
 import type { EventStore } from './event-store.ts';
 
@@ -17,6 +17,13 @@ export class QuotaTracker {
   #onEvent(stored: StoredEvent): void {
     const event = stored.event;
     if (event.type !== 'quota.updated') return;
+    if (event.provider === 'codex') {
+      this.#db.prepare(`INSERT INTO quota_by_provider (provider, status, five_hour, seven_day, updated_at) VALUES ('codex', ?, ?, ?, ?)
+        ON CONFLICT(provider) DO UPDATE SET status = excluded.status,
+          five_hour = COALESCE(excluded.five_hour, quota_by_provider.five_hour), seven_day = COALESCE(excluded.seven_day, quota_by_provider.seven_day), updated_at = excluded.updated_at`)
+        .run(event.status, event.fiveHour ? JSON.stringify(event.fiveHour) : null, event.sevenDay ? JSON.stringify(event.sevenDay) : null, stored.ts);
+      return;
+    }
     this.#db
       .prepare(
         `INSERT INTO quota (id, status, five_hour, seven_day, updated_at) VALUES (1, ?, ?, ?, ?)
@@ -34,13 +41,15 @@ export class QuotaTracker {
       );
   }
 
-  state(): QuotaState | null {
-    const row = this.#db.prepare('SELECT status, five_hour, seven_day, updated_at FROM quota WHERE id = 1').get() as unknown as
+  state(provider: AgentProvider = 'claude'): QuotaState | null {
+    const row = this.#db.prepare(provider === 'codex' ? "SELECT status, five_hour, seven_day, updated_at FROM quota_by_provider WHERE provider = 'codex'" : 'SELECT status, five_hour, seven_day, updated_at FROM quota WHERE id = 1').get() as unknown as
       | { status: string; five_hour: string | null; seven_day: string | null; updated_at: number }
       | undefined;
     if (!row) return null;
     return { status: row.status, fiveHour: parseWindow(row.five_hour), sevenDay: parseWindow(row.seven_day), updatedAt: row.updated_at };
   }
+
+  states(): Record<AgentProvider, QuotaState | null> { return { claude: this.state('claude'), codex: this.state('codex') }; }
 
   usage(employeeId: string): EmployeeUsage {
     const startOfDay = new Date(this.#now());

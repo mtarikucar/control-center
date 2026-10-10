@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { stopWindowsDescendants } from '../windows-process.ts';
 
 export interface ProcessOptions {
   command: string[];
@@ -30,7 +31,7 @@ export class ClaudeProcess {
     const [command, ...prefix] = opts.command;
     if (!command) throw new Error('claude komutu boş');
     // Its own process group, so a forced stop also ends what its tools started (a dev server, a test watcher…).
-    this.#child = spawn(command, [...prefix, ...opts.args], { cwd: opts.cwd, env: opts.env ?? process.env, detached: true });
+    this.#child = spawn(command, [...prefix, ...opts.args], { cwd: opts.cwd, env: opts.env ?? process.env, detached: process.platform !== 'win32', windowsHide: true });
     const finish = (code: number | null, signal: NodeJS.Signals | null) => {
       if (this.#exited) return;
       this.#exited = true;
@@ -73,6 +74,11 @@ export class ClaudeProcess {
   /** Signals claude's whole process group; falls back to claude alone. */
   #signal(sig: NodeJS.Signals): void {
     const pid = this.#child.pid;
+    if (process.platform === 'win32' && pid !== undefined) {
+      const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      killer.on('error', () => this.#child.kill(sig));
+      return;
+    }
     try {
       if (pid === undefined) throw new Error('no pid');
       process.kill(-pid, sig);
@@ -107,13 +113,17 @@ export class ClaudeProcess {
     if (this.#exited) return Promise.resolve();
     return new Promise((resolve) => {
       this.#closeWaiters.push(resolve);
-      if (this.#closeTimers.length === 0) {
-        this.#closeTimers.push(
-          setTimeout(() => this.#signal('SIGTERM'), graceMs),
-          setTimeout(() => this.#signal('SIGKILL'), graceMs * 2),
-        );
+      if (this.#closeWaiters.length === 1) {
+        // Keep the parent alive while discovering descendants; losing its PID first leaves locked desk folders.
+        void stopWindowsDescendants(this.#child.pid).then(() => {
+          if (this.#exited) return;
+          this.#closeTimers.push(
+            setTimeout(() => this.#signal('SIGTERM'), graceMs),
+            setTimeout(() => this.#signal('SIGKILL'), graceMs * 2),
+          );
+          this.#child.stdin.end();
+        });
       }
-      this.#child.stdin.end();
     });
   }
 

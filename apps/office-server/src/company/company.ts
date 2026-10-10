@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs';
+import type { AgentProvider } from '@cc/shared';
 import { relative } from 'node:path';
 import type { CompanyProfile, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, PlanStream, PlanStreamView, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
 import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
@@ -174,6 +175,7 @@ export interface ProfileInput {
 }
 
 export interface StatusLine {
+  provider?: AgentProvider;
   id: string;
   name: string;
   title: string;
@@ -236,6 +238,7 @@ export class Company {
       title: e.title,
       team: e.team,
       kind: e.kind,
+      provider: e.provider ?? 'claude',
       lifecycle: e.lifecycle,
       task: this.#d.tasks.inProgressOf(e.id)?.title ?? null,
     }));
@@ -271,12 +274,12 @@ export class Company {
   }
 
   /** Fable by default: planning and judgement are the hardest work in the company. */
-  hireCoordinator(model: ModelAlias = 'fable'): Employee {
+  hireCoordinator(model: ModelAlias = 'fable', provider?: AgentProvider): Employee {
     if (this.coordinator()) throw new ConflictError('Ofiste zaten bir koordinatör var.');
     const characters = this.#d.characters();
     const characterId = characters.includes('manager') ? 'manager' : this.#leastUsedCharacter(characters);
     this.#assertRoom();
-    const hired = this.#d.hire({ name: 'Koordinatör', role: COORDINATOR_ROLE, model, title: 'Koordinatör', kind: 'coordinator', characterId });
+    const hired = this.#d.hire({ name: 'Koordinatör', role: COORDINATOR_ROLE, model, provider, title: 'Koordinatör', kind: 'coordinator', characterId });
     this.#emit(hired.id, { type: 'role.changed', kind: hired.kind, title: hired.title, team: hired.team });
     return hired;
   }

@@ -23,6 +23,7 @@ function useNow(ms: number, on: boolean): number {
 const noChange = (reasoning: string) => (saysNoChange(reasoning) ? reasoning : `Değişiklik yok — ${reasoning}`);
 
 interface CycleCardProps {
+  provider?: 'claude' | 'codex';
   state: 'open' | 'closed' | 'unclosed';
   startedAt: number;
   /** null: not known (the office stopped before the coordinator did anything in the cycle). */
@@ -60,17 +61,17 @@ function Triggers({ triggers }: { triggers: CycleTrigger[] }) {
 }
 
 /** One management cycle: when, how long, on which model, what opened it, what it decided and why, what it cost. */
-function CycleCard({ state, startedAt, durationMs, model, costUsd, triggers, words, now }: CycleCardProps) {
+function CycleCard({ state, startedAt, durationMs, model, costUsd, triggers, words, now, provider }: CycleCardProps) {
   const when = formatWhenTR(startedAt, now);
   return (
     <article className={`cycle-card ${state}`} aria-label={`Yönetim turu ${when}`}>
       <header className="cycle-head">
         <time dateTime={new Date(startedAt).toISOString()}>{when}</time>
         <span className="muted">{durationMs === null ? 'süre bilinmiyor' : formatDuration(durationMs)}</span>
-        {model && <span className="badge model">{modelName(model)}</span>}
+        {model && <span className="badge model">{modelName(model, provider)}</span>}
         {state === 'open' && <span className="badge cycle-open">sürüyor</span>}
         {state === 'unclosed' && <span className="badge cycle-unclosed">kapanmadı</span>}
-        {costUsd !== null && <span className="cycle-cost">{state === 'open' ? `şimdiye dek ${formatCost(costUsd)}` : formatCost(costUsd)}</span>}
+        {costUsd !== null && provider !== 'codex' && <span className="cycle-cost">{state === 'open' ? `şimdiye dek ${formatCost(costUsd)}` : formatCost(costUsd)}</span>}
       </header>
       {triggers.length > 0 && <Triggers triggers={triggers} />}
       {words &&
@@ -129,14 +130,14 @@ export function ManagementTab() {
       ) : (
         <>
           {cycles.length > 0 && (
-            <p className="management-summary">{`Son ${cycles.length} tur · ${unclosed ? `${unclosed} kapanmadı` : 'hepsi kapandı'} · ${formatCost(spent)}`}</p>
+            <p className="management-summary">{`Son ${cycles.length} tur · ${unclosed ? `${unclosed} kapanmadı` : 'hepsi kapandı'} · ${formatCost(spent)}${cycles.some(c => c.provider === 'codex') ? ' bildirilen · Codex maliyeti bilinmiyor' : ''}`}</p>
           )}
           <div className="cycle-list">
             {log.open && (
-              <CycleCard state="open" startedAt={log.open.startedAt} durationMs={now - log.open.startedAt} model={log.open.model} costUsd={log.open.costUsd} triggers={log.open.triggers} words={log.open.close} now={now} />
+              <CycleCard state="open" startedAt={log.open.startedAt} durationMs={now - log.open.startedAt} model={log.open.model} provider={log.open.provider} costUsd={log.open.costUsd} triggers={log.open.triggers} words={log.open.close} now={now} />
             )}
             {cycles.map((c) => (
-              <CycleCard key={c.seq} state={c.closed ? 'closed' : 'unclosed'} startedAt={c.startedAt} durationMs={c.endedAt === null ? null : c.endedAt - c.startedAt} model={c.model} costUsd={c.costUsd} triggers={c.triggers} words={c.closed ? c : null} now={now} />
+              <CycleCard key={c.seq} state={c.closed ? 'closed' : 'unclosed'} startedAt={c.startedAt} durationMs={c.endedAt === null ? null : c.endedAt - c.startedAt} model={c.model} provider={c.provider} costUsd={c.costUsd} triggers={c.triggers} words={c.closed ? c : null} now={now} />
             ))}
           </div>
         </>

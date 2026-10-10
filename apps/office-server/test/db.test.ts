@@ -27,14 +27,15 @@ const V19_TABLES = [...V15_TABLES, 'blueprints', 'blueprint_steps'].sort();
 const V20_TABLES = [...V19_TABLES, 'kpi_readings'].sort();
 const V21_TABLES = [...V20_TABLES, 'search_fts', 'search_fts_config', 'search_fts_data', 'search_fts_docsize', 'search_fts_idx', 'search_index'].sort();
 const V22_TABLES = [...V21_TABLES, 'approvals'].sort();
+const V23_TABLES = [...V22_TABLES, 'quota_by_provider'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(22);
-    expect(tables(db)).toEqual(V22_TABLES);
+    expect(migrateUp(db)).toBe(23);
+    expect(tables(db)).toEqual(V23_TABLES);
   });
 
   it('review (Kerem): the applied migrations keep the names the live database has (checkApplied compares them; renaming one stops the office)', () => {
@@ -70,14 +71,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(22);
-    expect(tables(db)).toEqual(V22_TABLES);
+    expect(migrateUp(db)).toBe(23);
+    expect(tables(db)).toEqual(V23_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(22);
+    expect(migrateUp(db)).toBe(23);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -489,7 +490,7 @@ describe('migrations', () => {
     migrateUp(db, upTo(21));
     db.prepare("INSERT INTO tasks (id, plan_id, title, description, done, requester, assignee, priority, depends_on, status, chain_depth, created_at) VALUES ('t1', NULL, 'İş', '', '[]', 'owner', 'a', 3, '[]', 'waiting', 0, 1)").run();
     const before = db.prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all();
-    expect(migrateUp(db)).toBe(22);
+    expect(migrateUp(db, upTo(22))).toBe(22);
     expect(tables(db)).toEqual(V22_TABLES);
     expect(columns(db, 'approvals')).toEqual(['id', 'employee_id', 'task_id', 'kind', 'tool', 'target', 'fingerprint', 'summary', 'scope', 'status', 'requested_at', 'decided_at', 'decided_by', 'decided_via', 'expires_at', 'used_at', 'note']);
     const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'approvals' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>).map((r) => r.name);
@@ -500,6 +501,6 @@ describe('migrations', () => {
     expect(tables(db)).toEqual(V21_TABLES);
     expect(db.prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all()).toEqual(before);
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
-    expect(migrateUp(db)).toBe(22);
+    expect(migrateUp(db, upTo(22))).toBe(22);
   });
 });

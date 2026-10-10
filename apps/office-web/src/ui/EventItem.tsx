@@ -1,6 +1,6 @@
 import { APPROVAL_KIND_LABELS, APPROVAL_STATUS_LABELS, PROFILE_SPEC, reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, formatWhenTR, summarizeToolInput } from './format.ts';
-import { lifecycleLabel } from './labels.ts';
+import { lifecycleLabel, modelName } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 import { ApprovalCard } from './ApprovalCard.tsx';
@@ -28,6 +28,7 @@ const SCHEDULE_CHANGE: Record<ScheduleChange, string> = {
 
 export function EventItem({ stored }: { stored: StoredEvent }) {
   const e = stored.event;
+  const codex = e.provider === 'codex';
   const time = <time>{formatClock(stored.ts)}</time>;
   switch (e.type) {
     case 'message.user':
@@ -81,13 +82,14 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
     case 'turn.finished':
       return (
         <div className="note">
-          Tur bitti · {formatTokens(e.usage.inputTokens + e.usage.outputTokens)} · {formatCost(e.costUsd)}
+          Tur bitti · {formatTokens(e.usage.inputTokens + e.usage.outputTokens)}{codex ? ' · Codex' : ` · ${formatCost(e.costUsd)}`}
         </div>
       );
     case 'error':
       return <div className="note error">{e.message}</div>;
     case 'session.started': {
       const failed = e.mcp.filter((m) => m.status === 'failed');
+      if (codex) return <div className="note">Oturum başladı · {e.model}{failed.length ? ` · ${failed.map(m => m.name).join(', ')} bağlantısı açılamadı` : ''}</div>;
       if (failed.length === 0) return null;
       return (
         <details className="note warn">
@@ -173,7 +175,9 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
     case 'spend.recorded':
       return <div className="note">{`Harcama: ${e.spend.service} $${e.spend.usd} — ${e.spend.purpose}`}</div>;
     case 'model.changed':
-      return <div className="note">{`Model: ${e.model}`}</div>;
+      return <div className="note">{`Model: ${codex ? modelName(e.model, 'codex') : e.model}`}</div>;
+    case 'provider.changed':
+      return <div className="note">{`Sağlayıcı: ${e.from === 'codex' ? 'Codex' : 'Claude'} → ${e.to === 'codex' ? 'Codex' : 'Claude'} · görevler ve dosyalar korundu`}</div>;
     case 'model.switch.failed':
       return <div className="note">{`Model geçişi olmadı (${e.to}): ${e.from} ile sürüyor. ${e.reason}`}</div>;
     case 'gate.checked':

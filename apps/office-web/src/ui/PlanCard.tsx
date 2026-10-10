@@ -36,6 +36,7 @@ function PlanStreams({ streams }: { streams: PlanStreamView[] }) {
 
 /** A plan the coordinator proposed, as it stands now; the owner approves or declines the latest version here. */
 export function PlanCard({ plan }: { plan: Plan }) {
+  const runtime = useOffice((s) => s.runtime);
   const live = useOffice((s) => s.plans[plan.id]) ?? plan;
   const spent = useOffice((s) => s.budget?.plans[plan.id]);
   const tasks = useOffice((s) => s.tasks);
@@ -121,7 +122,7 @@ export function PlanCard({ plan }: { plan: Plan }) {
       {guess && <p className="muted">{guess}</p>}
       {(live.status === 'approved' || live.status === 'done') && spent && (
         <p className={`muted${live.usd !== null && spent.spentUsd > live.usd ? ' over' : ''}`}>
-          {`Harcanan: $${spent.spentUsd}${live.usd !== null ? ` / $${live.usd}` : ''} · Claude ~$${spent.claudeUsd}`}
+          {`Harcanan: $${spent.spentUsd}${live.usd !== null ? ` / $${live.usd}` : ''} · Claude ~$${spent.claudeUsd}${runtime?.costAvailable === false ? ' + Codex maliyeti bilinmiyor' : ''}`}
         </p>
       )}
       {live.status === 'draft' && (

@@ -4,6 +4,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type PlanView, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { coordinatorHint } from './model-policy.ts';
+import type { AgentProvider } from '@cc/shared';
 import type { Company } from './company/company.ts';
 import { LOG_DEFAULT, LOG_MAX, type ManagementCycle } from './company/cycle.ts';
 import type { Memory } from './company/memory.ts';
@@ -78,7 +79,7 @@ const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
 const APPROVAL_ROUTE = /^\/api\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|deny)$/;
 const EMPLOYEE_ROUTE =
-  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file))?$/;
+  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file|provider))?$/;
 
 /** What the owner sees of the proposals: everything still open or waiting for them, and the last 30 decided. */
 function visibleProposals(store: ProposalStore) {
@@ -87,7 +88,8 @@ function visibleProposals(store: ProposalStore) {
 
 export function snapshot(d: ApiDeps): OfficeSnapshot {
   const employees = d.roster.list();
-  const base: OfficeSnapshot = { employees, quota: d.quota.state(), usage: d.quota.usageAll(employees.map((e) => e.id)), lastSeq: d.events.lastSeq() };
+  const base: OfficeSnapshot = { employees, quota: d.quota.state(), usage: d.quota.usageAll(employees.map((e) => e.id)), lastSeq: d.events.lastSeq(), ...(typeof d.engine.runtime === 'function' ? { runtime: d.engine.runtime() } : {}) };
+  if (typeof d.quota.states === 'function') base.quotas = d.quota.states();
   if (!d.company) return base;
   const open = d.company.tasks.list({ statuses: ['waiting', 'in_progress', 'review', 'blocked', 'parked'] });
   const closed = d.company.tasks.list({ statuses: ['done', 'cancelled'], limit: 100_000 }).slice(-50);
@@ -228,7 +230,10 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       company.resume();
       return sendJson(res, 200, { paused: false });
     }
-    if (method === 'POST' && url.pathname === '/api/company/coordinator/hire') return sendJson(res, 201, company.hireCoordinator());
+    if (method === 'POST' && url.pathname === '/api/company/coordinator/hire') {
+      const body = (!req.headers['transfer-encoding'] && (!req.headers['content-length'] || req.headers['content-length'] === '0')) ? null : await readJson(req) as { provider?: AgentProvider } | null;
+      return sendJson(res, 201, company.hireCoordinator('fable', body?.provider));
+    }
     if (method === 'POST' && url.pathname === '/api/company/coordinator') {
       const id = (await readJson(req) as { employeeId?: unknown }).employeeId;
       if (typeof id !== 'string' || !id) throw new ValidationError('employeeId gerekli.');
@@ -335,6 +340,10 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     }
     if (method === 'POST' && action === 'side-questions') return sendJson(res, 200, await d.engine.sideQuestion(id, textOf(await readJson(req))));
     if (method === 'POST' && action === 'stop') return sendJson(res, 200, await d.engine.stop(id));
+    if (method === 'POST' && action === 'provider') {
+      const body = await readJson(req) as { provider?: AgentProvider } | null;
+      return sendJson(res, 200, await d.engine.switchProvider(id, body?.provider as AgentProvider));
+    }
     if (method === 'POST' && action === 'resume') return sendJson(res, 200, d.engine.resume(id));
     if (method === 'POST' && action === 'terminal') return sendJson(res, 200, await d.engine.openInTerminal(id));
     if (method === 'DELETE' && action === 'terminal') return sendJson(res, 200, d.engine.returnFromTerminal(id));

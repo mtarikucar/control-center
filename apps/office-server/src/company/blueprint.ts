@@ -207,7 +207,7 @@ export class Blueprints {
         step, label: label(step),
         existing: () => this.#employeeNamed(r.name)?.id ?? null,
         make: () =>
-          company.hire(by, { name: r.name, template: r.template, role: r.role ?? '', title: r.title, team: r.team, model: r.model, capabilities: r.capabilities }, { deny: b.closedMode?.deny }).id,
+          company.hire(by, { name: r.name, template: r.template, role: r.role ?? '', title: r.title, team: r.team, model: r.model, provider: r.provider, capabilities: r.capabilities }, { deny: b.closedMode?.deny }).id,
       });
     }
     for (const g of b.goals) {
@@ -282,7 +282,7 @@ export class Blueprints {
     const titleOf = (r: BlueprintRole) => r.title ?? (r.template ? roleTemplate(r.template).title : '');
     const modelOf = (r: BlueprintRole) => r.model ?? (r.template ? roleTemplate(r.template).model : 'sonnet');
     const capsOf = (r: BlueprintRole) => r.capabilities ?? (r.template ? roleTemplate(r.template).capabilities : []);
-    const people = b.roles.map((r) => `${r.name}${titleOf(r) ? ` — ${titleOf(r)}` : ''} (${r.template ? `şablon ${r.template}, ` : ''}${modelOf(r)})`);
+    const people = b.roles.map((r) => `${r.name}${titleOf(r) ? ` — ${titleOf(r)}` : ''} (${r.template ? `şablon ${r.template}, ` : ''}${r.provider ? `${r.provider}, ` : ''}${modelOf(r)})`);
     const steps = stepKeys(b).map(({ step, label }) => {
       const [kind, key] = [step.slice(0, step.indexOf(':')), step.slice(step.indexOf(':') + 1)];
       if (step === 'brief') return `${label}: yazılır (${b.brief!.length} karakter)`;
@@ -443,12 +443,15 @@ export function parseBlueprint(value: unknown): Blueprint {
       }
     }
     const model = str(r.model);
+    const provider = str(r.provider);
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') throw fail(`rol “${key}”: provider claude veya codex olmalı.`);
     if (model !== undefined && !(MODEL_ALIASES as readonly string[]).includes(model)) throw fail(`rol “${key}”: model ${MODEL_ALIASES.join(', ')} olmalı.`);
     const role = str(r.role);
     if (template === undefined && (!role?.trim() || model === undefined)) throw fail(`rol “${key}”: şablonsuz rolde role ve model gerekli.`);
     return {
       key, name, ...(template !== undefined ? { template } : {}), ...(role !== undefined ? { role } : {}), ...(str(r.title) !== undefined ? { title: str(r.title)! } : {}),
       ...(str(r.team) !== undefined ? { team: str(r.team)! } : {}), ...(model !== undefined ? { model: model as ModelAlias } : {}),
+      ...(provider !== undefined ? { provider: provider as 'claude' | 'codex' } : {}),
       ...(r.capabilities !== undefined ? { capabilities: roleCapabilities(r.capabilities, key) } : {}),
     };
   });

@@ -353,7 +353,7 @@ export function officeTools(o: {
         const kindTr: Record<EmployeeKind, string> = { coordinator: 'koordinatör', lead: 'ekip lideri', member: 'çalışan' };
         return company
           .status()
-          .map((l) => `• ${l.name}${l.title ? ` — ${l.title}` : ''} (${kindTr[l.kind]}${l.team ? `, ${l.team}` : ''}; ${l.lifecycle}) id ${l.id}${l.task ? ` — şu an: “${l.task}”` : ''}`)
+          .map((l) => `• ${l.name}${l.title ? ` — ${l.title}` : ''} (${kindTr[l.kind]}${l.team ? `, ${l.team}` : ''}; ${l.provider ?? 'claude'}; ${l.lifecycle}) id ${l.id}${l.task ? ` — şu an: “${l.task}”` : ''}`)
           .join('\n');
       },
     },
@@ -941,12 +941,13 @@ export function officeTools(o: {
     },
     {
       name: 'hire',
-      description: `Hire a new employee (coordinator). From a role template (template; read them with roleTemplates): the role text, title, team and model come from it; role is then this company's own part (brand voice, channels, language, limits from the profile) and title, team or model given override the template's. Without a template: the role card text (responsibilities, how to work, what "done" means) and the model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
+      description: `Hire a new employee (coordinator). Choose provider: claude or codex independently of your own provider; both share office tasks, reviews and memory. Codex uses the model aliases as reasoning presets (haiku low, sonnet medium, opus high, fable xhigh), with the configured Codex model. From a role template (template; read them with roleTemplates): role text, title, team and model come from it; role is this company's own part and title, team or model given override the template. Without a template: role and model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
       inputSchema: {
         ...object(
           {
             name: s('Name.'), template: { type: 'string', enum: listRoleTemplates().map((t) => t.id), description: 'Role template id (roleTemplates).' }, title: s('Job title.'), team: s('Team.'),
             role: s('Without a template: the role card. With one: this company’s own part of the role.'), model: { type: 'string', enum: [...MODEL_ALIASES] },
+            provider: { type: 'string', enum: ['claude', 'codex'], description: 'The employee runtime; choose independently of the coordinator.' },
             capabilities: strings('The capabilities the role needs, from the vocabulary (capabilitiesRead): the whole list, replacing the template’s; none given, the template’s. The reply says how the new desk has each.'),
             characterId: { type: 'string', enum: characterList(), description: 'Look in the 3D office.' },
           },
@@ -960,9 +961,11 @@ export function officeTools(o: {
         const model = (template === undefined ? str(args, 'model') : optStr(args, 'model')) as ModelAlias | undefined;
         if (model !== undefined && !(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${model}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
         const role = template === undefined ? str(args, 'role') : (optStr(args, 'role') ?? '');
-        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, characterId: optStr(args, 'characterId'), reportsTo: null, capabilities: list(args, 'capabilities') });
+        const provider = optStr(args, 'provider');
+        if (provider !== undefined && provider !== 'claude' && provider !== 'codex') throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
+        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, provider, characterId: optStr(args, 'characterId'), reportsTo: null, capabilities: list(args, 'capabilities') });
         const from = hired.template ? `, şablon ${hired.template.id} (sürüm ${hired.template.version})` : '';
-        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}${from}.${deskBrief(hired.capabilities, hired.id, 'Yetenekler')}`;
+        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}${from}.${hired.provider === 'codex' ? ' Sağlayıcı: Codex.' : ''}${deskBrief(hired.capabilities, hired.id, 'Yetenekler')}`;
       },
     },
     {

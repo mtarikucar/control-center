@@ -604,4 +604,14 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS approvals_lookup;
       DROP TABLE IF EXISTS approvals;`,
   },
+  {
+    version: 23,
+    name: 'mixed Claude and Codex employee sessions',
+    up: `ALTER TABLE employees ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude' CHECK (provider IN ('claude', 'codex'));
+      ALTER TABLE employees ADD COLUMN provider_sessions TEXT NOT NULL DEFAULT '{}';
+      UPDATE employees SET provider_sessions = json_object('claude', session_started);
+      CREATE TABLE quota_by_provider (provider TEXT PRIMARY KEY, status TEXT NOT NULL, five_hour TEXT, seven_day TEXT, updated_at INTEGER NOT NULL);`,
+    down: `UPDATE employees SET session_started = CASE WHEN provider = 'claude' THEN session_started ELSE COALESCE(json_extract(provider_sessions, '$.claude'), 0) END;
+      DROP TABLE quota_by_provider; ALTER TABLE employees DROP COLUMN provider_sessions; ALTER TABLE employees DROP COLUMN provider;`,
+  },
 ];

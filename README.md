@@ -1,7 +1,30 @@
 # control-center
 
-Claude Code oturumlarını rol tanımı verilmiş çalışanlar olarak, canlı bir 3D ofiste çalıştıran platform.
+Claude Code ve Codex oturumlarını aynı canlı 3D ofiste, rol tanımı verilmiş çalışanlar olarak çalıştıran platform.
 Tasarım: `docs/superpowers/specs/2026-10-06-office-v1-design.md`.
+
+## Claude ve Codex birlikte
+
+Node.js 24+, pnpm 9 ve kullanacağın sağlayıcının giriş yapılmış CLI'ı gerekir. Karma ofiste hem `claude` hem `codex` kurulu olmalı:
+
+```bash
+codex login
+pnpm install
+pnpm office
+```
+
+Tarayıcıda **http://127.0.0.1:4319** adresini aç. **Şirket → Koordinatörün sağlayıcısı** alanında Claude
+veya Codex seçip koordinatör al. **Çalışan al → Sağlayıcı** ile her çalışanı ayrı seç: Claude koordinatör
+Codex geliştiriciye görev verebilir; Codex koordinatör de Claude çalışanlarını yönetebilir. Aynı görev,
+inceleme, teslim, hafıza ve ajanda sistemi kullanılır. Sohbette “bu iş için Codex çalışanı al” diyebilirsin.
+
+Koordinatörün veya çalışanın panelindeki **Sağlayıcı** seçimini boşta ya da durdurulmuşken değiştirebilirsin.
+İki sağlayıcının yerel sohbetleri ayrı saklanır; aynı sağlayıcıya dönünce kendi oturumu sürdürülür. Geçişte
+son konuşmalar devir notuna aktarılır; görevler, şirket hafızası ve dosyalar ortak kalır. Codex'te model
+ailesi yerine dört çalışma düzeyi seçilir. `pnpm office:codex` yalnız yeni çalışan varsayılanını Codex
+yapar ve ayrı `~/.control-center-codex/` klasörünü açar; yine iki sağlayıcı da seçilebilir.
+`OFFICE_CODEX_MODEL` belirli bir Codex modeli, `OFFICE_CODEX_COMMAND` JSON komut dizisi içindir. Ayrıntılar:
+[Codex entegrasyonu](docs/codex.md).
 
 ## Ofisi açmak
 
@@ -22,7 +45,7 @@ pnpm --filter @cc/office-web dev     # http://127.0.0.1:5180
 
 ## Şirket
 
-Üst çubuktaki **Şirket** görünümünden bir **koordinatör** işe alın (Fable ile çalışır) ya da bir çalışanı koordinatör
+Üst çubuktaki **Şirket** görünümünden bir **koordinatör** işe alın (Claude veya Codex seçilebilir) ya da bir çalışanı koordinatör
 yapın. Sonra yalnız koordinatörle konuşursunuz:
 
 1. Ne istediğinizi yazın; koordinatör sohbette bir **plan kartı** açar (yaklaşım, kimler, görevler, tahmini kota/para/süre).

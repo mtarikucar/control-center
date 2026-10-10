@@ -18,9 +18,10 @@ function Meter({ label, window, now }: { label: string; window: QuotaWindow | nu
   );
 }
 
-export function QuotaHud({ quota, now }: { quota: QuotaState | null; now: number }) {
+export function QuotaHud({ quota, now, label }: { quota: QuotaState | null; now: number; label?: string }) {
   return (
-    <div className="quota" aria-label="Abonelik kotası">
+    <div className="quota" aria-label={label ? `${label} abonelik kotası` : 'Abonelik kotası'}>
+      {label && <span className="meter-label">{label}</span>}
       <Meter label="5 saat" window={quota?.fiveHour ?? null} now={now} />
       <Meter label="7 gün" window={quota?.sevenDay ?? null} now={now} />
     </div>

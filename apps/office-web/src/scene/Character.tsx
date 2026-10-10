@@ -36,6 +36,7 @@ interface Props {
 }
 
 export function Character({ employee, behavior, spot, asset, usage, selected, task = null, ping = null, reports = 0 }: Props) {
+  const costAvailable = employee.provider !== 'codex';
   const select = useOffice((s) => s.select);
   const group = useRef<Group>(null);
   const sits = SEATED.has(behavior.activity);
@@ -154,7 +155,7 @@ export function Character({ employee, behavior, spot, asset, usage, selected, ta
             {behavior.marker === 'terminal' && <span aria-label="terminalde">⌨</span>}
           </span>
           <span className="tag-usage">
-            {formatTokens(tokensOf(today))} · {formatCost(today?.costUsd ?? 0)}
+            {formatTokens(tokensOf(today))}{costAvailable === false ? '' : ` · ${formatCost(today?.costUsd ?? 0)}`}
           </span>
           {limitNote(employee, Date.now()) && <span className="tag-usage">{limitNote(employee, Date.now())}</span>}
           {task && <span className="tag-task">{task.length > 28 ? `${task.slice(0, 27)}…` : task}</span>}

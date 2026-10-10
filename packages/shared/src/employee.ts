@@ -2,6 +2,8 @@ import type { WorkType } from './company.ts';
 /** Claude Code model aliases: each always resolves to the newest model of its family. */
 export const MODEL_ALIASES = ['fable', 'opus', 'sonnet', 'haiku'] as const;
 export type ModelAlias = (typeof MODEL_ALIASES)[number];
+export const AGENT_PROVIDERS = ['claude', 'codex'] as const;
+export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
 /** Who someone is in the company: the coordinator (one per office), a team lead, or a member. */
 export const EMPLOYEE_KINDS = ['coordinator', 'lead', 'member'] as const;
@@ -22,6 +24,8 @@ export const LIFECYCLES = [
 export type Lifecycle = (typeof LIFECYCLES)[number];
 
 export interface Employee {
+  /** Missing only in older clients; those employees use Claude. */
+  provider?: AgentProvider;
   id: string;
   slug: string;
   name: string;
@@ -74,6 +78,7 @@ export interface RoleTemplate {
 }
 
 export interface HireInput {
+  provider?: AgentProvider;
   name: string;
   /** With a template: the company's own part of the role (optional); without: the whole role text (required). */
   role: string;

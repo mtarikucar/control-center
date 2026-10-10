@@ -52,6 +52,8 @@ export function prepareDesk(dataDir: string, e: Employee): string {
     if (!text.includes(BRIEF_IMPORT)) appendFileSync(card, `\n## Şirket\n\n${BRIEF_IMPORT}\n`);
   }
   writeFileSync(join(dir, GUIDE_FILE), guideText(e.kind));
+  const handoff = '@provider-handoff.md';
+  if (existsSync(join(dir, 'provider-handoff.md')) && !readFileSync(card, 'utf8').includes(handoff)) appendFileSync(card, `\n## Sağlayıcı devri\n\n${handoff}\n`);
   writeFileSync(join(dir, BRIEF_FILE), readBrief(dataDir));
   return dir;
 }

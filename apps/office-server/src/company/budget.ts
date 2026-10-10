@@ -1,5 +1,6 @@
 import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, TASK_DIFFICULTIES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
+import type { AgentProvider } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { ConstitutionStore, SpendStore } from './budget-store.ts';
@@ -7,6 +8,7 @@ import type { NoticeStore, PlanStore, TaskStore } from './store.ts';
 import { clean } from './text.ts';
 
 export interface BudgetDeps {
+  provider?: 'claude' | 'codex';
   constitution: ConstitutionStore;
   spend: SpendStore;
   tasks: TaskStore;
@@ -14,7 +16,7 @@ export interface BudgetDeps {
   roster: Roster;
   events: EventStore;
   notices: NoticeStore;
-  quota: { state(): QuotaState | null; usageAll?(ids: string[]): Record<string, EmployeeUsage> };
+  quota: { state(provider?: AgentProvider): QuotaState | null; states?(): Record<AgentProvider, QuotaState | null>; usageAll?(ids: string[]): Record<string, EmployeeUsage> };
   /** Desks in the office: the most employees the constitution may allow. */
   deskCount: number;
   now?: () => number;
@@ -212,20 +214,23 @@ export class Budget {
     return next;
   }
 
-  reserve(): ReserveState {
+  reserve(provider?: AgentProvider): ReserveState {
     const c = this.constitution();
     const limitPct = 100 - c.ownerReservePct;
-    const q = this.#d.quota.state();
+    const readings = provider ? [this.#d.quota.state(provider)] : this.#d.quota.states ? Object.values(this.#d.quota.states()) : [this.#d.quota.state()];
     const now = this.#now();
-    const fiveHourPct = pctOf(q?.fiveHour ?? null, now);
-    const sevenDayPct = pctOf(q?.sevenDay ?? null, now);
+    const max = (values: Array<number | null>) => values.some(v => v !== null) ? Math.max(...values.filter((v): v is number => v !== null)) : null;
+    const fiveHourPct = max(readings.map(q => pctOf(q?.fiveHour ?? null, now)));
+    const sevenDayPct = max(readings.map(q => pctOf(q?.sevenDay ?? null, now)));
     const active = c.ownerReservePct > 0 && [fiveHourPct, sevenDayPct].some((p) => p !== null && p >= limitPct);
     return { active, limitPct, fiveHourPct, sevenDayPct };
   }
 
-  reserveActive(): boolean {
-    return this.reserve().active;
+  reserveActive(provider?: AgentProvider): boolean {
+    return this.reserve(provider).active;
   }
+
+  #hasCodex(): boolean { return this.#d.provider === 'codex' || this.#d.roster.list({ includeArchived: true }).some(e => e.provider === 'codex') || this.#d.events.hasProviderUsage('codex'); }
 
   /** When the reserve starts or ends: the coordinator is told once, and the screen hears. */
   checkReserve(): void {
@@ -239,7 +244,7 @@ export class Budget {
         coordinator.id,
         'reserve.changed',
         r.active
-          ? `Sahibinin kota payı devrede: kullanım %${used}, sınır %${r.limitPct}. Ofis yalnız öncelik 1 görevleri başlatıyor, boştakiler uyuyor; pencere açılınca kendiliğinden döner. Gerekirse öncelikleri yeniden sırala.`
+          ? `Sahibinin kota payı devrede: kullanım %${used}, sınır %${r.limitPct}. ${this.#hasCodex() ? 'Sınırına gelen sağlayıcının çalışanları yalnız öncelik 1 görevleri başlatıyor' : 'Ofis yalnız öncelik 1 görevleri başlatıyor'}, boştakiler uyuyor; pencere açılınca kendiliğinden döner. Gerekirse öncelikleri yeniden sırala.`
           : 'Sahibinin kota payı serbest kaldı: ofis normal çalışmaya döndü.',
       );
     }
@@ -307,13 +312,14 @@ export class Budget {
       `Kota: 5 saat ${pct(r.fiveHourPct)}, 7 gün ${pct(r.sevenDayPct)} (sahibinin payı %${c.ownerReservePct} → sınır %${r.limitPct})${r.active ? '. PAY DEVREDE: yalnız öncelik 1 görevler başlıyor.' : '.'}`,
       `Bu ay harcanan: ${money(s.month.usd)}${c.monthlyUsdCap !== null ? ` / sınır ${money(c.monthlyUsdCap)}` : ''}.`,
     ];
+    if (this.#hasCodex()) lines.push('Claude ve Codex kotaları ayrı izlenir. Codex para maliyeti bilinmiyor; USD toplamı yalnız bildirilen Claude kullanımını içerir. Sıfır kayıtlar ücretsiz kullanım anlamına gelmez.');
     const running = this.#d.plans.list().filter((p) => p.status === 'approved');
     if (running.length) {
       lines.push('Süren planlar:');
       for (const p of running) {
         const b = s.plans[p.id] ?? { spentUsd: 0, claudeUsd: 0 };
         lines.push(
-          `• “${p.title}”: para ${money(b.spentUsd)}${p.usd !== null ? ` / ${money(p.usd)}` : ''} · Claude kullanımı ~${money(b.claudeUsd)}${p.quotaPct !== null ? ` · tahmini kota %${p.quotaPct}` : ''}`,
+          `• “${p.title}”: para ${money(b.spentUsd)}${p.usd !== null ? ` / ${money(p.usd)}` : ''} · Claude kullanımı ~${money(b.claudeUsd)}${this.#hasCodex() ? ' + Codex maliyeti bilinmiyor' : ''}${p.quotaPct !== null ? ` · tahmini kota %${p.quotaPct}` : ''}`,
         );
       }
     }
@@ -324,7 +330,7 @@ export class Budget {
       .filter((x) => x.usd > 0 || x.turns > 0 || x.side > 0)
       .sort((a, b) => b.usd - a.usd || b.turns - a.turns)
       .slice(0, 5);
-    const used = (x: (typeof top)[number]) => `${x.name} ~${money(x.usd)}, ${x.turns} tur${x.side ? ` + ${x.side} yan cevap` : ''}`;
+    const used = (x: (typeof top)[number]) => `${x.name} ~${money(x.usd)}${this.#hasCodex() ? ' bildirilen kullanım' : ''}, ${x.turns} tur${x.side ? ` + ${x.side} yan cevap` : ''}`;
     if (top.length) lines.push(`Bugün en çok kullananlar: ${top.map(used).join('; ')}.`);
     return lines.join('\n');
   }

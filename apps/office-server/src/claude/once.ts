@@ -30,7 +30,7 @@ export function runOnce(o: OnceOptions): Promise<OnceResult> {
   if (!command) return Promise.resolve(fail('claude komutu boş'));
   if (o.signal?.aborted) return Promise.resolve(fail('iptal edildi'));
   return new Promise((resolve) => {
-    const child = spawn(command, [...prefix, ...o.args], { cwd: o.cwd, env: o.env ?? process.env });
+    const child = spawn(command, [...prefix, ...o.args], { cwd: o.cwd, env: o.env ?? process.env, windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), o.timeoutMs);

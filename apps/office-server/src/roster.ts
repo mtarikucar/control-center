@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { EMPLOYEE_KINDS, MODEL_ALIASES, type Employee, type EmployeeKind, type HireInput, type ModelAlias, type TemplateRef } from '@cc/shared';
+import { AGENT_PROVIDERS, EMPLOYEE_KINDS, MODEL_ALIASES, type AgentProvider, type Employee, type EmployeeKind, type HireInput, type ModelAlias, type TemplateRef } from '@cc/shared';
 import type { Db } from './db.ts';
 import { ConflictError, NotFoundError, ValidationError } from './errors.ts';
 
@@ -18,6 +18,8 @@ export function slugify(name: string): string {
 }
 
 interface Row {
+  provider?: AgentProvider;
+  provider_sessions?: string;
   id: string;
   slug: string;
   name: string;
@@ -43,6 +45,7 @@ interface Row {
 
 function fromRow(r: Row): Employee {
   return {
+    ...(r.provider ? { provider: r.provider } : {}),
     id: r.id,
     slug: r.slug,
     name: r.name,
@@ -91,6 +94,7 @@ export class Roster {
   }
 
   create(input: NewEmployee): Employee {
+    if (input.provider !== undefined && !(AGENT_PROVIDERS as readonly unknown[]).includes(input.provider)) throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     const role = typeof input.role === 'string' ? input.role.trim() : '';
     if (!name) throw new ValidationError('Ad boş olamaz.');
@@ -118,6 +122,7 @@ export class Roster {
     if (deskIndex < 0) throw new ConflictError(`Ofis dolu: ${this.#deskCount} masanın hepsi dolu.`);
 
     const employee: Employee = {
+      ...(input.provider ? { provider: input.provider } : {}),
       id: randomUUID(),
       slug: this.#uniqueSlug(slugify(name)),
       name,
@@ -149,12 +154,13 @@ export class Roster {
       columns.push('template', 'template_version');
       values.push(employee.template.id, employee.template.version);
     }
+    if (employee.provider) { columns.push('provider'); values.push(employee.provider); }
     if (employee.capabilities!.length > 0) {
       columns.push('capabilities');
       values.push(JSON.stringify(employee.capabilities));
     }
     this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
-    return employee;
+    return this.get(employee.id);
   }
 
   /** Slugs are unique across archived employees too, because desk folders are never deleted. */
@@ -205,6 +211,17 @@ export class Roster {
       this.#db.prepare('UPDATE employees SET capabilities = ? WHERE id = ?').run(patch.capabilities.length ? JSON.stringify(patch.capabilities) : null, id);
     }
     return next;
+  }
+
+  /** Save each provider's readiness independently; native transcripts remain in their own session stores. */
+  changeProvider(id: string, provider: AgentProvider): Employee {
+    const current = this.get(id);
+    const row = this.#db.prepare('SELECT provider_sessions FROM employees WHERE id = ?').get(id) as unknown as Row;
+    const sessions = JSON.parse(row.provider_sessions ?? '{}') as Record<string, number>;
+    sessions[current.provider ?? 'claude'] = current.sessionStarted ? 1 : 0;
+    this.#db.prepare('UPDATE employees SET provider = ?, provider_sessions = ?, session_started = ? WHERE id = ?')
+      .run(provider, JSON.stringify(sessions), sessions[provider] ?? 0, id);
+    return this.get(id);
   }
 
 }
