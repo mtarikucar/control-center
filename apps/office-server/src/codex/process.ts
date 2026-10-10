@@ -67,7 +67,7 @@ export class CodexProcess {
     const account = await this.#rpc.request('account/read', { refreshToken: false });
     if (account.requiresOpenaiAuth === true && !account.account) throw new Error('Önce codex login ile giriş yapın');
     const config = obj((await this.#rpc.request('config/read', { includeLayers: false })).config);
-    const overrides: Obj = { 'features.apps': false, 'features.multi_agent': false };
+    const overrides: Obj = { 'features.apps': false, 'features.multi_agent': false, 'features.image_generation': !this.#o.fork };
     // Claude's tool-deny and PreToolUse policies cannot govern Codex connectors. Expose only office tools until
     // connector policy has a native Codex implementation; inherited user/plugin connectors are disabled.
     for (const name of Object.keys(obj(config.mcp_servers))) overrides[`mcp_servers.${name}.enabled`] = false;
@@ -89,7 +89,7 @@ export class CodexProcess {
     };
     const saved = this.#o.fork ?? codexSession(this.#o.cwd);
     if (this.#o.requireSession && !saved) throw new Error('Codex oturum kaydı bulunamadı; hafızayı korumak için yeni oturum açılmadı');
-    const response = await this.#rpc.request(this.#o.fork ? 'thread/fork' : saved ? 'thread/resume' : 'thread/start', { ...params, ...(saved ? { threadId: saved } : {}), ...(this.#o.fork ? { ephemeral: true } : {}) });
+    const response = await this.#rpc.request(this.#o.fork ? 'thread/fork' : saved ? 'thread/resume' : 'thread/start', { ...params, ...(saved ? { threadId: saved } : {}), ...(this.#o.fork ? { ephemeral: true, excludeTurns: true } : {}) });
     this.#threadId = str(obj(response.thread).id);
     if (!this.#threadId) throw new Error('Codex oturum kimliği göndermedi');
     if (!this.#o.fork) {
@@ -100,6 +100,7 @@ export class CodexProcess {
     // Read the actual MCP catalog, not an assumed successful connection.
     const servers = await this.#rpc.request('mcpServerStatus/list', { threadId: this.#threadId, limit: 100 });
     const reported = (Array.isArray(servers.data) ? servers.data : []).map(obj);
+    if (this.#o.fork && reported.some((s) => Object.keys(obj(s.tools)).length > 0)) throw new Error('Yan soru oturumunda ofis araçları kapatılamadı');
     if (reported.some((s) => s.name !== 'office' && Object.keys(obj(s.tools)).length > 0)) throw new Error('Ofis dışındaki Codex bağlantıları kapatılamadı; çalışan başlatılmadı');
     const mcp = reported.filter((s) => s.name === 'office').map((raw) => {
       const s = obj(raw), tools = Object.keys(obj(s.tools));

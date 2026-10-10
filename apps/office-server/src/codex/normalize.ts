@@ -23,6 +23,15 @@ export function codexQuota(raw: unknown, rejected = false): OfficeEvent {
 export function codexItem(raw: unknown, completed: boolean): OfficeEvent[] {
   const i = obj(raw), id = str(i.id), type = str(i.type);
   if (type === 'agentMessage') return completed && str(i.text) ? [{ type: 'message.assistant', text: str(i.text) }] : [];
+  if (type === 'imageGeneration') {
+    if (!completed) return [{ type: 'tool.started', toolUseId: id, name: 'Imagegen', input: { prompt: str(i.revisedPrompt) } }];
+    const failed = i.status !== 'completed' || !!i.failure;
+    const path = str(i.savedPath), prompt = str(i.revisedPrompt);
+    // `result` can contain megabytes of base64. Keep media out of the event log and websocket replay.
+    const output = failed ? `Görsel üretilemedi: ${str(obj(i.failure).type) || str(i.status)}` : path ? `Görsel hazır: ${path}` : 'Görsel üretildi; bu Codex sürümü yerel dosya yolu bildirmedi.';
+    return [{ type: 'tool.finished', toolUseId: id, isError: failed, output },
+      ...(!failed && path ? [{ type: 'image.generated' as const, path, prompt }] : [])];
+  }
   let name: string, input: unknown;
   if (type === 'commandExecution') { name = 'Bash'; input = { command: i.command, cwd: i.cwd }; }
   else if (type === 'fileChange') { name = 'Edit'; input = i.changes; }

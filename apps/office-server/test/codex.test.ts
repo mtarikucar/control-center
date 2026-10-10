@@ -52,7 +52,7 @@ describe('Codex office integration', () => {
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).not.toContain('@office-guide.md');
     expect(codexSession(cwd)).toBe('codex-thread-1');
     const start = transcript(t.log).find(m => m.method === 'thread/start');
-    expect(start?.params).toMatchObject({ model: 'test-codex', sandbox: 'read-only', approvalPolicy: 'untrusted', approvalsReviewer: 'user', config: { 'mcp_servers.personal.enabled': false, 'plugins.test@plugin.enabled': false } });
+    expect(start?.params).toMatchObject({ model: 'test-codex', sandbox: 'read-only', approvalPolicy: 'untrusted', approvalsReviewer: 'user', config: { 'features.image_generation': true, 'mcp_servers.personal.enabled': false, 'plugins.test@plugin.enabled': false } });
     expect(t.engine.runtime()).toEqual({ provider: 'codex', mode: 'mixed', costAvailable: false });
   });
   it('delivers multiple messages once, accounts for per-turn tokens, and resumes the same native thread', async () => {
@@ -85,7 +85,7 @@ describe('Codex office integration', () => {
     const file = join(t.dataDir, 'desks', e.slug, CODEX_SESSION_FILE), original = readFileSync(file, 'utf8');
     expect(await t.engine.sideQuestion(e.id, 'durum')).toEqual({ ok: true, answer: 'echo:durum' });
     expect(readFileSync(file, 'utf8')).toBe(original);
-    expect(transcript(t.log).find(m => m.method === 'thread/fork')?.params).toMatchObject({ threadId: 'codex-thread-1', ephemeral: true });
+    expect(transcript(t.log).find(m => m.method === 'thread/fork')?.params).toMatchObject({ threadId: 'codex-thread-1', ephemeral: true, excludeTurns: true, config: { 'features.image_generation': false } });
     const handoff = await t.engine.openInTerminal(e.id);
     expect(handoff.command).toContain('codex resume'); expect(handoff.command).toContain('codex-thread-1');
   });
@@ -108,5 +108,15 @@ describe('Codex office integration', () => {
     expect(calls.map(c => c.tool_name)).toEqual(['Bash', 'Write']);
     await new Promise<void>(resolve => server.close(() => resolve()));
     expect((await turn(t, e.id, 'COMMAND')).events.some(s => s.event.type === 'message.assistant' && s.event.text === 'denied')).toBe(true);
+  });
+  it('records native images without base64 payloads and reports generation failures', () => {
+    const item = { type: 'imageGeneration', id: 'image-1', status: 'completed', savedPath: '/images/ugc.png', revisedPrompt: 'UGC photo', result: 'BASE64_MUST_NOT_ENTER_EVENT_LOG' };
+    expect(codexItem(item, false)).toMatchObject([{ type: 'tool.started', name: 'Imagegen' }]);
+    expect(codexItem(item, true)).toEqual([
+      { type: 'tool.finished', toolUseId: 'image-1', isError: false, output: 'Görsel hazır: /images/ugc.png' },
+      { type: 'image.generated', path: '/images/ugc.png', prompt: 'UGC photo' },
+    ]);
+    expect(codexItem({ ...item, failure: { type: 'usageLimitExceeded' } }, true)).toMatchObject([{ type: 'tool.finished', isError: true, output: 'Görsel üretilemedi: usageLimitExceeded' }]);
+    expect(codexItem({ ...item, savedPath: undefined }, true)).toHaveLength(1);
   });
 });

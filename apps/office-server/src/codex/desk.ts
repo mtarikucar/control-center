@@ -12,6 +12,7 @@ export function prepareCodexDesk(dataDir: string, e: Employee): string {
     .replaceAll(`@${BRIEF_FILE}`, readFileSync(join(cwd, BRIEF_FILE), 'utf8'))
     .replaceAll('@provider-handoff.md', existsSync(join(cwd, 'provider-handoff.md')) ? readFileSync(join(cwd, 'provider-handoff.md'), 'utf8') : '');
   writeFileSync(join(cwd, 'AGENTS.md'), `${role}\n\nBu ofis Codex ile çalışır. Model adları yerine çalışma düzeyleri kullanılır: haiku=düşük, sonnet=dengeli, opus=yüksek, fable=en yüksek (modelin desteklediği düzeylerde). Ofis araçları mcp__office__ önekiyle sunulur.\n`);
+  writeFileSync(join(cwd, 'AGENTS.md'), `\nGörsel istendiğinde mevcut yerleşik image_gen/imagegen aracını kullan; yalnız prompt yazmayı görsel teslimi sayma. Üretilen dosyanın gerçek mutlak yolunu taskFinish outputs listesine ekle; ofis arşivi dosyayı kendisi kopyalar, teslim için masaya ayrıca Copy-Item yapmak gerekmez. Araç kullanılamazsa gerçek hatayı bildir; API anahtarı arama veya sessizce ücretli bir servise geçme. Metin dosyalarını native apply_patch ile yaz; salt okunur shell yazımı yerine mevcut dosya onayı yolunu kullan.\n`, { flag: 'a' });
   return cwd;
 }
 

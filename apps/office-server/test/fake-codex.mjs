@@ -30,13 +30,14 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     case 'config/read': reply(m.id, { config: { model: 'test-codex', mcp_servers: { personal: { url: 'https://example.invalid' } }, plugins: { 'test@plugin': { enabled: true } } } }); break;
     case 'model/list': reply(m.id, { data: [{ id: 'test-codex', model: 'test-codex', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: ['low', 'medium', 'high'].map(reasoningEffort => ({ reasoningEffort })) }] }); break;
     case 'thread/start': case 'thread/resume': case 'thread/fork':
+      if (m.method === 'thread/fork' && p.ephemeral && !p.excludeTurns) { send({ id: m.id, error: { message: 'ephemeral paginated thread/fork requires excludeTurns: true' } }); break; }
       thread = m.method === 'thread/fork' ? 'codex-fork-1' : p.threadId ?? thread;
       if (m.method !== 'thread/start') {
         const saved = join(process.cwd(), `.fake-${p.threadId}.json`);
         if (existsSync(saved)) ({ turns, total } = JSON.parse(readFileSync(saved, 'utf8')));
       }
       reply(m.id, { thread: { id: thread }, model: p.model ?? 'test-codex' }); break;
-    case 'mcpServerStatus/list': reply(m.id, { data: [{ name: 'office', runtimeStatus: 'ready', tools: { taskFinish: {}, taskPark: {} }, authStatus: 'notLoggedIn' }] }); break;
+    case 'mcpServerStatus/list': reply(m.id, { data: thread === 'codex-fork-1' ? [] : [{ name: 'office', runtimeStatus: 'ready', tools: { taskFinish: {}, taskPark: {} }, authStatus: 'notLoggedIn' }] }); break;
     case 'account/rateLimits/read': reply(m.id, { rateLimits: { primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 2000000000 }, secondary: { usedPercent: 20, windowDurationMins: 10080, resetsAt: 2000100000 } } }); break;
     case 'turn/start': {
       const text = p.input[0].text;

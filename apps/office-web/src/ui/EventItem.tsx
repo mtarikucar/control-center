@@ -46,6 +46,14 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
           {time}
         </div>
       );
+    case 'image.generated': {
+      const src = `/api/employees/${encodeURIComponent(stored.employeeId ?? '')}/images/${stored.seq}`;
+      return <figure className="msg assistant">
+        <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="Codex tarafından üretilen görsel" loading="lazy" style={{ maxWidth: '100%', maxHeight: 220, objectFit: 'contain' }} /></a>
+        <figcaption>Codex · Imagegen · <a href={src} download>Görseli indir</a></figcaption>
+        {time}
+      </figure>;
+    }
     case 'tool.started':
       return (
         <div className="tool">

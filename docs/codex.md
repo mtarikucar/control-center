@@ -73,6 +73,25 @@ Veritabanı göçü v23 mevcut çalışanları Claude olarak korur; eski Claude 
 `employees.provider` çalışanın sağlayıcısını, `provider_sessions` her sağlayıcının oturumu açılıp açılmadığını
 tutar. Aynı şirket/veri klasöründe iki sağlayıcı kullanılabilir.
 
+## Yerleşik Imagegen
+
+Codex çalışanları kendi oturumlarının yerleşik `image_gen` / `imagegen` aracını kullanabilir.
+Ofis normal çalışan oturumlarında `features.image_generation` özelliğini açar; yalnız okuma amaçlı
+yan soru kopyalarında kapatır. Bu, kişisel MCP bağlantılarından ayrı bir Codex yeteneğidir ve
+ana Codex sohbetinden görsel kopyalanmasını gerektirmez. Hesabın ve kurulu Codex sürümünün desteği gerekir;
+gerçek üretim hataları ofis akışında gösterilir. API anahtarı ya da başka servise otomatik geçiş yapılmaz.
+
+Çalışandan fotoğraf istediğinde rolünde görsel üretimini yasaklayan eski bir talimat olmadığından emin ol.
+Koordinatör bu rolü `editRoleCard` ile değiştirebilir. Çalışan üretilen dosyanın gerçek yolunu
+`taskFinish.outputs` listesine ekler; mevcut teslim arşivi dosyayı saklar. Native `imageGeneration`
+olayında `savedPath` geldiğinde ofis sohbetinde önizleme ve indirme bağlantısı görünür. Görselin base64
+içeriği olay günlüğüne yazılmaz; yerel dosya yolu bildirmeyen sürümlerde metin durumu gösterilir.
+Önizleme yalnız kayda geçmiş PNG/JPEG/WebP çıktıları için sunulur.
+
+Kontrol edilen resmi kaynak: [Codex görsel üretimi](https://learn.chatgpt.com/docs/image-generation).
+Codex oturumunun modeli ve yerleşik araçları kullanılabilir; masaüstü uygulamasının bütün bağlantıları
+ve arayüz özellikleri ControlCenter'a kendiliğinden aktarılmış sayılmaz.
+
 ## Karma ekip ve koordinatörü değiştirmek
 
 Claude koordinatör `hire(provider: "codex", ...)` ile Codex çalışanı alabilir; Codex koordinatör de

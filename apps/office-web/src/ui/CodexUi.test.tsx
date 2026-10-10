@@ -12,6 +12,12 @@ beforeEach(() => useOffice.setState({ ...EMPTY_DATA, runtime: { provider: 'codex
 afterEach(() => { cleanup(); useOffice.setState({ ...EMPTY_DATA, runtime: undefined }); });
 
 describe('Codex office UI', () => {
+  it('previews native generations through the recorded employee event, not a raw filesystem URL', () => {
+    render(<EventItem stored={{ seq: 42, ts: 0, employeeId: 'employee-1', event: { provider: 'codex', type: 'image.generated', path: 'C:/private/generated.png', prompt: 'test' } }} />);
+    expect(screen.getByRole('img').getAttribute('src')).toBe('/api/employees/employee-1/images/42');
+    expect(screen.getByText('Görseli indir').getAttribute('href')).toBe('/api/employees/employee-1/images/42');
+    expect(screen.queryByText('C:/private/generated.png')).toBeNull();
+  });
   it('identifies the provider and offers Codex work levels instead of Claude model families', () => {
     render(<><TopBar /><HireDialog /></>);
     expect(screen.getByText('Claude + Codex')).toBeTruthy();

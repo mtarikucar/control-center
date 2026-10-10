@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { extname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type PlanView, type ServerMessage } from '@cc/shared';
@@ -182,6 +184,28 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     throw new UnsupportedMediaTypeError('İstek gövdesi application/json olmalı.');
   }
   if (method === 'GET' && url.pathname === '/api/office') return sendJson(res, 200, snapshot(d));
+  const generatedImage = /^\/api\/employees\/([0-9a-f-]{36})\/images\/([1-9][0-9]*)$/.exec(url.pathname);
+  if ((method === 'GET' || method === 'HEAD') && generatedImage) {
+    const seq = Number(generatedImage[2]);
+    const stored = Number.isSafeInteger(seq) ? d.events.list({ employeeId: generatedImage[1], after: seq - 1, limit: 1 })[0] : undefined;
+    if (stored?.seq !== seq || stored.event.type !== 'image.generated' || stored.event.provider !== 'codex') return sendJson(res, 404, { error: 'Görsel bulunamadı.' });
+    const path = stored.event.path;
+    // Serve only a recorded native generation, never a caller-supplied path or active formats such as SVG/HTML.
+    let fd: number | undefined;
+    try {
+      const st = statSync(path), head = Buffer.alloc(12), ext = extname(path).toLowerCase();
+      if (!st.isFile() || st.size > 100 * 1024 * 1024) throw new Error('not an image');
+      fd = openSync(path, 'r'); readSync(fd, head, 0, 12, 0);
+      const png = ext === '.png' && head.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      const jpeg = ['.jpg', '.jpeg'].includes(ext) && head[0] === 255 && head[1] === 216 && head[2] === 255;
+      const webp = ext === '.webp' && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WEBP';
+      if (!png && !jpeg && !webp) throw new Error('not an image');
+    } catch { return sendJson(res, 404, { error: 'Görsel dosyası bulunamadı.' }); }
+    finally { if (fd !== undefined) closeSync(fd); }
+    res.setHeader('x-content-type-options', 'nosniff');
+    if (sendFile(req, res, path)) return;
+    return sendJson(res, 404, { error: 'Görsel dosyası bulunamadı.' });
+  }
   if (method === 'POST' && url.pathname === '/api/employees') {
     const body = await readJson(req);
     if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
