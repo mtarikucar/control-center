@@ -34,7 +34,7 @@ describe('HireDialog', () => {
     fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'opus' } });
     fireEvent.change(screen.getByLabelText('Karakter'), { target: { value: 'designer' } });
     fireEvent.click(screen.getByRole('button', { name: 'İşe al' }));
-    await waitFor(() => expect(api.hire).toHaveBeenCalledWith({ name: 'Ece', role: 'Arayüz tasarımcısı', model: 'opus', characterId: 'designer' }));
+    await waitFor(() => expect(api.hire).toHaveBeenCalledWith({ name: 'Ece', role: 'Arayüz tasarımcısı', model: 'opus', provider: 'claude', characterId: 'designer' }));
     await waitFor(() => expect(useOffice.getState().hireOpen).toBe(false));
     expect(useOffice.getState().selectedId).toBe('new-id');
     // The panel must find the new employee at once, not say "not found" until the next snapshot.

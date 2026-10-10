@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { AGENT_PROVIDERS, type AgentProvider } from '@cc/shared';
 import type { Employee, HireInput, Lifecycle, ModelAlias, OfficeEvent, QuotaWindow, Usage } from '@cc/shared';
 import { sessionArgs, sideQuestionArgs, terminalCommand } from './claude/args.ts';
 import { normalize, replayedUuid, taskChange, usageSince } from './claude/normalize.ts';
 import { runOnce } from './claude/once.ts';
 import { ClaudeProcess } from './claude/process.ts';
+import { CodexProcess, codexSession } from './codex/process.ts';
+import { prepareCodexDesk, codexTerminalCommand } from './codex/desk.ts';
+import { runCodexOnce } from './codex/once.ts';
 import { deskDir, prepareDesk, writeDeskDeny } from './desk.ts';
 import { ConflictError, ValidationError } from './errors.ts';
 import type { EventStore } from './event-store.ts';
@@ -66,6 +72,9 @@ export interface EngineOptions {
   events: EventStore;
   dataDir: string;
   claudeCommand: string[];
+  provider?: 'claude' | 'codex';
+  codexCommand?: string[];
+  codexModel?: string;
   env?: NodeJS.ProcessEnv;
   home?: string;
   now?: () => number;
@@ -123,7 +132,7 @@ interface Pending {
 }
 
 interface Runtime {
-  proc: ClaudeProcess | null;
+  proc: ClaudeProcess | CodexProcess | null;
   turnActive: boolean;
   expectingExit: boolean;
   crashes: number[];
@@ -180,6 +189,9 @@ export class Engine {
   readonly #events: EventStore;
   readonly #dataDir: string;
   readonly #command: string[];
+  readonly #provider: 'claude' | 'codex';
+  readonly #codexCommand: string[];
+  readonly #codexModel: string | undefined;
   readonly #env: NodeJS.ProcessEnv | undefined;
   readonly #home: string | undefined;
   readonly #now: () => number;
@@ -202,6 +214,9 @@ export class Engine {
     this.#events = o.events;
     this.#dataDir = o.dataDir;
     this.#command = o.claudeCommand;
+    this.#provider = o.provider ?? 'claude';
+    this.#codexCommand = o.codexCommand ?? ['codex'];
+    this.#codexModel = o.codexModel;
     this.#env = o.env;
     this.#home = o.home;
     this.#now = o.now ?? Date.now;
@@ -218,8 +233,12 @@ export class Engine {
     this.#backgroundLimitMs = o.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
   }
 
+  runtime(): { provider: AgentProvider; mode: 'mixed'; model?: string; costAvailable: boolean } {
+    return { provider: this.#provider, mode: 'mixed', ...(this.#codexModel ? { model: this.#codexModel } : {}), costAvailable: !this.#roster.list().some(e => e.provider === 'codex') && !this.#events.hasProviderUsage('codex') };
+  }
+
   hire(input: NewEmployee): Employee {
-    const employee = this.#roster.create(input);
+    const employee = this.#roster.create({ ...input, provider: input.provider ?? this.#provider });
     this.#emit(employee.id, { type: 'employee.hired', name: employee.name });
     // Closed mode (B5): the desk's settings are in place before the first session opens and reads them.
     if (input.deskDeny?.length) writeDeskDeny(this.#dataDir, employee.slug, input.deskDeny);
@@ -389,6 +408,19 @@ export class Engine {
     }
   }
 
+  codexRequests(id: string) {
+    this.#roster.get(id);
+    const proc = this.#runtimes.get(id)?.proc;
+    return proc instanceof CodexProcess ? proc.requests() : [];
+  }
+
+  answerCodexRequest(id: string, requestId: string, action: string, content: unknown): void {
+    this.#roster.get(id);
+    const proc = this.#runtimes.get(id)?.proc;
+    if (!(proc instanceof CodexProcess)) throw new ConflictError('Etkin Codex oturumu bulunamadı.');
+    proc.answerRequest(requestId, action, content);
+  }
+
   async sideQuestion(id: string, text: string): Promise<{ ok: boolean; answer: string }> {
     const question = text.trim();
     if (!question) throw new ValidationError('Soru boş olamaz.');
@@ -402,7 +434,11 @@ export class Engine {
     this.#sideRuns.add(abort);
     let result: Awaited<ReturnType<typeof runOnce>>;
     try {
-      result = await runOnce({
+      if (employee.provider === 'codex') {
+        const cwd = prepareCodexDesk(this.#dataDir, employee), fork = codexSession(cwd);
+        if (!fork) throw new ConflictError('Codex oturumu henüz hazır değil.');
+        result = await runCodexOnce({ command: this.#codexCommand, cwd, env: sessionEnv(this.#env ?? process.env), model: this.#codexModel, preset: employee.model, fork, instructions: 'Bu bir yan soru kopyasıdır. Asıl oturum çalışmaya devam eder. Kısaca yanıt ver; dosya değiştirme, iş yürütme ya da ofis araçlarını çağırma.', input, timeoutMs: this.#sideQuestionTimeoutMs, signal: abort.signal });
+      } else result = await runOnce({
         signal: abort.signal,
         command: this.#command,
         args: sideQuestionArgs({ model: employee.model, sessionId: employee.sessionId, home: this.#home }),
@@ -483,11 +519,14 @@ export class Engine {
       const employee = this.#roster.get(id);
       this.#assertReachable(employee);
       if (!employee.sessionStarted) throw new ConflictError('Bu çalışan henüz hiç konuşmadı; terminalde açılacak bir oturum yok.');
+      if (employee.provider === 'codex' && !codexSession(deskDir(this.#dataDir, employee.slug))) throw new ConflictError('Codex oturum kaydı bulunamadı; çalışan terminale alınmadı.');
       // The model its session ran on, kept in the log (it outlives an office restart): the work goes on on it (K1).
       const model = this.#sessionModel(employee, this.#runtime(id));
       await this.#halt(id);
       const updated = this.#setLifecycle(this.#roster.get(id), 'in_terminal', 'terminalde açıldı', model);
-      return { command: terminalCommand(deskDir(this.#dataDir, employee.slug), employee.sessionId), employee: updated };
+      const cwd = deskDir(this.#dataDir, employee.slug);
+      const command = employee.provider === 'codex' ? codexTerminalCommand(cwd, codexSession(cwd)!) : terminalCommand(cwd, employee.sessionId);
+      return { command, employee: updated };
     });
   }
 
@@ -537,6 +576,30 @@ export class Engine {
       return;
     }
     this.#reloadNow(id);
+  }
+
+  /** The owner can change a worker or coordinator once the current work has stopped. Each native history survives. */
+  async switchProvider(id: string, provider: AgentProvider): Promise<Employee> {
+    if (!(AGENT_PROVIDERS as readonly unknown[]).includes(provider)) throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
+    return this.#exclusive(id, async () => {
+      const employee = this.#roster.get(id), rt = this.#runtime(id);
+      this.#assertReachable(employee);
+      if (employee.lifecycle === 'in_terminal' || rt.turnActive || this.#jobsRunning(rt) || employee.lifecycle === 'working') throw new ConflictError('Sağlayıcıyı değiştirmeden önce çalışanı durdur veya terminalden ofise geri al.');
+      const from = employee.provider ?? 'claude';
+      if (from === provider) return employee;
+      const wasIdle = employee.lifecycle === 'idle';
+      await this.#halt(id);
+      const cwd = prepareDesk(this.#dataDir, employee);
+      const recent = this.#events.list({ employeeId: id, tail: true, limit: 100 }).filter(s => s.event.type === 'message.user' || s.event.type === 'message.assistant').slice(-20)
+        .map(s => `${s.event.type === 'message.user' ? 'Gelen mesaj' : 'Çalışan yanıtı'}: ${'text' in s.event ? s.event.text.slice(0, 3000) : ''}`).join('\n\n');
+      writeFileSync(join(cwd, 'provider-handoff.md'), `# Sağlayıcı devri: ${from} → ${provider}\n\nBu not önceki sağlayıcının son konuşmalarını aktarır. Görevlerin, teslimlerin, şirket notların ve dosyaların ortaktır; officeStatus, myTasks ve memorySearch ile güncel durumu kontrol et. Diğer sağlayıcının yerel sohbet geçmişi ayrı tutulur.\n\n${recent}\n`);
+      const changed = this.#roster.changeProvider(id, provider);
+      rt.totals = null; rt.crashes = []; rt.quotaStatus = ''; rt.windows = { fiveHour: null, sevenDay: null }; rt.limitAt = null; rt.failedModel = null;
+      this.#roster.update(id, { lifecycle: 'stopped', lastError: null, limitResetsAt: null });
+      this.#emit(id, { type: 'provider.changed', from, to: provider });
+      this.#emit(id, { type: 'lifecycle.changed', from: employee.lifecycle, to: 'stopped', reason: `${provider} seçildi` });
+      return wasIdle ? this.#start(this.#roster.get(id), `${provider} seçildi`) : this.#roster.get(changed.id);
+    });
   }
 
   #reloadNow(id: string): void {
@@ -604,6 +667,19 @@ export class Engine {
       : undefined;
     // The gate's hook asks the office with this session's own token (B9a).
     const gate = this.#gate && token ? this.#gate : undefined;
+    if (employee.provider === 'codex') {
+      rt.proc = new CodexProcess({
+        command: this.#codexCommand, cwd: prepareCodexDesk(this.#dataDir, employee), env: sessionEnv(this.#env ?? process.env),
+        preset: rt.model ?? employee.model, model: this.#codexModel, requireSession: employee.sessionStarted, instructions: 'Çalışan rolünü ve ofis kurallarını masandaki AGENTS.md dosyasından oku ve uygula.',
+        ...(this.#mcp && token ? { mcp: { url: this.#mcp.url(), token } } : {}),
+        ...(gate && token ? { gate: { url: gate.url(), token } } : {}),
+      }, {
+        onEvent: (event) => this.#onEvents(employee.id, [event]),
+        onAcknowledged: (uuid) => this.#acknowledged(employee.id, uuid),
+        onExit: (code, signal, stderr) => this.#onExit(employee.id, code, signal, stderr),
+      });
+      return this.#setLifecycle(this.#roster.get(employee.id), 'idle', reason);
+    }
     rt.proc = new ClaudeProcess(
       {
         command: this.#command,
@@ -620,15 +696,22 @@ export class Engine {
   }
 
   #onJson(id: string, raw: unknown): void {
-    const rt = this.#runtime(id);
     const acknowledged = replayedUuid(raw);
-    if (acknowledged) {
-      rt.unread = rt.unread.filter((m) => m.uuid !== acknowledged);
-      rt.consumedInTurn = true;
-    }
+    if (acknowledged) this.#acknowledged(id, acknowledged);
     const task = taskChange(raw);
     if (task) this.#onTask(id, task);
-    for (const event of normalize(raw)) {
+    this.#onEvents(id, normalize(raw));
+  }
+
+  #acknowledged(id: string, uuid: string): void {
+    const rt = this.#runtime(id);
+    rt.unread = rt.unread.filter((m) => m.uuid !== uuid);
+    rt.consumedInTurn = true;
+  }
+
+  #onEvents(id: string, events: OfficeEvent[]): void {
+    const rt = this.#runtime(id);
+    for (const event of events) {
       if (event.type === 'session.started' && !this.#roster.get(id).sessionStarted) this.#roster.update(id, { sessionStarted: true });
       // claude opened a turn by itself (to read what a background job left): work, as a turn the office opens is.
       if ((event.type === 'message.assistant' || event.type === 'tool.started') && !rt.turnActive) this.#ownTurn(id);
@@ -660,7 +743,7 @@ export class Engine {
   #totals(id: string): Totals {
     const rt = this.#runtime(id);
     if (!rt.totals) {
-      const last = this.#events.latest(id, 'turn.finished')?.event;
+      const last = this.#events.latest(id, 'turn.finished', this.#roster.get(id).provider ?? 'claude')?.event;
       rt.totals =
         last?.type === 'turn.finished' ? { usage: last.sessionUsage ?? NO_USAGE, costUsd: last.sessionCostUsd ?? 0 } : { usage: NO_USAGE, costUsd: 0 };
     }
@@ -801,7 +884,7 @@ export class Engine {
     const sinceSwitch = rt.sinceSwitch;
     rt.sinceSwitch = [];
     if (onTrial) this.#failedSwitch(id, this.#sessionModel(employee, rt), onTrial, tail || `süreç ilk turdan önce kapandı (kod ${code ?? '-'})`);
-    const message = `claude süreci beklenmedik şekilde kapandı (kod ${code ?? '-'}, sinyal ${signal ?? '-'}).${tail ? ` ${tail}` : ''}`;
+    const message = `${employee.provider ?? 'claude'} süreci beklenmedik şekilde kapandı (kod ${code ?? '-'}, sinyal ${signal ?? '-'}).${tail ? ` ${tail}` : ''}`;
     this.#emit(id, { type: 'error', message });
     if (rt.crashes.length >= 2) {
       const lost = onTrial ? sinceSwitch : unread;
@@ -938,7 +1021,7 @@ export class Engine {
   }
 
   #emit(id: string, event: OfficeEvent): void {
-    this.#events.append(id, event);
+    this.#events.append(id, this.#roster.get(id).provider === 'codex' ? { ...event, provider: 'codex' } : event);
   }
 
   #runtime(id: string): Runtime {

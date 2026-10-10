@@ -2,6 +2,7 @@ import { DEFAULT_CONSTITUTION, REVIEW_SEVERITY_LABELS, TASK_DIFFICULTY_LABELS, t
 import type { ModelHint, SendOptions } from '../engine.ts';
 import type { EventStore } from '../event-store.ts';
 import { coordinatorHint } from '../model-policy.ts';
+import type { AgentProvider } from '@cc/shared';
 import type { Roster } from '../roster.ts';
 import { BOARD_COVERS } from './board.ts';
 import type { Company } from './company.ts';
@@ -30,7 +31,7 @@ export interface DispatcherDeps {
   /** Runs work after the current event has been handled (default setImmediate), so sends never nest in an event. */
   defer?: (fn: () => void) => void;
   /** The owner's reserve and the constitution (absent: no reserve, no idle sleep). */
-  budget?: { reserveActive(): boolean; constitution(): Constitution; checkReserve(): void };
+  budget?: { reserveActive(provider?: AgentProvider): boolean; constitution(): Constitution; checkReserve(): void };
   now?: () => number;
   /** How often the reserve is re-checked and everyone swept again (the quota resets on its own clock). */
   tickMs?: number;
@@ -388,13 +389,14 @@ export class Dispatcher {
     }
   }
 
-  #reserve(): boolean {
-    return this.#d.budget?.reserveActive() ?? false;
+  #reserve(e?: Employee): boolean {
+    const coordinator = this.#d.company.coordinator();
+    return this.#d.budget?.reserveActive((e ?? coordinator)?.provider ?? 'claude') ?? false;
   }
 
   /** While the owner's share is kept, only urgent work and hand-overs start. */
   #mayStart(task: Task): boolean {
-    return !this.#reserve() || task.priority === 1 || task.kind === 'handover';
+    return !this.#reserve(this.#d.roster.get(task.assignee)) || task.priority === 1 || task.kind === 'handover';
   }
 
   /**
@@ -430,7 +432,7 @@ export class Dispatcher {
   /** Nothing to do: in the reserve members sleep at once; otherwise after the constitution's idle minutes. */
   #maybeSleep(e: Employee, focus: Task | null): void {
     if (focus) return;
-    if (this.#reserve() && e.kind !== 'coordinator') {
+    if (this.#reserve(e) && e.kind !== 'coordinator') {
       void this.#d.engine.sleep(e.id).catch(() => undefined);
       return;
     }

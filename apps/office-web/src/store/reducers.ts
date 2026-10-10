@@ -13,6 +13,8 @@ export interface EmployeeView {
 }
 
 export interface OfficeData {
+  runtime?: OfficeSnapshot['runtime'];
+  quotas?: OfficeSnapshot['quotas'];
   /** Last seq received over the live feed: the point a reconnect replays from. */
   lastSeq: number;
   /** Events up to this seq are already included in `usage` (it came from a snapshot taken at that seq). */
@@ -87,6 +89,8 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
   }
   const lastSeq = source === 'live' ? Math.max(d.lastSeq, s.lastSeq) : d.lastSeq;
   return {
+    runtime: s.runtime,
+    quotas: s.quotas,
     lastSeq,
     usageSeq: s.lastSeq,
     quota: s.quota,
@@ -155,9 +159,13 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   const ev = s.event;
   let quota = d.quota;
   if (ev.type === 'quota.updated') {
-    quota = { status: ev.status, fiveHour: ev.fiveHour ?? d.quota?.fiveHour ?? null, sevenDay: ev.sevenDay ?? d.quota?.sevenDay ?? null, updatedAt: s.ts };
+    if (ev.provider !== 'codex') quota = { status: ev.status, fiveHour: ev.fiveHour ?? d.quota?.fiveHour ?? null, sevenDay: ev.sevenDay ?? d.quota?.sevenDay ?? null, updatedAt: s.ts };
   }
   const next: OfficeData = { ...d, lastSeq: Math.max(d.lastSeq, s.seq), quota };
+  if (ev.type === 'quota.updated') {
+    const provider = ev.provider ?? 'claude', previous = d.quotas?.[provider] ?? (provider === 'claude' ? d.quota : null);
+    next.quotas = { ...d.quotas, [provider]: { status: ev.status, fiveHour: ev.fiveHour ?? previous?.fiveHour ?? null, sevenDay: ev.sevenDay ?? previous?.sevenDay ?? null, updatedAt: s.ts } };
+  }
   // Company records are global: keep them whatever the page knows about the employee the event is filed under.
   if (ev.type === 'task.changed') next.tasks = { ...d.tasks, [ev.task.id]: ev.task };
   if (ev.type === 'plan.changed') next.plans = { ...d.plans, [ev.plan.id]: withStreamStatus(ev.plan, d.plans[ev.plan.id], d.tasks) };
@@ -183,6 +191,10 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   let v: EmployeeView = { ...view, events: [...view.events, s].slice(-MAX_EVENTS) };
   let usage = d.usage;
   switch (ev.type) {
+    case 'provider.changed':
+      v = { ...v, employee: { ...v.employee, provider: ev.to, sessionStarted: false }, openTools: {} };
+      next.managementRev = d.managementRev + 1;
+      break;
     case 'lifecycle.changed':
       v = { ...v, employee: { ...v.employee, lifecycle: ev.to } };
       // Only a working employee runs tools; a crash or stop never reports the open ones finished.

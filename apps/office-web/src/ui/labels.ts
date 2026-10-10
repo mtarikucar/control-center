@@ -31,8 +31,11 @@ export const MODEL_LABELS: Record<ModelAlias, string> = {
   haiku: 'Haiku — hızlı ve ucuz',
 };
 
+export const CODEX_LABELS: Record<ModelAlias, string> = { haiku: 'Codex — düşük', sonnet: 'Codex — dengeli', opus: 'Codex — yüksek', fable: 'Codex — en yüksek' };
+export const modelLabels = (provider?: string): Record<ModelAlias, string> => provider === 'codex' ? CODEX_LABELS : MODEL_LABELS;
+
 /** A model's family name alone: “Opus”. */
-export const modelName = (m: ModelAlias): string => MODEL_LABELS[m].split(' — ')[0] ?? m;
+export const modelName = (m: ModelAlias, provider?: string): string => provider === 'codex' ? CODEX_LABELS[m] : MODEL_LABELS[m].split(' — ')[0] ?? m;
 
 export const KIND_LABELS: Record<EmployeeKind, string> = { coordinator: 'Koordinatör', lead: 'Ekip lideri', member: 'Çalışan' };
 

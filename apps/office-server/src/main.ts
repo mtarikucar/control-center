@@ -83,6 +83,7 @@ const engine = new Engine({
   // B9b: each session closes the employee's own list (the registry is built below; asked only when a session starts).
   sessionDeny: (e) => sessionDeny({ capabilities: e.capabilities ?? [], seen: integrations.seenToolNames(), closedServers: integrations.closedServers() }),
   roster, events, dataDir: config.dataDir, claudeCommand: config.claudeCommand, mcp: { url: () => mcpUrl, tokens },
+  provider: config.provider, codexCommand: config.codexCommand, codexModel: config.codexModel,
   // B9a: every session's hook asks the gate before a tool call (the constitution's gateEnabled decides whether it holds).
   gate: { url: () => gateUrl, hook: gateHookCommand() },
   cacheTtlMinutes: () => budget.constitution().cacheTtlMinutes,
@@ -130,7 +131,8 @@ const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, bu
 const cycle = new ManagementCycle({ events, state, company, roster, tasks, budget, clock, board: (o) => buildBoard(boardDeps, o) });
 // B12: each task message carries what the memory holds for it (the index read, no memory.searched event).
 // The owner's weekly line (constitution weeklyStopPct): the office pauses itself when the week's quota reaches it.
-const quotaStop = new QuotaStop({ quota, constitution: () => budget.constitution(), company, state, notices });
+const quotaStops = (['claude', 'codex'] as const).map(provider => new QuotaStop({ provider, quota: { state: () => quota.state(provider) }, constitution: () => budget.constitution(), company, state, notices }));
+const quotaStop = { check: () => quotaStops.forEach(stop => stop.check()) };
 const dispatcher = new Dispatcher({ events, roster, tasks, notices, plans, company, engine, budget, pulse, clock, kpis, quotaStop, related: (task) => relatedMemory(searchIndex, task), precheck, cycle });
 
 // How the work went (B4): read from the log on demand, the last `days` or all time.
@@ -178,7 +180,7 @@ api.server.listen(config.port, config.host, () => {
   stopDispatcher = dispatcher.start();
   stopClock = clock.start();
   budget.watch();
-  console.log(`office-server hazır: http://${config.host}:${port}  (veri: ${config.dataDir})`);
+  console.log(`office-server hazır: http://${config.host}:${port}  (Claude + Codex; yeni çalışan varsayılanı: ${config.provider}, veri: ${config.dataDir})`);
 });
 
 let closing = false;

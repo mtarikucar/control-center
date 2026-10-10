@@ -2,17 +2,20 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { MODEL_ALIASES, type BudgetSummary, type Constitution } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
-import { PLAN_STATUS_LABELS } from './labels.ts';
+import { PLAN_STATUS_LABELS, modelLabels } from './labels.ts';
 
 const money = (n: number) => `$${Math.round(n * 100) / 100}`;
 const pct = (p: number | null) => (p === null ? '—' : `%${p}`);
 
 /** Where the money and the quota go (spec §6): live from the store, refreshed every 15 s while open. */
 export function BudgetTab() {
+  const runtime = useOffice((s) => s.runtime);
   const stored = useOffice((s) => s.budget);
   const plans = useOffice((s) => s.plans);
   const views = useOffice((s) => s.views);
   const usage = useOffice((s) => s.usage);
+  const quotas = useOffice((s) => s.quotas);
+  const incompleteCost = runtime?.costAvailable === false || Object.values(views).some(v => v.employee.provider === 'codex');
   const [fresh, setFresh] = useState<BudgetSummary | null>(null);
   useEffect(() => {
     let alive = true;
@@ -29,17 +32,18 @@ export function BudgetTab() {
   const shown = Object.values(plans)
     .filter((p) => p.status === 'approved' || p.status === 'done')
     .sort((x, y) => y.updatedAt - x.updatedAt);
-  const teams = new Map<string, { usd: number; turns: number }>();
+  const teams = new Map<string, { usd: number; turns: number; codex: boolean }>();
   for (const v of Object.values(views)) {
     if (v.employee.lifecycle === 'archived') continue;
     const team = v.employee.team || 'Ekipsiz';
     const today = usage[v.employee.id]?.today;
-    const sum = teams.get(team) ?? { usd: 0, turns: 0 };
-    teams.set(team, { usd: sum.usd + (today?.costUsd ?? 0), turns: sum.turns + (today?.turns ?? 0) });
+    const sum = teams.get(team) ?? { usd: 0, turns: 0, codex: false };
+    teams.set(team, { usd: sum.usd + (today?.costUsd ?? 0), turns: sum.turns + (today?.turns ?? 0), codex: sum.codex || v.employee.provider === 'codex' });
   }
   const cap = b.constitution.monthlyUsdCap;
   return (
     <div className="budget">
+      {incompleteCost && <p className="muted">USD tutarları bildirilen Claude kullanımını içerir; Codex para maliyetini bildirmez. Dış harcamalar ayrıca kaydedilir.</p>}
       {b.reserve.active && (
         <p className="reserve-banner" role="status">
           Sahibinin payı korunuyor: kullanım %{Math.max(b.reserve.fiveHourPct ?? 0, b.reserve.sevenDayPct ?? 0)}, sınır %{b.reserve.limitPct}. Ofis yalnız öncelik 1 işleri
@@ -48,6 +52,7 @@ export function BudgetTab() {
       )}
       <section aria-label="Kota">
         <h3>Kota</h3>
+        {quotas && Object.entries(quotas).map(([provider, q]) => <p key={provider}>{provider === 'codex' ? 'Codex' : 'Claude'}: 5 saat {q?.fiveHour ? pct(Math.round(q.fiveHour.utilization * 100)) : '—'} · 7 gün {q?.sevenDay ? pct(Math.round(q.sevenDay.utilization * 100)) : '—'}</p>)}
         <p>
           5 saat {pct(b.reserve.fiveHourPct)} · 7 gün {pct(b.reserve.sevenDayPct)} · sahibinin payı %{b.constitution.ownerReservePct} (sınır %{b.reserve.limitPct})
         </p>
@@ -83,7 +88,7 @@ export function BudgetTab() {
                     <td>{p.title}</td>
                     <td>{PLAN_STATUS_LABELS[p.status]}</td>
                     <td>{`${money(used.spentUsd)}${p.usd !== null ? ` / ${money(p.usd)}` : ''}`}</td>
-                    <td>{`~${money(used.claudeUsd)}`}</td>
+                    <td>{`~${money(used.claudeUsd)}${incompleteCost ? ' + Codex bilinmiyor' : ''}`}</td>
                     <td>{p.quotaPct !== null ? `%${p.quotaPct}` : '—'}</td>
                   </tr>
                 );
@@ -93,13 +98,13 @@ export function BudgetTab() {
         )}
       </section>
       <section aria-label="Ekipler">
-        <h3>Ekipler (bugün, Claude kullanımı)</h3>
+        <h3>Ekipler (bugün, bildirilen kullanım)</h3>
         <table>
           <tbody>
             {[...teams.entries()].map(([team, sum]) => (
               <tr key={team} aria-label={team}>
                 <td>{team}</td>
-                <td>{money(sum.usd)}</td>
+                <td>{`${money(sum.usd)}${sum.codex ? ' + Codex bilinmiyor' : ''}`}</td>
                 <td>{`${sum.turns} tur`}</td>
               </tr>
             ))}
@@ -170,6 +175,7 @@ function draftOf(f: Field, c: Constitution): Array<[string, string]> {
 
 /** The owner's fixed limits; the server checks every value and says what is wrong. */
 export function ConstitutionTab() {
+  const provider = useOffice((s) => s.runtime?.provider);
   const current = useOffice((s) => s.budget?.constitution);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -256,13 +262,13 @@ export function ConstitutionTab() {
                   }}>
                   {MODEL_ALIASES.map((m) => (
                     <option key={m} value={m}>
-                      {m}
+                      {provider === 'codex' ? modelLabels(provider)[m] : m}
                     </option>
                   ))}
                 </select>
               </label>
             ))}
-            <small className="muted">{f.hint}</small>
+            <small className="muted">{provider === 'codex' ? f.hint.replaceAll('Claude', 'Codex') : f.hint}</small>
           </fieldset>
         ) : (
           <label key={f.key}>
@@ -278,7 +284,7 @@ export function ConstitutionTab() {
                   setDraft({ ...draft, [f.key]: e.target.value });
                 }} />
             )}
-            <small className="muted">{f.hint}</small>
+            <small className="muted">{provider === 'codex' ? f.key === 'cacheTtlMinutes' ? 'Son turdan sonra daha düşük çalışma düzeyine geçmeden önce bekleme süresi; Codex önbelleğinin süresini değiştirmez.' : f.hint.replaceAll('Claude', 'Codex') : f.hint}</small>
           </label>
         ),
       )}

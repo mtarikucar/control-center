@@ -7,6 +7,7 @@ import type { ModelAlias } from './employee.ts';
  */
 
 export interface BlueprintRole {
+  provider?: 'claude' | 'codex';
   /** Unique in the blueprint: a-z, 0-9, dashes. Routines and tasks name their doer and reviewer by it. */
   key: string;
   name: string;

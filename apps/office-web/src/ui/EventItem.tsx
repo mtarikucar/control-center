@@ -1,9 +1,10 @@
 import { APPROVAL_KIND_LABELS, APPROVAL_STATUS_LABELS, PROFILE_SPEC, reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, formatWhenTR, summarizeToolInput } from './format.ts';
-import { lifecycleLabel } from './labels.ts';
+import { lifecycleLabel, modelName } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 import { ApprovalCard } from './ApprovalCard.tsx';
+import { CodexRequestCard } from './CodexRequestCard.tsx';
 
 const PLAN_CHANGE: Record<PlanChange, string> = {
   proposed: 'önerildi',
@@ -28,8 +29,11 @@ const SCHEDULE_CHANGE: Record<ScheduleChange, string> = {
 
 export function EventItem({ stored }: { stored: StoredEvent }) {
   const e = stored.event;
+  const codex = e.provider === 'codex';
   const time = <time>{formatClock(stored.ts)}</time>;
   switch (e.type) {
+    case 'codex.request':
+      return <CodexRequestCard employeeId={stored.employeeId ?? ''} requestId={e.requestId} />;
     case 'message.user':
       return (
         <div className={`msg ${e.source}`}>
@@ -45,6 +49,14 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
           {time}
         </div>
       );
+    case 'image.generated': {
+      const src = `/api/employees/${encodeURIComponent(stored.employeeId ?? '')}/images/${stored.seq}`;
+      return <figure className="msg assistant">
+        <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="Codex tarafından üretilen görsel" loading="lazy" style={{ maxWidth: '100%', maxHeight: 220, objectFit: 'contain' }} /></a>
+        <figcaption>Codex · Imagegen · <a href={src} download>Görseli indir</a></figcaption>
+        {time}
+      </figure>;
+    }
     case 'tool.started':
       return (
         <div className="tool">
@@ -81,13 +93,16 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
     case 'turn.finished':
       return (
         <div className="note">
-          Tur bitti · {formatTokens(e.usage.inputTokens + e.usage.outputTokens)} · {formatCost(e.costUsd)}
+          Tur bitti · {formatTokens(e.usage.inputTokens + e.usage.outputTokens)}{codex ? ' · Codex' : ` · ${formatCost(e.costUsd)}`}
         </div>
       );
     case 'error':
       return <div className="note error">{e.message}</div>;
     case 'session.started': {
       const failed = e.mcp.filter((m) => m.status === 'failed');
+      if (codex) return <details className="note"><summary>Oturum başladı · {e.model} · {e.mcp.filter(m => m.status === 'connected').length} bağlantı hazır</summary>
+        {e.mcp.map(m => <div key={m.name}>{m.name}: {m.status === 'connected' ? `${m.tools ?? 0} araç hazır` : m.status === 'needs-auth' ? 'Giriş gerekiyor' : m.status === 'disabled' ? 'Codex ayarlarında kapalı' : 'Bağlantı açılamadı'}</div>)}
+      </details>;
       if (failed.length === 0) return null;
       return (
         <details className="note warn">
@@ -173,7 +188,9 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
     case 'spend.recorded':
       return <div className="note">{`Harcama: ${e.spend.service} $${e.spend.usd} — ${e.spend.purpose}`}</div>;
     case 'model.changed':
-      return <div className="note">{`Model: ${e.model}`}</div>;
+      return <div className="note">{`Model: ${codex ? modelName(e.model, 'codex') : e.model}`}</div>;
+    case 'provider.changed':
+      return <div className="note">{`Sağlayıcı: ${e.from === 'codex' ? 'Codex' : 'Claude'} → ${e.to === 'codex' ? 'Codex' : 'Claude'} · görevler ve dosyalar korundu`}</div>;
     case 'model.switch.failed':
       return <div className="note">{`Model geçişi olmadı (${e.to}): ${e.from} ile sürüyor. ${e.reason}`}</div>;
     case 'gate.checked':

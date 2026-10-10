@@ -74,6 +74,7 @@ interface CycleClose {
 
 /** The cycle the coordinator is in: from the board's delivery to the end of the turn that carried it. */
 interface OpenCycle {
+  provider?: 'claude' | 'codex';
   startedAt: number;
   since: number;
   triggers: CycleTrigger[];
@@ -264,7 +265,7 @@ export class ManagementCycle {
     this.#savePending(this.#pending().filter((t) => !o.triggers.some((x) => identical(x, t))));
     this.#d.state.set(KEY.lastStart, String(o.at));
     this.#d.state.set(KEY.unclosed, null);
-    this.#saveOpen({ startedAt: o.at, since: o.since, triggers: o.triggers, costUsd: null, close: null, model });
+    this.#saveOpen({ startedAt: o.at, since: o.since, triggers: o.triggers, costUsd: null, close: null, model, ...(this.#d.company.coordinator()?.provider === 'codex' ? { provider: 'codex' } : {}) });
     this.#d.events.append(this.#d.company.coordinator()?.id ?? null, { type: 'management.cycle.started', triggers: o.triggers, since: o.since, unclosedWarning: o.unclosedWarning });
   }
 
@@ -300,6 +301,7 @@ export class ManagementCycle {
     const record = this.#d.events.append(this.#d.company.coordinator()?.id ?? null, {
       type: 'management.cycle', closed: open.close !== null, startedAt: open.startedAt, endedAt, triggers: open.triggers, ...(open.close ?? { changes: [], reasoning: '', next: null }), costUsd: open.costUsd,
       model: open.model ?? null,
+      ...(open.provider ? { provider: open.provider } : {}),
     });
     // Where the turn ended in the log: what asks for a project start is looked for after it (the board's startAfter).
     this.#d.state.set(KEY.endSeq, String(record.seq));
@@ -343,11 +345,11 @@ export class ManagementCycle {
         if (ev.type !== 'management.cycle') return [];
         const { closed, startedAt, triggers, changes, reasoning, next, costUsd, model } = ev;
         // An older office's record has no end of its own: it was logged when its turn ended.
-        return [{ seq: e.seq, startedAt, endedAt: ev.endedAt === undefined ? e.ts : ev.endedAt, closed, triggers, changes, reasoning, next, costUsd, model }];
+        return [{ seq: e.seq, startedAt, endedAt: ev.endedAt === undefined ? e.ts : ev.endedAt, closed, triggers, changes, reasoning, next, costUsd, model, ...(ev.provider ? { provider: ev.provider } : {}) }];
       });
     return {
       generatedAt: this.#now(),
-      open: open ? { startedAt: open.startedAt, triggers: open.triggers, model: open.model ?? null, costUsd: open.costUsd, close: open.close } : null,
+      open: open ? { startedAt: open.startedAt, triggers: open.triggers, model: open.model ?? null, costUsd: open.costUsd, close: open.close, ...(open.provider ? { provider: open.provider } : {}) } : null,
       cycles,
     };
   }

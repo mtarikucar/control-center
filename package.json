@@ -7,6 +7,7 @@
   },
   "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "office:codex": "node scripts/office-codex.mjs",
     "office": "pnpm --filter @cc/office-web build && pnpm --filter @cc/office-server start",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",

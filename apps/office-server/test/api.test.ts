@@ -1,4 +1,6 @@
 import { request as httpRequest } from 'node:http';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { connect } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,6 +26,27 @@ async function start(o: { allowedHosts?: string[] } = {}) {
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
   return { s, port };
 }
+
+it('serves only recorded native raster images for the matching employee', async () => {
+  const { s, port } = await start();
+  const owner = s.roster.create({ name: 'Image owner', role: 'test' });
+  const other = s.roster.create({ name: 'Other owner', role: 'test' });
+  const path = join(s.dataDir, 'output.png');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==', 'base64');
+  writeFileSync(path, png);
+  const saved = s.events.append(owner.id, { type: 'image.generated', provider: 'codex', path, prompt: 'test' });
+  const url = `http://127.0.0.1:${port}/api/employees/${owner.id}/images/${saved.seq}`;
+  const response = await fetch(url);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('content-type')).toBe('image/png');
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+  expect((await fetch(url, { method: 'HEAD' })).status).toBe(200);
+  expect((await fetch(url.replace(owner.id, other.id))).status).toBe(404);
+  const message = s.events.append(owner.id, { type: 'message.assistant', text: path });
+  expect((await fetch(url.replace(`/images/${saved.seq}`, `/images/${message.seq}`))).status).toBe(404);
+  writeFileSync(path, '<html>not a PNG</html>');
+  expect((await fetch(url)).status).toBe(404);
+});
 
 interface Reply {
   status: number;

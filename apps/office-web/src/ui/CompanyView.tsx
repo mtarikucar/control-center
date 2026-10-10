@@ -35,6 +35,8 @@ const inColumn = (t: Task, status: TaskStatus) => t.status === status || (status
 const parkedLast = (t: Task) => (t.status === 'parked' ? 1 : 0);
 
 function NoCoordinator({ people }: { people: Employee[] }) {
+  const defaultProvider = useOffice(s => s.runtime?.provider ?? 'claude');
+  const [provider, setProvider] = useState<'claude' | 'codex'>(defaultProvider);
   const [pick, setPick] = useState('');
   const [error, setError] = useState<string | null>(null);
   const run = async (work: () => Promise<unknown>) => {
@@ -49,7 +51,10 @@ function NoCoordinator({ people }: { people: Employee[] }) {
     <div className="company-banner">
       <p>Şirketin koordinatörü yok. Koordinatör seninle plan konuşur, gerekirse işe alır ve işleri dağıtır.</p>
       <div className="row">
-        <button type="button" className="primary" onClick={() => void run(() => api.hireCoordinator())}>
+        <select aria-label="Koordinatörün sağlayıcısı" value={provider} onChange={ev => setProvider(ev.target.value as 'claude' | 'codex')}>
+          <option value="claude">Claude</option><option value="codex">Codex</option>
+        </select>
+        <button type="button" className="primary" onClick={() => void run(() => api.hireCoordinator(provider))}>
           Koordinatör işe al
         </button>
         {people.length > 0 && (
@@ -84,6 +89,7 @@ function PersonCard({ e, current, onOpen }: { e: Employee; current: Task | undef
   return (
     <button type="button" className="org-card" onClick={onOpen}>
       <strong>{e.name}</strong>
+      <span className="badge model">{e.provider === 'codex' ? 'Codex' : 'Claude'}</span>
       {title && <span className="muted"> — {title}</span>}
       {badge && <span className="badge">{badge}</span>}
       <span className={`dot ${e.lifecycle}`} aria-hidden="true" />

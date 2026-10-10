@@ -3,9 +3,11 @@ import { MODEL_ALIASES, type ModelAlias } from '@cc/shared';
 import { VOXEL_CHARACTER, characterAssets } from '../assets/manifest.ts';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
-import { MODEL_LABELS } from './labels.ts';
+import { modelLabels } from './labels.ts';
 
 export function HireDialog() {
+  const defaultProvider = useOffice((s) => s.runtime?.provider ?? 'claude');
+  const [provider, setProvider] = useState<'claude' | 'codex'>(defaultProvider);
   const manifest = useOffice((s) => s.manifest);
   const setHireOpen = useOffice((s) => s.setHireOpen);
   const select = useOffice((s) => s.select);
@@ -23,7 +25,7 @@ export function HireDialog() {
     setError(null);
     setBusy(true);
     try {
-      const hired = await api.hire({ name, role, model, characterId: character });
+      const hired = await api.hire({ name, role, model, provider, characterId: character });
       setHireOpen(false);
       admit(hired);
       select(hired.id);
@@ -48,11 +50,17 @@ export function HireDialog() {
         </div>
         <div className="row">
           <div className="field">
-            <label htmlFor="hire-model">Model</label>
+            <label htmlFor="hire-provider">Sağlayıcı</label>
+            <select id="hire-provider" value={provider} onChange={e => setProvider(e.target.value as 'claude' | 'codex')}>
+              <option value="claude">Claude</option><option value="codex">Codex</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="hire-model">{provider === 'codex' ? 'Çalışma düzeyi' : 'Model'}</label>
             <select id="hire-model" value={model} onChange={(e) => setModel(e.target.value as ModelAlias)}>
               {MODEL_ALIASES.map((m) => (
                 <option key={m} value={m}>
-                  {MODEL_LABELS[m]}
+                  {modelLabels(provider)[m]}
                 </option>
               ))}
             </select>

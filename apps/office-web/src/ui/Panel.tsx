@@ -3,7 +3,7 @@ import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { EventItem } from './EventItem.tsx';
 import { formatCost, formatTokens, tokensOf } from './format.ts';
-import { canResume, canStop, lifecycleLabel, limitNote } from './labels.ts';
+import { canResume, canStop, lifecycleLabel, limitNote, modelName } from './labels.ts';
 import { AgendaSection } from './AgendaTab.tsx';
 import { EmployeeFileSection } from './EmployeeFile.tsx';
 import { FireControls } from './FireControls.tsx';
@@ -50,6 +50,7 @@ export function Panel({ id }: { id: string }) {
     );
   }
   const e = view.employee;
+  const provider = e.provider ?? 'claude';
   const note = limitNote(e, Date.now());
 
   const run = async (work: () => Promise<unknown>) => {
@@ -80,17 +81,24 @@ export function Panel({ id }: { id: string }) {
           <h2>{e.name}</h2>
           <span className={`badge ${e.lifecycle}`}>{lifecycleLabel(e.lifecycle)}</span>
           {note && <span className="muted"> {note}</span>}
-          <span className="muted"> {e.model}</span>
+          <span className="muted"> {provider === 'codex' ? modelName(e.model, 'codex') : `Claude · ${e.model}`}</span>
         </div>
         <button type="button" className="icon" aria-label="Paneli kapat" onClick={() => select(null)}>
           ×
         </button>
       </header>
       <p className="role">{e.role}</p>
+      <div className="field">
+        <label htmlFor={`provider-${id}`}>{e.kind === 'coordinator' ? 'Koordinatörün sağlayıcısı' : 'Çalışanın sağlayıcısı'}</label>
+        <select id={`provider-${id}`} value={provider} disabled={busy || ['working', 'starting', 'in_terminal'].includes(e.lifecycle)} onChange={ev => void run(() => api.switchProvider(id, ev.target.value as 'claude' | 'codex'))}>
+          <option value="claude">Claude</option><option value="codex">Codex</option>
+        </select>
+        {e.lifecycle === 'working' && <small className="muted">Sağlayıcıyı değiştirmek için önce durdur.</small>}
+      </div>
       <p className="usage">Oturum {e.sessionId}</p>
       <p className="usage">
-        Bugün {formatTokens(tokensOf(usage?.today))} · {formatCost(usage?.today.costUsd ?? 0)} — toplam {formatTokens(tokensOf(usage?.total))} ·{' '}
-        {formatCost(usage?.total.costUsd ?? 0)}
+        Bugün {formatTokens(tokensOf(usage?.today))}{provider === 'codex' ? '' : ` · ${formatCost(usage?.today.costUsd ?? 0)} bildirilen`} — toplam {formatTokens(tokensOf(usage?.total))}
+        {provider === 'codex' ? ' · Codex para maliyeti bildirmiyor' : ` · ${formatCost(usage?.total.costUsd ?? 0)} bildirilen`}
       </p>
       <div className="actions">
         {canStop(e.lifecycle) && (

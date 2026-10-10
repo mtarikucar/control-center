@@ -19,6 +19,7 @@ const SECTIONS = ['### Sorumlulukların', '### Nasıl çalışırsın', '### Bit
  * section is refused.
  */
 export function parseRoleTemplate(id: string, text: string): RoleTemplate {
+  text = text.replaceAll('\r\n', '\n');
   const fail = (why: string) => new ValidationError(`Rol şablonu ${id}: ${why}`);
   const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
   if (!match) throw fail('ön bilgi bloğu yok (--- ile başlayıp --- ile bitmeli).');

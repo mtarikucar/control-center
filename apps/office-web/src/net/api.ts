@@ -67,6 +67,8 @@ export function resetOwnerNonce(): void {
 }
 
 export const api = {
+  codexRequests: (id: string) => request<Array<{ id: string; method: string; params: Record<string, unknown> }>>('GET', `${employee(id)}/codex-requests`),
+  answerCodexRequest: (id: string, requestId: string, action: string, content?: unknown) => request('POST', `${employee(id)}/codex-requests`, { requestId, action, content }),
   office: () => request<OfficeSnapshot>('GET', '/api/office'),
   hire: (input: HireInput) => request<Employee>('POST', '/api/employees', input),
   approvePlan: (id: string) => request<Plan>('POST', `/api/plans/${encodeURIComponent(id)}/approve`),
@@ -76,7 +78,8 @@ export const api = {
   pauseCompany: () => request<{ paused: boolean }>('POST', '/api/company/pause'),
   resumeCompany: () => request<{ paused: boolean }>('POST', '/api/company/resume'),
   appointCoordinator: (employeeId: string) => request<Employee>('POST', '/api/company/coordinator', { employeeId }),
-  hireCoordinator: () => request<Employee>('POST', '/api/company/coordinator/hire'),
+  hireCoordinator: (provider?: 'claude' | 'codex') => request<Employee>('POST', '/api/company/coordinator/hire', { provider }),
+  switchProvider: (id: string, provider: 'claude' | 'codex') => request<Employee>('POST', `/api/employees/${id}/provider`, { provider }),
   /** Without `now` the company first asks for a hand-over and answers with that task; `now` fires at once (null). */
   fire: (id: string, now = false) => request<{ handover: Task } | null>('DELETE', `${employee(id)}${now ? '?now=1' : ''}`),
   employeeFile: (id: string) => request<EmployeeFile>('GET', `${employee(id)}/file`),

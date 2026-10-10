@@ -1,7 +1,7 @@
 import type { Approval, ApprovalChange, ApprovalKind } from './approval.ts';
 import type { BudgetSummary, Spend } from './budget.ts';
 import type { ClockStatus, CycleTrigger, Goal, GoalChange, Plan, PlanChange, PlanView, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
-import type { Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
+import type { AgentProvider, Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Integration } from './integration.ts';
 import type { Decision } from './memory.ts';
 import type { Onboarding, OnboardingChange, OnboardingRound } from './onboarding.ts';
@@ -22,7 +22,8 @@ export interface QuotaWindow {
   resetsAt: number;
 }
 
-export type OfficeEvent =
+export type OfficeEvent = { provider?: AgentProvider } & (
+  | { type: 'provider.changed'; from: AgentProvider; to: AgentProvider }
   | { type: 'employee.hired'; name: string }
   | { type: 'employee.fired' }
   /** `tools`: how many of the server's tools the session has (sessions from before carry none). */
@@ -47,6 +48,9 @@ export type OfficeEvent =
     }
   | { type: 'message.user'; text: string; source: 'owner' | 'system' }
   | { type: 'message.assistant'; text: string }
+  | { type: 'image.generated'; path: string; prompt: string }
+  /** Request contents and owner responses stay in the live process, not the event log. */
+  | { type: 'codex.request'; requestId: string }
   | { type: 'tool.started'; toolUseId: string; name: string; input: unknown }
   | { type: 'tool.finished'; toolUseId: string; isError: boolean; output: string }
   | { type: 'side.question'; text: string }
@@ -144,7 +148,7 @@ export type OfficeEvent =
    * A tool call the gate held (B9a): denied, or let through on an approval. Calls the gate does not hold leave no event.
    * `kind` and `target` are of the first part that held it (a Bash line may hold more than one).
    */
-  | { type: 'gate.checked'; tool: string; kind: ApprovalKind; target: string; decision: 'allow' | 'deny'; approvalId: string | null };
+  | { type: 'gate.checked'; tool: string; kind: ApprovalKind; target: string; decision: 'allow' | 'deny'; approvalId: string | null });
 
 export type OwnerRequestMark = 'owner-endpoint, origin-less' | 'owner-endpoint, nonce-less' | 'owner-endpoint, no fetch metadata';
 
@@ -173,6 +177,9 @@ export interface QuotaState {
 }
 
 export interface OfficeSnapshot {
+  /** Provider here is only the default for new hires. Employees select theirs independently. */
+  runtime?: { provider: AgentProvider; mode?: 'mixed'; model?: string; costAvailable: boolean };
+  quotas?: Partial<Record<AgentProvider, QuotaState | null>>;
   employees: Employee[];
   quota: QuotaState | null;
   usage: Record<string, EmployeeUsage>;

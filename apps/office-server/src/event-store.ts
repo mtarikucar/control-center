@@ -1,4 +1,4 @@
-import type { OfficeEvent, OfficeEventType, StoredEvent } from '@cc/shared';
+import type { AgentProvider, OfficeEvent, OfficeEventType, StoredEvent } from '@cc/shared';
 import type { Db } from './db.ts';
 
 export type EventListener = (event: StoredEvent) => void;
@@ -55,10 +55,10 @@ export class EventStore {
     return opts.tail ? events.reverse() : events;
   }
 
-  latest(employeeId: string, type: OfficeEventType): StoredEvent | null {
+  latest(employeeId: string, type: OfficeEventType, provider?: AgentProvider): StoredEvent | null {
     const row = this.#db
-      .prepare('SELECT seq, employee_id, ts, payload FROM events WHERE employee_id = ? AND type = ? ORDER BY seq DESC LIMIT 1')
-      .get(employeeId, type) as unknown as Row | undefined;
+      .prepare(`SELECT seq, employee_id, ts, payload FROM events WHERE employee_id = ? AND type = ?${provider ? " AND COALESCE(json_extract(payload, '$.provider'), 'claude') = ?" : ''} ORDER BY seq DESC LIMIT 1`)
+      .get(...(provider ? [employeeId, type, provider] : [employeeId, type])) as unknown as Row | undefined;
     return row ? toStored(row) : null;
   }
 
@@ -92,6 +92,10 @@ export class EventStore {
   lastSeq(): number {
     const row = this.#db.prepare('SELECT MAX(seq) AS s FROM events').get() as unknown as { s: number | null };
     return row.s ?? 0;
+  }
+
+  hasProviderUsage(provider: AgentProvider): boolean {
+    return !!this.#db.prepare("SELECT 1 FROM events WHERE type IN ('turn.finished', 'side.answer') AND COALESCE(json_extract(payload, '$.provider'), 'claude') = ? LIMIT 1").get(provider);
   }
 
   subscribe(listener: EventListener): () => void {

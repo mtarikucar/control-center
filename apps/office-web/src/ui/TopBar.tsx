@@ -5,8 +5,10 @@ import { QuotaHud } from './QuotaHud.tsx';
 import { useMetrics } from './useMetrics.ts';
 
 export function TopBar() {
+  const runtime = useOffice((s) => s.runtime);
   const connected = useOffice((s) => s.connected);
   const quota = useOffice((s) => s.quota);
+  const codexQuota = useOffice((s) => s.quotas?.codex);
   const count = useOffice((s) => Object.keys(s.views).length);
   const setHireOpen = useOffice((s) => s.setHireOpen);
   const setCompanyOpen = useOffice((s) => s.setCompanyOpen);
@@ -24,10 +26,12 @@ export function TopBar() {
     <header className="topbar">
       <div className="brand">
         <span className="brand-name">control-center</span>
+        {runtime && <span className="badge model">Claude + Codex</span>}
         <span className={`conn ${connected ? 'on' : 'off'}`}>{connected ? 'canlı' : 'bağlantı yok'}</span>
         <span className="muted">{count} çalışan</span>
       </div>
-      <QuotaHud quota={quota} now={Date.now()} />
+      <QuotaHud quota={quota} now={Date.now()} label={runtime?.mode === 'mixed' ? 'Claude' : undefined} />
+      {codexQuota && <QuotaHud quota={codexQuota} now={Date.now()} label="Codex" />}
       {company && metrics && <MetricChips metrics={metrics} onOpen={() => setCompanyOpen(true, 'agenda')} />}
       {reserve && (
         <span className="badge reserve" title="Kota kullanımı sahibinin payına dayandı: ofis yalnız acil işleri başlatıyor.">
