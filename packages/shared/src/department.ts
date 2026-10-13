@@ -34,6 +34,8 @@ export interface Department {
   status: DepartmentStatus;
   createdAt: number;
   closedAt: number | null;
+  /** The room it works in (spec office rooms §4.1), 0–5: the lowest free one when it opened; null once closed (or none was free). */
+  room: number | null;
 }
 
 export type DepartmentChange = 'created' | 'updated' | 'head' | 'moved' | 'closed';

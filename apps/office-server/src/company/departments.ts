@@ -1,4 +1,4 @@
-import { MAX_DEPARTMENTS, OWNER, departmentOwner, type Department, type DepartmentChange, type DepartmentInput, type Employee, type Plan, type PlanStreamView } from '@cc/shared';
+import { MAX_DEPARTMENTS, OWNER, ROOM_COUNT, departmentOwner, type Department, type DepartmentChange, type DepartmentInput, type Employee, type Plan, type PlanStreamView } from '@cc/shared';
 import { writeDepartmentFile, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -16,6 +16,8 @@ export interface DepartmentsDeps {
   dataDir: string;
   /** Restarts a session so it reads its new card and tool list (Engine.reload); absent in tests that do not care. */
   reload?: (id: string) => void;
+  /** Walks someone to their seat after their department changed (Seating.reseat, spec office rooms §3); absent: seats stay. */
+  reseat?: (employeeId: string) => void;
 }
 
 /** What the company gives the departments once both exist (they need each other). */
@@ -115,6 +117,11 @@ export class Departments {
     return (head ? this.#person(head) : null) ?? this.#coordinator();
   }
 
+  /** The room someone works in: their open department's (spec office rooms §4.1); null: the centre, or a department with no room. */
+  roomOf(employeeId: string): number | null {
+    return this.of(employeeId)?.room ?? null;
+  }
+
   create(by: string, input: DepartmentInput): Department {
     this.#assertDirector(by);
     const open = this.list({ status: 'open' });
@@ -124,7 +131,7 @@ export class Departments {
     const mission = clean(input.mission?.trim() ? input.mission : template?.mission, 'Misyon', 600, true);
     const scope = clean(input.scope?.trim() ? input.scope : template ? templateScope(template) : '', 'Sınır', 8000, false);
     const head = input.headId ? this.#candidate(input.headId) : null;
-    let dep = this.#d.store.create({ name, mission, scope, template: template ? { id: template.id, version: template.version } : null, headId: null });
+    let dep = this.#d.store.create({ name, mission, scope, template: template ? { id: template.id, version: template.version } : null, headId: null, room: this.#freeRoom() });
     this.#emit(by, 'created', dep);
     this.#announce(by, `${name} departmanı açıldı${template ? ` (şablon ${template.id})` : ''}: ${firstSentence(mission)}`, head ? [head.id] : []);
     if (head) dep = this.setHead(by, dep.id, head.id);
@@ -260,15 +267,17 @@ export class Departments {
     const names = new Set(everyone.map((e) => fold(e.name)));
     const nameOf = (team: string) => (names.has(fold(team)) ? `${team.slice(0, 34).trimEnd()} ekibi` : team.trim());
     const people = everyone.filter((e) => e.kind !== 'coordinator' && !e.departmentId && e.team.trim());
-    for (const e of [...people].sort((a, b) => a.createdAt - b.createdAt)) {
+    // The rooms go in this order, so it is total: hired earlier first, the same millisecond by desk (the roster lists by desk, but the sort says it).
+    for (const e of [...people].sort((a, b) => a.createdAt - b.createdAt || a.deskIndex - b.deskIndex)) {
       let dep = this.find(nameOf(e.team));
       if (!dep) {
-        dep = this.#d.store.create({ name: nameOf(e.team), mission: `${e.team.trim()} ekibi (departmanlardan önceki ekipten); misyonunu departmentUpdate ile yaz.`, scope: '', template: null, headId: null });
+        dep = this.#d.store.create({ name: nameOf(e.team), mission: `${e.team.trim()} ekibi (departmanlardan önceki ekipten); misyonunu departmentUpdate ile yaz.`, scope: '', template: null, headId: null, room: this.#freeRoom() });
         this.#emit(OWNER, 'created', dep);
       }
       const asHead = e.kind === 'lead' && !dep.headId;
       if (asHead) dep = this.#d.store.update(dep.id, { headId: e.id });
       const adopted = this.#d.roster.update(e.id, { departmentId: dep.id, team: dep.name, kind: asHead ? 'lead' : 'member', reportsTo: asHead ? null : dep.headId });
+      this.#d.reseat?.(e.id);
       // The card names the team and the guide follows the kind; no notice and no restart (this runs at the start).
       if (adopted.kind !== e.kind || adopted.team !== e.team) writeRoleCard(this.#d.dataDir, adopted);
       touched.add(dep.id);
@@ -316,14 +325,25 @@ export class Departments {
     return e;
   }
 
-  /** Puts someone in a department (or the centre) as its head or a member, keeping the invariants (spec §3). */
+  /** Puts someone in a department (or the centre) as its head or a member, keeping the invariants (spec §3); their seat follows. */
   #place(e: Employee, dep: Department | null, head: boolean): Employee {
     if (e.kind === 'coordinator') {
       // Never into a department; one found in a department (the tools do not allow it) may still go to the centre, keeping their kind.
       if (dep) throw new ConflictError('Koordinatörün departmanı olmaz.');
-      return this.#d.roster.update(e.id, { departmentId: null, team: '', reportsTo: null });
+      this.#d.roster.update(e.id, { departmentId: null, team: '', reportsTo: null });
+    } else {
+      this.#d.roster.update(e.id, { departmentId: dep?.id ?? null, team: dep?.name ?? '', kind: head ? 'lead' : 'member', reportsTo: !dep || head ? null : dep.headId });
     }
-    return this.#d.roster.update(e.id, { departmentId: dep?.id ?? null, team: dep?.name ?? '', kind: head ? 'lead' : 'member', reportsTo: !dep || head ? null : dep.headId });
+    this.#d.reseat?.(e.id);
+    // Read again: the walk to the seat changed the desk.
+    return this.#d.roster.get(e.id);
+  }
+
+  /** The lowest room no open department has; null: none (a team adopted past the six rooms sits at the hub). */
+  #freeRoom(): number | null {
+    const used = new Set(this.list({ status: 'open' }).map((d) => d.room));
+    for (let room = 0; room < ROOM_COUNT; room += 1) if (!used.has(room)) return room;
+    return null;
   }
 
   /** A former head stays in the department as a member (true); a coordinator found heading one goes to the centre (false). */

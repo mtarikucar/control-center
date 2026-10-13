@@ -11,7 +11,7 @@ describe('DepartmentStore', () => {
     const a = store.create({ name: 'Pazarlama', mission: 'm', scope: 's', template: { id: 'pazarlama', version: 1 }, headId: null });
     now = 2000;
     const b = store.create({ name: 'Satış', mission: 'm2', scope: '', template: null, headId: 'e1' });
-    expect(a).toEqual({ id: a.id, name: 'Pazarlama', mission: 'm', scope: 's', template: { id: 'pazarlama', version: 1 }, headId: null, status: 'open', createdAt: 1000, closedAt: null });
+    expect(a).toEqual({ id: a.id, name: 'Pazarlama', mission: 'm', scope: 's', template: { id: 'pazarlama', version: 1 }, headId: null, status: 'open', createdAt: 1000, closedAt: null, room: null });
     expect(store.get(b.id)).toEqual(b);
     expect(store.list().map((d) => d.name)).toEqual(['Pazarlama', 'Satış']);
     expect(store.update(a.id, { name: 'Büyüme', headId: 'e2' })).toMatchObject({ name: 'Büyüme', headId: 'e2', mission: 'm', scope: 's', template: { id: 'pazarlama', version: 1 } });
@@ -20,6 +20,16 @@ describe('DepartmentStore', () => {
     expect(store.list({ status: 'open' }).map((d) => d.id)).toEqual([a.id]);
     expect(store.list({ status: 'closed' }).map((d) => d.id)).toEqual([b.id]);
     expect(() => store.get('yok')).toThrow(NotFoundError);
+  });
+
+  it('keeps a department’s room; closing gives it up (spec office rooms §4.1)', () => {
+    const s = setup();
+    const store = new DepartmentStore(s.db);
+    const a = store.create({ name: 'A', mission: 'm', scope: '', template: null, headId: null, room: 2 });
+    const b = store.create({ name: 'B', mission: 'm', scope: '', template: null, headId: null });
+    expect([a.room, b.room]).toEqual([2, null]);
+    expect(store.update(a.id, { name: 'A2' }).room).toBe(2);
+    expect(store.close(a.id).room).toBeNull();
   });
 
   it('lists departments opened at the same instant in opening order', () => {

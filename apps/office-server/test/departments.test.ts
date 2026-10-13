@@ -13,14 +13,16 @@ afterEach(() => {
   for (const c of cleanups.splice(0)) c();
 });
 
-function make() {
-  const s = setup(20);
+/** `now` (optional): one clock for the roster, the log and the departments, to hire and open things in the same millisecond. */
+function make(now?: () => number) {
+  const s = setup(20, now);
   cleanups.push(s.cleanup);
   const notices = new NoticeStore(s.db);
-  const store = new DepartmentStore(s.db);
+  const store = new DepartmentStore(s.db, now);
   const reloaded: string[] = [];
   const returned: string[] = [];
-  const departments = new Departments({ store, roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => reloaded.push(id) });
+  const reseated: string[] = [];
+  const departments = new Departments({ store, roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => reloaded.push(id), reseat: (id) => void reseated.push(id) });
   let streams: ReturnType<Parameters<Departments['attach']>[0]['openStreams']> = [];
   departments.attach({ openStreams: () => streams, headEnded: (id) => returned.push(id) });
   const hire = (name: string, extra: Partial<Employee> = {}) => {
@@ -33,7 +35,7 @@ function make() {
   const changes = () => s.events.list({ limit: 1000 }).filter((e) => e.event.type === 'department.changed').map((e) => (e.event as { change: string }).change);
   const departmentEvents = () =>
     s.events.list({ limit: 1000 }).flatMap((e) => (e.event.type === 'department.changed' ? [e.event as { change: string; department: Department }] : []));
-  return { ...s, notices, store, departments, reloaded, returned, hire, coordinator, pending, changes, departmentEvents, setStreams: (x: typeof streams) => (streams = x) };
+  return { ...s, notices, store, departments, reloaded, returned, reseated, hire, coordinator, pending, changes, departmentEvents, setStreams: (x: typeof streams) => (streams = x) };
 }
 
 describe('Departments — opening, heads and members (spec §3, §5.1)', () => {
@@ -385,8 +387,86 @@ describe('Departments — each desk knows its department (spec §5.4)', () => {
 
   it('departmentBlock: a custom department without a Yapmaz section still says who heads it', () => {
     const e = { id: 'e', name: 'Ada', kind: 'member', departmentId: 'd' } as Employee;
-    const text = departmentBlock(e, [{ id: 'd', name: 'Keşif', mission: 'Araştırır.', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null }], [e]);
+    const text = departmentBlock(e, [{ id: 'd', name: 'Keşif', mission: 'Araştırır.', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null, room: null }], [e]);
     expect(text).toMatch(/\*\*Keşif\*\* — Araştırır\.\n\nBaşkan: yok \(koordinatör yönetir\)\./);
     expect(text).not.toMatch(/Yapmadıkların/);
+  });
+});
+
+describe('Departments — rooms (spec office rooms §4.1)', () => {
+  it('review focus 2: a department gets the lowest free room; closing frees it for the next; two open never share one', () => {
+    const t = make();
+    const [a, b, c] = ['A', 'B', 'C'].map((name) => t.departments.create(OWNER, { name, mission: 'm' })) as [Department, Department, Department];
+    expect([a, b, c].map((d) => d.room)).toEqual([0, 1, 2]);
+    expect(t.departments.close(OWNER, b.id, 'bitti').room).toBeNull();
+    expect(t.departments.create(OWNER, { name: 'D', mission: 'm' }).room).toBe(1);
+    expect(t.departments.create(OWNER, { name: 'E', mission: 'm' }).room).toBe(3);
+    const rooms = t.departments.list({ status: 'open' }).map((d) => d.room);
+    expect(new Set(rooms).size).toBe(rooms.length);
+    // The page draws a room from department.changed: the event carries it.
+    const last = t.events.list({ limit: 1000 }).filter((e) => e.event.type === 'department.changed').at(-1)!.event as { department: { room: number } };
+    expect(last.department.room).toBe(3);
+  });
+
+  it('adopted teams get rooms in order; someone’s room is their open department’s, the centre and the coordinator none', () => {
+    const t = make();
+    const deniz = t.hire('Deniz', { team: 'Keşif' });
+    const mert = t.hire('Mert', { team: 'Geliştirme' });
+    const ada = t.hire('Ada');
+    t.departments.adoptTeams();
+    expect(t.departments.list().map((d) => [d.name, d.room])).toEqual([['Keşif', 0], ['Geliştirme', 1]]);
+    expect([deniz, mert, ada, t.coordinator].map((e) => t.departments.roomOf(e.id))).toEqual([0, 1, null, null]);
+  });
+
+  it('walks everyone whose department changed to their seat (reseat): made head, moved, closed out, adopted', () => {
+    const t = make();
+    const [a, b] = [t.hire('Ada'), t.hire('Bora')];
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm', headId: a.id });
+    expect(t.reseated).toEqual([a.id]);
+    t.departments.move(OWNER, b.id, x.id);
+    expect(t.reseated).toEqual([a.id, b.id]);
+    t.departments.close(OWNER, x.id, 'bitti');
+    expect(t.reseated.slice(2).sort()).toEqual([a.id, b.id].sort());
+    const c = t.hire('Cem', { team: 'Keşif' });
+    t.departments.adoptTeams();
+    expect(t.reseated.at(-1)).toBe(c.id);
+  });
+
+  it('adoption opens the rooms in one fixed order even when everyone was hired in the same millisecond: the hire order (the earlier desk)', () => {
+    const t = make(() => 7000);
+    const teams = ['Üretim', 'Lojistik', 'Destek', 'Satış'];
+    teams.forEach((team, i) => t.hire(`Kişi${i}`, { team }));
+    t.departments.adoptTeams();
+    const open = t.departments.list({ status: 'open' });
+    expect(open.map((d) => [d.name, d.room])).toEqual([['Üretim', 0], ['Lojistik', 1], ['Destek', 2], ['Satış', 3]]);
+    // The departments were opened in the same millisecond too: the list (created_at, rowid) agrees with the rooms.
+    expect(new Set(open.map((d) => d.createdAt))).toEqual(new Set([7000]));
+    expect(open.map((d) => d.room)).toEqual([0, 1, 2, 3]);
+    // And again: nothing is re-opened or re-numbered.
+    t.departments.adoptTeams();
+    expect(t.departments.list().map((d) => [d.name, d.room])).toEqual(open.map((d) => [d.name, d.room]));
+  });
+
+  it('adoption goes by when each person was hired, and a tie by desk; a desk moved later reorders only a tie', () => {
+    let now = 1000;
+    const t = make(() => now);
+    const first = t.hire('Birinci', { team: 'Keşif' });
+    now = 2000;
+    const second = t.hire('İkinci', { team: 'Geliştirme' });
+    const third = t.hire('Üçüncü', { team: 'Destek' });
+    // The first hire now holds the last desk, and the second the later one of the two hired in the same millisecond.
+    t.roster.setDesk(first.id, 10);
+    t.roster.setDesk(second.id, 12);
+    t.departments.adoptTeams();
+    expect(t.departments.list().map((d) => [d.name, d.room])).toEqual([['Keşif', 0], ['Destek', 1], ['Geliştirme', 2]]);
+    expect(t.departments.roomOf(third.id)).toBe(1);
+  });
+
+  it('a team adopted past the six rooms has none (it sits at the hub); the first six are numbered in order', () => {
+    const t = make(() => 9000);
+    const teams = ['A1', 'B2', 'C3', 'D4', 'E5', 'F6', 'G7'];
+    teams.forEach((team, i) => t.hire(`Kişi${i}`, { team }));
+    t.departments.adoptTeams();
+    expect(t.departments.list().map((d) => [d.name, d.room])).toEqual([['A1', 0], ['B2', 1], ['C3', 2], ['D4', 3], ['E5', 4], ['F6', 5], ['G7', null]]);
   });
 });

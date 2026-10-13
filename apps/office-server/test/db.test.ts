@@ -515,7 +515,7 @@ describe('migrations', () => {
     const before = columns(db, 'employees');
     expect(migrateUp(db, upTo(24))).toBe(24);
     expect(tables(db)).toEqual(V24_TABLES);
-    expect(columns(db, 'departments')).toEqual(['id', 'name', 'mission', 'scope', 'template', 'template_version', 'head_id', 'status', 'created_at', 'closed_at']);
+    expect(columns(db, 'departments')).toEqual(['id', 'name', 'mission', 'scope', 'template', 'template_version', 'head_id', 'status', 'created_at', 'closed_at', 'room']);
     expect(columns(db, 'stream_notes')).toEqual(['id', 'plan_id', 'stream_id', 'kind', 'text', 'evidence', 'next', 'by', 'at']);
     expect(columns(db, 'employees')).toEqual([...before, 'department_id']);
     // Schema only: the team stays a team until the office adopts it (Departments.adoptTeams).
@@ -523,7 +523,13 @@ describe('migrations', () => {
     expect(db.prepare("SELECT department_id FROM employees WHERE id = 'e1'").get()).toMatchObject({ department_id: null });
     db.prepare("INSERT INTO departments (id, name, created_at) VALUES ('d1', 'Keşif', 1)").run();
     expect(() => db.prepare("INSERT INTO departments (id, name, status, created_at) VALUES ('d2', 'X', 'gone', 1)").run()).toThrow();
+    // Office rooms (sub-project 2): a room is 0–5, and two open departments never share one; a closed one may keep its number.
+    db.prepare("INSERT INTO departments (id, name, created_at, room) VALUES ('d3', 'Y', 1, 0)").run();
+    expect(() => db.prepare("INSERT INTO departments (id, name, created_at, room) VALUES ('d4', 'Z', 1, 0)").run()).toThrow();
+    expect(() => db.prepare("INSERT INTO departments (id, name, created_at, room) VALUES ('d5', 'Z', 1, 6)").run()).toThrow();
+    db.prepare("INSERT INTO departments (id, name, status, created_at, room) VALUES ('d6', 'W', 'closed', 1, 0)").run();
     expect(migrateDown(db, 23)).toBe(23);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'departments_room'").get()).toBeUndefined();
     expect(tables(db)).toEqual(V23_TABLES);
     expect(columns(db, 'employees')).toEqual(before);
     expect(db.prepare("SELECT team FROM employees WHERE id = 'e1'").get()).toMatchObject({ team: 'Keşif' });

@@ -3,7 +3,7 @@ import type { Department, DepartmentStatus, StreamNote, StreamNoteKind } from '@
 import type { Db } from '../db.ts';
 import { NotFoundError } from '../errors.ts';
 
-export type NewDepartment = Pick<Department, 'name' | 'mission' | 'scope' | 'template' | 'headId'>;
+export type NewDepartment = Pick<Department, 'name' | 'mission' | 'scope' | 'template' | 'headId'> & { room?: number | null };
 export type DepartmentPatch = Partial<Pick<Department, 'name' | 'mission' | 'scope' | 'template' | 'headId'>>;
 export type NewStreamNote = Omit<StreamNote, 'id' | 'at'>;
 
@@ -18,12 +18,13 @@ interface DepartmentRow {
   status: string;
   created_at: number;
   closed_at: number | null;
+  room: number | null;
 }
 
 const department = (r: DepartmentRow): Department => ({
   id: r.id, name: r.name, mission: r.mission, scope: r.scope,
   template: r.template ? { id: r.template, version: r.template_version ?? 1 } : null,
-  headId: r.head_id, status: r.status as DepartmentStatus, createdAt: r.created_at, closedAt: r.closed_at,
+  headId: r.head_id, status: r.status as DepartmentStatus, createdAt: r.created_at, closedAt: r.closed_at, room: r.room ?? null,
 });
 
 /** The departments (spec 2026-10-13-departments §3): rows only; the invariants are the Departments service's. */
@@ -39,8 +40,8 @@ export class DepartmentStore {
   create(d: NewDepartment): Department {
     const id = randomUUID();
     this.#db
-      .prepare('INSERT INTO departments (id, name, mission, scope, template, template_version, head_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, d.name, d.mission, d.scope, d.template?.id ?? null, d.template?.version ?? null, d.headId, 'open', this.#now());
+      .prepare('INSERT INTO departments (id, name, mission, scope, template, template_version, head_id, status, created_at, room) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, d.name, d.mission, d.scope, d.template?.id ?? null, d.template?.version ?? null, d.headId, 'open', this.#now(), d.room ?? null);
     return this.get(id);
   }
 
@@ -68,9 +69,9 @@ export class DepartmentStore {
     return this.get(id);
   }
 
-  /** Closed for good: no head, no members (the service moves them first). */
+  /** Closed for good: no head, no members (the service moves them first), no room. */
   close(id: string): Department {
-    this.#db.prepare("UPDATE departments SET status = 'closed', closed_at = ?, head_id = NULL WHERE id = ?").run(this.#now(), id);
+    this.#db.prepare("UPDATE departments SET status = 'closed', closed_at = ?, head_id = NULL, room = NULL WHERE id = ?").run(this.#now(), id);
     return this.get(id);
   }
 }
