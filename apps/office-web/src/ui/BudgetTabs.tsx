@@ -164,12 +164,12 @@ const FIELDS: Field[] = [
   },
   {
     key: 'specialContacts', label: 'Özel kişiler', list: true,
-    hint: 'Satır başına bir girdi: e-posta, telefon numarası, kullanıcı adı ya da kişinin ya da firmanın adı (adlar bütün bir ifade olarak aranır; büyük-küçük harf ve telefonun yazılışı fark etmez). Girdisinde bunlardan biri geçen çağrı, politika ne olursa olsun her zaman sana gelir; mesajın sana ulaşması gereken kişi buraya yazılır.',
+    hint: 'Satır başına bir girdi: e-posta, telefon numarası, kullanıcı adı, kişinin ya da firmanın adı ya da kişinin aday/konuşma kimliği (adlar bütün bir ifade olarak aranır; büyük-küçük harf ve telefonun yazılışı fark etmez). Kapı açıkken, girdisinde bunlardan biri geçen çağrı — o kişiye giden ya da onu anan —, politika ne olursa olsun sana gelir. Kapı yalnız çağrının girdisine bakar: kimlikle adreslenen bir çağrıda (aday ya da konuşma kimliğiyle e-posta, mesaj, arama) kişiyi ancak kimliği listedeyse görür; adresini, telefonunu ve kimliklerini birlikte yaz.',
   },
   { key: 'sendsPerHour', label: 'Saatlik gönderim sınırı', hint: 'Bir departmanın (departmansız çalışanın kendi) son bir saatte sistemce geçen gönderim + yayın sayısı buna gelince sıradaki sana gelir; 0 = sistem hiç göndermez.' },
   { key: 'bulkRecipients', label: 'Toplu gönderim eşiği (alıcı)', hint: 'Bundan çok alıcılı (to, cc, bcc…) çağrı sana gelir.' },
   { key: 'callHours', label: 'Arama saatleri', hint: 'Sistem yalnız bu yerel saatler arasında arar (ör. 9, 19 = 09:00–19:00).', span: true },
-  { key: 'callsPerDay', label: 'Günlük arama sınırı', hint: 'Bir departmanın (departmansız çalışanın kendi) bugünkü sistem araması buna gelince sıradaki sana gelir.' },
+  { key: 'callsPerDay', label: 'Günlük arama sınırı', hint: 'Bir departmanın (departmansız çalışanın kendi) bugünkü sistem araması buna gelince sıradaki sana gelir; 0 = sistem hiç aramaz.' },
   { key: 'autonomy', label: 'Tam serbest', hint: 'Açıkken koordinatör hedef koyar ve planlarını sormadan başlatır; kapalıyken her plan senin onayını bekler.', toggle: true, choice: ['free', 'plans'] },
   { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
   { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre bu aralıkla yönetim turu açılır (dinlenirken açılmaz, dinlenme bitince bir tur açılır); 0 = hiç.' },
@@ -253,8 +253,10 @@ export function ConstitutionTab() {
         continue;
       }
       if (f.span) {
-        const hours = (draft[f.key] ?? '').split(/[\s,;–-]+/).filter(Boolean).map(Number);
-        if (hours.length !== 2 || hours.some((h) => !Number.isInteger(h))) {
+        const text = draft[f.key] ?? '';
+        const hours = text.split(/[\s,;–-]+/).filter(Boolean).map(Number);
+        // A dash between the two hours separates them; before the first it is a minus sign, which no hour has.
+        if (/^\s*[–-]/.test(text) || hours.length !== 2 || hours.some((h) => !Number.isInteger(h))) {
           setError(`${f.label}: iki tam saat girin (ör. 9, 19).`);
           setBusy(false);
           return;

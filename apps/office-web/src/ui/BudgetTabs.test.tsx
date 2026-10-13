@@ -27,6 +27,8 @@ const ada: Employee = {
 
 beforeEach(() =>
   useOffice.setState({
+    // The Codex test sets it: left over, every later test would read Codex's names.
+    runtime: undefined,
     budget: summary(),
     plans: { p1: plan },
     views: { ada: { employee: ada, events: [], openTools: {}, idleSince: null, eventsLoaded: true } },
@@ -198,7 +200,8 @@ describe('ConstitutionTab', () => {
 
   it('call hours: three hours, a fraction or a word are refused too; a dash or a space between the two reads', async () => {
     render(<ConstitutionTab />);
-    for (const bad of ['9, 12, 19', '9, 19.5', '9, akşam', '']) {
+    // A leading dash is a minus sign, not a separator: “-9, 19” is not the window 9–19.
+    for (const bad of ['9, 12, 19', '9, 19.5', '9, akşam', '', '-9, 19', ' –9 19', '-9-19']) {
       fireEvent.change(screen.getByLabelText('Arama saatleri'), { target: { value: bad } });
       await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
       expect(screen.getByRole('alert').textContent).toMatch(/Arama saatleri: iki tam saat girin/);
@@ -246,6 +249,12 @@ describe('ConstitutionTab', () => {
     expect([...(screen.getByLabelText('Gönderim') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Sahibine sor', 'Sistem halletsin']);
   });
 
+  it('task 11: a test starts without the provider an earlier one set (the Codex test above leaves none behind)', () => {
+    expect(useOffice.getState().runtime).toBeUndefined();
+    render(<ConstitutionTab />);
+    expect(screen.getByLabelText('Önbellek süresi (dk)').closest('label')!.textContent).toMatch(/Claude Code önbelleği yine bir saat tutar/);
+  });
+
   it('says what the gate does now that the policy exists, and what a special contact can be', () => {
     render(<ConstitutionTab />);
     const gate = screen.getByLabelText('Geri alınamaz iş kapısı açık').closest('label')!;
@@ -253,9 +262,19 @@ describe('ConstitutionTab', () => {
     expect(gate.textContent).not.toMatch(/Açıkken yayın, gönderim/);
     expect(gate.textContent).toMatch(/Ödeme, silme.* her zaman senin onayını bekler/);
     const contacts = screen.getByLabelText('Özel kişiler').closest('label')!;
-    expect(contacts.textContent).toMatch(/e-posta, telefon numarası, kullanıcı adı ya da kişinin ya da firmanın adı/);
+    expect(contacts.textContent).toMatch(/e-posta, telefon numarası, kullanıcı adı, kişinin ya da firmanın adı ya da kişinin aday\/konuşma kimliği/);
     expect(contacts.textContent).toMatch(/adlar bütün bir ifade olarak aranır/);
     expect(contacts.textContent).toMatch(/satır başına bir/i);
-    expect(contacts.textContent).toMatch(/politika ne olursa olsun/);
+    // Final review C1/I4: the gate looks at what the call carries, and only with the gate on; the owner lists the ids too.
+    expect(contacts.textContent).toMatch(/Kapı açıkken, girdisinde bunlardan biri geçen çağrı — o kişiye giden ya da onu anan —, politika ne olursa olsun sana gelir/);
+    expect(contacts.textContent).toMatch(/Kapı yalnız çağrının girdisine bakar: kimlikle adreslenen bir çağrıda/);
+    expect(contacts.textContent).toMatch(/adresini, telefonunu ve kimliklerini birlikte yaz/);
+    expect(contacts.textContent).not.toMatch(/her zaman sana gelir|ulaşması gereken kişi/);
+  });
+
+  it('task 11: the rules’ hints say what 0 does — no sends, no calls', () => {
+    render(<ConstitutionTab />);
+    expect(screen.getByLabelText('Saatlik gönderim sınırı').closest('label')!.textContent).toMatch(/0 = sistem hiç göndermez/);
+    expect(screen.getByLabelText('Günlük arama sınırı').closest('label')!.textContent).toMatch(/0 = sistem hiç aramaz/);
   });
 });
