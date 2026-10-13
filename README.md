@@ -196,15 +196,32 @@ sırasını kilitlemez.
   ScheduleWakeup RemoteTrigger` ile açılır. Bu araçlar oturuma özeldir, ofisten görünmez ve duraklatmayı dinlemez;
   zamana bağlı her iş ofisin saatinden geçer.
 
-## Öneriler ve ekip liderleri
+## Departmanlar ve öneriler
 
+- **Departman:** ofiste bir alanın sahibi, bir tür oda: bir **başkanı** (o departmanın lideri) ve üyeleri olur; ad,
+  misyon ve "yapar / yapmaz" sınırı yazılıdır. Aynı anda en fazla **6** departman açık olabilir. Koordinatör
+  departmansızdır; başkansız bir departmanın işi koordinatöre gelir.
+- **Açmak:** beş hazır şablon var: Yazılım ve Otomasyon, Pazarlama, İç-Dış İletişim, Satış, Operasyon ve Finans. Her
+  biri misyonunu, sınırını, başkan rolünü ve önerilen rollerini taşır. **Şirket → Departmanlar** sekmesinden bir
+  şablondan ya da **Özel departman** olarak (ad, misyon, yapar / yapmaz) açarsınız; koordinatör de `departmentCreate`
+  ile açar, `departmentUpdate`, `departmentMove` ve `departmentClose` ile düzenler. Kapanan departmanın üyeleri
+  merkeze geçer, açık akışları koordinatöre döner.
+- **İş nasıl akar:** plan kartındaki akışların sahibi bir departman olabilir (`departman: Pazarlama`). Başkan akışını
+  duyar, `streamPlan` ile planını yazar, kendi ekibine görev açıp dağıtır ve akış bitince `streamReport` ile raporlar;
+  plan kartında akışın altında son plan ve rapor görünür, koordinatörün panosunda **Departmanlar** bölümü durur.
+  Başka bir departmandan iş istemek için `taskPass` bir departman adıyla da çalışır: görev o departmanın başkanına
+  gider (başkan yoksa koordinatöre).
+- **Başkan ne yapabilir:** kendi departmanına `hire` ile çalışan alır (hep üye olarak; Anayasa'nın çalışan sınırı
+  geçerlidir), kendi departmanındakilerin modelini değiştirir, onları uyutup uyandırır, çalışan dosyasına not yazar.
+  **Yapamaz:** departman açmak, kapatmak ya da düzenlemek, başkan atamak, başka departmana doğrudan görev açmak
+  (`taskPass` ile ister), plan kartı açmak ya da değiştirmek; işten çıkarmayı yalnız siz yaparsınız.
+- **Eski ekipler:** departmanlardan önce yazdığınız serbest `team` adları ofis her açıldığında kendiliğinden
+  departman olur (aynı ad tek departman; ekibin ilk lideri başkanı); elle bir şey yapmanız gerekmez.
 - Çalışanlar **ihtiyaç**, **fikir**, **itiraz** ("yanlış yoldayız") ve **satın alma** taleplerini `propose` ile açar.
-  Liderleri ya da koordinatör karara bağlar (karar defterine yazılır) ya da büyükse size getirir. **Satın almalar her
+  Başkanlar ya da koordinatör karara bağlar (karar defterine yazılır) ya da büyükse size getirir. **Satın almalar her
   zaman size gelir**: Şirket görünümünün **Öneriler** sekmesinde (ve koordinatörün sohbetinde) Onayla / Reddet. Şirket
   düğmesindeki sayı sizi bekleyen plan ve talepleri gösterir.
 - `askColleague`: bir çalışan arkadaşına onu bölmeden soru sorar.
-- Bir ekip büyüyünce koordinatör `appointLead` ile ekip lideri atar; lider kendi ekibine iş açar ve dağıtır, etiketinde
-  ★ görünür.
 - Bir revizyonu reddederseniz plan onaylı sürümüyle sürer. Koordinatör her gün kısa bir özet raporlar; okunmamış rapor
   etiketinde 📋 olarak görünür. Koordinatör sizinle plan konuşurken toplantı odasına geçer.
 
