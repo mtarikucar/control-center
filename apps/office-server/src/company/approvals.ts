@@ -123,35 +123,43 @@ export class Approvals {
   }
 
   /**
-   * The gate's question: is every held part of this call approved? One-call approvals are used now (all or none);
-   * a task's approval covers the same kind and tool family while its task is open.
+   * The gate's question: is every held part of this call approved? A one-call approval covers its own call; a task's
+   * approval the same kind and tool family while its task is open. Nothing is used yet (spend does that): the gate
+   * writes the call's outbox line first, so a line that cannot be written leaves the approvals as they were.
+   * `byPart`: the approval of each part, in the parts' order; `calls`: the one-call approvals among them.
    */
-  pass(employeeId: string, tool: string, parts: GatePart[]): { ok: true; ids: string[] } | { ok: false; missing: GatePart } {
+  match(employeeId: string, tool: string, parts: GatePart[]): { ok: true; byPart: string[]; calls: string[] } | { ok: false; missing: GatePart } {
     this.#expireDue();
     const now = this.#now();
+    const byPart: string[] = [];
     const calls: string[] = [];
-    const tasks: string[] = [];
     for (const part of parts) {
       const call = this.#d.store.findCall(employeeId, fingerprint(tool, part), now);
       if (call && !calls.includes(call.id)) {
         calls.push(call.id);
+        byPart.push(call.id);
         continue;
       }
       const family = toolFamily(tool, part.target);
       const scoped = part.kind === 'self' ? undefined : this.#d.store.taskScoped(employeeId, part.kind, now).find((a) => toolFamily(a.tool, a.target) === family && this.#open(a.taskId));
       if (scoped) {
-        tasks.push(scoped.id);
+        byPart.push(scoped.id);
         continue;
       }
       return { ok: false, missing: part };
     }
+    return { ok: true, byPart, calls };
+  }
+
+  /** Uses a matched call's one-call approvals (all of them, once); a task's approval stays for the task's other calls. */
+  spend(employeeId: string, calls: readonly string[]): void {
+    const now = this.#now();
     const used: Approval[] = [];
     for (const id of calls) {
       const u = this.#d.store.use(id, now);
       if (u) used.push(u);
     }
     for (const u of used) this.#d.events.append(employeeId, { type: 'approval.changed', change: 'used', approval: u });
-    return { ok: true, ids: [...calls, ...tasks] };
   }
 
   #open(taskId: string | null): boolean {

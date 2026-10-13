@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { APPROVAL_KIND_LABELS, isOutwardPolicyKind, type ApprovalKind, type ApprovalScope, type Constitution, type Employee, type GateDecision, type OutboxVia, type OutwardPolicyKind } from '@cc/shared';
+import { APPROVAL_KIND_LABELS, isOutwardPolicyKind, type ApprovalKind, type ApprovalScope, type Constitution, type Employee, type GateDecision, type OutboxEntry, type OutboxVia, type OutwardPolicyKind } from '@cc/shared';
 import { deskDir } from '../desk.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
@@ -86,19 +86,23 @@ export class Gate {
       verdict = classify();
     }
     if (!verdict.gated) return { decision: 'allow', reason: 'serbest' };
-    const passed = this.#d.approvals.pass(employeeId, tool, verdict.parts);
+    const matched = this.#d.approvals.match(employeeId, tool, verdict.parts);
     const first = verdict.parts[0]!;
-    if (passed.ok) {
-      this.#d.events.append(employeeId, { type: 'gate.checked', tool, kind: first.kind, target: first.target, decision: 'allow', approvalId: passed.ids[0] ?? null });
-      this.#record(employee, tool, hook.tool_input, verdict.parts, 'owner', passed.ids[0] ?? null);
-      return { decision: 'allow', reason: 'sahibinin onayıyla', kind: first.kind, target: first.target, approvalId: passed.ids[0] };
+    if (matched.ok) {
+      const approvalId = matched.byPart[0]!;
+      // The outbox line first, then the approvals' use and the events, as one write (Task 8 review M1): a line that
+      // cannot be written fails the call closed with its approval unspent and no allow on record.
+      this.#together(() => {
+        const line = this.#line(employee, tool, hook.tool_input, verdict.parts, 'owner', matched.byPart);
+        this.#d.approvals.spend(employeeId, matched.calls);
+        this.#d.events.append(employeeId, { type: 'gate.checked', tool, kind: first.kind, target: first.target, decision: 'allow', approvalId });
+        if (line) this.#d.events.append(employee.id, { type: 'outbox.sent', entry: line });
+      });
+      return { decision: 'allow', reason: 'sahibinin onayıyla', kind: first.kind, target: first.target, approvalId };
     }
-    const system = this.#system(employee, hook.tool_input, verdict.parts);
-    if (system === true) {
-      this.#record(employee, tool, hook.tool_input, verdict.parts, 'system', null);
-      return { decision: 'allow', reason: 'sistemce (otonomi politikası)', kind: first.kind, target: first.target };
-    }
-    const part = passed.missing;
+    const system = this.#system(employee, tool, hook.tool_input, verdict.parts);
+    if (system === true) return { decision: 'allow', reason: 'sistemce (otonomi politikası)', kind: first.kind, target: first.target };
+    const part = matched.missing;
     this.#held.set(employeeId, { tool, kind: part.kind, target: part.target, scope: verdict.scope });
     this.#d.events.append(employeeId, { type: 'gate.checked', tool, kind: part.kind, target: part.target, decision: 'deny', approvalId: null });
     const rule = system === null ? '' : ' Sistem bu çağrıyı kuralı yüzünden kendi geçirmedi.';
@@ -117,36 +121,60 @@ export class Gate {
 
   /**
    * Spec capabilities §5: a call is the system's when every part comes from a connector's classified tool, of a kind
-   * the owner's policy leaves to the system — the shell's and the built-in tools' sends and publishes never are. Then
-   * true (it passes), or the rule of §6 that holds it. null: the owner's, as before.
+   * the owner's policy leaves to the system — the shell's and the built-in tools' sends and publishes never are, and
+   * never make the gate read the constitution (Task 8 review M4). Then true — it passes, and its outbox line is
+   * written — or the rule of §6 that holds it. null: the owner's, as before; also when the system cannot decide or
+   * write the call (M4: held, never a 500).
    */
-  #system(employee: Employee, input: unknown, parts: GatePart[]): true | string | null {
+  #system(employee: Employee, tool: string, input: unknown, parts: GatePart[]): true | string | null {
     const a = this.#d.autonomy;
-    if (!a) return null;
-    const c = a.constitution();
-    const kinds: OutwardPolicyKind[] = [];
-    for (const p of parts) {
-      if (p.capability === undefined || !isOutwardPolicyKind(p.kind) || c.outwardPolicy[p.kind] !== 'system') return null;
-      kinds.push(p.kind);
+    if (!a || parts.some((p) => p.capability === undefined)) return null;
+    try {
+      const c = a.constitution();
+      const kinds: OutwardPolicyKind[] = [];
+      for (const p of parts) {
+        if (!isOutwardPolicyKind(p.kind) || c.outwardPolicy[p.kind] !== 'system') return null;
+        kinds.push(p.kind);
+      }
+      const departmentId = employee.departmentId ?? null;
+      const rule = outwardRule({
+        input, kinds, rules: c, now: (a.now ?? Date.now)(),
+        count: (k, since) => a.outbox.countSystem({ departmentId, employeeId: employee.id, kinds: k, since }),
+      });
+      if (rule) return rule;
+      // Counted and written with no await between (Task 8 review M5): two calls at once never both take the last place.
+      // The line and its event are one write (M1).
+      a.outbox.together(() => {
+        const line = this.#line(employee, tool, input, parts, 'system', []);
+        if (line) this.#d.events.append(employee.id, { type: 'outbox.sent', entry: line });
+      });
+      return true;
+    } catch (err) {
+      console.error('ofis kapısı: sistem yolu hata verdi; çağrı sahibine kaldı', err);
+      return null;
     }
-    const departmentId = employee.departmentId ?? null;
-    const rule = outwardRule({
-      input, kinds, rules: c, now: (a.now ?? Date.now)(),
-      count: (k, since) => a.outbox.countSystem({ departmentId, employeeId: employee.id, kinds: k, since }),
-    });
-    return rule ?? true;
   }
 
-  /** The outbox's line for a call let out (spec §7): its first part of an outward kind; other calls write nothing. */
-  #record(employee: Employee, tool: string, input: unknown, parts: GatePart[], via: OutboxVia, approvalId: string | null): void {
+  /** The writes that go together (the outbox's savepoint); without an outbox there is no line to keep them with. */
+  #together(work: () => void): void {
     const outbox = this.#d.autonomy?.outbox;
-    const part = parts.find((p) => isOutwardPolicyKind(p.kind));
-    if (!outbox || !part) return;
-    const entry = outbox.add({
+    if (outbox) outbox.together(work);
+    else work();
+  }
+
+  /**
+   * The outbox's line for a call let out (spec §7): its first part of an outward kind, with the approval that part
+   * passed on (`approvals`: by part, Task 8 review M2); other calls write none. The caller announces it (outbox.sent).
+   */
+  #line(employee: Employee, tool: string, input: unknown, parts: GatePart[], via: OutboxVia, approvals: readonly string[]): OutboxEntry | null {
+    const outbox = this.#d.autonomy?.outbox;
+    const at = parts.findIndex((p) => isOutwardPolicyKind(p.kind));
+    if (!outbox || at === -1) return null;
+    const part = parts[at]!;
+    return outbox.add({
       employeeId: employee.id, departmentId: employee.departmentId ?? null, tool, kind: part.kind as OutwardPolicyKind, target: part.target,
-      recipients: recipientsOf(input), summary: callSummary(input), via, approvalId,
+      recipients: recipientsOf(input), summary: callSummary(input), via, approvalId: approvals[at] ?? null,
     });
-    this.#d.events.append(employee.id, { type: 'outbox.sent', entry });
   }
 }
 

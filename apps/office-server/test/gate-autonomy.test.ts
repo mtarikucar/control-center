@@ -1,26 +1,28 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OWNER, type Approval, type Employee, type OutboxEntry } from '@cc/shared';
 import { ApprovalStore } from '../src/company/approval-store.ts';
 import { Approvals } from '../src/company/approvals.ts';
-import { Gate } from '../src/company/gate.ts';
+import { Gate, type GateDeps } from '../src/company/gate.ts';
 import { OutboxStore } from '../src/company/outbox-store.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
-import { DATA, testContext } from './gate-helpers.ts';
+import { DATA, HOME, testContext } from './gate-helpers.ts';
 import { setup } from './helpers.ts';
 
 /** Spec capabilities §5–§7: the gate's system path, its rules and the outbox. */
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const c of cleanups.splice(0)) await c();
 });
 
 const HOUR = 3_600_000;
 const GMAIL = 'mcp__claude_ai_Gmail__send_message';
 
-function make() {
+/** `git`: the gate asks it first (an await before the classification); `reads`: the system path's constitution reads, `fail` makes them throw. */
+function make(o: { git?: GateDeps['git'] } = {}) {
   // Tuesday 13 October 2026, 11:00 local: inside the call hours.
   let now = new Date(2026, 9, 13, 11, 0).getTime();
   const clock = () => now;
@@ -31,10 +33,16 @@ function make() {
   c.budget.setConstitution({ gateEnabled: true });
   const approvals = new Approvals({ store: new ApprovalStore(s.db, clock), events: s.events, notices: c.notices, roster: s.roster, tasks: c.tasks, coordinator: () => c.company.coordinator(), memory: c.memory, now: clock, defer: (fn) => fn() });
   const outbox = new OutboxStore(s.db, clock);
+  const reads = { n: 0, fail: null as Error | null };
+  const constitution = () => {
+    reads.n += 1;
+    if (reads.fail) throw reads.fail;
+    return c.budget.constitution();
+  };
   const gate = new Gate({
     approvals, events: s.events, roster: s.roster, enabled: () => c.budget.constitution().gateEnabled,
-    context: (e) => testContext({ deskDir: `${DATA}/desks/${e.slug}` }),
-    autonomy: { constitution: () => c.budget.constitution(), outbox, now: clock },
+    context: (e) => testContext({ deskDir: `${DATA}/desks/${e.slug}` }), ...(o.git ? { git: o.git } : {}),
+    autonomy: { constitution, outbox, now: clock },
   });
   const coordinator = c.company.hireCoordinator();
   const sales = c.departments!.create(OWNER, { name: 'Satış', mission: 'm' });
@@ -43,7 +51,7 @@ function make() {
   const ask = (who: Employee, tool_name: string, tool_input: unknown) => gate.check(who.id, { tool_name, tool_input, cwd: `${DATA}/desks/${who.slug}` });
   const mail = (who: Employee, to: string | string[] = 'musteri@x.co') => ask(who, GMAIL, { to, subject: 'Siparişiniz', body: 'Kargoya verildi.' });
   const ev = (type: string) => s.events.list({ limit: 5000 }).filter((e) => e.event.type === type);
-  return { ...s, ...c, approvals, outbox, gate, coordinator, sales, marketing, hire, ask, mail, ev, advance: (ms: number) => void (now += ms) };
+  return { ...s, ...c, approvals, outbox, gate, reads, coordinator, sales, marketing, hire, ask, mail, ev, advance: (ms: number) => void (now += ms) };
 }
 
 describe('the gate lets the system send (spec capabilities §5–§7)', () => {
@@ -177,6 +185,124 @@ describe('the gate lets the system send (spec capabilities §5–§7)', () => {
     expect((await t.mail(ada)).decision).toBe('allow');
     expect((await t.ask(ada, 'Bash', { command: 'curl -X POST https://api.mail.io/send' })).decision).toBe('allow');
     expect([t.outbox.list(), t.ev('outbox.sent'), t.ev('gate.checked')]).toEqual([[], [], []]);
+  });
+});
+
+describe('the gate’s writes (Task 8 review M1, M2, M4, M5)', () => {
+  /** Held as the owner's, as before the policy: the part's own why, no word of a rule. */
+  const ownersReason = /^OFİS KAPISI: gönderim — “send_message to=musteri@x\.co” onaysız yapılamaz \(dışarıya gönderir \(email\.send\)\)\. approvalRequest/;
+
+  it('M1: an approved call whose outbox line cannot be written fails closed — its approval unspent, no allow on record; with the outbox back it passes on that approval', async () => {
+    const t = make();
+    const selin = t.hire('Selin', t.sales.id);
+    const six = Array.from({ length: 6 }, (_, i) => `k${i}@x.co`);
+    const held = await t.mail(selin, six);
+    const a = t.approvals.request(selin.id, { kind: 'send', tool: GMAIL, target: held.target, summary: 'Kampanya duyurusu' });
+    t.approvals.decide(a.id, true, { via: 'page' });
+    // Nothing is announced either: the line is written before the approval's use and the allow are.
+    const heard: string[] = [];
+    cleanups.push(t.events.subscribe((e) => heard.push(e.event.type)));
+    vi.spyOn(t.outbox, 'add').mockImplementationOnce(() => {
+      throw new Error('disk dolu');
+    });
+    await expect(t.mail(selin, six)).rejects.toThrow('disk dolu');
+    expect(heard).toEqual([]);
+    expect(t.ev('gate.checked').map((e) => (e.event as { decision: string }).decision)).toEqual(['deny']);
+    expect(t.ev('approval.changed').map((e) => (e.event as { change: string }).change)).toEqual(['requested', 'approved']);
+    expect(t.approvals.get(a.id).status).toBe('approved');
+    expect([t.outbox.list(), t.ev('outbox.sent')]).toEqual([[], []]);
+    // A write after the line fails: the line, the approval's use and the allow go back with it.
+    const append = t.events.append.bind(t.events);
+    const events = vi.spyOn(t.events, 'append').mockImplementation((id, event) => {
+      if (event.type === 'gate.checked') throw new Error('olay yazılamadı');
+      return append(id, event);
+    });
+    await expect(t.mail(selin, six)).rejects.toThrow('olay yazılamadı');
+    expect([t.outbox.list(), t.approvals.get(a.id).status, t.ev('gate.checked').length]).toEqual([[], 'approved', 1]);
+    events.mockRestore();
+    expect(await t.mail(selin, six)).toMatchObject({ decision: 'allow', approvalId: a.id });
+    expect(t.outbox.list()).toEqual([expect.objectContaining({ via: 'owner', approvalId: a.id })]);
+    expect(t.ev('gate.checked').map((e) => (e.event as { decision: string }).decision)).toEqual(['deny', 'allow']);
+  });
+
+  it('M1: the system’s line and its outbox.sent are written together or not at all; a call the outbox cannot take stays the owner’s', async () => {
+    const t = make();
+    const ada = t.hire('Ada');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(t.outbox, 'add').mockImplementationOnce(() => {
+      throw new Error('disk dolu');
+    });
+    const held = await t.mail(ada);
+    expect(held).toMatchObject({ decision: 'deny', kind: 'send' });
+    expect(held.reason).toMatch(ownersReason);
+    expect([t.outbox.list(), t.ev('outbox.sent')]).toEqual([[], []]);
+    // The line is added and its event cannot be: the line goes too.
+    const append = t.events.append.bind(t.events);
+    const events = vi.spyOn(t.events, 'append').mockImplementation((id, event) => {
+      if (event.type === 'outbox.sent') throw new Error('olay yazılamadı');
+      return append(id, event);
+    });
+    expect((await t.mail(ada)).decision).toBe('deny');
+    expect([t.outbox.list(), t.ev('outbox.sent')]).toEqual([[], []]);
+    expect(error).toHaveBeenCalledTimes(2);
+    events.mockRestore();
+    expect((await t.mail(ada)).decision).toBe('allow');
+    expect([t.outbox.list(), t.ev('outbox.sent')].map((x) => x.length)).toEqual([1, 1]);
+  });
+
+  it('M2: the outbox line carries the approval of the part it records, the allow the first part’s', async () => {
+    const t = make();
+    const ada = t.hire('Ada');
+    const line = { command: `echo x > ${HOME}/.claude/settings.json; git push origin main` };
+    const ids: string[] = [];
+    for (const kind of ['self', 'publish']) {
+      const held = await t.ask(ada, 'Bash', line);
+      expect(held).toMatchObject({ decision: 'deny', kind });
+      const a = t.approvals.request(ada.id, { kind: held.kind!, tool: 'Bash', target: held.target!, summary: 'Ayar ve sürüm' });
+      t.approvals.decide(a.id, true, { via: 'page' });
+      ids.push(a.id);
+    }
+    expect(await t.ask(ada, 'Bash', line)).toMatchObject({ decision: 'allow', kind: 'self', approvalId: ids[0] });
+    expect(t.ev('gate.checked').at(-1)!.event).toMatchObject({ decision: 'allow', kind: 'self', approvalId: ids[0] });
+    expect(t.outbox.list()).toEqual([expect.objectContaining({ kind: 'publish', target: 'git push origin', via: 'owner', approvalId: ids[1] })]);
+  });
+
+  it('M4: the constitution is read only for a call whose every part is a connector’s; a throw on the system path holds the call as the owner’s, never a 500', async () => {
+    const t = make();
+    const ada = t.hire('Ada');
+    await t.ask(ada, 'Bash', { command: 'git push origin main' });
+    await t.ask(ada, 'SendMessage', { to: 'x', message: 'y' });
+    await t.ask(ada, 'mcp__netgsm__send_sms', { to: '0532' });
+    expect(t.reads.n).toBe(0);
+    expect((await t.mail(ada)).decision).toBe('allow');
+    expect(t.reads.n).toBe(1);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    t.reads.fail = new Error('anayasa okunamadı');
+    const held = await t.mail(ada);
+    expect(held).toMatchObject({ decision: 'deny', kind: 'send' });
+    expect(held.reason).toMatch(ownersReason);
+    expect(t.gate.lastHeld(ada.id)).toEqual({ tool: GMAIL, kind: 'send', target: 'send_message to=musteri@x.co', scope: 'call' });
+    expect(t.ev('gate.checked').at(-1)!.event).toMatchObject({ decision: 'deny', kind: 'send' });
+    t.reads.fail = null;
+    vi.spyOn(t.outbox, 'countSystem').mockImplementation(() => {
+      throw new Error('sayılamadı');
+    });
+    expect((await t.mail(ada)).reason).toMatch(ownersReason);
+    expect(error).toHaveBeenCalledTimes(2);
+    expect(error.mock.calls[0]![0]).toMatch(/sistem yolu/);
+    expect(t.outbox.list()).toHaveLength(1);
+  });
+
+  it('M5: two mails at once at sendsPerHour 1 — exactly one is let out, also when both wait for git first', async () => {
+    // git answering at once: both calls take up again in the same turn of the event loop, one right after the other.
+    for (const git of [undefined, { missing: () => true, refresh: async () => undefined }]) {
+      const t = make(git ? { git } : {});
+      t.budget.setConstitution({ sendsPerHour: 1 });
+      const ada = t.hire('Ada');
+      const both = await Promise.all([t.mail(ada, 'a@x.co'), t.mail(ada, 'b@x.co')]);
+      expect(both.map((d) => d.decision).sort()).toEqual(['allow', 'deny']);
+      expect(t.outbox.list()).toHaveLength(1);
+    }
   });
 });
 

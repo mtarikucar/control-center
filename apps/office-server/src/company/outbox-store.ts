@@ -43,6 +43,23 @@ export class OutboxStore {
     return { ...e, recipients, summary, id: Number(lastInsertRowid), at };
   }
 
+  /**
+   * `work` as one write (Task 8 review M1): a line, the approvals it used and their events land together or not at
+   * all. A savepoint, so it also nests in a transaction a caller has open.
+   */
+  together<T>(work: () => T): T {
+    this.#db.exec('SAVEPOINT outbox_line');
+    try {
+      const out = work();
+      this.#db.exec('RELEASE outbox_line');
+      return out;
+    } catch (err) {
+      this.#db.exec('ROLLBACK TO outbox_line');
+      this.#db.exec('RELEASE outbox_line');
+      throw err;
+    }
+  }
+
   /** Newest first. `departmentId`: one department's (null: the centre's); `kind` and `since` narrow it. */
   list(o: { departmentId?: string | null; kind?: OutwardPolicyKind; since?: number; limit?: number } = {}): OutboxEntry[] {
     const where: string[] = [];
