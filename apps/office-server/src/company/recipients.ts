@@ -21,42 +21,62 @@ const MAX_VALUES = 10_000;
 const filled = (v: unknown) => (typeof v === 'string' && v.trim() !== '') || (typeof v === 'number' && Number.isFinite(v));
 
 /**
+ * Keys (folded, `_` and `-` ignored) by which a send reaches people the input does not name (final review C1): a draft
+ * sent as it is (Gmail's send_message ignores every other field then), and a reply to everyone on a thread when true.
+ */
+const DRAFT_KEY = 'draftid';
+const REPLY_ALL_KEY = 'replyall';
+const yes = (v: unknown) => v === true || (typeof v === 'string' && fold(v.trim()) === 'true');
+
+/**
  * The input's texts and numbers, in their order, each marked when it names a recipient: a value under a recipient
  * field, or — in an object there — under the first who-field filled (else under any field: `recipients: { to, cc }`,
- * `to: [{ emailAddress: { address } }]`). Iterative; `whole` false when it stopped at a cap.
+ * `to: [{ emailAddress: { address } }]`). `hidden`: a draft's id or a reply to everyone at any depth. Iterative;
+ * `whole` false when it stopped at a cap.
  */
-function read(input: unknown): { leaves: Array<{ text: string; who: boolean }>; whole: boolean } {
+function read(input: unknown): { leaves: Array<{ text: string; who: boolean }>; whole: boolean; hidden: boolean } {
   const leaves: Array<{ text: string; who: boolean }> = [];
   const stack: Array<{ v: unknown; depth: number; who: boolean }> = [{ v: input, depth: 0, who: false }];
   // Values taken off the stack; with the stack's, never more than the cap: a child is counted before it is walked into.
   let values = 0;
-  const cut = { leaves, whole: false };
+  let hidden = false;
+  const cut = () => ({ leaves, whole: false, hidden });
   while (stack.length > 0) {
     const { v, depth, who } = stack.pop()!;
     values += 1;
-    if (depth > MAX_DEPTH) return cut;
+    if (depth > MAX_DEPTH) return cut();
     if (typeof v === 'string') leaves.push({ text: v, who });
     else if (typeof v === 'number' && Number.isFinite(v)) leaves.push({ text: String(v), who });
     else if (Array.isArray(v)) {
-      if (values + stack.length + v.length > MAX_VALUES) return cut;
+      if (values + stack.length + v.length > MAX_VALUES) return cut();
       for (let i = v.length - 1; i >= 0; i -= 1) stack.push({ v: v[i], depth: depth + 1, who });
     } else if (v && typeof v === 'object') {
       const o = v as Record<string, unknown>;
       const entries = Object.entries(o);
-      if (values + stack.length + entries.length > MAX_VALUES) return cut;
+      if (values + stack.length + entries.length > MAX_VALUES) return cut();
       const field = who ? WHO_FIELDS.find((f) => filled(o[f])) : undefined;
       for (let i = entries.length - 1; i >= 0; i -= 1) {
         const [k, x] = entries[i]!;
-        stack.push({ v: x, depth: depth + 1, who: who ? field === undefined || k === field : RECIPIENT_FIELDS.has(keyOf(k)) });
+        const key = keyOf(k);
+        if (key === DRAFT_KEY || (key === REPLY_ALL_KEY && yes(x))) hidden = true;
+        stack.push({ v: x, depth: depth + 1, who: who ? field === undefined || k === field : RECIPIENT_FIELDS.has(key) });
       }
     }
   }
-  return { leaves, whole: true };
+  return { leaves, whole: true, hidden };
 }
 
 /** Whether the input is read to its end: no deeper than 64 levels, no more than 10 000 values (review I5). */
 export function readable(input: unknown): boolean {
   return read(input).whole;
+}
+
+/**
+ * Whether a send goes to people its input does not name (final review C1): a `draftId` (any depth, any case, `_` or
+ * `-` between) or a `replyAll` that is true. Its recipients cannot be counted nor matched against the special contacts.
+ */
+export function hiddenRecipients(input: unknown): boolean {
+  return read(input).hidden;
 }
 
 /** Each recipient once (folded), in the order met; a text names several split on `,` `;` and newlines. */

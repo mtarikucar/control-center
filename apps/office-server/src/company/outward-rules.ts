@@ -1,5 +1,5 @@
 import type { Constitution, OutwardPolicyKind } from '@cc/shared';
-import { readable, recipientsOf, specialContact } from './recipients.ts';
+import { hiddenRecipients, readable, recipientsOf, specialContact } from './recipients.ts';
 
 const HOUR = 60 * 60_000;
 const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -17,12 +17,15 @@ export interface OutwardCall {
 /**
  * The rule a call the system would let out breaks, in Turkish — the held call's reason —, or null (spec capabilities
  * §6). Cheapest first: the counters are read only for a call that could still pass. A limit is reached at `>=`. An
- * input too deep or too big to read to its end may hide a contact or a recipient: it is the owner's (review I5).
+ * input too deep or too big to read to its end may hide a contact or a recipient: it is the owner's (review I5); so is
+ * a send whose recipients its input does not show (final review C1).
  */
 export function outwardRule(c: OutwardCall): string | null {
   if (!readable(c.input)) return 'okunamayan girdi: çok derin ya da çok büyük';
   const special = specialContact(c.input, c.rules.specialContacts);
   if (special) return `özel kişi: ${special}`;
+  // A draft sent by its id, a reply to everyone: whom it reaches is not in the call (final review C1).
+  if (c.kinds.includes('send') && hiddenRecipients(c.input)) return 'alıcılar girdide yok (taslak / hepsini yanıtla)';
   const recipients = recipientsOf(c.input).length;
   if (recipients > c.rules.bulkRecipients) return `toplu gönderim: ${recipients} alıcı > ${c.rules.bulkRecipients}`;
   if (c.kinds.includes('call')) {

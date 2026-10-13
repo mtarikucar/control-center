@@ -81,6 +81,22 @@ describe('the rules the system keeps (spec capabilities §6)', () => {
     expect(check({ to: ['ALI@firma.com', 'b@x.co'] }, ['send'], { rules: { specialContacts: ['ali@firma.com'] }, counts: { 'send+publish': 99 } }).rule).toBe('özel kişi: ali@firma.com');
   });
 
+  it('final review C1: a send whose recipients the input cannot show — a draft sent by its id, a reply to everyone — is held; a reply to one is not', () => {
+    const hidden = 'alıcılar girdide yok (taslak / hepsini yanıtla)';
+    expect(check({ draftId: 'r-123' }, ['send'])).toEqual({ rule: hidden, asked: [] });
+    // The key folded, at any depth, whatever stands beside it: a `to` the draft ignores counts for nothing.
+    expect(check({ message: { Draft_ID: 'r-1' }, to: ['x@y.co'] }, ['send']).rule).toBe(hidden);
+    expect(check({ 'draft-id': '' }, ['send']).rule).toBe(hidden);
+    expect(check({ messageId: 'm1', replyAll: true, body: 'Teşekkürler' }, ['send']).rule).toBe(hidden);
+    expect(check({ options: { reply_all: 'TRUE' } }, ['send']).rule).toBe(hidden);
+    expect(check({ messageId: 'm1', replyAll: false, body: 'x' }, ['send']).rule).toBeNull();
+    expect(check({ messageId: 'm1', body: 'x' }, ['send']).rule).toBeNull();
+    // Only a send: a post published from its draft goes to no one's mailbox.
+    expect(check({ draftId: 'd1' }, ['publish']).rule).toBeNull();
+    // A special contact named in it is still the first reason.
+    expect(check({ draftId: 'd1', note: 'ali@firma.com' }, ['send'], { rules: { specialContacts: ['ali@firma.com'] } }).rule).toBe('özel kişi: ali@firma.com');
+  });
+
   it('calls: only in the call hours (local), at most callsPerDay a day counted from midnight', () => {
     expect(check({ phone: '0532' }, ['call'], { now: at(21, 40) }).rule).toBe('mesai dışı arama (21:40)');
     expect(check({ phone: '0532' }, ['call'], { now: at(8, 59) }).rule).toBe('mesai dışı arama (08:59)');

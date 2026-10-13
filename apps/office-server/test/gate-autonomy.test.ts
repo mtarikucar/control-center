@@ -162,6 +162,21 @@ describe('the gate lets the system send (spec capabilities §5–§7)', () => {
     expect(t.outbox.list()).toEqual([]);
   });
 
+  it('final review C1: Gmail’s send of a draft and a reply to everyone go to the owner — their recipients are not in the input; a reply to one is the system’s', async () => {
+    const t = make();
+    t.budget.setConstitution({ specialContacts: ['ali@firma.com'] });
+    const ada = t.hire('Ada');
+    const draft = await t.ask(ada, GMAIL, { draftId: 'r-123' });
+    expect(draft).toMatchObject({ decision: 'deny', kind: 'send' });
+    expect(draft.reason).toContain('onaysız yapılamaz (alıcılar girdide yok (taslak / hepsini yanıtla)). Sistem bu çağrıyı kuralı yüzünden kendi geçirmedi.');
+    const all = await t.ask(ada, 'mcp__claude_ai_Gmail__reply', { messageId: 'm1', replyAll: true, body: 'Teşekkürler, %30 indirim sizin.' });
+    expect(all).toMatchObject({ decision: 'deny', kind: 'send' });
+    expect(all.reason).toMatch(/\(alıcılar girdide yok \(taslak \/ hepsini yanıtla\)\)/);
+    expect(t.outbox.list()).toEqual([]);
+    expect(await t.ask(ada, 'mcp__claude_ai_Gmail__reply', { messageId: 'm1', body: 'Teşekkürler.' })).toMatchObject({ decision: 'allow', reason: 'sistemce (otonomi politikası)' });
+    expect(t.outbox.list()).toEqual([expect.objectContaining({ tool: 'mcp__claude_ai_Gmail__reply', via: 'system', recipients: [] })]);
+  });
+
   it('an outward call the owner approved is an outbox line whatever its tool (a git push is a publish); a payment is not', async () => {
     const t = make();
     const ada = t.hire('Ada');

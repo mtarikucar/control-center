@@ -196,6 +196,8 @@ describe('Budget — constitution', () => {
     ]) {
       expect(() => t.budget.setConstitution(bad), JSON.stringify(bad)).toThrow(/Anayasa/);
     }
+    // Final review C1: a contact is matched only as the call's input writes it — the message names every form, ids too.
+    expect(() => t.budget.setConstitution({ specialContacts: [3] })).toThrow('Anayasa: Özel kişiler en çok 200 metinden oluşan bir liste olmalı (e-posta, telefon, kullanıcı adı, ad soyad ya da aday/konuşma kimliği; her biri en çok 200 karakter).');
     expect(t.budget.constitution()).toMatchObject({ outwardPolicy: DEFAULT_CONSTITUTION.outwardPolicy, specialContacts: [], callHours: [9, 19], sendsPerHour: 30, bulkRecipients: 5, callsPerDay: 20 });
   });
 

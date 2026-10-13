@@ -84,11 +84,15 @@ function outwardPolicy(value: unknown, current: OutwardPolicy): OutwardPolicy {
   return { ...current, ...(value as Partial<OutwardPolicy>) };
 }
 
-/** Up to 200 people, each an e-mail, a phone or a user name; trimmed, empty ones dropped, each once (folded). */
+/**
+ * Up to 200 people, each an e-mail, a phone, a user name, a name or a record's id (a lead's, a conversation's: a call
+ * that names its person only by reference is matched by that — final review C1); trimmed, empty ones dropped, each
+ * once (folded).
+ */
 function specialContacts(value: unknown): string[] {
   const { count, chars } = SPECIAL_CONTACT_LIMITS;
   if (!Array.isArray(value) || value.length > count || value.some((x) => typeof x !== 'string' || x.trim().length > chars)) {
-    throw new ValidationError(`Anayasa: Özel kişiler en çok ${count} metinden oluşan bir liste olmalı (e-posta, telefon ya da kullanıcı adı; her biri en çok ${chars} karakter).`);
+    throw new ValidationError(`Anayasa: Özel kişiler en çok ${count} metinden oluşan bir liste olmalı (e-posta, telefon, kullanıcı adı, ad soyad ya da aday/konuşma kimliği; her biri en çok ${chars} karakter).`);
   }
   const out: string[] = [];
   for (const raw of value as string[]) {
