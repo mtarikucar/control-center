@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { existsSync } from 'node:fs';
 import { join, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SEAT_COUNT } from '@cc/shared';
 
 export const REPO_ROOT = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 
@@ -13,6 +14,7 @@ export interface OfficeConfig {
   provider: 'claude' | 'codex';
   codexCommand: string[];
   codexModel?: string;
+  /** Seats in the office (spec office rooms §3): what the roster gives out and the constitution's ceiling. */
   deskCount: number;
   /** Origins allowed besides the server's own http://127.0.0.1:<port> and http://localhost:<port>. */
   allowedOrigins: string[];
@@ -76,5 +78,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OfficeConfig {
   const allowedHosts = (env.OFFICE_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
   const webDir = env.OFFICE_WEB_DIR ?? join(REPO_ROOT, 'apps', 'office-web', 'dist');
   const assetsDir = env.OFFICE_ASSETS_DIR ?? join(REPO_ROOT, 'assets', '3d');
-  return { dataDir, host: '127.0.0.1', port, claudeCommand, provider, codexCommand, ...(env.OFFICE_CODEX_MODEL?.trim() ? { codexModel: env.OFFICE_CODEX_MODEL.trim() } : {}), deskCount: 8, allowedOrigins, allowedHosts, webDir, assetsDir };
+  return { dataDir, host: '127.0.0.1', port, claudeCommand, provider, codexCommand, ...(env.OFFICE_CODEX_MODEL?.trim() ? { codexModel: env.OFFICE_CODEX_MODEL.trim() } : {}), deskCount: SEAT_COUNT, allowedOrigins, allowedHosts, webDir, assetsDir };
 }

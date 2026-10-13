@@ -1,4 +1,4 @@
-import { DEFAULT_CONSTITUTION, type QuotaState } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, SEAT_COUNT, type QuotaState } from '@cc/shared';
 import { Budget } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { Company } from '../src/company/company.ts';
@@ -38,9 +38,10 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   // directly so no budget.changed event joins the log (the economy scenario compares the log with main's).
   const constitutionStore = new ConstitutionStore(s.db);
   constitutionStore.set({ autonomy: 'plans' });
+  // The office's seats bound the constitution, as main.ts's config.deskCount; a test office's roster may have fewer desks (setup).
   const budget = new Budget({
     constitution: constitutionStore, spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices,
-    quota: { state: () => quotaState }, deskCount: 8, now,
+    quota: { state: () => quotaState }, deskCount: SEAT_COUNT, now,
   });
   // A fake office clock: counts how often a time change asked it to re-arm.
   let touched = 0;

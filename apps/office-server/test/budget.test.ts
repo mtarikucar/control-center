@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_CONSTITUTION, OWNER, normalizeConstitution, type QuotaState, type Usage } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, OWNER, SEAT_COUNT, normalizeConstitution, type QuotaState, type Usage } from '@cc/shared';
 import { Budget, constitutionChanges } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -47,6 +47,19 @@ describe('Budget — constitution', () => {
     });
   });
 
+  it('allows twelve by default and up to the office’s 45 seats; a limit the owner saved before stays (spec office rooms §5)', () => {
+    const t = make();
+    expect(DEFAULT_CONSTITUTION.maxEmployees).toBe(12);
+    expect(t.budget.constitution().maxEmployees).toBe(12);
+    expect(t.budget.setConstitution({ maxEmployees: SEAT_COUNT }).maxEmployees).toBe(45);
+    expect(() => t.budget.setConstitution({ maxEmployees: SEAT_COUNT + 1 })).toThrow('Anayasa: Çalışan sınırı 1 ile 45 arasında bir tam sayı olmalı.');
+    // The owner's form saved 8 while the office had eight desks: the owner's choice, so it stays 8.
+    const before = setup();
+    cleanups.push(before.cleanup);
+    new ConstitutionStore(before.db).set({ maxEmployees: 8 });
+    expect(new ConstitutionStore(before.db).get().maxEmployees).toBe(8);
+  });
+
   it('R9: the economy switches are off by default, also in a database written before they existed; the owner turns them on and off', () => {
     const t = make();
     // B8's switch and B9a's gate are off the same way.
@@ -81,7 +94,7 @@ describe('Budget — constitution', () => {
   it('review focus: refuses wrong types, out-of-range values and unknown keys, changing nothing', () => {
     const t = make();
     for (const bad of [
-      { maxEmployees: 9 }, { maxEmployees: 0 }, { maxEmployees: 2.5 }, { ownerReservePct: -1 }, { ownerReservePct: 95 }, { ownerReservePct: '25' },
+      { maxEmployees: 46 }, { maxEmployees: 0 }, { maxEmployees: 2.5 }, { ownerReservePct: -1 }, { ownerReservePct: 95 }, { ownerReservePct: '25' },
       { monthlyUsdCap: -5 }, { chainDepth: 0 }, { tasksPerDay: 501 }, { idleSleepMinutes: 1441 }, { salary: 10 },
       { digestHours: [] }, { digestHours: [24] }, { digestHours: [9.5] }, { digestHours: '9, 17' }, { digestHours: [1, 2, 3, 4, 5, 6, 7] },
       { cacheTtlMinutes: 61 }, { digestEnabled: 'false' }, { modelPolicyEnabled: 0 }, { difficultyModelsEnabled: null }, { capabilityPrecheckEnabled: 1 }, { gateEnabled: 'true' }, { coordinatorModels: { boss: 'fable' } }, { coordinatorModels: { kickoff: 'gpt' } }, { coordinatorModels: { owner: 'fable' } }, { coordinatorModels: 'opus' }, { difficultyModels: 'haiku' }, { difficultyModels: [] },
@@ -150,7 +163,7 @@ describe('Budget — the owner’s constitution change reaches the coordinator',
     t.budget.ownerSetConstitution({ ownerReservePct: 40, maxEmployees: 6, pulseHours: 6 });
     expect(changed(t, c.id)).toHaveLength(1);
     expect(changed(t, c.id)[0]!.kind).toBe('decision');
-    expect(changed(t, c.id)[0]!.text).toBe('Sahibi anayasayı değiştirdi: Çalışan sınırı 8 → 6; Ofisin kota sınırı %75 → %60. Süren planlarını yeni sınırlara göre gözden geçir.');
+    expect(changed(t, c.id)[0]!.text).toBe(`Sahibi anayasayı değiştirdi: Çalışan sınırı ${DEFAULT_CONSTITUTION.maxEmployees} → 6; Ofisin kota sınırı %75 → %60. Süren planlarını yeni sınırlara göre gözden geçir.`);
     t.budget.ownerSetConstitution({
       monthlyUsdCap: 100, digestHours: [18, 8], digestEnabled: true, autonomy: 'free', coordinatorModels: { kickoff: 'opus' }, idleCapacityHours: 4,
     });
@@ -195,7 +208,7 @@ describe('Budget — the owner’s constitution change reaches the coordinator',
     t.budget.ownerSetConstitution({ ...t.budget.constitution() });
     expect(changed(t, c.id)).toEqual([]);
     expect(() => t.budget.ownerSetConstitution({ maxEmployees: 6, ownerReservePct: 95 })).toThrow(/Anayasa/);
-    expect(t.budget.constitution().maxEmployees).toBe(8);
+    expect(t.budget.constitution().maxEmployees).toBe(DEFAULT_CONSTITUTION.maxEmployees);
     expect(changed(t, c.id)).toEqual([]);
     t.budget.setConstitution({ ownerReservePct: 30 });
     expect(changed(t, c.id)).toEqual([]);

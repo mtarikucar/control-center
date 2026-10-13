@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { MODEL_ALIASES, type BudgetSummary, type Constitution } from '@cc/shared';
+import { MODEL_ALIASES, SEAT_COUNT, type BudgetSummary, type Constitution } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { PLAN_STATUS_LABELS, modelLabels } from './labels.ts';
@@ -130,7 +130,7 @@ interface Field {
 }
 
 const FIELDS: Field[] = [
-  { key: 'maxEmployees', label: 'Çalışan sınırı', hint: 'Koordinatör dahil; masa sayısını aşamaz.' },
+  { key: 'maxEmployees', label: 'Çalışan sınırı', hint: `Koordinatör dahil; en çok ${SEAT_COUNT} (ofisteki koltuk sayısı).` },
   { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
   { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
   { key: 'chainDepth', label: 'Paslama zinciri', hint: 'Paslanan işten paslanan iş en çok kaç halka olabilir.' },

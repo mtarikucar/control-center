@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { OWNER, type EmployeeKind, type Goal, type Plan, type Task } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, OWNER, type EmployeeKind, type Goal, type Plan, type Task } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
 import { buildBoard } from '../src/company/board.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -414,9 +414,9 @@ describe('board — 1. Ne değişti', () => {
     t.advance(5 * MIN);
     t.budget.ownerSetConstitution({ maxEmployees: 6 });
     const line = () => t.section(t.board({ since }).text, 1).split('\n').find((l) => l.startsWith('- Kısıt'));
-    expect(line()).toBe('- Kısıt: Çalışan sınırı 8 → 6');
+    expect(line()).toBe(`- Kısıt: Çalışan sınırı ${DEFAULT_CONSTITUTION.maxEmployees} → 6`);
     // Back where it was: nothing changed on balance, so no line at all.
-    t.budget.ownerSetConstitution({ maxEmployees: 8 });
+    t.budget.ownerSetConstitution({ maxEmployees: DEFAULT_CONSTITUTION.maxEmployees });
     expect(line()).toBeUndefined();
   });
 

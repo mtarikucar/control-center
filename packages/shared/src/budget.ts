@@ -12,7 +12,7 @@ export type CoordinatorTurn = (typeof COORDINATOR_TURNS)[number];
 
 /** The owner's fixed limits (spec §4.6, §6). */
 export interface Constitution {
-  /** Employees at most, the coordinator included (never more than the desks). */
+  /** Employees at most, the coordinator included (12 by default; never more than the seats, 45). */
   maxEmployees: number;
   /** Share of the Claude quota kept for the owner: above 100 − this %, the office starts only urgent work. */
   ownerReservePct: number;
@@ -84,7 +84,7 @@ export interface Constitution {
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
-  maxEmployees: 8,
+  maxEmployees: 12,
   ownerReservePct: 25,
   monthlyUsdCap: null,
   chainDepth: 5,
