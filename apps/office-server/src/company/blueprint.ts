@@ -7,7 +7,7 @@ import { mcpToolPrefix } from '../claude/normalize.ts';
 import { ConflictError, NotFoundError, ValidationError } from '../errors.ts';
 import type { Roster } from '../roster.ts';
 import type { BlueprintStore } from './blueprint-store.ts';
-import { capability, capabilityIds, capabilityVocabulary, coverage, knownServer } from './capabilities.ts';
+import { capabilityIds, capabilityVocabulary, coverage, knownServer } from './capabilities.ts';
 import type { Company, PlanDraft } from './company.ts';
 import type { IntegrationRegistry } from './integrations.ts';
 import { checkKpis } from './kpi.ts';
@@ -308,7 +308,10 @@ export class Blueprints {
     });
     // What the owner should see before approving: what exists already, what is not open, what goes outward.
     const lacking = b.roles.flatMap((r) => coverage(registry, capsOf(r)).filter((c) => c.status === 'shut' || c.status === 'missing').map((c) => `${c.id} (${r.name})`));
-    const outward = b.roles.flatMap((r) => capsOf(r).filter((c) => capability(c).outward).map((c) => `${c} (${r.name})`));
+    // An id the vocabulary no longer has (a company capability retired since, final review minor 2) is named as such,
+    // among the outward ones: what it would do is no longer known.
+    const known = (id: string) => capabilityVocabulary().capabilities.find((x) => x.id === id);
+    const outward = b.roles.flatMap((r) => capsOf(r).filter((c) => known(c)?.outward ?? true).map((c) => `${c} (${r.name}${known(c) ? '' : ', sözlükte yok'})`));
     const unknownRules = (b.closedMode?.deny ?? []).filter((rule) => !knownRule(registry, rule));
     const records = planId ? this.#d.store.steps(planId) : [];
     const gone = records.flatMap((r) => {
