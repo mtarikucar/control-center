@@ -592,9 +592,13 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const b = metrics.busy;
       const atWork = new Set(b.atWork.map((p) => p.id));
       const idle = new Set(b.idle.map((p) => p.id));
+      const longIdle = summary.constitution.idleCapacityHours * HOUR;
       const streams = live.filter((p) => p.status === 'approved').flatMap((plan) => (d.company.streamsOf([plan]).get(plan.id) ?? []).map((stream) => ({ plan, stream })));
       const lines: string[] = [];
-      const warnings: string[] = [];
+      // Most urgent first, so a cap keeps what needs the coordinator: no head, a room gone idle, a finished stream nobody reported.
+      const headless: string[] = [];
+      const resting: string[] = [];
+      const unreported: string[] = [];
       for (const dep of openDepartments) {
         const people = d.departments!.members(dep.id);
         const mine = streams.filter((x) => ownerDepartment(x.stream.owner) === dep.id);
@@ -606,11 +610,16 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
         const streamText = mine.length ? mine.map((x) => `${x.stream.id} (${STREAM_TR[x.stream.status]})`).join(', ') : 'yok';
         lines.push(`${dep.name} — başkan ${head} · ${counts} · akışlar: ${streamText}${reviewing ? ` · incelemede ${reviewing}` : ''}${last ? ` · son rapor: “${clip(last.text, L.noteChars)}” (${ago(last.at)})` : ''}`);
         const running = mine.filter((x) => x.stream.status !== 'done');
-        if (!dep.headId && running.length) warnings.push(`UYARI: ${dep.name} başkansız ve açık akışı var (${running.map((x) => x.stream.id).join(', ')}); departmentUpdate ile başkan ata ya da akışı kendin yönet.`);
-        for (const y of notes) if (y.x.stream.status === 'done' && !y.n?.report) warnings.push(`${dep.name}: “${y.x.plan.title}” planının “${y.x.stream.id}” akışı bitti, raporu yok.`);
+        if (!dep.headId && running.length) headless.push(`UYARI: ${dep.name} başkansız ve açık akışı var (${running.map((x) => x.stream.id).join(', ')}); departmentUpdate ile başkan ata ya da akışı kendin yönet.`);
+        // Everyone in the room idle, the latest of them for as long as the board marks one person “uzun süredir” (spec §6.3).
+        if (people.length > 0 && people.every((p) => idle.has(p.id))) {
+          const since = Math.max(...people.map((p) => idleSince.get(p.id)!));
+          if (longIdle > 0 && now - since >= longIdle) resting.push(`${dep.name}: odadaki herkes uzun süredir boşta (${lasted(since)}) — akış ver ya da odayı uyut.`);
+        }
+        for (const y of notes) if (y.x.stream.status === 'done' && !y.n?.report) unreported.push(`${dep.name}: “${y.x.plan.title}” planının “${y.x.stream.id}” akışı bitti, raporu yok.`);
       }
       // Capped like the other lists: a board over the budget is drawn again with fewer of each.
-      return [...cap(lines, L.lines, 'departman'), ...cap(warnings, L.details, 'uyarı')].map((l) => `- ${l}`);
+      return [...cap(lines, L.lines, 'departman'), ...cap([...headless, ...resting, ...unreported], L.details, 'uyarı')].map((l) => `- ${l}`);
     };
 
     // ── 4. chains and the critical path ───────────────────────────────────────

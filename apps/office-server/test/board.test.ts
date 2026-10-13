@@ -1342,3 +1342,155 @@ describe('board — Departmanlar under the budget (spec departments §6.3)', () 
     expect(text.split('\n').filter((l) => l.startsWith('## ')).map((h) => h.replace(/ \(.*/, ''))).toContain('## 4. Departmanlar');
   });
 });
+
+describe('board — Departmanlar: urgency, idle rooms, shape and counts (spec departments §6.3)', () => {
+  /** The section's lines, “- ” off. */
+  const lines = (t: ReturnType<typeof make>, text = t.board().text) => t.section(text, 4).split('\n').slice(1).map((l) => l.replace(/^- /, ''));
+  const warningsOf = (all: string[]) => all.filter((l) => !/ — başkan | departman daha$/.test(l));
+  /** A person at work: a task started. */
+  const atWork = (t: ReturnType<typeof make>, id: string, title = 'İş') => t.company.start(t.task(id, title).id);
+
+  it('warnings by urgency: a headless department first, a room gone idle next, an unreported stream last — department order within each', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const [bir, iki] = [d.create(OWNER, { name: 'Birinci', mission: 'Bir.' }), d.create(OWNER, { name: 'İkinci', mission: 'İki.' })];
+    const [selin, deniz] = [t.person('Selin'), t.person('Deniz')];
+    d.setHead(OWNER, bir.id, selin.id);
+    d.move(OWNER, deniz.id, iki.id);
+    const plan = t.plan('Site', { streams: [{ id: 'doc', title: 'Belgeler', owner: 'Birinci' }, { id: 'tanitim', title: 'Tanıtım', owner: 'İkinci' }] });
+    t.finish(selin.id, t.company.start(t.task(selin.id, 'Belgeler', { planId: plan.id, streamId: 'doc' }).id).id);
+    t.advance(3 * HOUR);
+    expect(warningsOf(lines(t))).toEqual([
+      'UYARI: İkinci başkansız ve açık akışı var (tanitim); departmentUpdate ile başkan ata ya da akışı kendin yönet.',
+      'Birinci: odadaki herkes uzun süredir boşta (3 sa) — akış ver ya da odayı uyut.',
+      'İkinci: odadaki herkes uzun süredir boşta (3 sa) — akış ver ya da odayı uyut.',
+      'Birinci: “Site” planının “doc” akışı bitti, raporu yok.',
+    ]);
+  });
+
+  it('at the tightest limits the warnings kept are the urgent ones, not the first department’s unreported stream', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const names = ['Yazılım Geliştirme ve Mimari Departmanı', 'Pazarlama ve Duyuru Çalışmaları Birimi', 'Müşteri Destek ve Memnuniyet Odası', 'Finans ve Bütçe Denetimi Departmanı', 'Araştırma ve Ürün Keşfi Departmanı', 'İnsan Kaynakları ve Kültür Departmanı'];
+    const deps = names.map((name) => d.create(OWNER, { name, mission: 'Görev.' }));
+    // The first two have heads, each with a finished stream no one reported; the other four are headless with open streams.
+    const [selin, mert] = [t.person('Selin'), t.person('Mert')];
+    d.setHead(OWNER, deps[0]!.id, selin.id);
+    d.setHead(OWNER, deps[1]!.id, mert.id);
+    // A third stream, not started, keeps the plan running after the other two are done.
+    const rapor = t.plan('Raporsuz', { streams: [{ id: 'doc0', title: 'Belge 0', owner: deps[0]!.name }, { id: 'doc1', title: 'Belge 1', owner: deps[1]!.name }, { id: 'sonra', title: 'Sonra', owner: deps[0]!.name }] });
+    t.finish(selin.id, t.company.start(t.task(selin.id, 'Belge 0', { planId: rapor.id, streamId: 'doc0' }).id).id);
+    t.finish(mert.id, t.company.start(t.task(mert.id, 'Belge 1', { planId: rapor.id, streamId: 'doc1' }).id).id);
+    for (let n = 1; n <= 5; n++) {
+      t.plan(`Çok uzun adlı plan numara ${n}`, { streams: deps.flatMap((dep, i) => [`a${n}`, `b${n}`].map((s) => ({ id: `${s}-${i}`, title: `Uzun bir akış başlığı ${s} ${i}`, owner: dep.name }))) });
+    }
+    const text = t.board().text;
+    const warnings = warningsOf(lines(t, text));
+    expect(text.length).toBeLessThanOrEqual(3900);
+    // Four headless, two unreported: the two kept are the first two headless (the third and fourth departments).
+    expect(warnings).toHaveLength(3);
+    expect(warnings.slice(0, 2).every((w) => w.startsWith('UYARI: '))).toBe(true);
+    expect(warnings.slice(0, 2).map((w) => w.split(' başkansız')[0])).toEqual([`UYARI: ${names[2]}`, `UYARI: ${names[3]}`]);
+    expect(warnings[2]).toBe('… ve 4 uyarı daha');
+  });
+
+  it('a room whose people have all been idle for the constitution’s hours gets a warning; a room with someone at work, a young one and an empty one do not', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const [yaz, pzr] = [d.create(OWNER, { name: 'Yazılım', mission: 'Kod.' }), d.create(OWNER, { name: 'Pazarlama', mission: 'Duyuru.' })];
+    d.create(OWNER, { name: 'Boş oda', mission: 'Kimse yok.' });
+    const [selin, mert, deniz, ece] = ['Selin', 'Mert', 'Deniz', 'Ece'].map((n) => t.person(n));
+    d.setHead(OWNER, yaz.id, selin!.id);
+    d.move(OWNER, mert!.id, yaz.id);
+    d.move(OWNER, deniz!.id, pzr.id);
+    d.move(OWNER, ece!.id, pzr.id);
+    atWork(t, deniz!.id);
+    const resting = () => lines(t).filter((l) => l.includes('uzun süredir boşta'));
+    // The threshold is two hours (the default): one hour in, no one is “uzun süredir”.
+    t.advance(HOUR);
+    expect(resting()).toEqual([]);
+    t.advance(2 * HOUR);
+    expect(resting()).toEqual(['Yazılım: odadaki herkes uzun süredir boşta (3 sa) — akış ver ya da odayı uyut.']);
+    // The latest of the room's idle starts counts: Mert finishes a task, so the room is young again.
+    t.finish(mert!.id, atWork(t, mert!.id, 'Kısa iş').id);
+    expect(resting()).toEqual([]);
+    t.advance(2 * HOUR);
+    expect(resting()).toEqual(['Yazılım: odadaki herkes uzun süredir boşta (2 sa) — akış ver ya da odayı uyut.']);
+  });
+
+  it('the shape stays when only the clock moves: a department’s last report and its idle room are not what the board says', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const [yaz, pzr] = [d.create(OWNER, { name: 'Yazılım', mission: 'Kod.' }), d.create(OWNER, { name: 'Pazarlama', mission: 'Duyuru.' })];
+    const [selin, mert, deniz] = [t.person('Selin'), t.person('Mert'), t.person('Deniz')];
+    d.setHead(OWNER, yaz.id, selin.id);
+    d.move(OWNER, mert.id, yaz.id);
+    d.move(OWNER, deniz.id, pzr.id);
+    // A second stream keeps the plan running after “doc” is done.
+    const plan = t.plan('Site', { streams: [{ id: 'api', title: 'API', owner: 'Yazılım' }, { id: 'doc', title: 'Belgeler', owner: 'Yazılım' }] });
+    t.company.start(t.task(mert.id, 'Uç noktalar', { planId: plan.id, streamId: 'api' }).id);
+    t.finish(selin.id, t.company.start(t.task(selin.id, 'Belgeler', { planId: plan.id, streamId: 'doc' }).id).id);
+    t.company.streamReport(selin.id, plan.id, 'doc', { summary: 'Belgeler hazır.' });
+    // Pazarlama’s only person is idle past the threshold: its warning is on the board already.
+    t.advance(3 * HOUR);
+    const since = T0 + MIN;
+    const before = t.board({ since });
+    expect(before.text).toMatch(/son rapor: “Belgeler hazır\.” \(3 sa önce\)/);
+    expect(before.text).toMatch(/Pazarlama: odadaki herkes uzun süredir boşta \(3 sa\)/);
+    t.advance(50 * MIN);
+    const later = t.board({ since });
+    expect(later.text).toMatch(/\(3 sa 50 dk önce\)/);
+    expect(later.text).not.toBe(before.text);
+    expect(later.shape).toBe(before.shape);
+    // The report itself is what the board says: another text, another shape.
+    t.company.streamReport(selin.id, plan.id, 'doc', { summary: 'Belgeler gözden geçirildi.' });
+    expect(t.board({ since }).shape).not.toBe(later.shape);
+  });
+
+  it('counts: the people of a department at work and idle, exactly', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const yaz = d.create(OWNER, { name: 'Yazılım', mission: 'Kod.' });
+    const [selin, mert, aylin] = [t.person('Selin'), t.person('Mert'), t.person('Aylin')];
+    d.setHead(OWNER, yaz.id, selin.id);
+    d.move(OWNER, mert.id, yaz.id);
+    d.move(OWNER, aylin.id, yaz.id);
+    atWork(t, selin.id);
+    atWork(t, mert.id);
+    expect(lines(t)[0]).toBe('Yazılım — başkan Selin · 3 kişi (2 işte, 1 boşta) · akışlar: yok');
+    // Aylin takes work too; Selin hands hers in.
+    atWork(t, aylin.id);
+    t.finish(selin.id, t.tasks.list({ assignee: selin.id, statuses: ['in_progress'] })[0]!.id);
+    expect(lines(t)[0]).toBe('Yazılım — başkan Selin · 3 kişi (2 işte, 1 boşta) · akışlar: yok');
+    t.finish(mert.id, t.tasks.list({ assignee: mert.id, statuses: ['in_progress'] })[0]!.id);
+    expect(lines(t)[0]).toBe('Yazılım — başkan Selin · 3 kişi (1 işte, 2 boşta) · akışlar: yok');
+  });
+
+  it('a member’s task waiting in review is counted on the department’s line', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const yaz = d.create(OWNER, { name: 'Yazılım', mission: 'Kod.' });
+    const [selin, mert, can] = [t.person('Selin'), t.person('Mert'), t.person('Can')];
+    d.setHead(OWNER, yaz.id, selin.id);
+    d.move(OWNER, mert.id, yaz.id);
+    t.finish(mert.id, t.company.start(t.task(mert.id, 'Uç noktalar', { reviewer: can.id }).id).id);
+    expect(t.tasks.list({ assignee: mert.id })[0]!.status).toBe('review');
+    expect(lines(t)[0]).toBe('Yazılım — başkan Selin · 2 kişi (0 işte, 1 boşta) · akışlar: yok · incelemede 1');
+  });
+
+  it('a stream whose department closed says so in “Hedefler ve planlar”, not that its owner is missing', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const yaz = d.create(OWNER, { name: 'Yazılım', mission: 'Kod.' });
+    t.plan('Site', { streams: [{ id: 'api', title: 'API', owner: 'Yazılım' }] });
+    expect(t.section(t.board().text, 2)).toMatch(/api \(Yazılım departmanı\): planlı/);
+    expect(t.section(t.board().text, 2)).toMatch(/api: sahibi Yazılım departmanı, başkanı yok — sen yönet ya da başkan ata/);
+    d.close(OWNER, yaz.id, 'Proje bitti.');
+    const goals = t.section(t.board().text, 2);
+    expect(goals).toMatch(/api \(Yazılım departmanı\): planlı/);
+    expect(goals).toMatch(/! api: sahibi Yazılım departmanı kapandı/);
+    expect(goals).not.toMatch(/sahibi bulunamadı|başkanı yok/);
+    // No open department: no Departmanlar section.
+    expect(t.board().text).not.toMatch(/Departmanlar/);
+  });
+});
