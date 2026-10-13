@@ -107,9 +107,10 @@ tabloyu zaten kaldırır). `DepartmentStore` yazar ve okur.
 - **Boş oda:** halı koyu gri, oda lambaları sönük, masalarda ekran kapalı, tabelada "Boş oda".
 - **Ortak oda:** departmanı yok ama içinde merkezden oturan biri var: halı koyu gri, lambası yanık, oturulan masaların
   ekranı açık, tabelada "Ortak oda".
-- **Oda etiketi:** tabela varsayılan yakınlıkta okunmaz (≈ 31 × 10 px), bu yüzden departmanın odasının zemininde, dış
-  duvarı yanında piksel boyutlu bir etiket (drei `<Html>`) odanın rengini ve departmanın adını gösterir; tıklama ve
-  sürüklemeyi almaz, çalışanların etiketlerinin altında kalır.
+- **Oda etiketi:** tabela varsayılan yakınlıkta okunmaz (≈ 31 × 10 px), bu yüzden departmanın odasının zemininde,
+  kameraya bakan (güney) kenarında — kuzey odalarda merkeze bakan camın, güney odalarda alçak dış duvarın yanında;
+  odadakilerin etiketleri yukarı, kuzeye doğru düştüğü için orası boş kalır — piksel boyutlu bir etiket (drei `<Html>`)
+  odanın rengini ve departmanın adını gösterir; tıklama ve sürüklemeyi almaz, çalışanların etiketlerinin altında kalır.
 - **Tabela:** kapının üstünde, merkeze bakan, çift yüzlü düzlem; metin bir `<canvas>`'ta çizilip doku olur (ağdan
   yazı tipi indirmez; ofis yerel çalışır).
 

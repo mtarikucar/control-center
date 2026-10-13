@@ -117,18 +117,21 @@ export interface RoomTag {
   position: [number, number, number];
 }
 
-/** How far in from the room's outer wall its tag stands, and how high: just above the floor. */
+/** How far in from the room's camera-side edge its tag stands, and how high: just above the floor. */
 const TAG_INSET = 0.6;
 const TAG_Y = 0.1;
 
-/** A tag for each room an open department holds, at the room's middle by its outer wall, the side away from the hub (pure). */
-export function roomTags(rooms: readonly RoomGeometry[], names: ReadonlyMap<number, string>, hubZ: number): RoomTag[] {
+/**
+ * A tag for each room an open department holds, at the room's middle by its camera-side (south) edge, just above the
+ * floor (pure): a seated person's tag rises up-screen, towards the room's north side, so this edge stays clear of the
+ * room's own people (north rooms: the hub-side glass; south rooms: the low outer wall).
+ */
+export function roomTags(rooms: readonly RoomGeometry[], names: ReadonlyMap<number, string>): RoomTag[] {
   return rooms.flatMap((r) => {
     const name = names.get(r.index);
     if (name === undefined) return [];
-    const { x1, z1, x2, z2 } = r.rect;
-    const z = (z1 + z2) / 2 < hubZ ? z1 + TAG_INSET : z2 - TAG_INSET;
-    return [{ room: r.index, name, colour: r.carpet.color, position: [(x1 + x2) / 2, TAG_Y, z] }];
+    const { x1, x2, z2 } = r.rect;
+    return [{ room: r.index, name, colour: r.carpet.color, position: [(x1 + x2) / 2, TAG_Y, z2 - TAG_INSET] }];
   });
 }
 
@@ -142,6 +145,6 @@ export function useRoomTags(): RoomTag[] {
   return useMemo(() => {
     const names = new Map<number, string>();
     for (let i = 0; i < flat.length; i += 2) names.set(flat[i] as number, flat[i + 1] as string);
-    return roomTags(LAYOUT.rooms, names, LAYOUT.depth / 2);
+    return roomTags(LAYOUT.rooms, names);
   }, [flat]);
 }

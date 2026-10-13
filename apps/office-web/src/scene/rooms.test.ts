@@ -73,20 +73,22 @@ describe('rooms where the centre’s overflow sits (final review I1)', () => {
 });
 
 describe('roomTags (final review I2)', () => {
-  it('one for each room a department holds — its name, the room’s colour — by the room’s outer wall, away from the hub, at its middle, just above the floor', () => {
-    const tags = roomTags(LAYOUT.rooms, new Map([[0, 'Pazarlama'], [4, 'Çok uzun bir departman adı kırk karakter!']]), LAYOUT.depth / 2);
+  it('one for each room a department holds — its name, the room’s colour — at its middle by its camera-side (south) edge, just above the floor', () => {
+    const tags = roomTags(LAYOUT.rooms, new Map([[0, 'Pazarlama'], [4, 'Çok uzun bir departman adı kırk karakter!']]));
     expect(tags.map((t) => [t.room, t.name, t.colour])).toEqual([[0, 'Pazarlama', LAYOUT.rooms[0]!.carpet.color], [4, 'Çok uzun bir departman adı kırk karakter!', LAYOUT.rooms[4]!.carpet.color]]);
     const [north, south] = tags;
     const r0 = LAYOUT.rooms[0]!.rect;
     const r4 = LAYOUT.rooms[4]!.rect;
     expect(north!.position[0]).toBeCloseTo((r0.x1 + r0.x2) / 2);
     expect(south!.position[0]).toBeCloseTo((r4.x1 + r4.x2) / 2);
-    // North rooms by z ≈ 0.6, south rooms by z ≈ 23.4: beyond the carpet, on the side away from the hub.
-    expect(north!.position[2]).toBeCloseTo(0.6);
+    // Controller ruling: every room's south edge, out of the way of its own people's tags — a north room's hub-side
+    // glass, a south room's low outer wall (z ≈ 23.4); both beyond the carpet, on the camera's side.
+    expect(north!.position[2]).toBeCloseTo(r0.z2 - 0.6);
     expect(south!.position[2]).toBeCloseTo(LAYOUT.depth - 0.6);
-    expect(north!.position[2]).toBeLessThan(LAYOUT.rooms[0]!.carpet.z1);
+    expect(north!.position[2]).toBeGreaterThan(LAYOUT.rooms[0]!.carpet.z2);
+    expect(north!.position[2]).toBeLessThan(r0.z2);
     expect(south!.position[2]).toBeGreaterThan(LAYOUT.rooms[4]!.carpet.z2);
     expect(tags.every((t) => t.position[1] > 0 && t.position[1] < 0.3)).toBe(true);
-    expect(roomTags(LAYOUT.rooms, new Map(), LAYOUT.depth / 2)).toEqual([]);
+    expect(roomTags(LAYOUT.rooms, new Map())).toEqual([]);
   });
 });

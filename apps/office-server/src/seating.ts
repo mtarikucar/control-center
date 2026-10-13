@@ -34,6 +34,7 @@ export function seatFor(who: Seatee, current: number | null, taken: ReadonlySet<
   const held = o.held ?? NONE_HELD;
   const free = (seat: number) => seat >= 0 && seat < seatCount && !taken.has(seat);
   if (who.kind === 'coordinator') return free(COORDINATOR_SEAT) ? COORDINATOR_SEAT : null;
+  // A smaller (test) office has no hub; lowest first keeps its seats, and so its roster's order, as the economy golden recorded them.
   const others = (seatCount < SEAT_COUNT ? ROOMS_LOW_FIRST : ROOMS_HIGH_FIRST).filter((room) => room !== who.room);
   const unheld = others.filter((room) => !held.has(room)).flatMap(roomSeats);
   const otherDepartments = ROOMS_LOW_FIRST.filter((room) => room !== who.room && held.has(room)).flatMap(roomSeats);
