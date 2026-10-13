@@ -48,14 +48,14 @@ export function recipientsOf(input: unknown): string[] {
 
 export type ContactKey = { kind: 'email' | 'phone' | 'handle'; value: string };
 
-/** How a special contact is compared: an e-mail folded, a phone by its digits, anything else as a user name folded without its @. */
+/** How a special contact is compared: an e-mail folded, a phone by its digits, anything else as a user name or a name folded without its @ (runs of whitespace as one space). */
 export function contactKey(raw: string): ContactKey | null {
   const x = raw.trim();
   if (!x) return null;
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) return { kind: 'email', value: fold(x) };
   const digits = x.replace(/\D/g, '');
   if (/^\+?[\d\s().-]+$/.test(x) && digits.length >= 7) return { kind: 'phone', value: digits };
-  const handle = fold(x).replace(/^@+/, '');
+  const handle = fold(x).replace(/\s+/g, ' ').replace(/^@+/, '');
   return handle ? { kind: 'handle', value: handle } : null;
 }
 
@@ -63,6 +63,16 @@ export function contactKey(raw: string): ContactKey | null {
 const samePhone = (a: string, b: string) => a === b || (a.length >= 10 && b.length >= 10 && a.slice(-10) === b.slice(-10));
 const EMAIL = /[^\s<>()"',;:]+@[^\s<>()"',;:]+\.[^\s<>()"',;:]+/g;
 const PHONE = /\+?\d[\d\s().-]{5,}\d/g;
+
+const wordChar = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+
+/** `phrase` in `text` (both folded, whitespace collapsed) as whole words: "ahmet yilmaz" is not in "ahmet yilmazoglu". */
+function hasPhrase(text: string, phrase: string): boolean {
+  for (let i = text.indexOf(phrase); i !== -1; i = text.indexOf(phrase, i + 1)) {
+    if (!wordChar(text[i - 1]) && !wordChar(text[i + phrase.length])) return true;
+  }
+  return false;
+}
 
 function texts(v: unknown): string[] {
   if (typeof v === 'string') return [v];
@@ -80,10 +90,13 @@ export function specialContact(input: unknown, contacts: readonly string[]): str
   const phones = all.flatMap((t) => (t.match(PHONE) ?? []).map((p) => p.replace(/\D/g, '')));
   // A user name is a whole word: "@aliveli" and "aliveli," are it, "aliveli2" is not.
   const words = all.flatMap((t) => fold(t).split(/[\s,;:<>()"'!?]+/).map((w) => w.replace(/^@+/, '').replace(/\.+$/, '')).filter(Boolean));
+  // A name with spaces ("Ahmet Yılmaz", "ACME Ltd.") is a phrase, searched in each string on its own (not across fields).
+  const folded = all.map((t) => fold(t).replace(/\s+/g, ' '));
   for (const raw of contacts) {
     const key = contactKey(raw);
     if (!key) continue;
-    const hit = key.kind === 'email' ? emails.includes(key.value) : key.kind === 'phone' ? phones.some((p) => samePhone(p, key.value)) : words.includes(key.value);
+    const phrase = key.kind === 'handle' && key.value.includes(' ') ? key.value.replace(/[^\p{L}\p{N}]+$/u, '') : '';
+    const hit = key.kind === 'email' ? emails.includes(key.value) : key.kind === 'phone' ? phones.some((p) => samePhone(p, key.value)) : phrase ? folded.some((t) => hasPhrase(t, phrase)) : words.includes(key.value);
     if (hit) return raw.trim();
   }
   return null;

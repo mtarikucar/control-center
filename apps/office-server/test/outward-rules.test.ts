@@ -31,6 +31,22 @@ describe('a call’s recipients and special contacts (spec capabilities §6)', (
     expect(specialContact({ to: 'ali@firma.com' }, [])).toBeNull();
   });
 
+  it('a special contact that is a name (spaces in it) is found as a whole phrase: folded, runs of whitespace as one, at word boundaries, in any string of the input', () => {
+    expect(contactKey('  Ahmet   Yılmaz ')).toEqual({ kind: 'handle', value: 'ahmet yilmaz' });
+    const contacts = ['Ahmet Yılmaz', 'ipek kaya', 'ACME Ltd.'];
+    expect(specialContact({ to: 'ahmet  YILMAZ <a@x.co>' }, contacts)).toBe('Ahmet Yılmaz');
+    expect(specialContact({ message: { body: 'Merhaba ahmet \n YILMAZ bey,' } }, contacts)).toBe('Ahmet Yılmaz');
+    expect(specialContact({ to: ['İPEK KAYA'] }, contacts)).toBe('ipek kaya');
+    expect(specialContact({ text: 'Teklif: Acme Ltd. adına' }, contacts)).toBe('ACME Ltd.');
+    expect(specialContact({ text: 'acme ltd' }, contacts)).toBe('ACME Ltd.');
+    // Not the same person or company: a longer or a joined word, another first name, the words in two fields.
+    expect(specialContact({ to: 'Ahmet Yılmazoğlu' }, contacts)).toBeNull();
+    expect(specialContact({ to: 'Mahmet Yılmaz', text: 'ipek kayalar, acme ltdsti' }, contacts)).toBeNull();
+    expect(specialContact({ first: 'Ahmet', last: 'Yılmaz' }, contacts)).toBeNull();
+    // A name is found again after a near miss earlier in the same string.
+    expect(specialContact({ text: 'Mahmet Yılmaz ve Ahmet Yılmaz' }, contacts)).toBe('Ahmet Yılmaz');
+  });
+
   it('the summary the outbox keeps: the input without secret-looking fields, its first 300 characters', () => {
     expect(callSummary({ to: 'a@x.co', api_key: 'k', auth: { password: 'p', user: 'u' }, text: 'x' })).toBe('{"to":"a@x.co","auth":{"user":"u"},"text":"x"}');
     expect(callSummary({ text: 'y'.repeat(500) })).toHaveLength(300);
