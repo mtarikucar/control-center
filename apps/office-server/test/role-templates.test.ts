@@ -224,8 +224,14 @@ describe('Role templates — the catalog (ships with the office)', () => {
     }
     for (const id of ['pazarlama-muduru', 'sosyal-medya']) expect(roleTemplate(id).body, id).toMatch(ASK('yayınlamadan', 'gönderiyi'));
     for (const id of ['musteri-temsilcisi', 'iletisim-yoneticisi']) {
-      expect(roleTemplate(id).body, id).toMatch(/kapı Anayasa'nın .*geçirir ve giden kutusuna yazar, tutarsa `approvalRequest` ile istersin/);
+      expect(roleTemplate(id).body, id).toMatch(/kapı açıkken Anayasa'nın .*geçirir ve giden kutusuna yazar, tutarsa `approvalRequest` ile istersin/);
     }
+    // Final re-review: every line that says the outbox is written says it is written with the gate on — off, nothing is.
+    for (const t of listRoleTemplates()) {
+      for (const line of t.body.split('\n').filter((l) => /giden kutusuna yaz/.test(l))) expect(line, t.id).toMatch(/kapı açıkken/i);
+    }
+    expect(roleTemplate('iletisim-yoneticisi').body).toMatch(/Olağan e-posta cevabını kendin gönderirsin: sahibine sorulmaz, kapı açıkken sistemce geçer ve giden kutusuna yazılır;/);
+    expect(roleTemplate('sosyal-medya').body).toMatch(/kendin yayınlar ya da zamanlarsın; kapı açıkken Anayasa'nın kurallarıyla geçirir ve giden kutusuna yazar\./);
     // The old phrasing (the participle problem, the “konu alanı” aside, “kapı kapalıyken de” alone) is gone from every role.
     for (const t of listRoleTemplates()) expect(t.body, t.id).not.toMatch(/\(ya da onları konu alanı\)|kapı kapalıyken de\./);
     // Satış carries the same ask-first bullet beside its İYS rule (its department list already says the head asks).
