@@ -173,6 +173,9 @@ export function officeTools(o: {
   const characterList = () => [...o.characters(), 'voxel'];
 
   const deps = o.departments;
+  /** The tools a department's head shares with the coordinator exist for leads only where departments do; elsewhere they stay the coordinator's, as before. */
+  const headKinds: EmployeeKind[] = deps ? LEADS : COORDINATOR;
+  const headSuffix = deps ? '; a head for their own department' : '';
   /** An open department by name or id; with none, a NotFoundError that lists the open ones. */
   const findDepartment = (who: string): Department => {
     const found = deps?.find(who.replace(/^\s*departman\s*:/i, '')) ?? null;
@@ -568,9 +571,9 @@ export function officeTools(o: {
     },
     {
       name: 'employeeNote',
-      description: 'The employee file (coordinator; a head for their own department): with text, add an observation about someone (what they are good at, what to watch); without text, read their file (your notes and their finished work). Look at it before handing out work.',
+      description: `The employee file (coordinator${headSuffix}): with text, add an observation about someone (what they are good at, what to watch); without text, read their file (${deps ? 'the notes with who wrote them, and their finished work' : 'your notes and their finished work'}). Look at it before handing out work.`,
       inputSchema: object({ employee: s('Employee id or name.'), text: s('Your observation.') }, ['employee']),
-      kinds: LEADS,
+      kinds: headKinds,
       run: ({ employee }, args) => {
         const text = optStr(args, 'text');
         const who = findPerson(str(args, 'employee'));
@@ -582,7 +585,10 @@ export function officeTools(o: {
         const file = memory.employeeFile(who.id);
         return [
           `${who.name}${who.title ? ` — ${who.title}` : ''}: ${file.finished} görev bitirdi.`,
-          ...(file.notes.length ? ['Notların:', ...file.notes.map((n) => `• ${day(n.ts)} ${n.text}`)] : ['Henüz notun yok.']),
+          // With departments the file holds a head's notes and the coordinator's, each with its writer (spec departments §5.2).
+          ...(deps
+            ? file.notes.length ? ['Notlar:', ...file.notes.map((n) => `• ${day(n.ts)} ${company.nameOf(n.by)}: ${n.text}`)] : ['Henüz not yok.']
+            : file.notes.length ? ['Notların:', ...file.notes.map((n) => `• ${day(n.ts)} ${n.text}`)] : ['Henüz notun yok.']),
           ...(file.recent.length ? ['Son işleri:', ...file.recent.map((r) => `• ${r.title}: ${r.summary}`)] : []),
         ].join('\n');
       },
@@ -608,9 +614,9 @@ export function officeTools(o: {
     },
     {
       name: 'setModel',
-      description: `Move an employee to another model (coordinator; a head for their own department): ${MODEL_ALIASES.join(', ')}. Their session goes on with the new model and keeps its memory.`,
+      description: `Move an employee to another model (coordinator${headSuffix}): ${MODEL_ALIASES.join(', ')}. Their session goes on with the new model and keeps its memory.`,
       inputSchema: object({ employee: s('Employee id or name.'), model: { type: 'string', enum: [...MODEL_ALIASES] } }, ['employee', 'model']),
-      kinds: LEADS,
+      kinds: headKinds,
       run: ({ employee }, args) => {
         const model = str(args, 'model') as ModelAlias;
         const who = findPerson(str(args, 'employee'));
@@ -622,9 +628,9 @@ export function officeTools(o: {
     {
       name: 'sleep',
       description:
-        'Put an idle employee to sleep to free the machine (coordinator; a head for their own department). Their session is kept; a task for them or a message wakes them. Not while they hold a task in progress: sleeping stops their running work, so park it first or let it finish.',
+        `Put an idle employee to sleep to free the machine (coordinator${headSuffix}). Their session is kept; a task for them or a message wakes them. Not while they hold a task in progress: sleeping stops their running work, so park it first or let it finish.`,
       inputSchema: object({ employee: s('Employee id or name.') }, ['employee']),
-      kinds: LEADS,
+      kinds: headKinds,
       run: async ({ employee }, args) => {
         const who = findPerson(str(args, 'employee'));
         company.assertManagesPerson(employee.id, who.id);
@@ -640,9 +646,9 @@ export function officeTools(o: {
     },
     {
       name: 'wake',
-      description: 'Wake a sleeping employee (coordinator; a head for their own department).',
+      description: `Wake a sleeping employee (coordinator${headSuffix}).`,
       inputSchema: object({ employee: s('Employee id or name.') }, ['employee']),
-      kinds: LEADS,
+      kinds: headKinds,
       run: ({ employee }, args) => {
         const who = findPerson(str(args, 'employee'));
         company.assertManagesPerson(employee.id, who.id);
@@ -1002,7 +1008,7 @@ export function officeTools(o: {
     },
     {
       name: 'hire',
-      description: `Hire a new employee (coordinator). A department’s head may hire into their own department (when a need arises, not because a desk is free). Choose provider: claude or codex independently of your own provider; both share office tasks, reviews and memory. Codex uses the model aliases as reasoning presets (haiku low, sonnet medium, opus high, fable xhigh), with the configured Codex model. From a role template (template; read them with roleTemplates): role text, title, team and model come from it; role is this company's own part and title, team or model given override the template. Without a template: role and model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
+      description: `Hire a new employee (coordinator).${deps ? ' A department’s head may hire into their own department (when a need arises, not because a desk is free).' : ''} Choose provider: claude or codex independently of your own provider; both share office tasks, reviews and memory. Codex uses the model aliases as reasoning presets (haiku low, sonnet medium, opus high, fable xhigh), with the configured Codex model. From a role template (template; read them with roleTemplates): role text, title, team and model come from it; role is this company's own part and title, team or model given override the template. Without a template: role and model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
       inputSchema: {
         ...object(
           {
@@ -1011,13 +1017,12 @@ export function officeTools(o: {
             provider: { type: 'string', enum: ['claude', 'codex'], description: 'The employee runtime; choose independently of the coordinator.' },
             capabilities: strings('The capabilities the role needs, from the vocabulary (capabilitiesRead): the whole list, replacing the template’s; none given, the template’s. The reply says how the new desk has each.'),
             characterId: { type: 'string', enum: characterList(), description: 'Look in the 3D office.' },
-            department: s('Department name or id to hire into (coordinator). A head always hires into their own.'),
-            head: { type: 'boolean', description: 'Hire as the department’s head (coordinator).' },
+            ...(deps ? { department: s('Department name or id to hire into (coordinator). A head always hires into their own.'), head: { type: 'boolean', description: 'Hire as the department’s head (coordinator).' } } : {}),
           },
           ['name'],
         ),
       },
-      kinds: LEADS,
+      kinds: headKinds,
       run: ({ employee }, args) => {
         const template = optStr(args, 'template');
         // Without a template, as before: role and model are required.
@@ -1026,8 +1031,9 @@ export function officeTools(o: {
         const role = template === undefined ? str(args, 'role') : (optStr(args, 'role') ?? '');
         const provider = optStr(args, 'provider');
         if (provider !== undefined && provider !== 'claude' && provider !== 'codex') throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
-        const department = optStr(args, 'department');
-        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, provider, characterId: optStr(args, 'characterId'), reportsTo: null, capabilities: list(args, 'capabilities'), departmentId: department ? findDepartment(department).id : undefined, head: bool(args, 'head') });
+        // Without departments the two fields do not exist: nothing of them reaches the hire.
+        const department = deps ? optStr(args, 'department') : undefined;
+        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, provider, characterId: optStr(args, 'characterId'), reportsTo: null, capabilities: list(args, 'capabilities'), ...(deps ? { departmentId: department ? findDepartment(department).id : undefined, head: bool(args, 'head') } : {}) });
         const from = hired.template ? `, şablon ${hired.template.id} (sürüm ${hired.template.version})` : '';
         const placed = roster.get(hired.id);
         const where = hired.departmentId ? ` → ${placed.team} departmanı${placed.kind === 'lead' ? ' (başkan)' : ''}` : '';
@@ -1202,9 +1208,13 @@ export function officeTools(o: {
         run: ({ employee }, args) => {
           const d = findDepartment(str(args, 'department'));
           const patch = { name: optStr(args, 'name'), mission: optStr(args, 'mission'), scope: optStr(args, 'scope') };
-          let next = patch.name !== undefined || patch.mission !== undefined || patch.scope !== undefined ? deps.update(employee.id, d.id, patch) : d;
           const head = optStr(args, 'head');
-          if (head !== undefined) next = deps.setHead(employee.id, d.id, head.trim() ? findPerson(head).id : null);
+          // The head is found before anything changes: a name that is nobody's leaves the department as it was.
+          const headId = head === undefined ? undefined : head.trim() ? findPerson(head).id : null;
+          const fields = patch.name !== undefined || patch.mission !== undefined || patch.scope !== undefined;
+          if (!fields && headId === undefined) return `Değişiklik yok: ${d.name}.`;
+          let next = fields ? deps.update(employee.id, d.id, patch) : d;
+          if (headId !== undefined) next = deps.setHead(employee.id, d.id, headId);
           return `${next.name} departmanı güncellendi; ${next.headId ? `başkanı artık ${company.nameOf(next.headId)}` : 'başkansız'}.`;
         },
       },

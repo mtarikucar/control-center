@@ -17,9 +17,11 @@ function make() {
   const c = companyFor(s, f, ['coder', 'designer', 'manager'], undefined, undefined, { departments: true });
   c.budget.setConstitution({ maxEmployees: 8 });
   const coordinator = c.company.hireCoordinator('sonnet');
+  const slept: string[] = [];
+  const woke: string[] = [];
   const tools = officeTools({
     company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder'], memory: c.memory, budget: c.budget,
-    engine: { sleep: async () => undefined, wake: () => undefined, sideQuestion: async () => ({ ok: true, answer: '' }) },
+    engine: { sleep: async (id) => void slept.push(id), wake: (id) => void woke.push(id), sideQuestion: async () => ({ ok: true, answer: '' }) },
     plans: () => c.plans.list(), agenda: { text: () => '' }, departments: c.departments!,
   });
   const call = async (who: Employee, name: string, args: Record<string, unknown>) => {
@@ -27,7 +29,7 @@ function make() {
     if (!tool.kinds.includes(s.roster.get(who.id).kind)) throw new Error(`${name} not offered to ${who.kind}`);
     return String(await tool.run({ employee: s.roster.get(who.id) } as never, args));
   };
-  return { ...s, ...c, departments: c.departments!, coordinator, tools, call };
+  return { ...s, ...c, departments: c.departments!, coordinator, tools, call, slept, woke };
 }
 
 describe('Department tools (spec §5)', () => {
@@ -36,6 +38,9 @@ describe('Department tools (spec §5)', () => {
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name);
     expect(names('member')).toContain('departmentsRead');
     for (const n of ['departmentTemplates', 'streamPlan', 'streamReport', 'hire', 'setModel', 'sleep', 'wake', 'employeeNote']) expect(names('lead'), n).toContain(n);
+    const hire = t.tools.find((x) => x.name === 'hire')!;
+    expect(Object.keys((hire.inputSchema as { properties: object }).properties)).toEqual(expect.arrayContaining(['department', 'head']));
+    expect(hire.description).toContain('A department’s head may hire into their own department');
     for (const n of ['departmentCreate', 'departmentUpdate', 'departmentMove', 'departmentClose']) {
       expect(names('coordinator'), n).toContain(n);
       expect(names('lead'), n).not.toContain(n);
@@ -48,6 +53,14 @@ describe('Department tools (spec §5)', () => {
     const c = companyFor(s, f);
     const plain = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder'], memory: c.memory, budget: c.budget, engine: f.engine, plans: () => c.plans.list(), agenda: { text: () => '' } });
     expect(plain.map((x) => x.name).filter((n) => /^department|^stream(Plan|Report)$/.test(n))).toEqual([]);
+    // The tools a head shares with the coordinator stay the coordinator's, and hire keeps its old schema and words.
+    const kindsOf = (n: string) => plain.find((x) => x.name === n)!.kinds;
+    for (const n of ['hire', 'setModel', 'sleep', 'wake', 'employeeNote']) expect(kindsOf(n), n).toEqual(['coordinator']);
+    const plainHire = plain.find((x) => x.name === 'hire')!;
+    const fields = Object.keys((plainHire.inputSchema as { properties: object }).properties);
+    expect(fields).not.toContain('department');
+    expect(fields).not.toContain('head');
+    for (const n of ['hire', 'setModel', 'sleep', 'wake', 'employeeNote']) expect(plain.find((x) => x.name === n)!.description, n).not.toMatch(/head|başkan/i);
   });
 
   it('the coordinator opens from a template with a head, lists, updates, moves and closes', async () => {
@@ -154,5 +167,82 @@ describe('Department tools (spec §5)', () => {
     c.company.hire(OWNER, { name: 'Can', role: 'r' });
     await expect(Promise.resolve().then(() => pass!.run({ employee: ada } as never, { to: 'Pazarlama', title: 'x' }))).rejects.toThrow(/^Çalışan bulunamadı: Pazarlama\. officeStatus ile ofistekileri görebilirsin\.$/);
     expect(String(await pass!.run({ employee: ada } as never, { to: 'can', title: 'y' }))).toMatch(/“y” Can adlı çalışanın sırasına eklendi/);
+  });
+
+  it('a head puts to sleep and wakes someone of their own department; not themselves, not someone at work', async () => {
+    const t = make();
+    const a = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    const head = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: a.id, head: true });
+    const ece = t.company.hire(OWNER, { name: 'Ece', role: 'r', departmentId: a.id });
+    const ali = t.company.hire(OWNER, { name: 'Ali', role: 'r', departmentId: a.id });
+    expect(await t.call(head, 'sleep', { employee: 'Ece' })).toBe('Ece uyudu.');
+    expect(t.slept).toEqual([ece.id]);
+    expect(await t.call(head, 'wake', { employee: 'Ece' })).toBe('Ece uyandı.');
+    expect(t.woke).toEqual([ece.id]);
+    await expect(t.call(head, 'sleep', { employee: 'Pelin' })).rejects.toThrow('Kendini uyutamazsın.');
+    const task = t.company.createTask(OWNER, { assignee: ali.id, title: 'Metin' });
+    t.company.start(task.id);
+    await expect(t.call(head, 'sleep', { employee: 'Ali' })).rejects.toThrow(/Ali “Metin” görevinde .* çalışıyor; uyutmak süren işini durdurur/);
+    expect(t.slept).toEqual([ece.id]);
+  });
+
+  it('employeeNote: the file shows who wrote each note; a head reads only their own department’s files', async () => {
+    const t = make();
+    const a = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    const b = t.departments.create(OWNER, { name: 'Satış', mission: 'm' });
+    const head = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: a.id, head: true });
+    const ece = t.company.hire(OWNER, { name: 'Ece', role: 'r', departmentId: a.id });
+    t.company.hire(OWNER, { name: 'Oya', role: 'r', departmentId: b.id });
+    expect(await t.call(head, 'employeeNote', { employee: 'Ece' })).toMatch(/Henüz not yok\./);
+    await t.call(head, 'employeeNote', { employee: 'Ece', text: 'Görselde iyi.' });
+    await t.call(t.coordinator, 'employeeNote', { employee: 'Ece', text: 'Metinde de iyi.' });
+    for (const reader of [head, t.coordinator]) {
+      const file = await t.call(reader, 'employeeNote', { employee: 'Ece' });
+      expect(file).toMatch(/Notlar:\n• \d{4}-\d{2}-\d{2} Pelin: Görselde iyi\.\n• \d{4}-\d{2}-\d{2} Koordinatör: Metinde de iyi\./);
+      expect(file).not.toContain('Notların');
+    }
+    await expect(t.call(head, 'employeeNote', { employee: 'Oya' })).rejects.toThrow(/yalnız kendi departmanındaki/);
+    await expect(t.call(head, 'employeeNote', { employee: 'Oya', text: 'x' })).rejects.toThrow(/yalnız kendi departmanındaki/);
+    expect(ece.id).toBeTruthy();
+  });
+
+  it('a lead who heads no department gets nothing from setModel, sleep, wake or employeeNote', async () => {
+    const t = make();
+    const a = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    const lead = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: a.id });
+    const ece = t.company.hire(OWNER, { name: 'Ece', role: 'r', departmentId: a.id });
+    // Not reachable through the company's own tools (a lead is a head); forced on the roster to see the tools refuse.
+    t.roster.update(lead.id, { kind: 'lead' });
+    expect(t.departments.headOf(lead.id)).toBeNull();
+    for (const [name, args] of [['setModel', { employee: 'Ece', model: 'opus' }], ['sleep', { employee: 'Ece' }], ['wake', { employee: 'Ece' }], ['employeeNote', { employee: 'Ece', text: 'x' }], ['employeeNote', { employee: 'Ece' }]] as const) {
+      await expect(t.call(lead, name, args), name).rejects.toThrow(/Departman başkanı yalnız kendi departmanındaki/);
+    }
+    expect(t.slept).toEqual([]);
+    expect(t.woke).toEqual([]);
+    expect(t.roster.get(ece.id).model).not.toBe('opus');
+  });
+
+  it('a head’s hire cannot make a head or reach another department, whatever it names', async () => {
+    const t = make();
+    const a = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    t.departments.create(OWNER, { name: 'Satış', mission: 'm' });
+    const head = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: a.id, head: true });
+    await expect(t.call(head, 'hire', { name: 'Bora', role: 'r', model: 'sonnet', head: true })).rejects.toThrow(/Başkan atamak koordinatörün işi/);
+    await expect(t.call(head, 'hire', { name: 'Bora', role: 'r', model: 'sonnet', team: 'Satış' })).rejects.toThrow(/Başkan yalnız kendi departmanına işe alır/);
+    await expect(t.call(head, 'hire', { name: 'Bora', role: 'r', model: 'sonnet', team: 'Yeni Oda' })).rejects.toThrow(/Başkan yalnız kendi departmanına işe alır/);
+    expect(t.roster.byIdOrName('Bora')).toBeNull();
+    expect(t.departments.list({ status: 'open' }).map((d) => d.name)).toEqual(['Pazarlama', 'Satış']);
+  });
+
+  it('departmentUpdate finds the head before it changes anything; with nothing to change it says so', async () => {
+    const t = make();
+    const a = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'Eski misyon.' });
+    const pelin = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: a.id, head: true });
+    await expect(t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama', name: 'Yeni Ad', mission: 'Yeni misyon.', head: 'Kimse' })).rejects.toThrow(/Çalışan bulunamadı: Kimse/);
+    expect(t.departments.get(a.id)).toMatchObject({ name: 'Pazarlama', mission: 'Eski misyon.', headId: pelin.id });
+    expect(await t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama' })).toBe('Değişiklik yok: Pazarlama.');
+    expect(t.departments.get(a.id)).toMatchObject({ name: 'Pazarlama', mission: 'Eski misyon.', headId: pelin.id });
+    expect(await t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama', mission: 'Yeni misyon.' })).toBe('Pazarlama departmanı güncellendi; başkanı artık Pelin.');
+    expect(await t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama', head: '' })).toBe('Pazarlama departmanı güncellendi; başkansız.');
   });
 });
