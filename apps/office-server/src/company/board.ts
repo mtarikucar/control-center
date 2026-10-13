@@ -21,6 +21,8 @@ import { formatStamp, formatWhen } from './time.ts';
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
+/** A finished plan's streams stay on the Departmanlar lines this long (a head's last report comes after the plan is done, spec departments §6.2.5). */
+const RECENT_DONE_MS = 7 * DAY;
 
 /** What the board reads: the office's services, never written to. */
 export interface BoardDeps {
@@ -211,7 +213,8 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
   const coordinator = people.find((e) => e.kind === 'coordinator' && e.lifecycle !== 'archived') ?? null;
   const team = people.filter((e) => e.lifecycle !== 'archived' && e.kind !== 'coordinator');
   const goals = d.company.goals().filter((g) => g.status === 'active');
-  const live = d.plans.list(1000).filter(running).sort((a, b) => a.createdAt - b.createdAt);
+  const allPlans = d.plans.list(1000);
+  const live = allPlans.filter(running).sort((a, b) => a.createdAt - b.createdAt);
   const summary = d.budget.summary();
   const open = d.tasks.list({ statuses: OPEN_STATUSES, limit: 100_000 });
   const openById = new Map(open.map((t) => [t.id, t]));
@@ -593,7 +596,9 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const atWork = new Set(b.atWork.map((p) => p.id));
       const idle = new Set(b.idle.map((p) => p.id));
       const longIdle = summary.constitution.idleCapacityHours * HOUR;
-      const streams = live.filter((p) => p.status === 'approved').flatMap((plan) => (d.company.streamsOf([plan]).get(plan.id) ?? []).map((stream) => ({ plan, stream })));
+      // The running plans' streams, and those of a plan finished this week (its last stream was reported, or not, after the plan was done).
+      const shown = [...live.filter((p) => p.status === 'approved'), ...allPlans.filter((p) => p.status === 'done' && now - p.updatedAt <= RECENT_DONE_MS).sort((a, b) => a.createdAt - b.createdAt)];
+      const streams = shown.flatMap((plan) => (d.company.streamsOf([plan]).get(plan.id) ?? []).map((stream) => ({ plan, stream })));
       const lines: string[] = [];
       // Most urgent first, so a cap keeps what needs the coordinator: no head, a room gone idle, a finished stream nobody reported.
       const headless: string[] = [];
@@ -609,7 +614,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
         const counts = `${people.length} kişi (${people.filter((p) => atWork.has(p.id)).length} işte, ${people.filter((p) => idle.has(p.id)).length} boşta)`;
         const streamText = mine.length ? mine.map((x) => `${x.stream.id} (${STREAM_TR[x.stream.status]})`).join(', ') : 'yok';
         lines.push(`${dep.name} — başkan ${head} · ${counts} · akışlar: ${streamText}${reviewing ? ` · incelemede ${reviewing}` : ''}${last ? ` · son rapor: “${clip(last.text, L.noteChars)}” (${ago(last.at)})` : ''}`);
-        const running = mine.filter((x) => x.stream.status !== 'done');
+        const running = mine.filter((x) => x.plan.status === 'approved' && x.stream.status !== 'done');
         if (!dep.headId && running.length) headless.push(`UYARI: ${dep.name} başkansız ve açık akışı var (${running.map((x) => x.stream.id).join(', ')}); departmentUpdate ile başkan ata ya da akışı kendin yönet.`);
         // Everyone in the room idle, the latest of them for as long as the board marks one person “uzun süredir” (spec §6.3).
         if (people.length > 0 && people.every((p) => idle.has(p.id))) {

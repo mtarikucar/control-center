@@ -1311,6 +1311,44 @@ describe('board — Departmanlar (spec departments §6.3)', () => {
   });
 });
 
+describe('board — Departmanlar: a plan’s last stream (spec departments §6.2.5, final review)', () => {
+  /** A department with a head and one single-stream plan whose only task is done: the plan is done in the same call. */
+  function lastStream() {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const yaz = d.create(OWNER, { name: 'Yazılım', mission: 'Kod.' });
+    const selin = t.person('Selin');
+    d.setHead(OWNER, yaz.id, selin.id);
+    const plan = t.plan('Site', { streams: [{ id: 'doc', title: 'Belgeler', owner: 'Yazılım' }] });
+    t.finish(selin.id, t.company.start(t.task(selin.id, 'Belgeler', { planId: plan.id, streamId: 'doc' }).id).id);
+    expect(t.plans.get(plan.id).status).toBe('done');
+    return { t, plan, selin };
+  }
+
+  it('a finished plan’s stream still shows as (bitti) with “raporu yok” until it is reported, then with its last report', () => {
+    const { t, plan, selin } = lastStream();
+    const text = t.board().text;
+    expect(text).toMatch(/- Yazılım — başkan Selin · 1 kişi .*akışlar: doc \(bitti\)/);
+    expect(text).toMatch(/- Yazılım: “Site” planının “doc” akışı bitti, raporu yok\./);
+    expect(text).not.toMatch(/başkansız/);
+    t.company.streamReport(selin.id, plan.id, 'doc', { summary: 'Belgeler hazır.' });
+    const next = t.board().text;
+    expect(next).toMatch(/akışlar: doc \(bitti\).* · son rapor: “Belgeler hazır\.” \(/);
+    expect(next).not.toMatch(/raporu yok/);
+  });
+
+  it('only for a week after the plan finished: later the board lets it go', () => {
+    const { t } = lastStream();
+    t.advance(6 * 24 * HOUR);
+    expect(t.board().text).toMatch(/doc \(bitti\)/);
+    expect(t.board().text).toMatch(/raporu yok/);
+    t.advance(2 * 24 * HOUR);
+    const text = t.board().text;
+    expect(text).toMatch(/akışlar: yok/);
+    expect(text).not.toMatch(/raporu yok/);
+  });
+});
+
 describe('board — Departmanlar under the budget (spec departments §6.3)', () => {
   const NAMES = ['Yazılım Geliştirme ve Mimari Departmanı', 'Pazarlama ve Duyuru Çalışmaları Birimi', 'Müşteri Destek ve Memnuniyet Odası', 'Finans ve Bütçe Denetimi Departmanı', 'Araştırma ve Ürün Keşfi Departmanı', 'İnsan Kaynakları ve Kültür Departmanı'];
 

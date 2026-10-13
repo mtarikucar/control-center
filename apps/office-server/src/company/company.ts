@@ -331,6 +331,8 @@ export class Company {
     const target = this.#d.roster.get(id);
     if (target.lifecycle === 'archived') throw new ConflictError('Bu çalışan işten çıkarıldı.');
     const previous = this.coordinator();
+    // The coordinator is in no department (spec §3): leave it first, as the head of one that leaves it headless.
+    if (target.kind !== 'coordinator') this.#d.departments?.move(OWNER, id, null);
     if (previous && previous.id !== id) {
       const demoted = this.#d.roster.update(previous.id, { kind: 'member' });
       writeRoleCard(this.#d.dataDir, demoted);
@@ -351,6 +353,8 @@ export class Company {
       // A session reads its card and tool list only at start: without this the new coordinator has no coordinator tools.
       this.#d.reload?.(id);
     }
+    // Both desks' department blocks name the coordinator (or no longer do).
+    this.#d.departments?.refreshDesks();
     return next;
   }
 
@@ -487,7 +491,15 @@ export class Company {
 
   /** Someone was fired: their open work waits again and the coordinator hands it out (spec §10); a hand-over is cancelled. */
   releaseTasksOf(id: string): void {
-    this.#d.departments?.left(id);
+    // The department step comes last and still runs if the release throws: a failure in either must not undo the other (a fired person's tasks go back; their department loses its head).
+    try {
+      this.#releaseWork(id);
+    } finally {
+      this.#d.departments?.left(id);
+    }
+  }
+
+  #releaseWork(id: string): void {
     this.#rerouteProposals(id);
     // Routines they do or review wait for someone new (spec §4.4): the coordinator gives one.
     for (const sch of this.#d.schedules?.list({ statuses: ['active', 'paused'] }) ?? []) {
@@ -1133,7 +1145,9 @@ export class Company {
       next: clean(r.next, 'Sırada', 1000, false) || null, by,
     });
     this.#emit(by, { type: 'stream.noted', note });
-    this.#tellCoordinator(by, 'stream.report', `${this.nameOf(by)} “${plan.title}” planının “${stream.title}” akışını raporladı: ${note.text}${note.next ? ` Sırada: ${note.next}` : ''}`);
+    // The notice carries the start; the whole report is on the plan card and in departmentsRead.
+    const brief = note.text.length > 500 ? `${note.text.slice(0, 500)}…` : note.text;
+    this.#tellCoordinator(by, 'stream.report', `${this.nameOf(by)} “${plan.title}” planının “${stream.title}” akışını raporladı: ${brief}${note.next ? ` Sırada: ${note.next}` : ''}`);
     return note;
   }
 
@@ -1877,9 +1891,9 @@ export class Company {
     this.#rerouteProposals(id);
   }
 
-  /** Every not-done stream of a running plan, with its plan (the departments: what a headless one leaves). */
+  /** Every not-done stream of a running plan, with its plan (the departments: what a headless one leaves). A plan whose revision waits for the owner (a draft with its approved version kept) runs on. */
   liveStreams(): Array<{ plan: Plan; stream: PlanStreamView }> {
-    const live = this.#d.plans.list(1000).filter((p) => p.status === 'approved');
+    const live = this.#d.plans.list(1000).filter((p) => p.status === 'approved' || (p.status === 'draft' && this.#d.plans.approvedSnapshot(p.id) !== null));
     const views = this.streamsOf(live);
     return live.flatMap((plan) => (views.get(plan.id) ?? []).filter((s) => s.status !== 'done').map((stream) => ({ plan, stream })));
   }

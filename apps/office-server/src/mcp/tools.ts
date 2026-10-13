@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, ownerDepartment, type Department } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
@@ -408,7 +408,12 @@ export function officeTools(o: {
         const kindTr: Record<EmployeeKind, string> = { coordinator: 'koordinatör', lead: 'ekip lideri', member: 'çalışan' };
         return company
           .status()
-          .map((l) => `• ${l.name}${l.title ? ` — ${l.title}` : ''} (${kindTr[l.kind]}${l.team ? `, ${l.team}` : ''}; ${l.provider ?? 'claude'}; ${l.lifecycle}) id ${l.id}${l.task ? ` — şu an: “${l.task}”` : ''}`)
+          .map((l) => {
+            // With departments (spec departments §5.3) a head is marked ★ and everyone but the coordinator names their department (“merkez”: none).
+            const kind = deps && l.kind === 'lead' ? '★ departman başkanı' : kindTr[l.kind];
+            const where = deps ? (l.kind === 'coordinator' ? '' : `, ${deps.of(l.id)?.name ?? 'merkez'}`) : l.team ? `, ${l.team}` : '';
+            return `• ${l.name}${l.title ? ` — ${l.title}` : ''} (${kind}${where}; ${l.provider ?? 'claude'}; ${l.lifecycle}) id ${l.id}${l.task ? ` — şu an: “${l.task}”` : ''}`;
+          })
           .join('\n');
       },
     },
@@ -778,6 +783,12 @@ export function officeTools(o: {
           } else if (to.team !== employee.team) {
             throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
           }
+        }
+        // A head tags tasks to their own department's streams only (the coordinator's go to any); an unknown plan or stream is createTask's to refuse.
+        if (deps && employee.kind === 'lead' && input.planId && input.streamId) {
+          const stream = company.planStreams(input.planId).find((x) => x.id === input.streamId);
+          const mine = deps.headOf(employee.id);
+          if (stream && (!mine || stream.owner !== departmentOwner(mine.id))) throw new ForbiddenError('Bu akış senin departmanının değil; başka departmanın akışına iş açamazsın.');
         }
         const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         const stream = task.streamId ? (plans().find((p) => p.id === task.planId)?.streams?.find((x) => x.id === task.streamId)?.title ?? task.streamId) : null;

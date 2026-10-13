@@ -221,6 +221,65 @@ describe('Departments — opening, heads and members (spec §3, §5.1)', () => {
   });
 });
 
+describe('Departments — the coordinator is never half-applied (final review)', () => {
+  /** Everything a call could write, read back: the departments, the roster, the log and every notice. */
+  const state = (t: ReturnType<typeof make>) =>
+    JSON.stringify({ deps: t.departments.list(), people: t.roster.list(), events: t.events.lastSeq(), notices: t.roster.list().map((e) => t.notices.pending(e.id)) });
+
+  it('setHead with the coordinator writes nothing', () => {
+    const t = make();
+    const a = t.hire('Ada');
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm', headId: a.id });
+    const before = state(t);
+    expect(() => t.departments.setHead(OWNER, x.id, t.coordinator.id)).toThrow(/Koordinatörün departmanı olmaz/);
+    expect(state(t)).toBe(before);
+  });
+
+  it('a coordinator who (illegally) heads a department steps down to the centre when another is named or the head is cleared', () => {
+    const t = make();
+    const a = t.hire('Ada');
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm' });
+    t.store.update(x.id, { headId: t.coordinator.id });
+    t.roster.update(t.coordinator.id, { departmentId: x.id, team: 'X' });
+    t.departments.setHead(OWNER, x.id, a.id);
+    expect(t.departments.get(x.id).headId).toBe(a.id);
+    expect(t.roster.get(t.coordinator.id)).toMatchObject({ kind: 'coordinator', team: '', reportsTo: null });
+    expect(t.roster.get(t.coordinator.id)).not.toHaveProperty('departmentId');
+    expect(t.roster.get(a.id)).toMatchObject({ kind: 'lead', departmentId: x.id });
+    // Cleared: the same, with no one named.
+    t.departments.setHead(OWNER, x.id, null);
+    t.store.update(x.id, { headId: t.coordinator.id });
+    t.roster.update(t.coordinator.id, { departmentId: x.id, team: 'X' });
+    t.departments.setHead(OWNER, x.id, null);
+    expect(t.departments.get(x.id).headId).toBeNull();
+    expect(t.roster.get(t.coordinator.id)).toMatchObject({ kind: 'coordinator', team: '' });
+    expect(t.roster.get(t.coordinator.id)).not.toHaveProperty('departmentId');
+  });
+
+  it('closing a department that (illegally) holds the coordinator completes: everyone, the coordinator too, ends in the centre, the coordinator keeping their kind', () => {
+    const t = make();
+    const a = t.hire('Ada');
+    const b = t.hire('Bora');
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm', headId: a.id });
+    t.departments.move(OWNER, b.id, x.id);
+    t.roster.update(t.coordinator.id, { departmentId: x.id, team: 'X' });
+    t.departments.close(OWNER, x.id, 'iş bitti');
+    expect(t.departments.get(x.id)).toMatchObject({ status: 'closed', headId: null });
+    for (const id of [a.id, b.id]) expect(t.roster.get(id)).toMatchObject({ kind: 'member', team: '', reportsTo: null });
+    expect(t.roster.get(t.coordinator.id)).toMatchObject({ kind: 'coordinator', team: '' });
+    for (const id of [a.id, b.id, t.coordinator.id]) expect(t.roster.get(id)).not.toHaveProperty('departmentId');
+  });
+
+  it('the coordinator is still never placed in a department', () => {
+    const t = make();
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm' });
+    const before = state(t);
+    expect(() => t.departments.move(OWNER, t.coordinator.id, x.id)).toThrow(/Koordinatörün departmanı olmaz/);
+    expect(() => t.departments.create(OWNER, { name: 'Y', mission: 'm', headId: t.coordinator.id })).toThrow(/Koordinatörün departmanı olmaz/);
+    expect(state(t)).toBe(before);
+  });
+});
+
 describe('Departments — teams adopted and free-text teams (spec §5.5, §9.1)', () => {
   it('adopts every team once: names folded into one department, the first lead heads it, a second lead becomes a member', () => {
     const t = make();

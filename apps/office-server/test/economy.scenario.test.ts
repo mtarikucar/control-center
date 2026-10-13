@@ -107,14 +107,15 @@ function allEvents(s: TestSetup): StoredEvent[] {
  * the tasks have a difficulty; the coordinator's models by turn type are the defaults. Off: the day as the baseline on
  * main — 09:00, the plan proposed and approved, the coordinator on its own model for every turn type.
  */
-async function simulateDay(cfg: { economy: boolean }) {
+async function simulateDay(cfg: { economy: boolean; departments?: boolean }) {
   const start = new Date(2026, 9, 7, cfg.economy ? 8 : 9, cfg.economy ? 45 : 0).getTime();
   let clock = start;
   const now = () => clock;
   const s = setup(8, now);
   const holdDir = tempDir('fake-claude-hold-');
   const f = fakeEngine(s, { env: { FAKE_CLAUDE_HOLD_DIR: holdDir }, engine: { now, modelPolicyEnabled: () => c.budget.constitution().modelPolicyEnabled } });
-  const c = companyFor(s, f, undefined, now);
+  // `departments`: the office wired with them (none opened), as main.ts starts it.
+  const c = companyFor(s, f, undefined, now, undefined, { departments: cfg.departments });
   if (cfg.economy) c.budget.setConstitution({ digestEnabled: true, modelPolicyEnabled: true, difficultyModelsEnabled: true });
   // The coordinator's models by turn type are role models, applied with every switch off too (management cycle §3.5):
   // main's day is the one where every turn type is on the coordinator's own model (fable). Written to the store
@@ -130,6 +131,9 @@ async function simulateDay(cfg: { economy: boolean }) {
   const coord = c.company.hireCoordinator();
   const ada = c.company.hire(coord.id, { name: 'Ada', role: 'Geliştirici' });
   const can = c.company.hire(coord.id, { name: 'Can', role: 'Geliştirici' });
+  // main.ts adopts the teams and writes every desk's department block at the start (idempotent).
+  c.departments?.adoptTeams();
+  c.departments?.refreshDesks();
   const propose = () => c.company.propose(coord.id, { method: METHOD, title: 'Sürüm 1', goal: 'On işlik bir sürüm', approach: 'İki geliştirici, beşer iş' }).id;
   let planId = cfg.economy ? '' : propose();
 
@@ -402,22 +406,35 @@ function report(rows: Row[], coordinatorModels: string[], coordinatorTurns: Coor
   return [...employeeTable(rows), '', 'Koordinatöre tur açan olaylar (simüle saat):', '', ...timelineTable(coordinatorTurns, start, coordinatorModels)].join('\n');
 }
 
+/** The day with every switch off, compared with main's: the baseline note's tables, and main's messages and events one by one. */
+async function expectMainsDay(departments: boolean) {
+  const { s, c, start, coordinatorTurns, people } = await simulateDay({ economy: false, departments });
+  expect(Boolean(c.departments)).toBe(departments);
+  const log = logOf(s, people);
+  // ECONOMY_GOLDEN_OUT=<file>: write the log (how the golden was recorded on main).
+  if (process.env.ECONOMY_GOLDEN_OUT && !departments) writeFileSync(process.env.ECONOMY_GOLDEN_OUT, `${JSON.stringify(log, null, 1)}\n`);
+  const { turns, sessions } = turnsOf(s, people);
+  const table = employeeTable(rowsOf(turns, sessions, people));
+  const timeline = timelineTable(coordinatorTurns, start);
+  console.log(`\nEkonomi senaryosu — anahtarlar kapalı${departments ? ', departmanlar bağlı' : ''}\n\n${[...table, '', ...timeline].join('\n')}\n`);
+  const baseline = readFileSync(BASELINE_NOTE, 'utf8');
+  expect(table.slice(2)).toEqual(tableAfter(baseline, '## Taban (main, 2026-10-07)'));
+  expect(timeline.slice(2)).toEqual(tableAfter(baseline, 'Zaman çizelgesi'));
+  const golden = JSON.parse(readFileSync(BASELINE_LOG, 'utf8')) as ReturnType<typeof logOf>;
+  expect(log.messages).toEqual(golden.messages.map(sinceGolden));
+  expect(log.events).toEqual(eventsSinceGolden(golden.events));
+  return s;
+}
+
 describe('economy scenario', () => {
   it('R10: with every switch off the day is main’s — the baseline note’s tables, and main’s messages and events one by one', async () => {
-    const { s, start, coordinatorTurns, people } = await simulateDay({ economy: false });
-    const log = logOf(s, people);
-    // ECONOMY_GOLDEN_OUT=<file>: write the log (how the golden was recorded on main).
-    if (process.env.ECONOMY_GOLDEN_OUT) writeFileSync(process.env.ECONOMY_GOLDEN_OUT, `${JSON.stringify(log, null, 1)}\n`);
-    const { turns, sessions } = turnsOf(s, people);
-    const table = employeeTable(rowsOf(turns, sessions, people));
-    const timeline = timelineTable(coordinatorTurns, start);
-    console.log(`\nEkonomi senaryosu — anahtarlar kapalı\n\n${[...table, '', ...timeline].join('\n')}\n`);
-    const baseline = readFileSync(BASELINE_NOTE, 'utf8');
-    expect(table.slice(2)).toEqual(tableAfter(baseline, '## Taban (main, 2026-10-07)'));
-    expect(timeline.slice(2)).toEqual(tableAfter(baseline, 'Zaman çizelgesi'));
-    const golden = JSON.parse(readFileSync(BASELINE_LOG, 'utf8')) as ReturnType<typeof logOf>;
-    expect(log.messages).toEqual(golden.messages.map(sinceGolden));
-    expect(log.events).toEqual(eventsSinceGolden(golden.events));
+    await expectMainsDay(false);
+  }, 60_000);
+
+  it('R10 with departments wired and none opened: the same day, the same log — no department.* or stream.* event, no extra notice', async () => {
+    const s = await expectMainsDay(true);
+    // The golden has none either, so the comparison above already says it; this names it.
+    expect(allEvents(s).filter((e) => /^(department|stream)\./.test(e.event.type))).toEqual([]);
   }, 60_000);
 
   it('the economy on: turns, models and modelled cost per employee, within the plan’s thresholds', async () => {

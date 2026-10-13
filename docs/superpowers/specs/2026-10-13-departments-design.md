@@ -258,6 +258,9 @@ başkansızsa koordinatör.
    akış durumu panoda "bitti" görünür; panoda "raporsuz" işareti çıkar.
 6. Koordinatör yönetim turunda panonun **Departmanlar** bölümünü okur (§6.3), planı gerçekle karşılaştırır.
 
+Kabul edilen sapma: 4. adımdaki `department.task` notu yapılmadı; bir departmana paslanan görev (`taskPass`) başkanına
+bugünkü görev notuyla zaten ulaşır ve onu uyandırır.
+
 ### 6.3 Koordinatörün panosu: Departmanlar bölümü
 
 Panoya (`board.ts`) yeni bir bölüm eklenir. Her açık departman için bir satır:
@@ -352,6 +355,8 @@ ve çalışan ona girer. Lider (`kind = 'lead'`) olan ilk çalışan başkan olu
 (değişmez: `kind` ⇔ `headId`). SQL yerine kodda: Türkçe katlama SQL'de yapılamaz ("Keşif" ile "keşif" tek departman
 olmalı), ve aynı adım eski bir istemcinin serbest metin `team` ile yaptığı işe alımı da yakalar.
 
+- Geri alırken (v23'e inerken) her `desks/*/department.md` dosyası ve kartlardaki `@department.md` satırı da silinir: eski kod
+  kartta kalan içe aktarmayı görüp departman bloğunu göstermeye devam ederdi.
 - Down tabloları ve sütunu kaldırır; `team` yerinde kaldığı için eski sürüm aynen çalışır. Benimseme yalnız yeni
   tablolara ve sütuna yazar (ikinci liderin `kind`'ı dışında; tek liderli ekiplerde hiçbir şey değişmez).
 - Ekip sayısı 6'yı aşarsa benimseme hepsini açar; sınır yalnız yeni departman açmayı durdurur ve pano uyarır.

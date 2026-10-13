@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER } from '@cc/shared';
-import { companyFor } from './company-helpers.ts';
+import { deskDir } from '../src/desk.ts';
+import { companyFor, METHOD } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
 
@@ -170,6 +173,66 @@ describe('Letting a head go (review focus 2)', () => {
   });
 });
 
+describe('Making someone coordinator takes them out of their department first (final review)', () => {
+  it('a head made coordinator: their old department is headless, they have no department, they coordinate', () => {
+    const t = make();
+    const dep = t.departments.create(OWNER, { name: 'A', mission: 'm' });
+    const head = t.company.hire(OWNER, { name: 'Hale', role: 'r', departmentId: dep.id, head: true });
+    const mine = t.company.hire(OWNER, { name: 'Mine', role: 'r', departmentId: dep.id });
+    expect(t.roster.get(mine.id).reportsTo).toBe(head.id);
+    t.company.appointCoordinator(head.id);
+    expect(t.departments.get(dep.id)).toMatchObject({ status: 'open', headId: null });
+    expect(t.roster.get(head.id)).toMatchObject({ kind: 'coordinator', team: '', reportsTo: null });
+    expect(t.roster.get(head.id)).not.toHaveProperty('departmentId');
+    expect(t.roster.get(mine.id)).toMatchObject({ departmentId: dep.id, reportsTo: null });
+    expect(t.roster.get(t.coordinator.id).kind).toBe('member');
+    expect(t.departments.members(dep.id).map((e) => e.name)).toEqual(['Mine']);
+    // Nobody is a lead without a department, and the new coordinator's desk knows it is the coordinator's.
+    expect(t.roster.list().filter((e) => e.kind === 'lead')).toEqual([]);
+    expect(readFileSync(join(deskDir(t.dataDir, head.slug), 'department.md'), 'utf8')).toMatch(/Koordinatörsün/);
+    expect(readFileSync(join(deskDir(t.dataDir, t.coordinator.slug), 'department.md'), 'utf8')).not.toMatch(/Koordinatörsün/);
+  });
+
+  it('a member made coordinator is removed from the department, which keeps its head', () => {
+    const t = make();
+    const dep = t.departments.create(OWNER, { name: 'A', mission: 'm' });
+    const head = t.company.hire(OWNER, { name: 'Hale', role: 'r', departmentId: dep.id, head: true });
+    const mine = t.company.hire(OWNER, { name: 'Mine', role: 'r', departmentId: dep.id });
+    t.company.appointCoordinator(mine.id);
+    expect(t.roster.get(mine.id)).toMatchObject({ kind: 'coordinator', team: '', reportsTo: null });
+    expect(t.roster.get(mine.id)).not.toHaveProperty('departmentId');
+    expect(t.departments.get(dep.id).headId).toBe(head.id);
+    expect(t.departments.members(dep.id).map((e) => e.name)).toEqual(['Hale']);
+  });
+
+  it('appointing the coordinator again changes nothing; without departments appointCoordinator is as before', () => {
+    const t = make();
+    const dep = t.departments.create(OWNER, { name: 'A', mission: 'm' });
+    t.company.hire(OWNER, { name: 'Hale', role: 'r', departmentId: dep.id, head: true });
+    const seq = t.events.lastSeq();
+    t.company.appointCoordinator(t.coordinator.id);
+    expect(t.events.list({ after: seq }).filter((e) => e.event.type === 'department.changed')).toEqual([]);
+    expect(t.roster.get(t.coordinator.id).kind).toBe('coordinator');
+  });
+});
+
+describe('Letting a head go: the tasks are released before the department is told (final review)', () => {
+  it('a failing department step cannot keep a fired person’s tasks from being released; the failure is still raised', () => {
+    const t = make();
+    const dep = t.departments.create(OWNER, { name: 'A', mission: 'm' });
+    const hale = t.company.hire(OWNER, { name: 'Hale', role: 'r', departmentId: dep.id, head: true });
+    const task = t.company.createTask(t.coordinator.id, { assignee: hale.id, title: 'Yarım iş' });
+    t.company.start(task.id);
+    t.roster.update(hale.id, { lifecycle: 'archived' });
+    t.departments.left = () => {
+      throw new Error('bozuk departman');
+    };
+    expect(() => t.company.releaseTasksOf(hale.id)).toThrow(/bozuk departman/);
+    expect(t.tasks.get(task.id)).toMatchObject({ status: 'waiting', startedAt: null });
+    expect(t.notices.pending(t.coordinator.id).map((n) => n.text).join('\n')).toMatch(/Hale işten çıkarıldı; açık görevleri sahipsiz bekliyor: “Yarım iş”/);
+  });
+});
+
 describe('liveStreams (what a headless department leaves)', () => {
   it('sees the open streams of an approved plan even when more than a hundred newer plans exist', () => {
     const s = setup(8);
@@ -184,6 +247,55 @@ describe('liveStreams (what a headless department leaves)', () => {
     for (let i = 0; i < 105; i += 1) c.plans.create({ ...draft, title: `Yeni ${i}` });
     expect(c.plans.list().map((p) => p.title)).not.toContain('Eski');
     expect(c.company.liveStreams().map((x) => `${x.plan.title}/${x.stream.id}`)).toEqual(['Eski/web']);
+  });
+});
+
+describe('liveStreams: a plan whose revision waits for the owner is running (final review)', () => {
+  const DRAFT = { title: 'Site', goal: 'g', approach: 'a', method: METHOD };
+
+  it('counts the streams of a draft that keeps an approved version, not those of a draft never approved', () => {
+    const t = make();
+    t.departments.create(OWNER, { name: 'A', mission: 'm' });
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [{ id: 'api', title: 'API', owner: 'departman: A' }] });
+    expect(t.company.liveStreams()).toEqual([]);
+    t.company.approve(plan.id);
+    expect(t.company.liveStreams().map((x) => `${x.plan.title}/${x.stream.id}`)).toEqual(['Site/api']);
+    expect(t.company.revise(t.coordinator.id, plan.id, { days: 9 }).status).toBe('draft');
+    expect(t.company.liveStreams().map((x) => `${x.plan.title}/${x.stream.id}`)).toEqual(['Site/api']);
+  });
+
+  it('so a head who leaves while their plan’s revision waits still returns the stream to the coordinator, and the next head hears of it', () => {
+    const t = make();
+    const dep = t.departments.create(OWNER, { name: 'A', mission: 'm' });
+    t.company.hire(OWNER, { name: 'Hale', role: 'r', departmentId: dep.id, head: true });
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [{ id: 'api', title: 'API', owner: 'departman: A' }] });
+    t.company.approve(plan.id);
+    t.company.revise(t.coordinator.id, plan.id, { days: 9 });
+    expect(t.plans.get(plan.id).status).toBe('draft');
+    t.departments.setHead(t.coordinator.id, dep.id, null);
+    const said = t.notices.pending(t.coordinator.id).map((n) => `${n.topic}: ${n.text}`).join('\n');
+    expect(said).toContain('stream.returned: A departmanının başkanı yok; açık akışları sende: “API” (plan “Site”, api).');
+    const nova = t.company.hire(OWNER, { name: 'Nova', role: 'r', departmentId: dep.id });
+    t.departments.setHead(t.coordinator.id, dep.id, nova.id);
+    expect(t.notices.pending(nova.id).map((n) => `${n.topic}: ${n.text}`).join('\n')).toMatch(/stream\.assigned: Artık başkanı olduğun A departmanının açık akışları: “API” \(plan “Site”/);
+  });
+});
+
+describe('streamReport: the coordinator’s notice is short, the stored report whole (final review)', () => {
+  it('clips the summary to 500 characters with an ellipsis in the notice only', () => {
+    const t = make();
+    const dep = t.departments.create(OWNER, { name: 'A', mission: 'm' });
+    const hale = t.company.hire(OWNER, { name: 'Hale', role: 'r', departmentId: dep.id, head: true });
+    const plan = t.company.propose(t.coordinator.id, { title: 'Site', goal: 'g', approach: 'a', method: METHOD, streams: [{ id: 'api', title: 'API', owner: 'departman: A' }] });
+    t.company.approve(plan.id);
+    const long = `${'a'.repeat(499)}bc${'d'.repeat(900)}`;
+    expect(t.company.streamReport(hale.id, plan.id, 'api', { summary: long, next: 'Sırada ne var' }).text).toBe(long);
+    expect(t.streamNotes!.latest(plan.id, 'api', 'report')?.text).toBe(long);
+    t.company.streamReport(hale.id, plan.id, 'api', { summary: 'Kısa rapor.' });
+    const said = t.notices.pending(t.coordinator.id).filter((n) => n.topic === 'stream.report').map((n) => n.text);
+    expect(said[0]).toBe(`Hale “Site” planının “API” akışını raporladı: ${'a'.repeat(499)}b… Sırada: Sırada ne var`);
+    expect(said[1]).toBe('Hale “Site” planının “API” akışını raporladı: Kısa rapor.');
+    expect(t.streamNotes!.latest(plan.id, 'api', 'report')?.text).toBe('Kısa rapor.');
   });
 });
 

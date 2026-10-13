@@ -136,6 +136,31 @@ describe('Department tools (spec §5)', () => {
     expect(ece.departmentId).toBeTruthy();
   });
 
+  it('taskCreate: a head tags tasks only to streams of their own department (final review); the coordinator to any', async () => {
+    const t = make();
+    t.budget.setConstitution({ autonomy: 'free' });
+    const pzr = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    const sat = t.departments.create(OWNER, { name: 'Satış', mission: 'm' });
+    const pelin = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: pzr.id, head: true });
+    t.company.hire(OWNER, { name: 'Ece', role: 'r', departmentId: pzr.id });
+    t.company.hire(OWNER, { name: 'Oya', role: 'r', departmentId: sat.id, head: true });
+    t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const method = { workType: 'general', stages: [{ name: 'a', role: 'b' }, { name: 'c', role: 'd' }], checks: ['x'] };
+    const plan = t.company.propose(t.coordinator.id, { title: 'Lansman', goal: 'g', approach: 'a', method, streams: [{ id: 'duyuru', title: 'Duyuru', owner: 'Pazarlama' }, { id: 'kampanya', title: 'Kampanya', owner: 'Satış' }, { id: 'kisi', title: 'Kişinin', owner: 'Ada' }] } as never);
+    expect(await t.call(pelin, 'taskCreate', { assignee: 'Ece', title: 'Metin', planId: plan.id, streamId: 'duyuru' })).toMatch(/Görev açıldı: .* “Metin” → Ece \(akış: Duyuru\)/);
+    const refused = /^Bu akış senin departmanının değil; başka departmanın akışına iş açamazsın\.$/;
+    const before = t.tasks.list().length;
+    await expect(t.call(pelin, 'taskCreate', { assignee: 'Ece', title: 'Başkasının', planId: plan.id, streamId: 'kampanya' })).rejects.toThrow(refused);
+    await expect(t.call(pelin, 'taskCreate', { assignee: 'Pelin', title: 'Kendime', planId: plan.id, streamId: 'kampanya' })).rejects.toThrow(refused);
+    await expect(t.call(pelin, 'taskCreate', { assignee: 'Ece', title: 'Kişinin akışı', planId: plan.id, streamId: 'kisi' })).rejects.toThrow(refused);
+    expect(t.tasks.list()).toHaveLength(before);
+    // Without a stream, or with one that is not there, nothing new is said here: the old rules and checks answer.
+    expect(await t.call(pelin, 'taskCreate', { assignee: 'Ece', title: 'Akışsız' })).toMatch(/Görev açıldı/);
+    await expect(t.call(pelin, 'taskCreate', { assignee: 'Ece', title: 'Yok', planId: plan.id, streamId: 'yok' })).rejects.toThrow(/“yok” akışı yok/);
+    // The coordinator tags any stream.
+    expect(await t.call(t.coordinator, 'taskCreate', { assignee: 'Oya', title: 'Kampanya işi', planId: plan.id, streamId: 'kampanya' })).toMatch(/Görev açıldı: .* → Oya \(akış: Kampanya\)/);
+  });
+
   it('departmentsRead names a department’s people and open streams; a plan’s streams name the department that carries them', async () => {
     const t = make();
     t.budget.setConstitution({ autonomy: 'free' });
@@ -167,6 +192,41 @@ describe('Department tools (spec §5)', () => {
     c.company.hire(OWNER, { name: 'Can', role: 'r' });
     await expect(Promise.resolve().then(() => pass!.run({ employee: ada } as never, { to: 'Pazarlama', title: 'x' }))).rejects.toThrow(/^Çalışan bulunamadı: Pazarlama\. officeStatus ile ofistekileri görebilirsin\.$/);
     expect(String(await pass!.run({ employee: ada } as never, { to: 'can', title: 'y' }))).toMatch(/“y” Can adlı çalışanın sırasına eklendi/);
+  });
+
+  it('officeStatus marks a head with ★ and names everyone’s department when departments are wired (final review)', async () => {
+    const t = make();
+    const pzr = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    const pelin = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: pzr.id, head: true });
+    t.company.hire(OWNER, { name: 'Ece', role: 'r', departmentId: pzr.id });
+    t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const lines = (await t.call(pelin, 'officeStatus', {})).split('\n');
+    const line = (name: string) => lines.find((l) => l.startsWith(`• ${name}`))!;
+    expect(line('Pelin')).toMatch(/^• Pelin \(★ departman başkanı, Pazarlama; claude; \w+\) id /);
+    expect(line('Ece')).toMatch(/^• Ece \(çalışan, Pazarlama; claude; \w+\) id /);
+    expect(line('Ada')).toMatch(/^• Ada \(çalışan, merkez; claude; \w+\) id /);
+    expect(line('Koordinatör')).toMatch(/^• Koordinatör — Koordinatör \(koordinatör; claude; \w+\) id /);
+    expect(lines.join('\n')).not.toContain('ekip lideri');
+  });
+
+  it('without departments officeStatus reads exactly as before: “ekip lideri”, the team, no ★', async () => {
+    const s = setup();
+    const f = fakeEngine(s);
+    cleanups.push(f.cleanup, s.cleanup);
+    const c = companyFor(s, f);
+    const coordinator = c.company.hireCoordinator('sonnet');
+    const lale = c.company.hire(coordinator.id, { name: 'Lale', role: 'r' });
+    c.company.appointLead(coordinator.id, lale.id, { team: 'Keşif' });
+    c.company.hire(coordinator.id, { name: 'Ada', role: 'r', team: 'Keşif' });
+    c.company.hire(coordinator.id, { name: 'Can', role: 'r' });
+    const [status] = officeTools({ company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder'], memory: c.memory, budget: c.budget, engine: f.engine, plans: () => c.plans.list(), agenda: { text: () => '' } }).filter((x) => x.name === 'officeStatus');
+    const lines = String(await status!.run({ employee: coordinator } as never, {})).split('\n').map((l) => l.replace(/ id [\w-]+.*$/, ''));
+    expect(lines).toEqual([
+      expect.stringMatching(/^• Koordinatör — Koordinatör \(koordinatör; claude; \w+\)$/),
+      expect.stringMatching(/^• Lale \(ekip lideri, Keşif; claude; \w+\)$/),
+      expect.stringMatching(/^• Ada \(çalışan, Keşif; claude; \w+\)$/),
+      expect.stringMatching(/^• Can \(çalışan; claude; \w+\)$/),
+    ]);
   });
 
   it('a head puts to sleep and wakes someone of their own department; not themselves, not someone at work', async () => {

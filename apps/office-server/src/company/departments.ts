@@ -159,11 +159,12 @@ export class Departments {
     if (employeeId === null) {
       if (!former) return dep;
       dep = this.#d.store.update(id, { headId: null });
-      this.#place(former, dep, false);
+      const stays = this.#stepDown(former, dep);
       this.#headless(dep, former.id);
-      this.#changed(by, 'head', dep, [[former.id, `${dep.name} departmanının başkanlığın bitti; departmanda çalışansın.`]]);
+      this.#changed(by, 'head', dep, stays ? [[former.id, `${dep.name} departmanının başkanlığın bitti; departmanda çalışansın.`]] : []);
       return dep;
     }
+    // The coordinator is refused here, before the first write.
     const target = this.#candidate(employeeId);
     if (former?.id === target.id) return dep;
     const elsewhere = this.headOf(target.id);
@@ -171,9 +172,9 @@ export class Departments {
     dep = this.#d.store.update(id, { headId: target.id });
     const told: Array<[string, string]> = [];
     if (former) {
-      this.#place(former, dep, false);
+      const stays = this.#stepDown(former, dep);
       this.#links?.headEnded(former.id);
-      told.push([former.id, `${dep.name} departmanının başkanı artık ${target.name}; departmanda çalışansın.`]);
+      if (stays) told.push([former.id, `${dep.name} departmanının başkanı artık ${target.name}; departmanda çalışansın.`]);
     }
     const head = this.#place(target, dep, true);
     for (const m of this.members(id)) if (m.id !== head.id && m.reportsTo !== head.id) this.#d.roster.update(m.id, { reportsTo: head.id });
@@ -208,8 +209,10 @@ export class Departments {
     else this.#returnStreams(dep, true);
     for (const e of people) this.#place(e, null, false);
     const closed = this.#d.store.close(id);
-    this.#changed(by, 'closed', closed, people.map((e): [string, string] => [e.id, `${dep.name} departmanı kapandı (${why}); artık merkezdesin, doğrudan koordinatöre bağlısın.`]));
-    this.#announce(by, `${dep.name} departmanı kapandı: ${why}`, people.map((e) => e.id));
+    // A coordinator found inside (the tools never put one there) is in the centre like the rest but hears of it as everyone outside does.
+    const told = people.filter((e) => e.kind !== 'coordinator');
+    this.#changed(by, 'closed', closed, told.map((e): [string, string] => [e.id, `${dep.name} departmanı kapandı (${why}); artık merkezdesin, doğrudan koordinatöre bağlısın.`]));
+    this.#announce(by, `${dep.name} departmanı kapandı: ${why}`, told.map((e) => e.id));
     return closed;
   }
 
@@ -315,8 +318,19 @@ export class Departments {
 
   /** Puts someone in a department (or the centre) as its head or a member, keeping the invariants (spec §3). */
   #place(e: Employee, dep: Department | null, head: boolean): Employee {
-    if (e.kind === 'coordinator') throw new ConflictError('Koordinatörün departmanı olmaz.');
+    if (e.kind === 'coordinator') {
+      // Never into a department; one found in a department (the tools do not allow it) may still go to the centre, keeping their kind.
+      if (dep) throw new ConflictError('Koordinatörün departmanı olmaz.');
+      return this.#d.roster.update(e.id, { departmentId: null, team: '', reportsTo: null });
+    }
     return this.#d.roster.update(e.id, { departmentId: dep?.id ?? null, team: dep?.name ?? '', kind: head ? 'lead' : 'member', reportsTo: !dep || head ? null : dep.headId });
+  }
+
+  /** A former head stays in the department as a member (true); a coordinator found heading one goes to the centre (false). */
+  #stepDown(former: Employee, dep: Department): boolean {
+    const stays = former.kind !== 'coordinator';
+    this.#place(former, stays ? dep : null, false);
+    return stays;
   }
 
   /** A department lost its head (`closed`: it is closing): its members report to no one, the former head's proposals go up, its open streams go to the coordinator. */
