@@ -240,3 +240,16 @@ export class CustomCapabilities {
     this.#d.events.append(by, { type: 'capability.changed', change, capability: c });
   }
 }
+
+/** capabilitiesRead's section on the company's own: those waiting for a decision and those active (spec §4.2). */
+export function customCapabilityLines(list: CustomCapability[], nameOf: (id: string) => string): string[] {
+  const shown = list.filter((c) => c.status === 'proposed' || c.status === 'active');
+  if (shown.length === 0) return [];
+  return [
+    '',
+    '## Şirketin eklediği yetenekler — öneren çalışan; karar koordinatörün (kendi önerisi sahibinin); para ve silme türünü yalnız sahibi değiştirir',
+    ...shown.map(
+      (c) => `• ${c.id} — ${c.title} [${CUSTOM_CAPABILITY_STATUS_LABELS[c.status]}] tür: ${CAPABILITY_KIND_LABELS[c.kind]}; araçlar: ${c.tools.join(', ')}; öneren ${nameOf(c.proposedBy)}${c.decidedBy ? `, karar ${nameOf(c.decidedBy)}` : ''}`,
+    ),
+  ];
+}

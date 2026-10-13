@@ -3,6 +3,8 @@ import { OWNER, type Employee } from '@cc/shared';
 import { capabilityIds, toolClass, useCompanyCapabilities } from '../src/company/capabilities.ts';
 import { asCapability, coordinatorMayChange, CustomCapabilities } from '../src/company/custom-capabilities.ts';
 import { CustomCapabilityStore } from '../src/company/custom-capability-store.ts';
+import { IntegrationRegistry } from '../src/company/integrations.ts';
+import { officeTools } from '../src/mcp/tools.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
@@ -194,5 +196,67 @@ describe('company capabilities — proposing and deciding (spec capabilities §4
     expect(t.changes()).toEqual(['proposed', 'kind', 'activated', 'kind', 'kind']);
     t.caps.retire('sms.send');
     expect(() => t.caps.setKind('sms.send', 'send')).toThrow(/geri alındı; türü değiştirilemez/);
+  });
+});
+
+/** The office tools as an MCP session sees them: `as(who, name, args)` runs one, refusing a tool outside the caller's kind. */
+function toolsFor(t: ReturnType<typeof make>, capabilities: boolean) {
+  const integrations = new IntegrationRegistry({ db: t.db, roster: t.roster, events: t.events });
+  const tools = officeTools({
+    company: t.company, roster: t.roster, tasks: t.tasks, characters: () => ['coder'], memory: t.memory, budget: t.budget,
+    engine: { sleep: async () => undefined, wake: () => undefined, sideQuestion: async () => ({ ok: true, answer: '' }) },
+    plans: () => t.plans.list(), agenda: { text: () => '' }, integrations, ...(capabilities ? { capabilities: t.caps } : {}),
+  });
+  return async (who: Employee, name: string, args: Record<string, unknown> = {}) => {
+    const tool = tools.find((x) => x.name === name)!;
+    if (!tool.kinds.includes(t.roster.get(who.id).kind)) throw new Error(`${name} not offered to ${who.kind}`);
+    return String(await tool.run({ employee: t.roster.get(who.id) } as never, args));
+  };
+}
+
+describe('company capabilities — the tools (spec capabilities §4.2)', () => {
+  it('capabilityPropose (everyone), capabilityDecide (the coordinator), capabilitiesRead shows the company’s own; a role card takes the new one', async () => {
+    const t = make();
+    const call = toolsFor(t, true);
+    expect(await call(t.ada, 'capabilityPropose', proposal())).toBe('Yetenek önerildi: sms.send (gönderim). Koordinatör karara bağlayacak.');
+    await expect(call(t.ada, 'capabilityDecide', { id: 'sms.send', decision: 'accept' })).rejects.toThrow(/not offered/);
+    const before = await call(t.coordinator, 'capabilitiesRead');
+    expect(before).toContain('## Şirketin eklediği yetenekler');
+    expect(before).toContain('• sms.send — SMS gönderme [karar bekliyor] tür: gönderim; araçlar: mcp__netgsm__send_sms; öneren Ada');
+    expect(await call(t.coordinator, 'capabilityDecide', { id: 'sms.send', decision: 'accept', kind: 'pay' })).toBe(
+      'sms.send etkin (ödeme/harcama); sahibi Yetenekler sekmesinde görür. Gereken rollere editRoleCard capabilities ile ekle.',
+    );
+    const after = await call(t.ada, 'capabilitiesRead');
+    expect(after).toContain('# Yetenek sözlüğü (25 yetenek, sürüm 3; 1 şirketin) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
+    expect(after).toContain('• sms.send — SMS gönderme (şirketin) (dışa dönük) [yok] sağlayan bağlantı yok');
+    expect(after).toContain('• sms.send — SMS gönderme [etkin] tür: ödeme/harcama; araçlar: mcp__netgsm__send_sms; öneren Ada, karar Koordinatör');
+    expect(await call(t.coordinator, 'capabilityPropose', proposal({ id: 'wa.send', tools: ['mcp__wa__send'] }))).toBe('Yetenek önerildi: wa.send (gönderim). Kendi önerin sahibine gider; Yetenekler sekmesinden karar verecek.');
+    await expect(call(t.coordinator, 'capabilityDecide', { id: 'wa.send', decision: 'maybe' })).rejects.toThrow(/accept ya da reject/);
+    await expect(call(t.coordinator, 'capabilityDecide', { id: 'wa.send', decision: 'accept' })).rejects.toThrow(/Kendi önerini karara bağlayamazsın/);
+    expect(await call(t.coordinator, 'editRoleCard', { employee: 'Ada', capabilities: ['sms.send'] })).toMatch(/Yetenekler: sms\.send \[yok\]/);
+  });
+  it('capabilitiesRead names only the proposed and the active, and no company count while there are none; a rejection needs a note; an office without them says so', async () => {
+    const t = make();
+    const call = toolsFor(t, true);
+    const bare = await call(t.ada, 'capabilitiesRead');
+    expect(bare).toContain('# Yetenek sözlüğü (24 yetenek, sürüm 3) —');
+    expect(bare).not.toContain('Şirketin eklediği');
+    await call(t.ada, 'capabilityPropose', proposal());
+    await call(t.ada, 'capabilityPropose', proposal({ id: 'sms.credits', kind: 'pay', tools: ['mcp__netgsm__buy_credits'] }));
+    await call(t.ada, 'capabilityPropose', proposal({ id: 'sms.inbox', kind: 'read', tools: ['mcp__netgsm__inbox'] }));
+    await expect(call(t.coordinator, 'capabilityDecide', { id: 'sms.credits', decision: 'reject' })).rejects.toThrow(/Not/);
+    expect(await call(t.coordinator, 'capabilityDecide', { id: 'sms.credits', decision: 'reject', note: 'Kredi elle alınır.' })).toBe('sms.credits reddedildi.');
+    await expect(call(t.coordinator, 'capabilityDecide', { id: 'sms.inbox', decision: 'accept' })).rejects.toThrow(/okuma \(read\) olarak sınıflandırmak sahibinin kararı/);
+    t.caps.decide(OWNER, 'sms.send', { accept: true });
+    t.caps.retire('sms.send');
+    const listed = await call(t.ada, 'capabilitiesRead');
+    expect(listed).toContain('• sms.inbox — SMS gönderme [karar bekliyor] tür: okuma');
+    expect(listed).not.toMatch(/• sms\.(credits|send) — SMS gönderme \[/);
+    expect(listed).toContain('sürüm 3) —');
+
+    const without = toolsFor(t, false);
+    await expect(without(t.ada, 'capabilityPropose', proposal({ id: 'sms.other' }))).rejects.toThrow(/Bu ofiste şirket yetenekleri yok/);
+    await expect(without(t.coordinator, 'capabilityDecide', { id: 'sms.inbox', decision: 'reject', note: 'x' })).rejects.toThrow(/Bu ofiste şirket yetenekleri yok/);
+    expect(await without(t.ada, 'capabilitiesRead')).not.toContain('Şirketin eklediği');
   });
 });

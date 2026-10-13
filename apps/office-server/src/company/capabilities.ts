@@ -215,7 +215,7 @@ export function coverageLines(list: CapabilityCoverage[], onDesk: boolean): stri
       ...(c.builtin.length ? [`yerleşik: ${c.builtin.join(', ')}`] : []),
       ...c.providers.map((p) => `${p.name}: ${providerText(p, onDesk)}`),
     ];
-    const what = def ? `${def.title}${def.outward ? ' (dışa dönük)' : ''}` : 'sözlükte yok';
+    const what = def ? `${def.title}${def.company ? ' (şirketin)' : ''}${def.outward ? ' (dışa dönük)' : ''}` : 'sözlükte yok';
     return `• ${c.id} — ${what} [${COVERAGE_STATUS_LABELS[c.status]}] ${parts.length ? parts.join('; ') : 'sağlayan bağlantı yok'}`;
   });
 }

@@ -1,7 +1,8 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
+import { customCapabilityLines, type CustomCapabilities } from '../company/custom-capabilities.ts';
 import type { Departments } from '../company/departments.ts';
 import { departmentTemplate, listDepartmentTemplates } from '../company/department-templates.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
@@ -155,6 +156,8 @@ export function officeTools(o: {
   gate?: { lastHeld(employeeId: string): HeldCall | null };
   /** The departments (spec 2026-10-13-departments); absent (or null, as companyFor gives an office without them): no departments and none of their tools. */
   departments?: Departments | null;
+  /** The company's own capabilities (spec capabilities §4: capabilityPropose, capabilityDecide); absent: neither, and capabilitiesRead shows none. */
+  capabilities?: CustomCapabilities;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -455,7 +458,7 @@ export function officeTools(o: {
     {
       name: 'capabilitiesRead',
       description:
-        'Read the capability model, read-only: without arguments the vocabulary — every capability the product knows, which go outward — and how the office has each (built in, or which connectors and on which desks they are open), then each connector’s tools no capability names (unclassified: no role gets them, the gate counts them outward); with employee, the capabilities that person declares and how their desk has each; with task, what the task requires and how its assignee’s desk has each (with employee as well: on that person’s desk instead, to see who could do it). It calls no connector.',
+        'Read the capability model, read-only: without arguments the vocabulary — every capability the product knows and the company’s own, which go outward — and how the office has each (built in, or which connectors and on which desks they are open), then the company’s own capabilities with their kind, tools and who proposed and decided them, then each connector’s tools no capability names (unclassified: no role gets them, the gate counts them outward); with employee, the capabilities that person declares and how their desk has each; with task, what the task requires and how its assignee’s desk has each (with employee as well: on that person’s desk instead, to see who could do it). It calls no connector.',
       inputSchema: object({ employee: s('Id or name.'), task: s('Task id.') }),
       kinds: EVERYONE,
       run: (_ctx, args) => {
@@ -476,12 +479,52 @@ export function officeTools(o: {
           return [`# ${person.name} — yetenekler (${declared.length}), masasındaki karşılığı`, ...coverageLines(coverage(registry, declared, person.id), true)].join('\n');
         }
         const v = capabilityVocabulary();
+        const own = v.capabilities.filter((c) => c.company).length;
         return [
-          `# Yetenek sözlüğü (${v.capabilities.length} yetenek, sürüm ${v.version}) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.`,
+          `# Yetenek sözlüğü (${v.capabilities.length} yetenek, sürüm ${v.version}${own ? `; ${own} şirketin` : ''}) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.`,
           ...coverageLines(coverage(registry, v.capabilities.map((c) => c.id)), false),
+          ...customCapabilityLines(o.capabilities?.list() ?? [], (id) => company.nameOf(id)),
           ...knownConnectorLines(),
           ...unclassifiedLines(registry),
         ].join('\n');
+      },
+    },
+    {
+      name: 'capabilityPropose',
+      description: `Propose a capability for the company's vocabulary. A connector tool no capability names is unclassified: outward, held by the gate, closed in every session — capabilitiesRead lists them. Give an id (area.action, lowercase, e.g. sms.send), a Turkish title and summary (what it does and why the company needs it), its kind (${CAPABILITY_KINDS.join(', ')}: read only reads, every other kind goes outward) and the connector tools it is made of, by full name (mcp__server__tool). The coordinator decides it; the coordinator's own proposal goes to the owner. Once active, a role needs it on its card (editRoleCard) for its tools to open in that person's next session.`,
+      inputSchema: object(
+        { id: s('area.action, lowercase, e.g. sms.send.'), title: s('Short Turkish title.'), summary: s('What it does and why, in Turkish.'), kind: { type: 'string', enum: [...CAPABILITY_KINDS] }, tools: strings('Connector tools by full name (mcp__server__tool).') },
+        ['id', 'title', 'summary', 'kind', 'tools'],
+      ),
+      kinds: EVERYONE,
+      run: ({ employee }, args) => {
+        if (!o.capabilities) throw new ConflictError('Bu ofiste şirket yetenekleri yok.');
+        const c = o.capabilities.propose(employee.id, { id: args.id, title: args.title, summary: args.summary, kind: args.kind, tools: args.tools });
+        const next = employee.kind === 'coordinator' ? 'Kendi önerin sahibine gider; Yetenekler sekmesinden karar verecek.' : 'Koordinatör karara bağlayacak.';
+        return `Yetenek önerildi: ${c.id} (${CAPABILITY_KIND_LABELS[c.kind]}). ${next}`;
+      },
+    },
+    {
+      name: 'capabilityDecide',
+      description: 'Decide a capability someone proposed (coordinator; your own proposal is the owner’s). accept keeps its kind or makes it stricter — read → an outward kind, any kind → pay or delete; pay and delete never move, and loosening is the owner’s — and it is in the vocabulary at once; then put it on the roles that need it with editRoleCard. reject needs a note.',
+      inputSchema: object(
+        {
+          id: s('The proposed capability’s id.'),
+          decision: { type: 'string', enum: ['accept', 'reject'] },
+          kind: { type: 'string', enum: [...CAPABILITY_KINDS], description: 'The kind to activate it with (default: as proposed).' },
+          note: s('Why (required to reject).'),
+        },
+        ['id', 'decision'],
+      ),
+      kinds: COORDINATOR,
+      run: ({ employee }, args) => {
+        if (!o.capabilities) throw new ConflictError('Bu ofiste şirket yetenekleri yok.');
+        const decision = str(args, 'decision');
+        if (decision !== 'accept' && decision !== 'reject') throw new ValidationError('decision accept ya da reject olmalı.');
+        const c = o.capabilities.decide(employee.id, str(args, 'id').trim(), { accept: decision === 'accept', kind: optStr(args, 'kind'), note: optStr(args, 'note') });
+        return c.status === 'active'
+          ? `${c.id} etkin (${CAPABILITY_KIND_LABELS[c.kind]}); sahibi Yetenekler sekmesinde görür. Gereken rollere editRoleCard capabilities ile ekle.`
+          : `${c.id} reddedildi.`;
       },
     },
     {

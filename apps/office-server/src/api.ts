@@ -21,6 +21,7 @@ import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
 import type { Blueprints } from './company/blueprint.ts';
+import type { CustomCapabilities } from './company/custom-capabilities.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
 import { OwnerGuard } from './owner-guard.ts';
 import { capabilityVocabulary, coverage, unclassifiedTools } from './company/capabilities.ts';
@@ -53,6 +54,8 @@ export interface ApiDeps {
     blueprints?: Blueprints;
     /** The owner's approvals of calls the gate holds (B9a). */
     approvals?: Approvals;
+    /** The company's own capabilities (spec capabilities §4): the owner adds, decides, re-kinds and retires them. */
+    capabilities?: CustomCapabilities;
     /** The departments (spec departments §7; absent: an office without them). */
     departments?: Departments;
   };
@@ -84,6 +87,7 @@ const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
 const APPROVAL_ROUTE = /^\/api\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|deny)$/;
+const CUSTOM_CAPABILITY_ROUTE = /^\/api\/custom-capabilities\/([a-z]+\.[a-z]+)\/(accept|reject|retire|kind)$/;
 const DEPARTMENT_ROUTE = /^\/api\/departments\/([^/]+)(?:\/(close))?$/;
 const STREAM_NOTES_ROUTE = /^\/api\/plans\/([^/]+)\/stream-notes$/;
 const EMPLOYEE_ROUTE =
@@ -339,6 +343,25 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       const wanted = person ? (person.capabilities ?? []) : vocabulary.capabilities.map((c) => c.id);
       const registry = d.company.integrations.list();
       return sendJson(res, 200, { ...vocabulary, coverage: coverage(registry, wanted, person?.id), unclassified: unclassifiedTools(registry) });
+    }
+    // The company's own capabilities (spec capabilities §4.2): reading is free; every change has passed the owner guard.
+    const custom = d.company.capabilities;
+    if (custom) {
+      if (method === 'GET' && url.pathname === '/api/custom-capabilities') return sendJson(res, 200, custom.list());
+      if (method === 'POST' && url.pathname === '/api/custom-capabilities') {
+        const body = await readJson(req);
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
+        return sendJson(res, 201, custom.ownerAdd(body as Record<string, unknown>));
+      }
+      const route = CUSTOM_CAPABILITY_ROUTE.exec(url.pathname);
+      if (method === 'POST' && route) {
+        const id = route[1] ?? '';
+        const body = ((await readJson(req)) ?? {}) as { kind?: unknown; note?: unknown };
+        if (route[2] === 'retire') return sendJson(res, 200, custom.retire(id, body.note));
+        if (route[2] === 'kind') return sendJson(res, 200, custom.setKind(id, body.kind));
+        // A rejection needs a note (decide refuses one without): the page sends "Sahibi reddetti." when the owner writes none.
+        return sendJson(res, 200, custom.decide(OWNER, id, { accept: route[2] === 'accept', kind: body.kind, note: body.note }));
+      }
     }
     if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {
       const raw = url.searchParams.get('days');
