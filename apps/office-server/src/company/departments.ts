@@ -242,7 +242,7 @@ export class Departments {
 
   /**
    * The teams of before departments become departments (spec §9.1), at every start and idempotent: names matched
-   * folded, so “Keşif” and “keşif” are one; a team's first lead heads it, another lead becomes a member.
+   * folded, so “Keşif” and “keşif” are one; a team's first lead heads it, another lead becomes a member, and so does a lead without a team.
    */
   adoptTeams(): void {
     const touched = new Set<string>();
@@ -263,6 +263,10 @@ export class Departments {
       // The card names the team and the guide follows the kind; no notice and no restart (this runs at the start).
       if (adopted.kind !== e.kind || adopted.team !== e.team) writeRoleCard(this.#d.dataDir, adopted);
       touched.add(dep.id);
+    }
+    // “Lead” is exactly “head of an open department”: a lead with no team has none, so they work as a member (card written, no notice, no restart).
+    for (const e of everyone) {
+      if (e.kind === 'lead' && !e.team.trim() && !e.departmentId) writeRoleCard(this.#d.dataDir, this.#d.roster.update(e.id, { kind: 'member' }));
     }
     for (const id of touched) {
       const head = this.get(id).headId;

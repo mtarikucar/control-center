@@ -236,6 +236,25 @@ describe('Departments — teams adopted and free-text teams (spec §5.5, §9.1)'
     expect(t.reloaded).toEqual([]);
   });
 
+  it('a lead without a team (so without a department) becomes a member: lead iff head of an open department; the card is written, nobody is told', () => {
+    const t = make();
+    const lale = t.hire('Lale', { kind: 'lead' });
+    const file = (e: Employee, name: string) => readFileSync(join(deskDir(t.dataDir, e.slug), name), 'utf8');
+    expect(file(lale, 'office-guide.md')).toBe(guideText('lead'));
+    const before = t.events.lastSeq();
+    t.departments.adoptTeams();
+    expect(t.roster.get(lale.id)).toMatchObject({ kind: 'member', team: '', reportsTo: null });
+    expect(t.roster.get(lale.id)).not.toHaveProperty('departmentId');
+    expect(t.roster.get(t.coordinator.id).kind).toBe('coordinator');
+    expect(file(lale, 'office-guide.md')).toBe(guideText('member'));
+    expect(t.pending(lale.id)).toEqual([]);
+    expect(t.reloaded).toEqual([]);
+    expect(t.events.lastSeq()).toBe(before);
+    expect(t.departments.list()).toEqual([]);
+    t.departments.adoptTeams();
+    expect(t.roster.get(lale.id).kind).toBe('member');
+  });
+
   it('a free-text team joins its department, opens one when asked to, refuses past six', () => {
     const t = make();
     const x = t.departments.create(OWNER, { name: 'Satış', mission: 'm' });

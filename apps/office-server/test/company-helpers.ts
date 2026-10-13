@@ -2,6 +2,8 @@ import { DEFAULT_CONSTITUTION, type QuotaState } from '@cc/shared';
 import { Budget } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { Company } from '../src/company/company.ts';
+import { DepartmentStore, StreamNoteStore } from '../src/company/department-store.ts';
+import { Departments } from '../src/company/departments.ts';
 import { KpiReadings } from '../src/company/kpi-readings.ts';
 import { performanceReport } from '../src/performance.ts';
 import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
@@ -18,7 +20,7 @@ import type { TestSetup } from './helpers.ts';
 
 /** The company layer over a test setup and a fake engine, wired like main.ts; `now` (optional) is every store's clock. */
 /** `reload` (optional) is also called when the company restarts a session (as main.ts wires Engine.reload). */
-export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = ['coder', 'designer', 'manager'], now?: () => number, reload?: (id: string) => void) {
+export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = ['coder', 'designer', 'manager'], now?: () => number, reload?: (id: string) => void, o: { departments?: boolean } = {}) {
   const index = new SearchIndex(s.db);
   const tasks = new TaskStore(s.db, now, index);
   const plans = new PlanStore(s.db, now);
@@ -40,20 +42,27 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     constitution: constitutionStore, spend: new SpendStore(s.db, now), tasks, plans, roster: s.roster, events: s.events, notices,
     quota: { state: () => quotaState }, deskCount: 8, now,
   });
-  const reloaded: string[] = [];
   // A fake office clock: counts how often a time change asked it to re-arm.
   let touched = 0;
   const clock = { touch: () => void (touched += 1) };
+  const reloaded: string[] = [];
+  // Departments (spec 2026-10-13-departments), wired like main.ts; opt-in so every older test keeps today's company.
+  const streamNotes = o.departments ? new StreamNoteStore(s.db, now) : null;
+  const departments = o.departments
+    ? new Departments({ store: new DepartmentStore(s.db, now), roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => { reloaded.push(id); reload?.(id); } })
+    : null;
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
     reload: (id) => {
       reloaded.push(id);
       reload?.(id);
     }, schedules, clock, now, profile: new ProfileStore(s.db, now, index), onboarding: new OnboardingStore(s.db, now),
+    ...(departments ? { departments, streamNotes: streamNotes! } : {}),
   });
   // KPI measurement (B26), wired like main.ts.
   const kpis = new KpiReadings({ db: s.db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(s.db, o), now });
   company.attachKpis(kpis);
+  departments?.attach({ openStreams: () => company.liveStreams(), headEnded: (id) => company.rerouteProposalsOf(id) });
   const scheduling = new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
   /** A restarted office's due-processor on the same database. */
   const freshScheduling = () => new Scheduling({ db: s.db, tasks, schedules, notices, company, state, events: s.events, constitution: () => budget.constitution(), now });
@@ -66,7 +75,7 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     };
   };
   return {
-    tasks, plans, notices, memory, company, reloaded, index, budget, proposals, goals, state, schedules, scheduling, freshScheduling, breakReturnOf, kpis,
+    tasks, plans, notices, memory, company, reloaded, index, budget, proposals, goals, state, schedules, scheduling, freshScheduling, breakReturnOf, kpis, departments, streamNotes,
     /** How often the fake clock was touched so far (a function: the tests spread this object, which would freeze a getter). */
     clockTouches: () => touched,
     setQuota: (q: QuotaState | null) => {
