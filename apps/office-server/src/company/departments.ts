@@ -167,11 +167,7 @@ export class Departments {
     const target = this.#candidate(employeeId);
     if (former?.id === target.id) return dep;
     const elsewhere = this.headOf(target.id);
-    if (elsewhere && elsewhere.id !== id) {
-      const left = this.#d.store.update(elsewhere.id, { headId: null });
-      this.#headless(left, target.id);
-      this.#emit(by, 'head', left);
-    }
+    if (elsewhere && elsewhere.id !== id) this.#vacate(by, elsewhere, target.id);
     dep = this.#d.store.update(id, { headId: target.id });
     const told: Array<[string, string]> = [];
     if (former) {
@@ -193,15 +189,12 @@ export class Departments {
     const before = this.of(target.id);
     if ((before?.id ?? null) === (dep?.id ?? null)) return target;
     const headed = this.headOf(target.id);
-    if (headed) {
-      const left = this.#d.store.update(headed.id, { headId: null });
-      this.#headless(left, target.id);
-      this.#emit(by, 'head', left);
-    }
+    if (headed) this.#vacate(by, headed, target.id);
     const moved = this.#place(target, dep, false);
     const head = dep?.headId ? this.#person(dep.headId) : null;
     const text = dep ? `Artık ${dep.name} departmanındasın (başkan: ${head?.name ?? 'yok, koordinatör yönetir'}).` : 'Artık merkezdesin: doğrudan koordinatöre bağlısın.';
-    this.#changed(by, 'moved', dep ?? before!, [[moved.id, text]]);
+    // Read again: leaving a department one headed made it headless since `before` was taken.
+    this.#changed(by, 'moved', this.get((dep ?? before!).id), [[moved.id, text]]);
     return this.#d.roster.get(moved.id);
   }
 
@@ -210,7 +203,8 @@ export class Departments {
     const dep = this.open(id);
     const why = clean(reason, 'Gerekçe', 600, true);
     const people = this.members(id);
-    if (dep.headId) this.#headless(dep, dep.headId);
+    if (dep.headId) this.#headless(dep, dep.headId, true);
+    else this.#returnStreams(dep, true);
     for (const e of people) this.#place(e, null, false);
     const closed = this.#d.store.close(id);
     this.#changed(by, 'closed', closed, people.map((e): [string, string] => [e.id, `${dep.name} departmanı kapandı (${why}); artık merkezdesin, doğrudan koordinatöre bağlısın.`]));
@@ -242,9 +236,7 @@ export class Departments {
   left(employeeId: string): void {
     const dep = this.headOf(employeeId);
     if (!dep) return;
-    const next = this.#d.store.update(dep.id, { headId: null });
-    this.#headless(next, employeeId);
-    this.#emit(OWNER, 'head', next);
+    this.#vacate(OWNER, dep, employeeId);
     this.refreshDesks();
   }
 
@@ -254,16 +246,22 @@ export class Departments {
    */
   adoptTeams(): void {
     const touched = new Set<string>();
-    const people = this.#d.roster.list().filter((e) => e.kind !== 'coordinator' && !e.departmentId && e.team.trim());
+    const everyone = this.#d.roster.list();
+    // A department never takes a person's name (taskPass and a stream's owner must mean one thing): such a team becomes “<team> ekibi”.
+    const names = new Set(everyone.map((e) => fold(e.name)));
+    const nameOf = (team: string) => (names.has(fold(team)) ? `${team.slice(0, 34).trimEnd()} ekibi` : team.trim());
+    const people = everyone.filter((e) => e.kind !== 'coordinator' && !e.departmentId && e.team.trim());
     for (const e of [...people].sort((a, b) => a.createdAt - b.createdAt)) {
-      let dep = this.find(e.team);
+      let dep = this.find(nameOf(e.team));
       if (!dep) {
-        dep = this.#d.store.create({ name: e.team.trim(), mission: `${e.team.trim()} ekibi (departmanlardan önceki ekipten); misyonunu departmentUpdate ile yaz.`, scope: '', template: null, headId: null });
+        dep = this.#d.store.create({ name: nameOf(e.team), mission: `${e.team.trim()} ekibi (departmanlardan önceki ekipten); misyonunu departmentUpdate ile yaz.`, scope: '', template: null, headId: null });
         this.#emit(OWNER, 'created', dep);
       }
       const asHead = e.kind === 'lead' && !dep.headId;
       if (asHead) dep = this.#d.store.update(dep.id, { headId: e.id });
-      this.#d.roster.update(e.id, { departmentId: dep.id, team: dep.name, kind: asHead ? 'lead' : 'member', reportsTo: asHead ? null : dep.headId });
+      const adopted = this.#d.roster.update(e.id, { departmentId: dep.id, team: dep.name, kind: asHead ? 'lead' : 'member', reportsTo: asHead ? null : dep.headId });
+      // The card names the team and the guide follows the kind; no notice and no restart (this runs at the start).
+      if (adopted.kind !== e.kind || adopted.team !== e.team) writeRoleCard(this.#d.dataDir, adopted);
       touched.add(dep.id);
     }
     for (const id of touched) {
@@ -311,16 +309,31 @@ export class Departments {
     return this.#d.roster.update(e.id, { departmentId: dep?.id ?? null, team: dep?.name ?? '', kind: head ? 'lead' : 'member', reportsTo: !dep || head ? null : dep.headId });
   }
 
-  /** A department lost its head: its members report to no one, the former head's proposals go up, its open streams go to the coordinator. */
-  #headless(dep: Department, formerHead: string): void {
+  /** A department lost its head (`closed`: it is closing): its members report to no one, the former head's proposals go up, its open streams go to the coordinator. */
+  #headless(dep: Department, formerHead: string, closed = false): void {
     for (const m of this.#d.roster.list()) if (m.reportsTo === formerHead && m.departmentId === dep.id) this.#d.roster.update(m.id, { reportsTo: null });
     this.#links?.headEnded(formerHead);
+    this.#returnStreams(dep, closed);
+  }
+
+  /** The department's open streams are the coordinator's: it has no head, or it closed (a stream's owner is then a room that is gone). */
+  #returnStreams(dep: Department, closed: boolean): void {
     const coordinator = this.#coordinator();
     const streams = (this.#links?.openStreams() ?? []).filter((x) => x.stream.owner === departmentOwner(dep.id));
-    if (coordinator && streams.length > 0) {
-      const list = streams.map((x) => `“${x.stream.title}” (plan “${x.plan.title}”, ${x.stream.id})`).join(', ');
-      this.#d.notices.add(coordinator.id, 'stream.returned', `${dep.name} departmanının başkanı yok; açık akışları sende: ${list}. departmentUpdate ile başkan ata ya da akışları kendin yönet.`);
-    }
+    if (!coordinator || streams.length === 0) return;
+    const list = streams.map((x) => `“${x.stream.title}” (plan “${x.plan.title}”, ${x.stream.id})`).join(', ');
+    const text = closed
+      ? `${dep.name} departmanı kapandı; açık akışları sende: ${list}. Akışların sahibini planRevise ile değiştir ya da kendin yönet.`
+      : `${dep.name} departmanının başkanı yok; açık akışları sende: ${list}. departmentUpdate ile başkan ata ya da akışları kendin yönet.`;
+    this.#d.notices.add(coordinator.id, 'stream.returned', text);
+  }
+
+  /** The head leaves a department that stays open (heading another, moved out, let go): it is headless and the 'head' change is emitted; telling the person is the caller's. */
+  #vacate(by: string, dep: Department, formerHead: string): Department {
+    const next = this.#d.store.update(dep.id, { headId: null });
+    this.#headless(next, formerHead);
+    this.#emit(by, 'head', next);
+    return next;
   }
 
   /** One change, told: the department's event; each affected person's card, role event, notice and session restart; every desk's block. */

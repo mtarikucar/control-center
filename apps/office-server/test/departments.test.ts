@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { OWNER, type Employee } from '@cc/shared';
-import { deskDir, writeRoleCard } from '../src/desk.ts';
+import { OWNER, type Department, type Employee } from '@cc/shared';
+import { deskDir, guideText, writeRoleCard } from '../src/desk.ts';
 import { DepartmentStore } from '../src/company/department-store.ts';
 import { departmentBlock, Departments } from '../src/company/departments.ts';
 import { NoticeStore } from '../src/company/store.ts';
@@ -31,7 +31,9 @@ function make() {
   const coordinator = hire('Koordinatör', { kind: 'coordinator' });
   const pending = (id: string) => notices.pending(id).map((n) => `${n.topic}: ${n.text}`);
   const changes = () => s.events.list({ limit: 1000 }).filter((e) => e.event.type === 'department.changed').map((e) => (e.event as { change: string }).change);
-  return { ...s, notices, store, departments, reloaded, returned, hire, coordinator, pending, changes, setStreams: (x: typeof streams) => (streams = x) };
+  const departmentEvents = () =>
+    s.events.list({ limit: 1000 }).flatMap((e) => (e.event.type === 'department.changed' ? [e.event as { change: string; department: Department }] : []));
+  return { ...s, notices, store, departments, reloaded, returned, hire, coordinator, pending, changes, departmentEvents, setStreams: (x: typeof streams) => (streams = x) };
 }
 
 describe('Departments — opening, heads and members (spec §3, §5.1)', () => {
@@ -116,12 +118,58 @@ describe('Departments — opening, heads and members (spec §3, §5.1)', () => {
     t.departments.update(t.coordinator.id, x.id, { name: 'Büyüme', mission: 'yeni' });
     expect(t.roster.get(b.id).team).toBe('Büyüme');
     expect(() => t.departments.close(OWNER, x.id, '  ')).toThrow(/Gerekçe boş olamaz/);
+    t.setStreams([{ plan: { id: 'p1', title: 'Site' } as never, stream: { id: 'api', title: 'API', owner: `departman:${x.id}`, dependsOn: [], status: 'active' } }]);
     t.departments.close(OWNER, x.id, 'iş bitti');
+    const said = t.pending(t.coordinator.id).join('\n');
+    expect(said).toContain('stream.returned: Büyüme departmanı kapandı; açık akışları sende: “API” (plan “Site”, api). Akışların sahibini planRevise ile değiştir ya da kendin yönet.');
+    expect(said).not.toMatch(/departmentUpdate ile başkan ata/);
     expect(t.departments.get(x.id)).toMatchObject({ status: 'closed', headId: null });
     for (const id of [a.id, b.id]) expect(t.roster.get(id)).toMatchObject({ kind: 'member', team: '', reportsTo: null });
     expect(t.roster.get(a.id)).not.toHaveProperty('departmentId');
     expect(() => t.departments.move(OWNER, a.id, x.id)).toThrow(/“Büyüme” departmanı kapandı/);
     expect(t.departments.find('Büyüme')).toBeNull();
+  });
+
+  it('closing a headless department also gives its open streams to the coordinator, and says it closed', () => {
+    const t = make();
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm' });
+    t.setStreams([{ plan: { id: 'p1', title: 'Site' } as never, stream: { id: 'api', title: 'API', owner: `departman:${x.id}`, dependsOn: [], status: 'active' } }]);
+    t.departments.close(OWNER, x.id, 'iş bitti');
+    expect(t.pending(t.coordinator.id).join('\n')).toContain('stream.returned: X departmanı kapandı; açık akışları sende: “API” (plan “Site”, api).');
+  });
+
+  it('a head moved to the centre: the department is headless in the event, its members report to no one, the person is a member with no department', () => {
+    const t = make();
+    const [a, b] = [t.hire('Ada'), t.hire('Bora')];
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm', headId: a.id });
+    t.departments.move(OWNER, b.id, x.id);
+    expect(t.roster.get(b.id).reportsTo).toBe(a.id);
+    const moved = t.departments.move(OWNER, a.id, null);
+    expect(moved).toMatchObject({ kind: 'member', team: '', reportsTo: null });
+    expect(moved).not.toHaveProperty('departmentId');
+    const events = t.departmentEvents();
+    expect(events.slice(-2).map((e) => e.change)).toEqual(['head', 'moved']);
+    for (const e of events.slice(-2)) expect(e.department).toMatchObject({ id: x.id, headId: null });
+    expect(t.departments.get(x.id).headId).toBeNull();
+    expect(t.roster.get(b.id)).toMatchObject({ departmentId: x.id, reportsTo: null });
+    expect(t.returned).toContain(a.id);
+  });
+
+  it('a head moved into another department: the old one is headless in the event, the person is a member of the new one under its head', () => {
+    const t = make();
+    const [a, b, c] = [t.hire('Ada'), t.hire('Bora'), t.hire('Cem')];
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm', headId: a.id });
+    t.departments.move(OWNER, b.id, x.id);
+    const y = t.departments.create(OWNER, { name: 'Y', mission: 'm', headId: c.id });
+    const moved = t.departments.move(OWNER, a.id, y.id);
+    expect(moved).toMatchObject({ kind: 'member', team: 'Y', departmentId: y.id, reportsTo: c.id });
+    const [head, move] = t.departmentEvents().slice(-2);
+    expect(head).toMatchObject({ change: 'head', department: { id: x.id, headId: null } });
+    expect(move).toMatchObject({ change: 'moved', department: { id: y.id, headId: c.id } });
+    expect(t.departments.get(x.id).headId).toBeNull();
+    expect(t.roster.get(b.id)).toMatchObject({ departmentId: x.id, reportsTo: null });
+    expect(t.departments.members(y.id).map((e) => e.name)).toEqual(['Cem', 'Ada']);
+    expect(t.returned).toContain(a.id);
   });
 
   it('someone let go who headed a department leaves it headless (Company.releaseTasksOf calls left)', () => {
@@ -158,6 +206,34 @@ describe('Departments — teams adopted and free-text teams (spec §5.5, §9.1)'
     t.departments.adoptTeams();
     expect(t.departments.list()).toHaveLength(2);
     expect(t.events.lastSeq()).toBe(before);
+  });
+
+  it('a team named like someone at work is adopted as “<team> ekibi”; whoever’s kind or team changed gets the card written again', () => {
+    const t = make();
+    t.hire('Ada');
+    const selin = t.hire('Selin', { team: 'Ada', kind: 'lead' });
+    const kerem = t.hire('Kerem', { team: 'ada', kind: 'lead' });
+    const mert = t.hire('Mert', { team: 'Ada' });
+    const file = (e: Employee, name: string) => readFileSync(join(deskDir(t.dataDir, e.slug), name), 'utf8');
+    expect(file(kerem, 'office-guide.md')).toBe(guideText('lead'));
+    expect(guideText('lead')).not.toBe(guideText('member'));
+    expect(file(kerem, 'CLAUDE.md')).toContain('ekibin: ada');
+    t.departments.adoptTeams();
+    const open = t.departments.list({ status: 'open' });
+    expect(open.map((d) => d.name)).toEqual(['Ada ekibi']);
+    expect(open[0]!.headId).toBe(selin.id);
+    expect(t.roster.get(kerem.id)).toMatchObject({ kind: 'member', team: 'Ada ekibi', departmentId: open[0]!.id, reportsTo: selin.id });
+    expect(t.roster.get(mert.id)).toMatchObject({ team: 'Ada ekibi', departmentId: open[0]!.id });
+    expect(file(kerem, 'office-guide.md')).toBe(guideText('member'));
+    expect(file(kerem, 'CLAUDE.md')).toContain('ekibin: Ada ekibi');
+    expect(file(kerem, 'CLAUDE.md')).toContain('@department.md');
+    expect(file(selin, 'office-guide.md')).toBe(guideText('lead'));
+    expect(file(selin, 'CLAUDE.md')).toContain('ekibin: Ada ekibi');
+    const before = t.events.lastSeq();
+    t.departments.adoptTeams();
+    expect(t.departments.list()).toHaveLength(1);
+    expect(t.events.lastSeq()).toBe(before);
+    expect(t.reloaded).toEqual([]);
   });
 
   it('a free-text team joins its department, opens one when asked to, refuses past six', () => {
