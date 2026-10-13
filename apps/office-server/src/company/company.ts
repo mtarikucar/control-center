@@ -1,8 +1,8 @@
 import { statSync } from 'node:fs';
 import type { AgentProvider } from '@cc/shared';
 import { relative } from 'node:path';
-import type { CompanyProfile, Department, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, PlanStream, PlanStreamView, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
+import type { CompanyProfile, Department, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, PlanStream, PlanStreamView, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, StreamNote, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, ownerDepartment, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -964,8 +964,42 @@ export class Company {
     if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, 'task.finished', line);
     this.#taskEvent('finished', next);
     this.#d.memory?.learnedFrom(next, result);
+    this.#streamMaybeDone(next);
     if (task.planId) this.#maybeFinishPlan(task.planId);
     return next;
+  }
+
+  /** Each department's head hears of a stream that is newly theirs in a running plan (spec departments §6.2); `before`: the streams as they were (null: the plan just started). */
+  #assignStreams(plan: Plan, before: readonly PlanStream[] | null): void {
+    const deps = this.#d.departments;
+    if (!deps || plan.status !== 'approved') return;
+    for (const s of this.streamsOf([plan]).get(plan.id) ?? []) {
+      const depId = ownerDepartment(s.owner);
+      if (!depId || s.status === 'done') continue;
+      if (before?.some((b) => b.id === s.id && b.owner === s.owner)) continue;
+      const dep = deps.get(depId);
+      if (!dep.headId) continue;
+      const checks = plan.method?.checks?.length ? ` Planın kalite kontrolleri: ${plan.method.checks.join('; ')}.` : '';
+      const estimate = [plan.quotaPct !== null ? `kota %${plan.quotaPct}` : '', plan.usd !== null ? `$${plan.usd}` : '', plan.days !== null ? `${plan.days} gün` : ''].filter(Boolean).join(', ');
+      const waits = s.dependsOn.length ? ` Önce şu akışların bitmesini bekler: ${s.dependsOn.join(', ')}.` : '';
+      this.#d.notices.add(
+        dep.headId,
+        'stream.assigned',
+        `“${plan.title}” planının “${s.title}” akışı (${s.id}) ${dep.name} departmanının: hedef ${plan.goal}.${checks}${estimate ? ` Planın tahmini: ${estimate}.` : ''}${waits} streamPlan ile akışını planla (planId ${plan.id}, streamId ${s.id}), görevleri taskCreate ile planId ve streamId vererek aç ve odana dağıt; bitince streamReport ile raporla.`,
+      );
+    }
+  }
+
+  /** A department's stream whose last open task just closed: its head (or the coordinator) reports it (spec §6.2 step 5). */
+  #streamMaybeDone(task: Task): void {
+    const deps = this.#d.departments;
+    if (!deps || !task.planId || !task.streamId) return;
+    const plan = this.#d.plans.get(task.planId);
+    const stream = (this.streamsOf([plan]).get(plan.id) ?? []).find((s) => s.id === task.streamId);
+    const depId = stream ? ownerDepartment(stream.owner) : null;
+    if (!stream || !depId || stream.status !== 'done') return;
+    const to = deps.responsible(depId);
+    if (to) this.#d.notices.add(to.id, 'stream.done', `“${plan.title}” planının “${stream.title}” akışının açık görevi kalmadı. streamReport ile koordinatöre raporla: ne yapıldı, kanıtı ne, sırada ne var (planId ${plan.id}, streamId ${stream.id}).`);
   }
 
   /** A reviewer named for a task: someone in the office, not let go, and never the one who does it. */
@@ -999,6 +1033,7 @@ export class Company {
     if (!free) return plan;
     const started = this.#d.plans.update(plan.id, { status: 'approved', approvedAt: this.#now(), approvedBy: 'coordinator' });
     this.#emit(by, { type: 'plan.changed', change: 'approved', plan: started });
+    this.#assignStreams(started, null);
     return started;
   }
 
@@ -1031,6 +1066,7 @@ export class Company {
       const plan = this.#d.plans.update(planId, { ...merged, method, streams, version: current.version + 1, status, approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
       this.#d.plans.clearApproved(planId);
       this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
+      this.#assignStreams(plan, current.streams ?? []);
       // Dropping the last unfinished stream leaves nothing to do: the plan finishes as when its last task closes.
       if (status === 'approved' && streams.length > 0) this.#maybeFinishPlan(planId);
       return this.#d.plans.get(planId);
@@ -1046,12 +1082,14 @@ export class Company {
   approve(planId: string): Plan {
     const current = this.#d.plans.get(planId);
     if (current.status !== 'draft') throw new ConflictError('Yalnız taslak bir plan onaylanabilir.');
+    const before = this.#d.plans.approvedSnapshot(planId)?.streams ?? null;
     const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now(), approvedBy: 'owner' });
     this.#d.plans.clearApproved(planId);
     const desk = this.#planDesk(plan);
     const next = this.#isBlueprint?.(plan.id) ? 'Bu bir kurulum planı: blueprintApply ile kur; yarıda kalırsa yeniden çalıştır, yapılmışı atlar.' : 'Görevleri aç ve dağıt.';
     this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). ${next}`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
+    this.#assignStreams(plan, before);
     // An approved revision may leave nothing to do (it dropped the last unfinished stream, or its work closed while it
     // waited): the plan finishes now. Only a plan that has streams or has had work: a fresh one is only starting.
     if (this.#hadWork(plan)) this.#maybeFinishPlan(planId);
@@ -1076,6 +1114,51 @@ export class Company {
     this.#emit(desk, { type: 'plan.changed', change: 'declined', plan });
     return plan;
   }
+  // ── streams of departments ───────────────────────────────────────────────
+
+  /** A head's plan of their department's stream (spec §5.2): a new note each time, the latest shown. */
+  streamPlan(by: string, planId: string, streamId: string, text: string): StreamNote {
+    const { plan, stream } = this.#streamFor(by, planId, streamId);
+    const note = this.#notes().add({ planId: plan.id, streamId: stream.id, kind: 'plan', text: clean(text, 'Akış planı', 6000, true), evidence: [], next: null, by });
+    this.#emit(by, { type: 'stream.noted', note });
+    return note;
+  }
+
+  streamReport(by: string, planId: string, streamId: string, r: { summary: string; evidence?: string[]; next?: string }): StreamNote {
+    const { plan, stream } = this.#streamFor(by, planId, streamId);
+    const note = this.#notes().add({
+      planId: plan.id, streamId: stream.id, kind: 'report', text: clean(r.summary, 'Rapor', 4000, true), evidence: lines(r.evidence, 'Kanıt', 12, 600),
+      next: clean(r.next, 'Sırada', 1000, false) || null, by,
+    });
+    this.#emit(by, { type: 'stream.noted', note });
+    this.#tellCoordinator(by, 'stream.report', `${this.nameOf(by)} “${plan.title}” planının “${stream.title}” akışını raporladı: ${note.text}${note.next ? ` Sırada: ${note.next}` : ''}`);
+    return note;
+  }
+
+  /** The latest plan and report of each of a plan's streams (plan card, board, departmentsRead). */
+  streamNotes(planId: string): Array<{ streamId: string; plan: StreamNote | null; report: StreamNote | null }> {
+    const plan = this.#d.plans.get(planId);
+    const notes = this.#d.streamNotes;
+    return (plan.streams ?? []).map((s) => ({ streamId: s.id, plan: notes?.latest(plan.id, s.id, 'plan') ?? null, report: notes?.latest(plan.id, s.id, 'report') ?? null }));
+  }
+
+  /** The stream, if `by` may write on it: the coordinator any, a head their department's. */
+  #streamFor(by: string, planId: string, streamId: string): { plan: Plan; stream: PlanStream } {
+    const plan = this.#d.plans.get(planId);
+    if (plan.status !== 'approved' && plan.status !== 'done') throw new ConflictError(`“${plan.title}” planı sürmüyor; akış notu yalnız süren ya da bitmiş plana yazılır.`);
+    const stream = (plan.streams ?? []).find((s) => s.id === streamId);
+    if (!stream) throw new ValidationError(`“${plan.title}” planında “${streamId}” akışı yok.`);
+    if (this.#d.roster.get(by).kind === 'coordinator') return { plan, stream };
+    const depId = ownerDepartment(stream.owner);
+    if (!depId || this.#d.departments?.headOf(by)?.id !== depId) throw new ForbiddenError('Bu akış senin departmanının değil; akış notunu akışın departmanının başkanı ya da koordinatör yazar.');
+    return { plan, stream };
+  }
+
+  #notes(): StreamNoteStore {
+    if (!this.#d.streamNotes) throw new ConflictError('Bu ofiste akış notları açık değil.');
+    return this.#d.streamNotes;
+  }
+
   /** A plan's streams with the status their tasks give them (management cycle §3.4). */
   planStreams(planId: string): PlanStreamView[] {
     const plan = this.#d.plans.get(planId);
@@ -1668,7 +1751,8 @@ export class Company {
 
   /** A plan's streams as given, with their owners looked up by id or name (by id also someone let go: a stream they owned needs a new owner). */
   #streams(value: unknown): PlanStream[] {
-    return checkStreams(value, (who) => this.#d.roster.byIdOrName(who) ?? this.#person(who));
+    const deps = this.#d.departments;
+    return checkStreams(value, (who) => this.#d.roster.byIdOrName(who) ?? this.#person(who), (who) => deps?.find(who) ?? null, () => deps?.list({ status: 'open' }) ?? []);
   }
 
   /** A revision may change any stream but not drop one that tasks belong to: they would point at nothing. */
