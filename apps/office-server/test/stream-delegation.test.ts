@@ -130,3 +130,78 @@ describe('Edges of a department’s stream', () => {
     expect(() => c.company.streamPlan(coordinator.id, plan.id, 'x', 'not')).toThrow(/akış notları açık değil/);
   });
 });
+
+describe('Streams given after the start (review round 1)', () => {
+  const told = (said: string) => (said.match(/stream\.assigned/g) ?? []).length;
+  const TWO = [
+    { id: 'api', title: 'API', owner: 'Yazılım ve Otomasyon' },
+    { id: 'tanitim', title: 'Tanıtım', owner: 'Pazarlama', dependsOn: ['api'] },
+  ];
+
+  it('a free revision that gives a stream to a second headed department tells that head once and the first not again', () => {
+    const t = make('free');
+    t.departments.setHead(OWNER, t.pzr.id, t.deniz.id);
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [TWO[0]!] });
+    expect(told(t.said(t.selin.id))).toBe(1);
+    expect(told(t.said(t.deniz.id))).toBe(0);
+    t.company.revise(t.coordinator.id, plan.id, { streams: TWO });
+    expect(told(t.said(t.deniz.id))).toBe(1);
+    expect(t.said(t.deniz.id)).toMatch(/stream.assigned: “Site” planının “Tanıtım” akışı \(tanitim\) Pazarlama departmanının/);
+    expect(told(t.said(t.selin.id))).toBe(1);
+  });
+
+  it('under the owner’s approval: propose, approve, revise to a second department, approve — only the new owner is told', () => {
+    const t = make('plans');
+    t.departments.setHead(OWNER, t.pzr.id, t.deniz.id);
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [TWO[0]!] });
+    t.company.approve(plan.id);
+    expect(told(t.said(t.selin.id))).toBe(1);
+    t.company.revise(t.coordinator.id, plan.id, { streams: TWO });
+    expect(told(t.said(t.deniz.id))).toBe(0);
+    t.company.approve(plan.id);
+    expect(told(t.said(t.deniz.id))).toBe(1);
+    expect(told(t.said(t.selin.id))).toBe(1);
+  });
+
+  it('a draft that never ran and is then revised under full autonomy starts: every department’s head is told', () => {
+    const t = make('plans');
+    t.departments.setHead(OWNER, t.pzr.id, t.deniz.id);
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: TWO });
+    expect(told(t.said(t.selin.id)) + told(t.said(t.deniz.id))).toBe(0);
+    t.budget.setConstitution({ autonomy: 'free' });
+    const revised = t.company.revise(t.coordinator.id, plan.id, { title: 'Site v2' });
+    expect(revised.status).toBe('approved');
+    expect(t.said(t.selin.id)).toMatch(/stream.assigned: “Site v2” planının “API” akışı/);
+    expect(t.said(t.deniz.id)).toMatch(/stream.assigned: “Site v2” planının “Tanıtım” akışı/);
+    expect(told(t.said(t.selin.id))).toBe(1);
+    expect(told(t.said(t.deniz.id))).toBe(1);
+  });
+
+  it('a revision waiting for the owner leaves the running plan’s streams writable; a plan that never ran refuses', () => {
+    const t = make('plans');
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: [TWO[0]!] });
+    expect(() => t.company.streamPlan(t.selin.id, plan.id, 'api', 'x')).toThrow(/“Site” planı sürmüyor/);
+    expect(() => t.company.streamPlan(t.coordinator.id, plan.id, 'api', 'x')).toThrow(/“Site” planı sürmüyor/);
+    t.company.approve(plan.id);
+    const waiting = t.company.revise(t.coordinator.id, plan.id, { title: 'Site v2' });
+    expect(waiting.status).toBe('draft');
+    expect(t.company.streamPlan(t.selin.id, plan.id, 'api', 'Önce uç noktalar.')).toMatchObject({ kind: 'plan', by: t.selin.id });
+    const report = t.company.streamReport(t.selin.id, plan.id, 'api', { summary: 'Uç noktalar hazır.' });
+    expect(report).toMatchObject({ kind: 'report', next: null });
+    expect(t.said(t.coordinator.id)).toMatch(/stream.report: Selin “Site v2” planının “API” akışını raporladı: Uç noktalar hazır\./);
+  });
+
+  it('a department given a head later hears of its open streams (not the finished ones, nor another department’s)', () => {
+    const t = make('free');
+    const plan = t.company.propose(t.coordinator.id, { ...DRAFT, streams: TWO });
+    t.departments.setHead(OWNER, t.yaz.id, null);
+    const task = t.company.createTask(t.coordinator.id, { assignee: t.deniz.id, title: 'Duyuru', planId: plan.id, streamId: 'tanitim' });
+    t.company.start(task.id);
+    t.company.finish(t.deniz.id, task.id, { summary: 'bitti', outputs: [], learned: '' } as never);
+    expect(told(t.said(t.mert.id))).toBe(0);
+    t.departments.setHead(OWNER, t.yaz.id, t.mert.id);
+    expect(t.said(t.mert.id)).toContain(`stream.assigned: Artık başkanı olduğun Yazılım ve Otomasyon departmanının açık akışları: “API” (plan “Site”, planId ${plan.id}, streamId api). Her birini streamPlan ile planla`);
+    expect(t.said(t.mert.id)).not.toMatch(/Tanıtım/);
+    expect(told(t.said(t.mert.id))).toBe(1);
+  });
+});

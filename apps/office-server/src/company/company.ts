@@ -1063,10 +1063,12 @@ export class Company {
       // A finished plan stays finished until it gets new work (a task reopens it): an empty "approved" would look running forever.
       // A stream still to do is work too: a revision that adds one starts the plan again.
       const status = current.status === 'done' && this.#d.tasks.openInPlan(planId) === 0 && this.#streamsDone(planId, streams) ? 'done' : 'approved';
+      // A draft's streams were never announced (it waited for the owner): it is compared with the version that ran, if any.
+      const before = current.status === 'draft' ? (this.#d.plans.approvedSnapshot(planId)?.streams ?? null) : (current.streams ?? []);
       const plan = this.#d.plans.update(planId, { ...merged, method, streams, version: current.version + 1, status, approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
       this.#d.plans.clearApproved(planId);
       this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
-      this.#assignStreams(plan, current.streams ?? []);
+      this.#assignStreams(plan, before);
       // Dropping the last unfinished stream leaves nothing to do: the plan finishes as when its last task closes.
       if (status === 'approved' && streams.length > 0) this.#maybeFinishPlan(planId);
       return this.#d.plans.get(planId);
@@ -1145,7 +1147,9 @@ export class Company {
   /** The stream, if `by` may write on it: the coordinator any, a head their department's. */
   #streamFor(by: string, planId: string, streamId: string): { plan: Plan; stream: PlanStream } {
     const plan = this.#d.plans.get(planId);
-    if (plan.status !== 'approved' && plan.status !== 'done') throw new ConflictError(`“${plan.title}” planı sürmüyor; akış notu yalnız süren ya da bitmiş plana yazılır.`);
+    // A running plan whose revision waits for the owner is a draft with its approved version kept: its work goes on.
+    const ran = plan.status === 'approved' || plan.status === 'done' || (plan.status === 'draft' && this.#d.plans.approvedSnapshot(planId) !== null);
+    if (!ran) throw new ConflictError(`“${plan.title}” planı sürmüyor; akış notu yalnız süren ya da bitmiş plana yazılır.`);
     const stream = (plan.streams ?? []).find((s) => s.id === streamId);
     if (!stream) throw new ValidationError(`“${plan.title}” planında “${streamId}” akışı yok.`);
     if (this.#d.roster.get(by).kind === 'coordinator') return { plan, stream };

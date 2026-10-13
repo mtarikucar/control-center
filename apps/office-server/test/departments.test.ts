@@ -110,6 +110,27 @@ describe('Departments — opening, heads and members (spec §3, §5.1)', () => {
     expect(said).not.toMatch(/Arayüz/);
   });
 
+  it('a head named while the department has open streams hears of them in one notice; none open: no notice', () => {
+    const t = make();
+    const [a, b] = [t.hire('Ada'), t.hire('Bora')];
+    const x = t.departments.create(OWNER, { name: 'X', mission: 'm' });
+    t.departments.setHead(OWNER, x.id, a.id);
+    expect(t.pending(a.id).join('\n')).not.toMatch(/stream.assigned/);
+    t.setStreams([
+      { plan: { id: 'p1', title: 'Site' } as never, stream: { id: 'api', title: 'API', owner: `departman:${x.id}`, dependsOn: [], status: 'active' } },
+      { plan: { id: 'p2', title: 'Blog' } as never, stream: { id: 'yazi', title: 'Yazılar', owner: `departman:${x.id}`, dependsOn: [], status: 'planned' } },
+      { plan: { id: 'p1', title: 'Site' } as never, stream: { id: 'ui', title: 'Arayüz', owner: 'someone', dependsOn: [], status: 'active' } },
+    ]);
+    t.departments.setHead(OWNER, x.id, b.id);
+    const said = t.pending(b.id).filter((n) => n.startsWith('stream.assigned'));
+    expect(said).toEqual([
+      'stream.assigned: Artık başkanı olduğun X departmanının açık akışları: “API” (plan “Site”, planId p1, streamId api), “Yazılar” (plan “Blog”, planId p2, streamId yazi). Her birini streamPlan ile planla (planId, streamId), görevlerini taskCreate ile planId ve streamId vererek aç; bitince streamReport ile raporla.',
+    ]);
+    expect(t.pending(a.id).join('\n')).not.toMatch(/stream.assigned/);
+    t.departments.setHead(OWNER, x.id, b.id);
+    expect(t.pending(b.id).filter((n) => n.startsWith('stream.assigned'))).toHaveLength(1);
+  });
+
   it('renames: the members’ team follows; closing sends everyone to the centre and returns the streams', () => {
     const t = make();
     const [a, b] = [t.hire('Ada'), t.hire('Bora')];

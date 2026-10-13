@@ -179,6 +179,7 @@ export class Departments {
     for (const m of this.members(id)) if (m.id !== head.id && m.reportsTo !== head.id) this.#d.roster.update(m.id, { reportsTo: head.id });
     told.push([head.id, `Artık ${dep.name} departmanının başkanısın: sana verilen akışları streamPlan ile planlar, görevleri açıp odana dağıtır, gerekirse kendi departmanına işe alırsın (hire); akış bitince streamReport ile raporlarsın. Rol kartın ve araçların yenilendi.`]);
     this.#changed(by, 'head', dep, told);
+    this.#handOver(dep, head);
     return dep;
   }
 
@@ -330,6 +331,18 @@ export class Departments {
       ? `${dep.name} departmanı kapandı; açık akışları sende: ${list}. Akışların sahibini planRevise ile değiştir ya da kendin yönet.`
       : `${dep.name} departmanının başkanı yok; açık akışları sende: ${list}. departmentUpdate ile başkan ata ya da akışları kendin yönet.`;
     this.#d.notices.add(coordinator.id, 'stream.returned', text);
+  }
+
+  /** A new head hears of the department's open streams: their assignment came at the plan's start, when no one (or their predecessor) headed it. */
+  #handOver(dep: Department, head: Employee): void {
+    const streams = (this.#links?.openStreams() ?? []).filter((x) => x.stream.owner === departmentOwner(dep.id));
+    if (streams.length === 0) return;
+    const list = streams.map((x) => `“${x.stream.title}” (plan “${x.plan.title}”, planId ${x.plan.id}, streamId ${x.stream.id})`).join(', ');
+    this.#d.notices.add(
+      head.id,
+      'stream.assigned',
+      `Artık başkanı olduğun ${dep.name} departmanının açık akışları: ${list}. Her birini streamPlan ile planla (planId, streamId), görevlerini taskCreate ile planId ve streamId vererek aç; bitince streamReport ile raporla.`,
+    );
   }
 
   /** The head leaves a department that stays open (heading another, moved out, let go): it is headless and the 'head' change is emitted; telling the person is the caller's. */
