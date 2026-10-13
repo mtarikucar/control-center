@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OutboxEntry } from '@cc/shared';
+import { OUTBOX_GATE_OFF_TEXT, type Constitution, type OutboxEntry } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { OutboxTab } from './OutboxTab.tsx';
 
@@ -19,9 +19,19 @@ vi.mock('../net/api.ts', () => ({
 }));
 const { api } = await import('../net/api.ts');
 
+/** A promise the test settles itself: a read that has not come back. */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() =>
   useOffice.setState({
     outboxRev: 0,
+    budget: null,
     departments: { d1: { id: 'd1', name: 'Satış', status: 'open' }, d2: { id: 'd2', name: 'Pazarlama', status: 'open' } } as never,
     views: { ada: { employee: { id: 'ada', name: 'Ada' } } as never, can: { employee: { id: 'can', name: 'Can' } } as never },
   }),
@@ -71,6 +81,59 @@ describe('OutboxTab (spec capabilities §7)', () => {
     unmount();
     render(<OutboxTab />);
     expect((await screen.findByRole('alert')).textContent).toMatch(/ulaşılamadı/);
+    expect(screen.queryByText('Kayıt yok.')).toBeNull();
+  });
+
+  it('task 12: no empty state before the record has come back', async () => {
+    const reading = deferred<OutboxEntry[]>();
+    vi.mocked(api.outbox).mockImplementationOnce(() => reading.promise);
+    render(<OutboxTab />);
+    await act(async () => {});
+    expect(screen.queryByText('Kayıt yok.')).toBeNull();
+    await act(async () => reading.resolve([]));
+    expect(screen.getByText('Kayıt yok.')).toBeTruthy();
+  });
+
+  it('task 12: a later read that fails does not make the record look empty', async () => {
+    vi.mocked(api.outbox).mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('Sunucuya ulaşılamadı.'));
+    render(<OutboxTab />);
+    await screen.findByText('Kayıt yok.');
+    await act(async () => useOffice.setState({ outboxRev: 1 }));
+    expect((await screen.findByRole('alert', {}, { timeout: 3000 })).textContent).toMatch(/ulaşılamadı/);
+    expect(screen.queryByText('Kayıt yok.')).toBeNull();
+  });
+
+  it('task 12: a filter that matches none of the newest 200 says so, which is not an empty record', async () => {
+    render(<OutboxTab />);
+    await screen.findByRole('row', { name: 'Ada send_message to=a@x.co' });
+    fireEvent.change(screen.getByLabelText('Tür'), { target: { value: 'calendar' } });
+    expect(screen.getByText('Son 200 kayıtta bu süzgece uyan yok.')).toBeTruthy();
+    expect(screen.queryByText('Kayıt yok.')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Tür'), { target: { value: '' } });
+    expect(screen.queryByText(/süzgece uyan yok/)).toBeNull();
+  });
+
+  it('with the gate off an empty box says nothing is written then, not just that it is empty', async () => {
+    useOffice.setState({ budget: { constitution: { gateEnabled: false } as Constitution } as never });
+    vi.mocked(api.outbox).mockResolvedValueOnce([]);
+    render(<OutboxTab />);
+    expect(await screen.findByText(OUTBOX_GATE_OFF_TEXT)).toBeTruthy();
+    expect(screen.queryByText('Kayıt yok.')).toBeNull();
+  });
+
+  it('task 12: says what the record holds — sends, publications, calls and calendar calls — and that nothing is written with the gate off', async () => {
+    render(<OutboxTab />);
+    await screen.findByRole('row', { name: 'Ada send_message to=a@x.co' });
+    const intro = screen.getByText(/"izin verildi" kaydıdır/).textContent ?? '';
+    expect(intro).toMatch(/gönderim, yayın, arama ve takvim çağrıları \(son 200\)/);
+    expect(intro).toMatch(/kapı kapalıyken yazılmaz/);
+    expect(intro).not.toMatch(/dışa dönük çağrılar/);
+  });
+
+  it('task 12: the table has a header row', async () => {
+    render(<OutboxTab />);
+    await screen.findByRole('row', { name: 'Ada send_message to=a@x.co' });
+    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Ne zaman', 'Çalışan', 'Departman', 'Tür', 'Hedef', 'Kim geçirdi', 'Özet']);
   });
 
   it('reads again when something goes out', async () => {
