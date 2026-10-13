@@ -35,7 +35,8 @@ export class OutboxStore {
   add(e: NewOutboxEntry): OutboxEntry {
     const at = this.#now();
     const recipients = e.recipients.slice(0, OUTBOX_MAX_RECIPIENTS);
-    const summary = e.summary.slice(0, OUTBOX_SUMMARY_CHARS);
+    // By code point: a cut through an emoji would store half of it (a lone surrogate).
+    const summary = Array.from(e.summary).slice(0, OUTBOX_SUMMARY_CHARS).join('');
     const { lastInsertRowid } = this.#db
       .prepare('INSERT INTO outbox (employee_id, department_id, tool, kind, target, recipients, summary, via, approval_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(e.employeeId, e.departmentId, e.tool, e.kind, e.target, JSON.stringify(recipients), summary, e.via, e.approvalId, at);
@@ -71,10 +72,12 @@ export class OutboxStore {
    */
   countSystem(o: { departmentId: string | null; employeeId: string; kinds: readonly OutwardPolicyKind[]; since: number }): number {
     const kinds = o.kinds.map(() => '?').join(', ');
-    const scope = o.departmentId ? 'department_id = ?' : 'department_id IS NULL AND employee_id = ?';
+    // The scope and the value bound to it from one test: a scope that disagreed with its value would count nothing.
+    const department = o.departmentId !== null;
+    const scope = department ? 'department_id = ?' : 'department_id IS NULL AND employee_id = ?';
     const row = this.#db
       .prepare(`SELECT COUNT(*) AS n FROM outbox WHERE via = 'system' AND kind IN (${kinds}) AND at >= ? AND ${scope}`)
-      .get(...o.kinds, o.since, o.departmentId ?? o.employeeId) as unknown as { n: number };
+      .get(...o.kinds, o.since, department ? o.departmentId : o.employeeId) as unknown as { n: number };
     return row.n;
   }
 }

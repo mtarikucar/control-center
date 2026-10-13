@@ -154,12 +154,19 @@ const isHourWindow = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && v.every((h) => Number.isInteger(h) && h >= 0 && h <= 24) && v[0] < v[1];
 
 /**
+ * The rules' counts and their ranges, as the owner's form takes them: a stored one out of range is no limit the owner
+ * set, and a null, a text or NaN would make `count >= limit` never true — the system would send without end.
+ */
+const RULE_RANGES = { sendsPerHour: [0, 1000], bulkRecipients: [1, 1000], callsPerDay: [0, 1000] } as const;
+const inRange = (v: unknown, [min, max]: readonly [number, number]): v is number => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
+
+/**
  * A constitution as it was kept — the database's rows, or a snapshot in the event log (a budget.changed) written by an
  * older office — read as today's: every key the constitution has, in its order, the default where one is missing, and
  * nothing else. A model map keeps the keys it knows with a known model and takes the default for the rest, and so does the
  * outward policy with its deciders; the coordinator's models from before the turn types (owner, decision, digest) meant
- * other turns, so they are dropped; special contacts that are not a list of texts and call hours that are not a window
- * are the defaults.
+ * other turns, so they are dropped; special contacts that are not a list of texts, call hours that are not a window and
+ * a rule's count that is not a whole number in its range are the defaults.
  * Everything that reads a constitution reads it through this.
  */
 export function normalizeConstitution(raw: unknown): Constitution {
@@ -171,6 +178,7 @@ export function normalizeConstitution(raw: unknown): Constitution {
     else if (key === 'outwardPolicy') out[key] = policyOf(value);
     else if (key === 'specialContacts') out[key] = Array.isArray(value) && value.every((x) => typeof x === 'string') ? value : [];
     else if (key === 'callHours') out[key] = isHourWindow(value) ? value : [...DEFAULT_CONSTITUTION.callHours];
+    else if (key === 'sendsPerHour' || key === 'bulkRecipients' || key === 'callsPerDay') out[key] = inRange(value, RULE_RANGES[key]) ? value : DEFAULT_CONSTITUTION[key];
     else out[key] = value === undefined ? DEFAULT_CONSTITUTION[key] : value;
   }
   return out as unknown as Constitution;

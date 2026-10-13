@@ -54,7 +54,18 @@ describe('OutboxStore (spec capabilities §7)', () => {
     expect(outbox.list({ departmentId: 'd1' }).map((e) => e.id)).toEqual([c.id, a.id]);
     expect(outbox.list({ departmentId: null }).map((e) => e.id)).toEqual([b.id]);
     expect(outbox.list({ kind: 'call' }).map((e) => e.id)).toEqual([b.id]);
-    expect(outbox.list({ since: 2_000, limit: 1 }).map((e) => e.id)).toEqual([c.id]);
+    // `since` is inclusive: a line written at that very moment is in.
+    expect(outbox.list({ since: 2_000 }).map((e) => e.id)).toEqual([c.id, b.id]);
+    expect(outbox.list({ limit: 1 }).map((e) => e.id)).toEqual([c.id]);
+  });
+
+  it('cuts the summary by code point: an emoji at the 300th place is kept whole or dropped whole, never half', () => {
+    const { outbox, line } = make();
+    const kept = line({ summary: `${'x'.repeat(299)}😀tail` });
+    const dropped = line({ summary: `${'x'.repeat(300)}😀` });
+    expect([kept.summary, dropped.summary]).toEqual([`${'x'.repeat(299)}😀`, 'x'.repeat(300)]);
+    // As stored: read back, the same text.
+    expect(outbox.list().map((e) => e.summary)).toEqual([dropped.summary, kept.summary]);
   });
 
   it('counts what the system let out: a department’s, or — someone without one — theirs alone; never the owner’s approvals', () => {
@@ -74,5 +85,14 @@ describe('OutboxStore (spec capabilities §7)', () => {
     expect(count(null, 'e5', ['send', 'publish'])).toBe(1);
     expect(count(null, 'e7', ['send', 'publish'])).toBe(0);
     expect(count('d1', 'e1', ['send', 'publish'], 1_001)).toBe(0);
+    // The hour's window is `at >= since`: a line written at `since` itself still counts.
+    expect(count('d1', 'e1', ['send', 'publish'], 1_000)).toBe(3);
+  });
+
+  it('the scope and the value it is bound to come from the same test: a department id, whatever it is, is counted as a department', () => {
+    const { outbox, line } = make();
+    line({ departmentId: '' });
+    line({ employeeId: 'e2', departmentId: '' });
+    expect(outbox.countSystem({ departmentId: '', employeeId: 'e1', kinds: ['send'], since: 0 })).toBe(2);
   });
 });

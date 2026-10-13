@@ -50,6 +50,9 @@ describe('a call’s recipients and special contacts (spec capabilities §6)', (
   it('the summary the outbox keeps: the input without secret-looking fields, its first 300 characters', () => {
     expect(callSummary({ to: 'a@x.co', api_key: 'k', auth: { password: 'p', user: 'u' }, text: 'x' })).toBe('{"to":"a@x.co","auth":{"user":"u"},"text":"x"}');
     expect(callSummary({ text: 'y'.repeat(500) })).toHaveLength(300);
+    // By code point, as the outbox keeps it: an emoji across the 300th place is whole or gone, never half.
+    expect(callSummary(`${'y'.repeat(299)}😀z`)).toBe(`${'y'.repeat(299)}😀`);
+    expect(callSummary(`${'y'.repeat(300)}😀`)).toBe('y'.repeat(300));
   });
 });
 

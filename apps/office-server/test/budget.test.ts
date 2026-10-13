@@ -223,6 +223,13 @@ describe('Budget — constitution', () => {
     expect(normalizeConstitution({ callHours: [0, 24] }).callHours).toEqual([0, 24]);
     expect(normalizeConstitution({ specialContacts: ['a@b.c', 3] }).specialContacts).toEqual([]);
     expect(normalizeConstitution({ specialContacts: ['a@b.c'] }).specialContacts).toEqual(['a@b.c']);
+    // A rule's number kept as something else, or out of its range, reads as the default: `count >= limit` must not
+    // quietly never hold (a null, a text or NaN would let the system send without end).
+    for (const bad of [null, '20', Number.NaN, -1, 1.5, 1001]) {
+      expect(normalizeConstitution({ sendsPerHour: bad, bulkRecipients: bad, callsPerDay: bad }), String(bad)).toMatchObject({ sendsPerHour: 30, bulkRecipients: 5, callsPerDay: 20 });
+    }
+    expect(normalizeConstitution({ bulkRecipients: 0 }).bulkRecipients).toBe(5);
+    expect(normalizeConstitution({ sendsPerHour: 0, bulkRecipients: 1, callsPerDay: 1000 })).toMatchObject({ sendsPerHour: 0, bulkRecipients: 1, callsPerDay: 1000 });
     // The defaults handed out are copies: changing one reader’s constitution never changes the defaults.
     const read = normalizeConstitution({});
     read.callHours[0] = 1;

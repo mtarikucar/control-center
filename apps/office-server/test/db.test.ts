@@ -546,6 +546,7 @@ describe('migrations', () => {
     expect(columns(db, 'outbox')).toEqual(['id', 'employee_id', 'department_id', 'tool', 'kind', 'target', 'recipients', 'summary', 'via', 'approval_id', 'at']);
     db.prepare("INSERT INTO custom_capabilities (id, title, summary, kind, status, proposed_by, created_at) VALUES ('sms.send', 'SMS', 's', 'send', 'proposed', 'e1', 1)").run();
     expect(() => db.prepare("INSERT INTO custom_capabilities (id, title, summary, kind, status, proposed_by, created_at) VALUES ('x.y', 'X', 's', 'spend', 'proposed', 'e1', 1)").run()).toThrow();
+    expect(() => db.prepare("INSERT INTO custom_capabilities (id, title, summary, kind, status, proposed_by, created_at) VALUES ('x.z', 'X', 's', 'send', 'pending', 'e1', 1)").run()).toThrow();
     expect(() => db.prepare("INSERT INTO outbox (employee_id, tool, kind, target, via, at) VALUES ('e1', 't', 'pay', 'x', 'system', 1)").run()).toThrow();
     expect(() => db.prepare("INSERT INTO outbox (employee_id, tool, kind, target, via, at) VALUES ('e1', 't', 'send', 'x', 'nobody', 1)").run()).toThrow();
     const indexes = () => (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'outbox%' ORDER BY name").all() as Array<{ name: string }>).map((r) => r.name);

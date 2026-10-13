@@ -104,7 +104,7 @@ export function specialContact(input: unknown, contacts: readonly string[]): str
 
 const SECRET = /token|secret|password|passwd|api[_-]?key|authorization|cookie|credential|private[_-]?key/i;
 
-/** The call's input as the outbox keeps it: JSON without secret-looking fields, its first `max` characters. */
+/** The call's input as the outbox keeps it: JSON without secret-looking fields, its first `max` characters (code points). */
 export function callSummary(input: unknown, max = OUTBOX_SUMMARY_CHARS): string {
   const strip = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(strip);
@@ -112,5 +112,6 @@ export function callSummary(input: unknown, max = OUTBOX_SUMMARY_CHARS): string 
     return v;
   };
   const text = typeof input === 'string' ? input : (JSON.stringify(strip(input)) ?? '');
-  return text.slice(0, max);
+  // A code point is at most two code units: the first 2·max hold the first max whole, without spreading a long input.
+  return Array.from(text.slice(0, 2 * max)).slice(0, max).join('');
 }
