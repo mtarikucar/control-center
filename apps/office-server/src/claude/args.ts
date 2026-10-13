@@ -23,7 +23,8 @@ export function gateHookCommand(node: string = process.execPath, script: string 
  * gate (B9a), a PreToolUse hook asks the office before a call runs; `disableAllHooks: false` here outranks a desk's
  * .claude/settings.local.json that would turn hooks off (design §11, deney 6A/6B).
  *
- * disabledMcpjsonServers (hardening round 2): a session (-p, the project's settings on) loads a .mcp.json from its
+ * disabledMcpjsonServers (hardening round 2), with the hook only — it is the hook's backstop, and without it a session
+ * is as before the gate (final review minor 4): a session (-p, the project's settings on) loads a .mcp.json from its
  * folder and every folder above it without asking; one that defines a server named like a classified connector or the
  * office is refused it here, as a backstop to the gate holding such a file's writing. Claude Code reads it from the
  * merged settings (this flag's list joins any other's) and applies it to .mcp.json servers only: the office's own
@@ -34,8 +35,9 @@ export function employeeSettings(home: string = homedir(), o: { hook?: string } 
     enabledPlugins: { 'superpowers@claude-plugins-official': false },
     claudeMdExcludes: [join(home, '.claude', 'CLAUDE.md')],
     attribution: { commit: '', pr: '' },
-    disabledMcpjsonServers: connectorServers(),
-    ...(o.hook ? { disableAllHooks: false, hooks: { PreToolUse: [{ matcher: GATE_MATCHER, hooks: [{ type: 'command', command: o.hook, timeout: 10 }] }] } } : {}),
+    ...(o.hook
+      ? { disabledMcpjsonServers: connectorServers(), disableAllHooks: false, hooks: { PreToolUse: [{ matcher: GATE_MATCHER, hooks: [{ type: 'command', command: o.hook, timeout: 10 }] }] } }
+      : {}),
   };
 }
 
