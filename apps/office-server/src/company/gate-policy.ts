@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { ApprovalKind, ApprovalScope } from '@cc/shared';
-import { toolClass } from './capabilities.ts';
+import { capabilityKind, toolClass } from './capabilities.ts';
 import { literal, parseShell, ShellSyntaxError, type ShellAssign, type ShellNode, type ShellWord } from './shell.ts';
 
 /**
@@ -42,6 +42,11 @@ export interface GatePart {
   target: string;
   /** Why it is held, in Turkish, for the model and the owner. */
   why: string;
+  /**
+   * The connector capability this part comes from — only for a classified connector tool (spec capabilities §5): the
+   * only parts the owner's outward policy may leave to the system. Bash and built-in parts never carry one.
+   */
+  capability?: string;
 }
 
 export interface GateVerdict {
@@ -64,14 +69,6 @@ export function toolFamily(tool: string, target: string): string {
   return tool;
 }
 
-/** The connector capabilities that do something outside, by what they do (§3 Y1). */
-const KIND_BY_CAPABILITY: Record<string, ApprovalKind> = {
-  'email.send': 'send', 'calendar.write': 'send', 'messages.send': 'send', 'calls.make': 'send',
-  'social.publish': 'publish', 'web.publish': 'publish',
-  'payments.charge': 'pay', 'ads.manage': 'pay', 'media.generate': 'pay', 'automation.run': 'pay',
-  'email.delete': 'delete',
-};
-
 /** Playwright's tools that only look (§3 Y3); every other browser_ tool acts and waits for an approval of the task. */
 const BROWSER_READ = new Set(['browser_navigate', 'browser_navigate_back', 'browser_snapshot', 'browser_take_screenshot', 'browser_find', 'browser_console_messages', 'browser_network_requests', 'browser_tabs', 'browser_wait_for', 'browser_resize', 'browser_hover', 'browser_close']);
 
@@ -92,7 +89,8 @@ const DYN = '\u0000';
 const MAX_DEPTH = 6;
 
 const KIND_WHY: Record<ApprovalKind, string> = {
-  publish: 'dışarıda yayımlar', send: 'dışarıya gönderir', pay: 'para harcar', delete: 'geri alınamaz siler', browser: 'tarayıcıda iş yapar', self: 'ofisin kendisine dokunur', other: 'ne yaptığı bilinmiyor',
+  publish: 'dışarıda yayımlar', send: 'dışarıya gönderir', calendar: 'takvime yazar, katılımcılara davet gider', call: 'telefonla arar', pay: 'para harcar',
+  delete: 'geri alınamaz siler', browser: 'tarayıcıda iş yapar', self: 'ofisin kendisine dokunur', other: 'ne yaptığı bilinmiyor',
 };
 
 const under = (p: string, root: string) => p === root || p.startsWith(root.endsWith('/') ? root : `${root}/`);
@@ -1356,8 +1354,10 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
   if (c.kind === 'office' || c.kind === 'builtin') return done([]);
   if (c.kind === 'classified') {
     if (!c.outward) return done([]);
-    const kind = KIND_BY_CAPABILITY[c.capability] ?? 'other';
-    return done([{ kind, target: mcpTarget(short, input), why: `${KIND_WHY[kind]} (${c.capability})` }]);
+    // The capability's own kind (spec capabilities §2); an outward id the vocabulary lost meanwhile is 'other'.
+    const k = capabilityKind(c.capability);
+    const kind: ApprovalKind = k === null || k === 'read' ? 'other' : k;
+    return done([{ kind, target: mcpTarget(short, input), why: `${KIND_WHY[kind]} (${c.capability})`, capability: c.capability }]);
   }
   return done([{ kind: 'other', target: mcpTarget(short, input), why: 'sınıflandırılmamış bağlayıcı aracı (ne yaptığı sözlükte yok)' }]);
 }

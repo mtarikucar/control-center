@@ -315,12 +315,12 @@ describe('company API', () => {
     const c = t.company.hireCoordinator();
     t.events.append(c.id, { type: 'session.started', model: 'm', mcp: [{ name: 'claude.ai Gmail', status: 'connected', tools: 30 }, { name: 'office', status: 'connected', tools: 18 }] });
     const all = (await call(t.port, 'GET', '/api/capabilities')).body;
-    expect(all.version).toBe(2);
-    expect(all.capabilities).toHaveLength(23);
+    expect(all.version).toBe(3);
+    expect(all.capabilities).toHaveLength(24);
     expect(all.knownConnectors.map((k: { name: string }) => k.name)).toEqual(['claude.ai Slack', 'claude.ai Google Drive']);
     // Gmail's session from before names: only a lower bound of what the vocabulary does not know.
     expect(all.unclassified).toEqual([expect.objectContaining({ server: 'claude.ai Gmail', tools: 30, unclassified: null })]);
-    expect(all.capabilities.find((x: { id: string }) => x.id === 'email.send')).toMatchObject({ title: 'E-posta gönderme', outward: true });
+    expect(all.capabilities.find((x: { id: string }) => x.id === 'email.send')).toMatchObject({ title: 'E-posta gönderme', kind: 'send', outward: true });
     expect(all.coverage.map((x: { id: string }) => x.id)).toEqual(all.capabilities.map((x: { id: string }) => x.id));
     expect(all.coverage.find((x: { id: string }) => x.id === 'email.read')).toMatchObject({ status: 'open', providers: [expect.objectContaining({ name: 'claude.ai Gmail', openOn: ['Koordinatör'] })] });
     const hired = await call(t.port, 'POST', '/api/employees', { name: 'Ada', role: 'Yanıtlar.', capabilities: ['email.read', 'crm.read'] });

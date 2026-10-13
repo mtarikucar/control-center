@@ -5,12 +5,24 @@ import type { IntegrationDesk, IntegrationKind, IntegrationStatus } from './inte
  * office, in the product's own words, and which of the office's connectors give it.
  */
 
+/**
+ * What a capability does (spec 2026-10-13-capabilities-autonomy §2): the gate takes a connector call's approval kind
+ * from it, and every kind but `read` goes outward (the vocabulary keeps `outward` beside it, checked to agree).
+ */
+export const CAPABILITY_KINDS = ['read', 'send', 'calendar', 'call', 'publish', 'pay', 'delete'] as const;
+export type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
+export const CAPABILITY_KIND_LABELS: Record<CapabilityKind, string> = {
+  read: 'okuma', send: 'gönderim', calendar: 'takvim', call: 'arama', publish: 'yayın', pay: 'ödeme/harcama', delete: 'silme',
+};
+
 /** A capability of the vocabulary (product knowledge, shipped as craft/capabilities.json). */
 export interface Capability {
   /** `area.action`, e.g. `email.send`. */
   id: string;
   title: string;
   summary: string;
+  /** What it does (CAPABILITY_KINDS); `outward` is `kind !== 'read'`. */
+  kind: CapabilityKind;
   /** Goes outward and cannot be taken back: sending, publishing, paying, inviting (B9's gate looks at it). */
   outward: boolean;
   /** Claude Code's own tools that give it: every session has them, so it is open on every desk. */

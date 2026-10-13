@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { OWNER, type Approval, type Employee } from '@cc/shared';
+import { APPROVAL_KIND_LABELS, OWNER, type Approval, type Employee } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
 import { ApprovalStore } from '../src/company/approval-store.ts';
 import { Approvals } from '../src/company/approvals.ts';
@@ -115,6 +115,10 @@ describe('requests, the owner’s decision, notes and the ledger (K1-3)', () => 
     expect(() => t.approvals.request(t.ada.id, { kind: 'publish', tool: 'Bash', target: 'git push origin', summary: ' ' })).toThrow(/summary/);
     expect(() => t.approvals.request(t.ada.id, { kind: 'yayın', tool: 'Bash', target: 'x', summary: 's' })).toThrow(/kind/);
     expect(() => t.approvals.request(t.ada.id, { kind: 'browser', tool: 'mcp__x__browser_click', target: 'browser_click', summary: 's', scope: 'task' })).toThrow(/görev/);
+    // Spec capabilities §2: an invitation and a dial are kinds of their own, with their own labels.
+    expect(t.approvals.request(t.ada.id, { kind: 'calendar', tool: 'mcp__claude_ai_Google_Calendar__create_event', target: 'create_event summary=Tanışma', summary: 's' })).toMatchObject({ kind: 'calendar' });
+    expect(t.approvals.request(t.ada.id, { kind: 'call', tool: 'mcp__claude_ai_jeeta__jeeta_click_to_dial', target: 'jeeta_click_to_dial', summary: 's' })).toMatchObject({ kind: 'call' });
+    expect([APPROVAL_KIND_LABELS.calendar, APPROVAL_KIND_LABELS.call]).toEqual(['takvim', 'arama']);
   });
 });
 

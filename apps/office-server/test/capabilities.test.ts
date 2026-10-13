@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../src/migrations.ts';
 import type { Employee, Integration, IntegrationDesk } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
-import { capability, capabilityIds, capabilityVocabulary, coverage, parseCapabilities, toolClass, unclassifiedTools } from '../src/company/capabilities.ts';
+import { capability, capabilityIds, capabilityKind, capabilityVocabulary, coverage, parseCapabilities, toolClass, unclassifiedTools } from '../src/company/capabilities.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import { listRoleTemplates, parseRoleTemplate } from '../src/company/role-templates.ts';
 import { TaskStore } from '../src/company/store.ts';
@@ -66,11 +66,11 @@ function office() {
 }
 
 const SAMPLE = JSON.stringify({
-  version: 2,
+  version: 3,
   capabilities: [
-    { id: 'email.read', title: 'E-posta okuma', summary: 'Gelen kutusunu okur.', outward: false, builtin: [], tools: ['mcp__claude_ai_Gmail__get_message'] },
-    { id: 'web.fetch', title: 'Web’den okuma', summary: 'Sayfaları okur.', outward: false, builtin: ['WebFetch'], tools: [] },
-    { id: 'email.send', title: 'E-posta gönderme', summary: 'Gönderir.', outward: true, builtin: [], tools: ['mcp__claude_ai_Gmail__send_message'] },
+    { id: 'email.read', title: 'E-posta okuma', summary: 'Gelen kutusunu okur.', kind: 'read', outward: false, builtin: [], tools: ['mcp__claude_ai_Gmail__get_message'] },
+    { id: 'web.fetch', title: 'Web’den okuma', summary: 'Sayfaları okur.', kind: 'read', outward: false, builtin: ['WebFetch'], tools: [] },
+    { id: 'email.send', title: 'E-posta gönderme', summary: 'Gönderir.', kind: 'send', outward: true, builtin: [], tools: ['mcp__claude_ai_Gmail__send_message'] },
   ],
 });
 const sample = () => JSON.parse(SAMPLE) as { version: number; capabilities: Array<Record<string, unknown>> };
@@ -83,9 +83,9 @@ const variant = (change: (v: ReturnType<typeof sample>) => void) => {
 describe('Capability vocabulary — the file', () => {
   it('reads a vocabulary: its version and each capability as written', () => {
     const v = parseCapabilities(SAMPLE);
-    expect(v.version).toBe(2);
+    expect(v.version).toBe(3);
     expect(v.capabilities.map((c) => c.id)).toEqual(['email.read', 'web.fetch', 'email.send']);
-    expect(v.capabilities[2]).toEqual({ id: 'email.send', title: 'E-posta gönderme', summary: 'Gönderir.', outward: true, builtin: [], tools: ['mcp__claude_ai_Gmail__send_message'] });
+    expect(v.capabilities[2]).toEqual({ id: 'email.send', title: 'E-posta gönderme', summary: 'Gönderir.', kind: 'send', outward: true, builtin: [], tools: ['mcp__claude_ai_Gmail__send_message'] });
   });
 
   it('reads the connectors known by name only (none when the field is absent): their tools are classified nowhere', () => {
@@ -116,6 +116,10 @@ describe('Capability vocabulary — the file', () => {
       [variant((v) => void (v.capabilities[0]!.title = ' ')), /email.read: title boş olamaz/],
       [variant((v) => void (v.capabilities[0]!.summary = '')), /email.read: summary boş olamaz/],
       [variant((v) => void (v.capabilities[0]!.outward = 'no')), /email.read: outward true ya da false olmalı/],
+      [variant((v) => void (v.capabilities[0]!.kind = 'mail')), /email.read: kind read, send, calendar, call, publish, pay, delete olmalı/],
+      [variant((v) => void delete v.capabilities[2]!.kind), /email.send: kind read, send/],
+      [variant((v) => void (v.capabilities[2]!.outward = false)), /email.send: outward türle uyuşmuyor \(send → true\)/],
+      [variant((v) => void (v.capabilities[0]!.kind = 'pay')), /email.read: outward türle uyuşmuyor \(pay → true\)/],
       [variant((v) => void (v.capabilities[1]!.builtin = 'WebFetch')), /web.fetch: builtin metinlerden oluşan bir liste olmalı/],
       [variant((v) => void (v.capabilities[0]!.tools = ['get_message'])), /email.read: “get_message” bir bağlayıcı aracı değil \(mcp__sunucu__araç\)/],
       [variant((v) => void (v.capabilities[2]!.tools = ['mcp__claude_ai_Gmail__get_message'])), /“mcp__claude_ai_Gmail__get_message” iki yetenekte geçiyor: email.read, email.send/],
@@ -125,14 +129,20 @@ describe('Capability vocabulary — the file', () => {
     for (const [text, error] of bad) expect(() => parseCapabilities(text), String(error)).toThrow(error);
   });
 
-  it('the shipped vocabulary: twenty-three capabilities, which go outward, which the session always has, the connectors named by their tools', () => {
+  it('the shipped vocabulary (version 3): twenty-four capabilities, each with its kind, which go outward, which the session always has, the connectors named by their tools', () => {
     const v = capabilityVocabulary();
-    expect(v.version).toBe(2);
+    expect(v.version).toBe(3);
     expect(v.capabilities.map((c) => c.id)).toEqual([
       'docs.read', 'docs.write', 'web.fetch', 'email.read', 'email.draft', 'email.send', 'calendar.read', 'calendar.write',
       'social.read', 'social.draft', 'social.publish', 'crm.read', 'crm.write', 'payments.read', 'payments.charge', 'ecommerce.orders',
-      'email.delete', 'messages.send', 'calls.make', 'ads.manage', 'web.publish', 'media.generate', 'automation.run',
+      'email.delete', 'messages.read', 'messages.send', 'calls.make', 'ads.manage', 'web.publish', 'media.generate', 'automation.run',
     ]);
+    // Spec capabilities §2: the kinds, as the gate's map had them, an invitation and a call now apart; the rest only read.
+    expect(Object.fromEntries(v.capabilities.filter((c) => c.kind !== 'read').map((c) => [c.id, c.kind]))).toEqual({
+      'email.send': 'send', 'calendar.write': 'calendar', 'social.publish': 'publish', 'payments.charge': 'pay', 'email.delete': 'delete',
+      'messages.send': 'send', 'calls.make': 'call', 'ads.manage': 'pay', 'web.publish': 'publish', 'media.generate': 'pay', 'automation.run': 'pay',
+    });
+    for (const c of v.capabilities) expect(c.outward, c.id).toBe(c.kind !== 'read');
     expect(v.capabilities.filter((c) => c.outward).map((c) => c.id)).toEqual([
       'email.send', 'calendar.write', 'social.publish', 'payments.charge', 'email.delete', 'messages.send', 'calls.make', 'ads.manage', 'web.publish', 'media.generate', 'automation.run',
     ]);
@@ -162,7 +172,19 @@ describe('Capability vocabulary — the file', () => {
     expect(capability('media.generate').tools).toEqual(expect.arrayContaining([`${H}generate_image`, `${H}generate_video`, `${H}generate_audio`]));
     expect(capability('email.delete').tools).toEqual(expect.arrayContaining(['mcp__claude_ai_Gmail__trash_message', 'mcp__claude_ai_Gmail__delete_label']));
     expect(capability('automation.run').tools).toEqual(['mcp__claude_ai_apify__call-actor']);
+    // Spec capabilities §3: conversations are messages — read apart from the customer records.
+    expect(capability('messages.read')).toMatchObject({ kind: 'read', outward: false, tools: [`${J}jeeta_list_conversations`, `${J}jeeta_read_conversation`] });
+    expect(capability('crm.read').tools).not.toContain(`${J}jeeta_list_conversations`);
+    expect(capability('crm.read').tools).not.toContain(`${J}jeeta_read_conversation`);
+    expect(capability('crm.read').summary).toBe('Müşteri adaylarını, kişileri, fırsatları ve huniyi okur.');
     expect(capability('docs.write').tools).toEqual(expect.arrayContaining(['mcp__claude_ai_Notion__notion-create-comment']));
+  });
+
+  it('a capability’s kind by its id; null for an id the vocabulary does not have', () => {
+    expect(capabilityKind('email.read')).toBe('read');
+    expect(capabilityKind('calendar.write')).toBe('calendar');
+    expect(capabilityKind('calls.make')).toBe('call');
+    expect(capabilityKind('email.sending')).toBeNull();
   });
 
   it('every role template’s capabilities are in the vocabulary; a template asking for one that is not fails to load', () => {
@@ -455,7 +477,7 @@ describe('Capabilities — reading them, and the tools that take them', () => {
       return text;
     };
     const all = await read(t.ada);
-    expect(all).toContain('# Yetenek sözlüğü (23 yetenek, sürüm 2) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
+    expect(all).toContain('# Yetenek sözlüğü (24 yetenek, sürüm 3) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
     expect(all).toContain('\n## Adıyla bilinen bağlayıcılar — araçları sözlükte yok, hepsi dışa dönük sayılır: claude.ai Slack, claude.ai Google Drive');
     expect(all).toContain('• email.read — E-posta okuma [açık] claude.ai Gmail: açık: Ada');
     expect(all).toContain('• web.fetch — Web’den okuma [açık] yerleşik: WebFetch, WebSearch');

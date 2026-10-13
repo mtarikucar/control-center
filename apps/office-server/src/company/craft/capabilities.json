@@ -1,10 +1,11 @@
 {
-  "version": 2,
+  "version": 3,
   "capabilities": [
     {
       "id": "docs.read",
       "title": "Belge okuma",
       "summary": "Masadaki dosyaları ve şirketin paylaşılan belgelerini okur.",
+      "kind": "read",
       "outward": false,
       "builtin": [
         "Read",
@@ -22,6 +23,7 @@
       "id": "docs.write",
       "title": "Belge yazma",
       "summary": "Masada dosya yazar; şirketin paylaşılan belgelerinde sayfa açar ve düzenler.",
+      "kind": "read",
       "outward": false,
       "builtin": [
         "Write",
@@ -40,6 +42,7 @@
       "id": "web.fetch",
       "title": "Web’den okuma",
       "summary": "Web sayfalarını arar, okur ve gezer; hiçbir şey göndermez.",
+      "kind": "read",
       "outward": false,
       "builtin": [
         "WebFetch",
@@ -57,6 +60,7 @@
       "id": "email.read",
       "title": "E-posta okuma",
       "summary": "Gelen kutusunu, konuları, iletileri ve taslakları okur.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": [
@@ -72,6 +76,7 @@
       "id": "email.draft",
       "title": "E-posta taslağı",
       "summary": "Gönderilmeyen taslak yazar ve düzenler; gönderimi sahibi onaylar.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": [
@@ -84,6 +89,7 @@
       "id": "email.send",
       "title": "E-posta gönderme",
       "summary": "Şirket adına e-posta gönderir, yanıtlar, iletir.",
+      "kind": "send",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -97,6 +103,7 @@
       "id": "calendar.read",
       "title": "Takvim okuma",
       "summary": "Takvimleri, etkinlikleri ve boş zamanları okur.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": [
@@ -111,6 +118,7 @@
       "id": "calendar.write",
       "title": "Takvime yazma",
       "summary": "Etkinlik açar, değiştirir, siler ve davetlere cevap verir; katılımcılara davet gider.",
+      "kind": "calendar",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -124,6 +132,7 @@
       "id": "social.read",
       "title": "Sosyal medya okuma",
       "summary": "Hesapları, planlanmış gönderileri ve içerik takvimini okur.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": [
@@ -138,6 +147,7 @@
       "id": "social.draft",
       "title": "Sosyal medya taslağı",
       "summary": "Yayınlanmayan gönderi taslağı hazırlar; yayını sahibi onaylar.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": [
@@ -148,6 +158,7 @@
       "id": "social.publish",
       "title": "Sosyal medyada yayın",
       "summary": "Gönderiyi yayınlar ya da yayına planlar.",
+      "kind": "publish",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -159,22 +170,22 @@
     {
       "id": "crm.read",
       "title": "Müşteri kayıtlarını okuma",
-      "summary": "Müşteri adaylarını, kişileri, fırsatları ve konuşmaları okur.",
+      "summary": "Müşteri adaylarını, kişileri, fırsatları ve huniyi okur.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": [
         "mcp__claude_ai_jeeta__jeeta_search_leads",
         "mcp__claude_ai_jeeta__jeeta_search_contacts",
         "mcp__claude_ai_jeeta__jeeta_list_opportunities",
-        "mcp__claude_ai_jeeta__jeeta_get_funnel",
-        "mcp__claude_ai_jeeta__jeeta_list_conversations",
-        "mcp__claude_ai_jeeta__jeeta_read_conversation"
+        "mcp__claude_ai_jeeta__jeeta_get_funnel"
       ]
     },
     {
       "id": "crm.write",
       "title": "Müşteri kayıtlarına yazma",
       "summary": "Aday, kişi ve fırsat açar; not ekler, durum ve aşama değiştirir.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": [
@@ -191,6 +202,7 @@
       "id": "payments.read",
       "title": "Ödeme kayıtlarını okuma",
       "summary": "Tahsilatları, iadeleri ve bakiyeyi okur.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": []
@@ -199,6 +211,7 @@
       "id": "payments.charge",
       "title": "Ödeme alma",
       "summary": "Ödeme alır, iade yapar ya da para gönderir.",
+      "kind": "pay",
       "outward": true,
       "builtin": [],
       "tools": []
@@ -207,6 +220,7 @@
       "id": "ecommerce.orders",
       "title": "E-ticaret siparişleri",
       "summary": "Mağazanın siparişlerini ve durumlarını okur.",
+      "kind": "read",
       "outward": false,
       "builtin": [],
       "tools": []
@@ -215,6 +229,7 @@
       "id": "email.delete",
       "title": "E-posta silme",
       "summary": "İletileri ve konuları çöpe atar, etiketleri siler.",
+      "kind": "delete",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -224,9 +239,22 @@
       ]
     },
     {
+      "id": "messages.read",
+      "title": "Gelen mesajları ve yorumları okuma",
+      "summary": "SMS, WhatsApp ve sosyal medya mesajlarını, gönderi yorumlarını okur; hiçbir şey göndermez.",
+      "kind": "read",
+      "outward": false,
+      "builtin": [],
+      "tools": [
+        "mcp__claude_ai_jeeta__jeeta_list_conversations",
+        "mcp__claude_ai_jeeta__jeeta_read_conversation"
+      ]
+    },
+    {
       "id": "messages.send",
       "title": "Mesaj gönderme",
       "summary": "Kişilere SMS, WhatsApp ya da sosyal medya mesajı gönderir.",
+      "kind": "send",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -237,6 +265,7 @@
       "id": "calls.make",
       "title": "Telefon araması",
       "summary": "Bir kişiyi telefonla arar.",
+      "kind": "call",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -247,6 +276,7 @@
       "id": "ads.manage",
       "title": "Reklam yönetimi",
       "summary": "Kampanya açar, durdurur, bütçeyi değiştirir ve pazarlama eylemlerini onaylar; reklam parası harcar.",
+      "kind": "pay",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -260,6 +290,7 @@
       "id": "web.publish",
       "title": "Web’de yayın",
       "summary": "Bir web sitesini herkese açık yayınlar ya da günceller.",
+      "kind": "publish",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -271,6 +302,7 @@
       "id": "media.generate",
       "title": "Görsel ve medya üretimi",
       "summary": "Görsel, video, ses ya da 3B model üretir; her üretim kredi harcar.",
+      "kind": "pay",
       "outward": true,
       "builtin": [],
       "tools": [
@@ -287,6 +319,7 @@
       "id": "automation.run",
       "title": "Ücretli otomasyon",
       "summary": "Hazır bir otomasyonu (aktör) çalıştırır; çalıştırma başına ücret alınır.",
+      "kind": "pay",
       "outward": true,
       "builtin": [],
       "tools": [

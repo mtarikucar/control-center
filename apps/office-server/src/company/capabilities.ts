@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import {
-  COVERAGE_STATUS_LABELS, INTEGRATION_KIND_LABELS, INTEGRATION_STATUS_LABELS,
-  type Capability, type CapabilityCoverage, type CapabilityProvider, type CapabilityVocabulary, type CoverageStatus, type Integration, type IntegrationDesk,
+  CAPABILITY_KINDS, COVERAGE_STATUS_LABELS, INTEGRATION_KIND_LABELS, INTEGRATION_STATUS_LABELS,
+  type Capability, type CapabilityCoverage, type CapabilityKind, type CapabilityProvider, type CapabilityVocabulary, type CoverageStatus, type Integration, type IntegrationDesk,
   type KnownConnector, type UnclassifiedTools,
 } from '@cc/shared';
 import { mcpToolPrefix } from '../claude/normalize.ts';
@@ -14,7 +14,7 @@ import { NotFoundError, ValidationError } from '../errors.ts';
  */
 
 const FILE = new URL('./craft/capabilities.json', import.meta.url);
-const FIELDS = ['id', 'title', 'summary', 'outward', 'builtin', 'tools'] as const;
+const FIELDS = ['id', 'title', 'summary', 'kind', 'outward', 'builtin', 'tools'] as const;
 const ID = /^[a-z]+\.[a-z]+$/;
 const TOOL = /^mcp__[A-Za-z0-9_-]+__\S+$/;
 /** Sessions never report these: the registry knows them only by hand. */
@@ -43,7 +43,11 @@ export function parseCapabilities(text: string): CapabilityVocabulary {
     const extra = Object.keys(entry).find((k) => !(FIELDS as readonly string[]).includes(k));
     if (extra) throw fail(`${id}: “${extra}” bilinmeyen alan.`);
     for (const key of ['title', 'summary'] as const) if (typeof entry[key] !== 'string' || !entry[key].trim()) throw fail(`${id}: ${key} boş olamaz.`);
+    if (typeof entry.kind !== 'string' || !(CAPABILITY_KINDS as readonly string[]).includes(entry.kind)) throw fail(`${id}: kind ${CAPABILITY_KINDS.join(', ')} olmalı.`);
+    const kind = entry.kind as CapabilityKind;
     if (typeof entry.outward !== 'boolean') throw fail(`${id}: outward true ya da false olmalı.`);
+    // Kept in the file for its reader; derived from the kind, so the two must agree.
+    if (entry.outward !== (kind !== 'read')) throw fail(`${id}: outward türle uyuşmuyor (${kind} → ${kind !== 'read'}).`);
     for (const key of ['builtin', 'tools'] as const) if (!strings(entry[key])) throw fail(`${id}: ${key} metinlerden oluşan bir liste olmalı.`);
     const tools = entry.tools as string[];
     for (const tool of tools) {
@@ -52,7 +56,7 @@ export function parseCapabilities(text: string): CapabilityVocabulary {
       if (other) throw fail(`“${tool}” iki yetenekte geçiyor: ${other}, ${id}.`);
       owner.set(tool, id);
     }
-    return { id, title: (entry.title as string).trim(), summary: (entry.summary as string).trim(), outward: entry.outward, builtin: entry.builtin as string[], tools };
+    return { id, title: (entry.title as string).trim(), summary: (entry.summary as string).trim(), kind, outward: entry.outward, builtin: entry.builtin as string[], tools };
   });
   // Known by name only: never a tool name — what a connector offers is read from a session, not written here.
   const raw2 = doc.knownConnectors ?? [];
@@ -88,6 +92,11 @@ export function capability(id: string): Capability {
   const found = capabilityVocabulary().capabilities.find((c) => c.id === id);
   if (!found) throw new NotFoundError(`Bilinmeyen yetenek: ${id}. Sözlük: ${ids().join(', ')}.`);
   return found;
+}
+
+/** A capability's kind in the vocabulary; null for an id it does not have. */
+export function capabilityKind(id: string): CapabilityKind | null {
+  return capabilityVocabulary().capabilities.find((c) => c.id === id)?.kind ?? null;
 }
 
 /** A declared list: text only, each in the vocabulary, each once, in the given order. */

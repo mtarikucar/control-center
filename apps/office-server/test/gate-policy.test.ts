@@ -51,6 +51,13 @@ describe('gate policy (K1) — connector, browser, file and web tools', () => {
   tool('mcp__claude_ai_Gmail__send_message', { to: 'a@b.co', body: 'x' }, 'send');
   tool('mcp__claude_ai_Gmail__list_labels', {}, 'pass');
   tool('mcp__claude_ai_jeeta__jeeta_publish_social_post', { post_id: 'p1' }, 'publish');
+  // Spec capabilities §2: a connector call's kind is its capability's — an invitation is calendar, a dial a call.
+  tool('mcp__claude_ai_Google_Calendar__create_event', { summary: 'Tanışma', attendees: ['a@b.co'] }, 'calendar');
+  tool('mcp__claude_ai_jeeta__jeeta_click_to_dial', { phone: '+905321112233' }, 'call');
+  tool('mcp__claude_ai_jeeta__jeeta_send_message', { to: '+905321112233', text: 'x' }, 'send');
+  tool('mcp__claude_ai_jeeta__jeeta_reallocate_budget', { campaign_id: 'c1' }, 'pay');
+  tool('mcp__claude_ai_Gmail__trash_message', { id: 'm1' }, 'delete');
+  tool('mcp__claude_ai_jeeta__jeeta_read_conversation', { id: 'c1' }, 'pass');
   tool('mcp__foo__bar', {}, 'other');
   tool('mcp__office__taskFinish', { taskId: 't' }, 'pass');
   tool('mcp__plugin_playwright_playwright__browser_click', { element: 'Gönder' }, 'browser', 'task');
@@ -363,6 +370,18 @@ describe('gate policy (K1) — targets and fingerprints (§4 madde 4)', () => {
     expect(fingerprint('Bash', a)).not.toBe(fingerprint('Bash', first(bash('git push --force origin'))));
     expect(fingerprint('Bash', a)).not.toBe(fingerprint('Monitor', a));
     expect(fingerprint('Bash', a)).not.toBe(fingerprint('Bash', first(bash('git push upstream main'))));
+  });
+
+  it('review focus 4: a connector’s part names its capability (the only parts the system may handle); a shell, a built-in or an unclassified part names none', () => {
+    expect(classifyCall('mcp__claude_ai_Gmail__send_message', { to: 'a@b.co' }, DESK, ctx).parts).toEqual([
+      { kind: 'send', target: 'send_message to=a@b.co', why: 'dışarıya gönderir (email.send)', capability: 'email.send' },
+    ]);
+    expect(first(classifyCall('mcp__claude_ai_Google_Calendar__create_event', {}, DESK, ctx))).toMatchObject({ kind: 'calendar', why: 'takvime yazar, katılımcılara davet gider (calendar.write)', capability: 'calendar.write' });
+    expect(first(bash('curl -X POST https://api.example.com/x'))).not.toHaveProperty('capability');
+    expect(first(bash('mail a@b.co'))).not.toHaveProperty('capability');
+    expect(first(classifyCall('SendMessage', { to: 'x', message: 'y' }, DESK, ctx))).not.toHaveProperty('capability');
+    expect(first(classifyCall('mcp__foo__bar', {}, DESK, ctx))).not.toHaveProperty('capability');
+    expect(first(classifyCall('mcp__plugin_playwright_playwright__browser_click', {}, DESK, ctx))).not.toHaveProperty('capability');
   });
 
   it('a line with two held parts holds both, each with its own target', () => {
