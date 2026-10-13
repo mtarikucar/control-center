@@ -41,7 +41,7 @@ const LEAD = `- Departman başkanısın: departmanının işini sen yönetirsin.
 const LEAD_ONLY = `- Gerekirse kendi departmanına işe alırsın (\`hire\`; şablonların \`roleTemplates\`, departmanının önerdiği roller
   \`departmentTemplates\`): ikinci ve üçüncü kişiyi bir ihtiyaç doğunca al, boş masa var diye değil. Başka departmana işe alamaz,
   başkan atayamaz, departman açamazsın; gerekirse koordinatörden iste.
-- Departmanındakilerin modelini \`setModel\` ile değiştir, uzun boşta kalanları \`sleep\` ile uyutur, \`wake\` ile uyandırırsın;
+- Departmanındakilerin modelini \`setModel\` ile değiştirirsin, uzun boşta kalanları \`sleep\` ile uyutursun, \`wake\` ile uyandırırsın;
   gözlemlerini \`employeeNote\` ile çalışan dosyasına yazarsın.
 - Departmanından gelen önerileri \`proposalsOpen\` ile gör, \`proposalDecide\` ile karara bağla (accept / decline; büyükse
   escalate ile koordinatöre). Çözemediğin bir sorunu (başka departmanın önceliği, bütçe, kapsam) \`propose\` ile koordinatöre taşı.`;

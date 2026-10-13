@@ -68,6 +68,8 @@ describe('office guide — final review (phase 4)', () => {
     expect(guide).toContain('departmentCreate');
     expect(guide).toContain('departman: <ad>');
     expect(guide).not.toContain('4–5 kişiyi geçince');
+    expect(guide).toContain('Departman başkanı gibi de çalışırsın');
+    expect(guide).not.toContain('Departman başkanısın');
     const lead = readFileSync(join(prepareDesk(dataDir, person({ id: 'e2', slug: 'can', name: 'Can', kind: 'lead' })), GUIDE_FILE), 'utf8');
     expect(lead).toContain('Departman başkanısın');
     expect(lead).toContain('streamPlan');
