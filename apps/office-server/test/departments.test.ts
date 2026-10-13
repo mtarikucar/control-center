@@ -22,7 +22,10 @@ function make(now?: () => number) {
   const reloaded: string[] = [];
   const returned: string[] = [];
   const reseated: string[] = [];
-  const departments = new Departments({ store, roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => reloaded.push(id), reseat: (id) => void reseated.push(id) });
+  let reseatAlls = 0;
+  const departments = new Departments({
+    store, roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => reloaded.push(id), reseat: (id) => void reseated.push(id), reseatAll: () => void (reseatAlls += 1),
+  });
   let streams: ReturnType<Parameters<Departments['attach']>[0]['openStreams']> = [];
   departments.attach({ openStreams: () => streams, headEnded: (id) => returned.push(id) });
   const hire = (name: string, extra: Partial<Employee> = {}) => {
@@ -35,7 +38,7 @@ function make(now?: () => number) {
   const changes = () => s.events.list({ limit: 1000 }).filter((e) => e.event.type === 'department.changed').map((e) => (e.event as { change: string }).change);
   const departmentEvents = () =>
     s.events.list({ limit: 1000 }).flatMap((e) => (e.event.type === 'department.changed' ? [e.event as { change: string; department: Department }] : []));
-  return { ...s, notices, store, departments, reloaded, returned, reseated, hire, coordinator, pending, changes, departmentEvents, setStreams: (x: typeof streams) => (streams = x) };
+  return { ...s, notices, store, departments, reloaded, returned, reseated, reseatAlls: () => reseatAlls, hire, coordinator, pending, changes, departmentEvents, setStreams: (x: typeof streams) => (streams = x) };
 }
 
 describe('Departments — opening, heads and members (spec §3, §5.1)', () => {
@@ -427,6 +430,8 @@ describe('Departments — rooms (spec office rooms §4.1)', () => {
     expect(t.reseated).toEqual([a.id, b.id]);
     t.departments.close(OWNER, x.id, 'bitti');
     expect(t.reseated.slice(2).sort()).toEqual([a.id, b.id].sort());
+    // Each change then walks everyone (final review I1, M1): a seat it freed is taken, a room it gave is cleared — once each.
+    expect(t.reseatAlls()).toBe(3);
     const c = t.hire('Cem', { team: 'Keşif' });
     t.departments.adoptTeams();
     expect(t.reseated.at(-1)).toBe(c.id);
@@ -470,7 +475,7 @@ describe('Departments — rooms (spec office rooms §4.1)', () => {
     expect(t.departments.list().map((d) => [d.name, d.room])).toEqual([['A1', 0], ['B2', 1], ['C3', 2], ['D4', 3], ['E5', 4], ['F6', 5], ['G7', null]]);
   });
 
-  it('review (task 5): a closed department’s room goes to the earliest-opened open department with none — told (department.changed updated) and its members walk (reseat)', () => {
+  it('review (task 5): a closed department’s room goes to the earliest-opened open department with none — told (department.changed updated) and its members walk (reseatAll)', () => {
     const t = make(() => 9000);
     const teams = ['A1', 'B2', 'C3', 'D4', 'E5', 'F6', 'G7'];
     const people = teams.map((team, i) => t.hire(`Kişi${i}`, { team }));
@@ -478,11 +483,13 @@ describe('Departments — rooms (spec office rooms §4.1)', () => {
     const open = (name: string) => t.departments.list({ status: 'open' }).find((d) => d.name === name)!;
     expect(open('G7').room).toBeNull();
     const walked = t.reseated.length;
+    const all = t.reseatAlls();
     t.departments.close(OWNER, open('B2').id, 'bitti');
     expect(t.departments.list({ status: 'open' }).map((d) => [d.name, d.room])).toEqual([['A1', 0], ['C3', 2], ['D4', 3], ['E5', 4], ['F6', 5], ['G7', 1]]);
     expect(t.departments.roomOf(people[6]!.id)).toBe(1);
-    // B2's person walks to the centre, then G7's to the room.
-    expect(t.reseated.slice(walked)).toEqual([people[1]!.id, people[6]!.id]);
+    // B2's person walks to the centre, then everyone to their seat: G7's to the room.
+    expect(t.reseated.slice(walked)).toEqual([people[1]!.id]);
+    expect(t.reseatAlls()).toBe(all + 1);
     const last = t.departmentEvents().slice(-2);
     expect(last.map((e) => [e.change, e.department.name, e.department.room])).toEqual([['closed', 'B2', null], ['updated', 'G7', 1]]);
   });
@@ -505,12 +512,14 @@ describe('Departments — rooms (spec office rooms §4.1)', () => {
     const ada = t.hire('Ada');
     t.departments.move(OWNER, ada.id, b.id);
     const events = t.departmentEvents().length;
-    const walked = t.reseated.length;
+    const all = t.reseatAlls();
     t.departments.adoptTeams();
     expect([a, b].map((d) => t.departments.get(d.id).room)).toEqual([0, 1]);
-    expect(t.reseated.slice(walked)).toEqual([ada.id]);
+    // Everyone walks to their seat: B's Ada to room 1.
+    expect(t.reseatAlls()).toBe(all + 1);
     expect(t.departmentEvents().slice(events).map((e) => [e.change, e.department.name, e.department.room])).toEqual([['updated', 'B', 1]]);
     t.departments.adoptTeams();
     expect(t.departmentEvents()).toHaveLength(events + 1);
+    expect(t.reseatAlls()).toBe(all + 1);
   });
 });

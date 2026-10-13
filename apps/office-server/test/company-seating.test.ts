@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { HUB_SEATS, OWNER, SEAT_COUNT, roomSeats } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, HUB_SEATS, OWNER, SEAT_COUNT, roomOfSeat, roomSeats } from '@cc/shared';
 import { ConflictError, ValidationError } from '../src/errors.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { setup } from './helpers.ts';
 
 const cleanups: Array<() => unknown> = [];
+const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
@@ -19,7 +20,7 @@ function make(o: { departments?: boolean } = { departments: true }) {
   const seat = (id: string) => s.roster.get(id).deskIndex;
   const moves = () =>
     s.events.list({ limit: 2000 }).filter((e) => e.event.type === 'seat.changed').map((e) => [s.roster.get(e.employeeId!).name, (e.event as { deskIndex: number }).deskIndex]);
-  return { ...s, ...c, departments: c.departments!, seat, moves };
+  return { ...s, ...c, engine: f.engine, departments: c.departments!, seat, moves };
 }
 
 describe('Seats in the company (spec office rooms §3)', () => {
@@ -158,5 +159,101 @@ describe('Seats in the company — a freed room (review of task 5)', () => {
     t.departments.close(OWNER, open('B2').id, 'bitti');
     expect(open('G7').room).toBe(1);
     expect(g7.map((e) => t.seat(e.id))).toEqual(roomSeats(1).slice(0, 2));
+  });
+});
+
+describe('Seats in the company — the centre past the hub, and seats freed (final review I1, M1)', () => {
+  it('(A) an office without departments at the default twelve: the coordinator under the beam, eight at the hub, the rest in the highest room; a new department takes room 0 and its people sit there', () => {
+    const t = make();
+    t.budget.setConstitution({ maxEmployees: DEFAULT_CONSTITUTION.maxEmployees });
+    expect(DEFAULT_CONSTITUTION.maxEmployees).toBe(12);
+    const coordinator = t.company.hireCoordinator('sonnet');
+    const people = range(1, 11).map((i) => t.company.hire(coordinator.id, { name: `Kişi ${i}`, role: 'r' }));
+    expect([coordinator, ...people].map((e) => t.seat(e.id))).toEqual([0, ...HUB_SEATS, ...roomSeats(5).slice(0, 3)]);
+    expect(t.seating.reseatAll()).toBe(0);
+    const dep = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    expect(dep.room).toBe(0);
+    // One of the overflow and one of the hub join it: both walk into room 0, and the hub seat freed takes the earliest-hired of the overflow.
+    t.departments.move(OWNER, people[9]!.id, dep.id);
+    t.departments.move(OWNER, people[0]!.id, dep.id);
+    expect([people[9], people[0]].map((e) => t.seat(e!.id))).toEqual(roomSeats(0).slice(0, 2));
+    expect(t.seat(people[8]!.id)).toBe(HUB_SEATS[0]);
+    expect(t.moves()).toEqual([['Kişi 10', 1], ['Kişi 1', 2], ['Kişi 9', HUB_SEATS[0]]]);
+    expect(t.seating.reseatAll()).toBe(0);
+  });
+
+  it('(C) the coordinator, eight of the centre and a department of three: closing it sends the three out of the closed room to the highest room nobody holds; a restart moves nobody', () => {
+    const t = make();
+    t.budget.setConstitution({ maxEmployees: DEFAULT_CONSTITUTION.maxEmployees });
+    const coordinator = t.company.hireCoordinator('sonnet');
+    const dep = t.departments.create(OWNER, { name: 'Satış', mission: 'm' });
+    const three = ['Ada', 'Bora', 'Cem'].map((name) => t.company.hire(OWNER, { name, role: 'r', departmentId: dep.id }));
+    const centre = range(1, 8).map((i) => t.company.hire(coordinator.id, { name: `Merkez ${i}`, role: 'r' }));
+    expect(three.map((e) => t.seat(e.id))).toEqual(roomSeats(0).slice(0, 3));
+    expect(centre.map((e) => t.seat(e.id))).toEqual(HUB_SEATS);
+    t.departments.close(OWNER, dep.id, 'bitti');
+    expect(three.map((e) => t.seat(e.id))).toEqual(roomSeats(5).slice(0, 3));
+    expect(t.roster.list().filter((e) => roomOfSeat(e.deskIndex) === 0)).toEqual([]);
+    expect(t.seating.reseatAll()).toBe(0);
+  });
+
+  it('someone of the centre sitting in the room a new department gets moves out to a room nobody holds; the department’s hire sits in it', () => {
+    const t = make();
+    const coordinator = t.company.hireCoordinator('sonnet');
+    for (const i of range(1, 8)) t.company.hire(coordinator.id, { name: `Merkez ${i}`, role: 'r' });
+    // Ada sits on room 0's first seat (an office of before); with the hub full nothing moves her while no department holds it.
+    const ada = t.roster.create({ name: 'Ada', role: 'r', deskIndex: 1 });
+    expect(t.seating.reseatAll()).toBe(0);
+    const dep = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
+    expect(dep.room).toBe(0);
+    expect(t.seat(ada.id)).toBe(roomSeats(5)[0]);
+    const pelin = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: dep.id });
+    expect(t.seat(pelin.id)).toBe(roomSeats(0)[0]);
+    expect(t.moves()).toEqual([['Ada', roomSeats(5)[0]]]);
+  });
+
+  function sevenInOne() {
+    const t = make();
+    t.company.hireCoordinator('sonnet');
+    const dep = t.departments.create(OWNER, { name: 'Yazılım', mission: 'm' });
+    const seven = ['Ada', 'Bora', 'Cem', 'Deniz', 'Ece', 'Filiz', 'Gül'].map((name) => t.company.hire(OWNER, { name, role: 'r', departmentId: dep.id }));
+    expect(seven.map((e) => t.seat(e.id))).toEqual([...roomSeats(0), HUB_SEATS[0]]);
+    return { t, dep, seven };
+  }
+
+  it('(M1) a department of seven: when one in the room leaves it, the seventh walks in from the hub at once', () => {
+    const { t, seven } = sevenInOne();
+    t.departments.move(OWNER, seven[2]!.id, null);
+    expect(t.seat(seven[6]!.id)).toBe(roomSeats(0)[2]);
+    expect(t.seat(seven[2]!.id)).toBe(HUB_SEATS[1]);
+    expect(t.moves()).toEqual([['Cem', HUB_SEATS[1]], ['Gül', roomSeats(0)[2]]]);
+    expect(t.seating.reseatAll()).toBe(0);
+  });
+
+  it('(M1) a department of seven: when one in the room is let go, the seventh walks in from the hub at once', async () => {
+    const { t, seven } = sevenInOne();
+    await t.engine.fire(seven[0]!.id);
+    t.company.releaseTasksOf(seven[0]!.id);
+    expect(t.seat(seven[6]!.id)).toBe(roomSeats(0)[0]);
+    expect(t.moves()).toEqual([['Gül', roomSeats(0)[0]]]);
+  });
+
+  it('(M1) a department of seven: when one in the room is made another department’s head, the seventh walks in from the hub at once', () => {
+    const { t, seven } = sevenInOne();
+    const other = t.departments.create(OWNER, { name: 'Tasarım', mission: 'm' });
+    t.departments.setHead(OWNER, other.id, seven[1]!.id);
+    expect(t.seat(seven[1]!.id)).toBe(roomSeats(1)[0]);
+    expect(t.seat(seven[6]!.id)).toBe(roomSeats(0)[1]);
+    expect(t.moves()).toEqual([['Bora', roomSeats(1)[0]], ['Gül', roomSeats(0)[1]]]);
+  });
+
+  it('letting someone of the hub go seats the centre’s earliest overflow there at once', async () => {
+    const t = make();
+    const coordinator = t.company.hireCoordinator('sonnet');
+    const people = range(1, 10).map((i) => t.company.hire(coordinator.id, { name: `Kişi ${i}`, role: 'r' }));
+    expect(people.slice(8).map((e) => t.seat(e.id))).toEqual(roomSeats(5).slice(0, 2));
+    await t.engine.fire(people[3]!.id);
+    t.company.releaseTasksOf(people[3]!.id);
+    expect(t.moves()).toEqual([['Kişi 9', HUB_SEATS[3]]]);
   });
 });

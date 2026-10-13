@@ -114,9 +114,9 @@ const budget = new Budget({
 const characters = manifestCharacters(config.assetsDir);
 // The departments (spec 2026-10-13-departments): the rooms, their heads and the notes on their streams.
 const streamNotes = new StreamNoteStore(db);
-const departments = new Departments({ store: new DepartmentStore(db), roster, events, notices, dataDir: config.dataDir, reload: (id) => engine.reload(id), reseat: (id) => seating.reseat(id) });
+const departments = new Departments({ store: new DepartmentStore(db), roster, events, notices, dataDir: config.dataDir, reload: (id) => engine.reload(id), reseat: (id) => seating.reseat(id), reseatAll: () => seating.reseatAll() });
 // Who sits where (spec 2026-10-13-office-rooms §3): the coordinator under the beam, a department in its room, the rest at the hub.
-const seating = new Seating({ roster, events, roomOf: (id) => departments.roomOf(id) });
+const seating = new Seating({ roster, events, roomOf: (id) => departments.roomOf(id), heldRooms: () => departments.heldRooms() });
 const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db, Date.now, searchIndex), onboarding: new OnboardingStore(db), departments, streamNotes, seating });
 // The project's pulse (spec §6.3): the dispatcher runs it only without the management cycle; here its facts are the board's (§3.6).
 const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, budget });

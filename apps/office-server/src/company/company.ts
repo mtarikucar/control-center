@@ -514,6 +514,8 @@ export class Company {
       this.#releaseWork(id);
     } finally {
       this.#d.departments?.left(id);
+      // Their seat is free: whoever waits for one (a room's overflow at the hub, the centre's past the hub) walks to it now (final review M1).
+      this.#d.seating?.reseatAll();
     }
   }
 

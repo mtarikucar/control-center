@@ -9,6 +9,7 @@ afterEach(() => {
 });
 
 const taken = (...seats: number[]) => new Set(seats);
+const held = (...rooms: number[]) => ({ held: new Set(rooms) });
 const member = (room: number | null) => ({ kind: 'member' as const, room });
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
@@ -18,10 +19,12 @@ function office() {
   const s = setup(SEAT_COUNT, () => (clock += 1));
   cleanups.push(s.cleanup);
   const rooms = new Map<string, number>();
-  const seating = new Seating({ roster: s.roster, events: s.events, roomOf: (id) => rooms.get(id) ?? null });
+  // A room someone is in is held, as an open department's (Departments.heldRooms); `held` adds rooms held by nobody here.
+  const held = new Set<number>();
+  const seating = new Seating({ roster: s.roster, events: s.events, roomOf: (id) => rooms.get(id) ?? null, heldRooms: () => new Set([...rooms.values(), ...held]) });
   const seatEvents = () =>
     s.events.list({ limit: 1000 }).filter((e) => e.event.type === 'seat.changed').map((e) => [s.roster.get(e.employeeId!).name, (e.event as { deskIndex: number }).deskIndex]);
-  return { ...s, rooms, seating, seatEvents };
+  return { ...s, rooms, held, seating, seatEvents };
 }
 
 describe('the seats (spec office rooms §3)', () => {
@@ -57,11 +60,24 @@ describe('seatFor', () => {
     expect(seatFor(member(2), null, taken(...roomSeats(2), 37, 38))).toBe(39);
   });
 
-  it('the centre sits at the hub; with the hub full, the first free seat, the coordinator’s desk last; none free, none', () => {
+  it('the centre sits at the hub; with the hub full, in the highest room no department holds, then in other departments’ rooms, the coordinator’s desk last; none free, none', () => {
     expect(seatFor(member(null), null, taken())).toBe(37);
-    expect(seatFor(member(null), null, taken(...HUB_SEATS))).toBe(1);
+    // Review I1: the 9th of the centre sits in room 5, not room 0 (the next department takes the lowest free room).
+    expect(seatFor(member(null), null, taken(...HUB_SEATS))).toBe(31);
+    expect(seatFor(member(null), null, taken(...HUB_SEATS, 31))).toBe(32);
+    expect(seatFor(member(null), null, taken(...HUB_SEATS, ...roomSeats(5)))).toBe(25);
+    expect(seatFor(member(null), null, taken(...HUB_SEATS), held(5, 4))).toBe(19);
+    // Every room held: the departments' rooms, lowest first.
+    expect(seatFor(member(null), null, taken(...HUB_SEATS), held(0, 1, 2, 3, 4, 5))).toBe(1);
     expect(seatFor(member(null), null, taken(...range(1, 44)))).toBe(0);
+    expect(seatFor(member(null), null, taken(...range(1, 44)), held(0, 1, 2, 3, 4, 5))).toBe(0);
     expect(seatFor(member(null), null, taken(...range(0, 44)))).toBeNull();
+  });
+
+  it('a full room’s overflow with the hub full: a room nobody holds before another department’s', () => {
+    expect(seatFor(member(2), null, taken(...roomSeats(2), ...HUB_SEATS), held(2, 5))).toBe(25);
+    expect(seatFor(member(2), null, taken(...roomSeats(2), ...HUB_SEATS, ...range(19, 30), ...range(1, 6)), held(0, 2, 5))).toBe(7);
+    expect(seatFor(member(2), null, taken(...roomSeats(2), ...HUB_SEATS, ...range(1, 30)), held(0, 2, 5))).toBe(31);
   });
 
   it('whoever may stay where they sit stays; someone in the wrong place moves to their own', () => {
@@ -70,16 +86,29 @@ describe('seatFor', () => {
     // A room's overflow at the hub goes into the room once a seat frees there; a centre person in a room goes to the hub.
     expect(seatFor(member(2), 38, taken(13))).toBe(14);
     expect(seatFor(member(null), 3, taken())).toBe(37);
-    // With nowhere better the seat one has is kept.
+    // With nowhere better the seat one has is kept: any room nobody holds is as good as another.
     expect(seatFor(member(null), 3, taken(...HUB_SEATS))).toBe(3);
+    expect(seatFor(member(null), 3, taken(...HUB_SEATS), held(5))).toBe(3);
     // A new department: the old room is left for the new one.
     expect(seatFor(member(4), 2, taken())).toBe(25);
   });
 
-  it('counts only the seats a smaller (test) office has', () => {
-    expect(seatFor(member(null), null, taken(0), 8)).toBe(1);
-    expect(seatFor(member(1), null, taken(...range(0, 6)), 8)).toBe(7);
-    expect(seatFor(member(1), null, taken(...range(0, 7)), 8)).toBeNull();
+  it('review I1: someone of the centre in a room a department now holds moves out as soon as a hub seat or a room nobody holds has room; until then they stay', () => {
+    expect(seatFor(member(null), 3, taken(...HUB_SEATS), held(0))).toBe(31);
+    expect(seatFor(member(null), 3, taken(...HUB_SEATS.slice(1)), held(0))).toBe(37);
+    expect(seatFor(member(null), 3, taken(...HUB_SEATS, ...range(7, 36)), held(0))).toBe(3);
+    // Another department's overflow likewise: its own room first, else out of the held room.
+    expect(seatFor(member(2), 3, taken(...roomSeats(2), ...HUB_SEATS), held(0, 2))).toBe(31);
+  });
+
+  it('counts only the seats a smaller (test) office has, and gives them lowest first as an office of eight desks always did', () => {
+    expect(seatFor(member(null), null, taken(0), { seatCount: 8 })).toBe(1);
+    expect(seatFor(member(null), null, taken(0, 1), { seatCount: 8 })).toBe(2);
+    expect(seatFor(member(null), null, taken(...range(0, 6)), { seatCount: 8 })).toBe(7);
+    expect(seatFor(member(1), null, taken(...range(0, 6)), { seatCount: 8 })).toBe(7);
+    expect(seatFor(member(1), null, taken(...range(0, 7)), { seatCount: 8 })).toBeNull();
+    // A room a department holds still comes after one nobody holds.
+    expect(seatFor(member(null), null, taken(0), { seatCount: 12, held: new Set([0]) })).toBe(7);
   });
 });
 
@@ -133,6 +162,19 @@ describe('Seating', () => {
     const sent = t.seatEvents().length;
     expect(t.seating.reseatAll()).toBe(0);
     expect(t.seatEvents()).toHaveLength(sent);
+  });
+
+  it('review I1: the centre past the hub sits in the highest room; once a department holds that room they move to the next one nobody holds, and a second pass moves nobody', () => {
+    const t = office();
+    t.roster.create({ name: 'Koordinatör', role: 'r', kind: 'coordinator' });
+    for (const i of range(1, 8)) t.roster.create({ name: `Merkez ${i}`, role: 'r', deskIndex: t.seating.forHire(member(null))! });
+    const ada = t.roster.create({ name: 'Ada', role: 'r', deskIndex: t.seating.forHire(member(null))! });
+    expect(ada.deskIndex).toBe(31);
+    expect(t.seating.reseatAll()).toBe(0);
+    t.held.add(5);
+    expect(t.seating.reseatAll()).toBe(1);
+    expect(t.seatEvents()).toEqual([['Ada', 25]]);
+    expect(t.seating.reseatAll()).toBe(0);
   });
 
   it('review focus 3: a department of seven — the room’s six, the seventh at the hub, nobody on another’s chair', () => {

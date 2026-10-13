@@ -51,10 +51,10 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   // Departments (spec 2026-10-13-departments), wired like main.ts; opt-in so every older test keeps today's company.
   const streamNotes = o.departments ? new StreamNoteStore(s.db, now) : null;
   const departments = o.departments
-    ? new Departments({ store: new DepartmentStore(s.db, now), roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => { reloaded.push(id); reload?.(id); }, reseat: (id) => seating.reseat(id) })
+    ? new Departments({ store: new DepartmentStore(s.db, now), roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => { reloaded.push(id); reload?.(id); }, reseat: (id) => seating.reseat(id), reseatAll: () => seating.reseatAll() })
     : null;
   // Who sits where (spec 2026-10-13-office-rooms §3), wired like main.ts in every office; the rooms come from the departments.
-  const seating = new Seating({ roster: s.roster, events: s.events, ...(departments ? { roomOf: (id: string) => departments.roomOf(id) } : {}) });
+  const seating = new Seating({ roster: s.roster, events: s.events, ...(departments ? { roomOf: (id: string) => departments.roomOf(id), heldRooms: () => departments.heldRooms() } : {}) });
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
     reload: (id) => {

@@ -18,6 +18,11 @@ export interface DepartmentsDeps {
   reload?: (id: string) => void;
   /** Walks someone to their seat after their department changed (Seating.reseat, spec office rooms §3); absent: seats stay. */
   reseat?: (employeeId: string) => void;
+  /**
+   * Everyone to their seat (Seating.reseatAll): after a room changes hands or a seat in one frees, whoever sits in a room
+   * a department now holds moves out and a room's overflow at the hub walks in (final review I1, M1); absent: seats stay.
+   */
+  reseatAll?: () => void;
 }
 
 /** What the company gives the departments once both exist (they need each other). */
@@ -122,6 +127,11 @@ export class Departments {
     return this.of(employeeId)?.room ?? null;
   }
 
+  /** The rooms open departments hold (Seating keeps the centre's overflow out of them). */
+  heldRooms(): Set<number> {
+    return new Set(this.list({ status: 'open' }).flatMap((d) => (d.room === null ? [] : [d.room])));
+  }
+
   create(by: string, input: DepartmentInput): Department {
     this.#assertDirector(by);
     const open = this.list({ status: 'open' });
@@ -134,8 +144,13 @@ export class Departments {
     let dep = this.#d.store.create({ name, mission, scope, template: template ? { id: template.id, version: template.version } : null, headId: null, room: this.#freeRoom() });
     this.#emit(by, 'created', dep);
     this.#announce(by, `${name} departmanı açıldı${template ? ` (şablon ${template.id})` : ''}: ${firstSentence(mission)}`, head ? [head.id] : []);
+    // A head comes from elsewhere, so setHead walks everyone to their seat.
     if (head) dep = this.setHead(by, dep.id, head.id);
-    else this.refreshDesks();
+    else {
+      this.refreshDesks();
+      // Whoever sat in the room it got (the centre's overflow) moves out.
+      if (dep.room !== null) this.#d.reseatAll?.();
+    }
     return dep;
   }
 
@@ -173,6 +188,7 @@ export class Departments {
     }
     // The coordinator is refused here, before the first write.
     const target = this.#candidate(employeeId);
+    const came = target.departmentId !== id;
     if (former?.id === target.id) return dep;
     const elsewhere = this.headOf(target.id);
     if (elsewhere && elsewhere.id !== id) this.#vacate(by, elsewhere, target.id);
@@ -188,6 +204,8 @@ export class Departments {
     told.push([head.id, `Artık ${dep.name} departmanının başkanısın: sana verilen akışları streamPlan ile planlar, görevleri açıp odana dağıtır, gerekirse kendi departmanına işe alırsın (hire); akış bitince streamReport ile raporlarsın. Rol kartın ve araçların yenilendi.`]);
     this.#changed(by, 'head', dep, told);
     this.#handOver(dep, head);
+    // A head from elsewhere left a seat there: whoever waits for one (their old room's overflow at the hub) walks to it.
+    if (came) this.#d.reseatAll?.();
     return dep;
   }
 
@@ -204,6 +222,8 @@ export class Departments {
     const text = dep ? `Artık ${dep.name} departmanındasın (başkan: ${head?.name ?? 'yok, koordinatör yönetir'}).` : 'Artık merkezdesin: doğrudan koordinatöre bağlısın.';
     // Read again: leaving a department one headed made it headless since `before` was taken.
     this.#changed(by, 'moved', this.get((dep ?? before!).id), [[moved.id, text]]);
+    // The seat they left: their old room's overflow at the hub walks into it, or the centre's into a hub seat.
+    this.#d.reseatAll?.();
     return this.#d.roster.get(moved.id);
   }
 
@@ -214,14 +234,18 @@ export class Departments {
     const people = this.members(id);
     if (dep.headId) this.#headless(dep, dep.headId, true);
     else this.#returnStreams(dep, true);
+    // Before the close, while the room is still held: each walks out of it (to the hub, else a room nobody holds), not
+    // left sitting where the next department will be given a room (final review I1, scenario C).
     for (const e of people) this.#place(e, null, false);
     const closed = this.#d.store.close(id);
     // A coordinator found inside (the tools never put one there) is in the centre like the rest but hears of it as everyone outside does.
     const told = people.filter((e) => e.kind !== 'coordinator');
     this.#changed(by, 'closed', closed, told.map((e): [string, string] => [e.id, `${dep.name} departmanı kapandı (${why}); artık merkezdesin, doğrudan koordinatöre bağlısın.`]));
     this.#announce(by, `${dep.name} departmanı kapandı: ${why}`, told.map((e) => e.id));
-    // The room it gave up goes to the earliest-opened department that has none.
+    // The room it gave up goes to the earliest-opened department that has none, whose people walk to it; or nobody
+    // holds it now, and the centre's overflow may sit there.
     this.#giveRooms(by);
+    this.#d.reseatAll?.();
     return closed;
   }
 
@@ -264,7 +288,7 @@ export class Departments {
    */
   adoptTeams(): void {
     // A department with no room while one is free (data from before the rule, or a close that never reached it) gets it first.
-    this.#giveRooms(OWNER);
+    if (this.#giveRooms(OWNER)) this.#d.reseatAll?.();
     const touched = new Set<string>();
     const everyone = this.#d.roster.list();
     // A department never takes a person's name (taskPass and a stream's owner must mean one thing): such a team becomes “<team> ekibi”.
@@ -353,16 +377,18 @@ export class Departments {
   /**
    * Every open department with no room takes the lowest free one, the earliest-opened first (spec office rooms §4.1): a
    * closed department's room is not left empty while another sits at the hub. The page hears it (department.changed
-   * updated) and the department's people walk to the room.
+   * updated); true: a room was given, and the caller walks everyone to their seat (reseatAll).
    */
-  #giveRooms(by: string): void {
+  #giveRooms(by: string): boolean {
+    let given = false;
     for (const dep of this.list({ status: 'open' })) {
       if (dep.room !== null) continue;
       const room = this.#freeRoom();
-      if (room === null) return;
+      if (room === null) break;
       this.#emit(by, 'updated', this.#d.store.setRoom(dep.id, room));
-      for (const m of this.members(dep.id)) this.#d.reseat?.(m.id);
+      given = true;
     }
+    return given;
   }
 
   /** A former head stays in the department as a member (true); a coordinator found heading one goes to the centre (false). */
