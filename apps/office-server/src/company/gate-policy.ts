@@ -284,7 +284,28 @@ function httpParts(cmd: string, reqs: Request[], ctx: GateContext): GatePart[] {
   return out;
 }
 
-const CURL_BOOL = new Set(['--silent', '--show-error', '--fail', '--fail-with-body', '--location', '--insecure', '--compressed', '--verbose', '--include', '--head', '--get', '--globoff', '--no-buffer', '--progress-bar', '--http1.0', '--http1.1', '--http2', '--http3', '--ipv4', '--ipv6', '--remote-name', '--remote-name-all', '--create-dirs', '--raw', '--no-progress-meter', '--retry-all-errors', '--location-trusted', '--fail-early', '--no-keepalive', '--tcp-nodelay', '--disable', '--anyauth', '--basic', '--digest', '--ntlm', '--negotiate', '--compressed-ssh', '--tr-encoding', '--remote-time', '--styled-output', '--no-styled-output']);
+/**
+ * curl's long options that take a value (`curl --help all`, 8.5, and a few newer ones); every other long option is a
+ * switch (hardening round 3): an unknown one must never swallow the next word — `--tlsv1.2 -o …`, `--netrc https://…`.
+ */
+const CURL_LONG_VALUE = new Set([
+  '--abstract-unix-socket', '--alt-svc', '--aws-sigv4', '--cacert', '--capath', '--cert', '--cert-type', '--ciphers', '--config', '--connect-timeout',
+  '--connect-to', '--continue-at', '--cookie', '--cookie-jar', '--create-file-mode', '--crlfile', '--curves', '--data', '--data-ascii', '--data-binary',
+  '--data-raw', '--data-urlencode', '--delegation', '--dns-interface', '--dns-ipv4-addr', '--dns-ipv6-addr', '--dns-servers', '--doh-url', '--dump-header',
+  '--ech', '--egd-file', '--engine', '--etag-compare', '--etag-save', '--expect100-timeout', '--form', '--form-string', '--ftp-account',
+  '--ftp-alternative-to-user', '--ftp-method', '--ftp-port', '--ftp-ssl-ccc-mode', '--happy-eyeballs-timeout-ms', '--header', '--hostpubmd5',
+  '--hostpubsha256', '--hsts', '--interface', '--ip-tos', '--ipfs-gateway', '--json', '--keepalive-time', '--key', '--key-type', '--knownhosts', '--krb',
+  '--libcurl', '--limit-rate', '--local-port', '--login-options', '--mail-auth', '--mail-from', '--mail-rcpt', '--max-filesize', '--max-redirs',
+  '--max-time', '--netrc-file', '--noproxy', '--oauth2-bearer', '--output', '--output-dir', '--parallel-max', '--pass', '--pinnedpubkey', '--preproxy',
+  '--proto', '--proto-default', '--proto-redir', '--proxy', '--proxy1.0', '--proxy-cacert', '--proxy-capath', '--proxy-cert', '--proxy-cert-type',
+  '--proxy-ciphers', '--proxy-crlfile', '--proxy-header', '--proxy-key', '--proxy-key-type', '--proxy-pass', '--proxy-pinnedpubkey',
+  '--proxy-service-name', '--proxy-tls13-ciphers', '--proxy-tlsauthtype', '--proxy-tlspassword', '--proxy-tlsuser', '--proxy-user', '--pubkey', '--quote',
+  '--random-file', '--range', '--rate', '--referer', '--request', '--request-target', '--resolve', '--retry', '--retry-delay', '--retry-max-time',
+  '--sasl-authzid', '--service-name', '--sigalgs', '--socks4', '--socks4a', '--socks5', '--socks5-gssapi-service', '--socks5-hostname', '--speed-limit',
+  '--speed-time', '--ssl-sessions', '--stderr', '--telnet-option', '--tftp-blksize', '--time-cond', '--tls13-ciphers', '--tlsauthtype', '--tls-max',
+  '--tlspassword', '--tlsuser', '--trace', '--trace-ascii', '--trace-config', '--unix-socket', '--upload-file', '--url', '--url-query', '--user',
+  '--user-agent', '--variable', '--vlan-priority', '--write-out',
+]);
 const CURL_SHORT_VALUE = new Set([...'AbcCdDeEFHKmoPQrtTuUwxXyYz']);
 
 function curlRequests(args: string[]): Request[] {
@@ -305,7 +326,7 @@ function curlRequests(args: string[]): Request[] {
         value();
       } else if (name === '--get') get = true;
       else if (name === '--head') head = true;
-      else if (!CURL_BOOL.has(name) && inline === null) i += 1;
+      else if (CURL_LONG_VALUE.has(name) && inline === null) i += 1;
       continue;
     }
     if (flag(t)) {
@@ -383,7 +404,7 @@ function downloads(name: 'curl' | 'wget', words: ShellWord[], st: ShellState, ru
     if (a.startsWith('--')) {
       const eq = a.indexOf('=');
       const opt = eq === -1 ? a : a.slice(0, eq);
-      const valued = name === 'curl' ? ['--output', '--output-dir', '--url'].includes(opt) || (!CURL_BOOL.has(opt) && !opt.startsWith('--remote-')) : WGET_LONG_VALUE.has(opt);
+      const valued = (name === 'curl' ? CURL_LONG_VALUE : WGET_LONG_VALUE).has(opt);
       const word = !valued ? null : eq === -1 ? words[++i] : composed(a.slice(eq + 1));
       const text = word ? textOf(word, st, run.ctx) : '';
       if (opt === '--output' || (name === 'wget' && opt !== '--directory-prefix' && WGET_LONG_VALUE.has(opt))) {

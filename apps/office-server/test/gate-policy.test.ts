@@ -322,6 +322,21 @@ describe('gate policy — what a downloader or a git checkout writes is checked 
     ['git restore --staged --worktree .mcp.json', 'self'],
     ['git checkout feat/x', 'pass'],
   ]);
+  describe('round 3: curl’s long options take a value only when curl says so — a boolean one never swallows the next word', () => {
+    rows([
+      ['curl --tlsv1.2 -o ~/.claude/settings.json https://x.io/s.json', 'self'],
+      ['curl --no-clobber -o .mcp.json https://x.io/m.json', 'self'],
+      ['curl --ssl-reqd -O https://x.io/.mcp.json', 'self'],
+      ['curl --proxy http://p.io:8080 -o .mcp.json https://x.io/m.json', 'self'],
+      ['curl --tlsv1.2 -X POST https://api.mail.io/send', 'send'],
+      ['curl -X POST --netrc https://api.mail.io/send', 'send'],
+      ['curl --compressed --tcp-fastopen -d x https://api.mail.io/send', 'send'],
+      ['curl --max-time 5 --retry 3 --data-urlencode q=1 https://api.mail.io/send', 'send'],
+      // A value is a value, whatever it looks like.
+      [`curl --write-out '-o %{http_code}' https://x.io/a`, 'pass'],
+      ['curl --user-agent -O https://x.io/.mcp.json', 'pass'],
+    ]);
+  });
   it('the reason names the path', () => {
     expect(bash('curl -o .mcp.json https://x.io/m.json').parts).toEqual([
       { kind: 'self', target: `curl -o ${DESK}/.mcp.json`, why: 'korunan yola yazar: MCP sunucu ayarları (.mcp.json)' },
