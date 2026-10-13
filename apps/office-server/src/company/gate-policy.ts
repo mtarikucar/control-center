@@ -661,19 +661,23 @@ function spawnedCommands(code: string): Array<{ line: string; at: number; list: 
   return out;
 }
 
+/** A literal no program's argument list holds — a number, a truth value, nothing (subprocess and spawn take texts only). */
+const NOT_AN_ARGUMENT = /^(?:[+-]?\d[\w.]*|True|False|None|true|false|null|undefined)(?![\w.])/;
+
 /**
  * The words of a start after its name (hardening round 4): from `from` to the list's or the call's close, its quoted
  * words up to the first that is not one (commas, spaces and nested lists between them); `whole` when it holds nothing
- * else and nothing is added to it after the close (`] + args`).
+ * else and nothing is added to it after the close (`] + args`); `argv` false when that first other thing is a literal
+ * no argument list holds (`('claude', 1)`: data, not a start — final re-review).
  */
-function startWords(code: string, from: number, close: string): { words: string[]; whole: boolean } {
+function startWords(code: string, from: number, close: string): { words: string[]; whole: boolean; argv: boolean } {
   const words: string[] = [];
   let depth = 0;
   for (let i = from; i < code.length && i < from + 400; i += 1) {
     const c = code[i]!;
     if (c === '"' || c === "'" || c === '`') {
       const end = code.indexOf(c, i + 1);
-      if (end === -1) return { words, whole: false };
+      if (end === -1) return { words, whole: false, argv: true };
       words.push(code.slice(i + 1, end));
       i = end;
     } else if (c === '[') depth += 1;
@@ -682,31 +686,32 @@ function startWords(code: string, from: number, close: string): { words: string[
         depth -= 1;
         continue;
       }
-      if (c !== close) return { words, whole: false };
+      if (c !== close) return { words, whole: false, argv: true };
       const after = /\S/.exec(code.slice(i + 1, i + 40))?.[0];
-      return { words, whole: after === undefined || [')', ',', ';', ']'].includes(after) };
-    } else if (c !== ',' && !/\s/.test(c)) return { words, whole: false };
+      return { words, whole: after === undefined || [')', ',', ';', ']'].includes(after), argv: true };
+    } else if (c !== ',' && !/\s/.test(c)) return { words, whole: false, argv: !NOT_AN_ARGUMENT.test(code.slice(i, i + 40)) };
   }
-  return { words, whole: false };
+  return { words, whole: false, argv: true };
 }
 
 /**
  * Claude Code's or Codex's name as a program writes it to start one (hardening round 4): exactly claude or codex, a
- * path ending in one, claude-<version>, or Claude Code's versions folder. Case counts — CLAUDE.md, CLAUDE_CONFIG_DIR and
- * CODEX_HOME are other names.
+ * path ending in one, claude-<version> (three numbers: claude-2.1 is a model's name — final re-review), or Claude
+ * Code's versions folder. Case counts — CLAUDE.md, CLAUDE_CONFIG_DIR and CODEX_HOME are other names.
  */
-const AGENT_NAME = /^(?:[^\s'"`]*\/)?(claude|codex)(?:-\d[\w.]*)?$/;
+const AGENT_NAME = /^(?:[^\s'"`]*\/)?(claude|codex)(?:-\d+\.\d+\.\d+)?$/;
 const agentName = (name: string): 'claude' | 'codex' | null =>
   (AGENT_NAME.exec(name)?.[1] as 'claude' | 'codex' | undefined) ?? (/\/claude\/versions\/[^/\s]+$/.test(name) ? 'claude' : null);
 
 /**
  * Where a start's name stands (hardening round 4): a spawn call's first argument — Python's subprocess, os, pty,
- * pexpect and asyncio, Node's child_process and execa, Ruby's and Perl's system and exec — or a literal list's first
- * item, the list after `(`, `=`, `,` or at a line's start (`cmd = ["claude", …]`, `run(\n  [\n  "claude"`), never one
- * read from (`rows['claude']`). Space between, new lines too.
+ * pexpect and asyncio, Node's child_process and execa, Ruby's and Perl's system and exec — or the first item of a
+ * literal list or tuple, opened after `(`, `=`, `,`, at a line's start, or after `return` or `yield` (`cmd = ["claude",
+ * …]`, `run(("claude", …))`, `run(\n  [\n  "claude"`; final re-review: tuples and handed-back lists), never one read
+ * from (`rows['claude']`, `rows[('claude',)]`). Space between, new lines too.
  */
 const SPAWN_CALL = /(?<![\w$])(?:run|call|check_call|check_output|Popen|spawn\w*|exec\w*|system|popen|create_subprocess_exec|execa|posix_spawn\w*)\s*\(\s*(['"`])/g;
-const START_LIST = /(?:[(=,]\s*|^[ \t]*)\[\s*(['"`])/gm;
+const START_SEQUENCE = /(?:[(=,]\s*|^[ \t]*|\b(?:return|yield)[ \t]+)([[(])\s*(['"`])/gm;
 /** Either package's name, as npx and the like run it: @anthropic-ai/claude-code, @openai/codex@latest. */
 const AGENT_PACKAGES = [['@anthropic-ai/claude-code', 'claude'], ['@openai/codex', 'codex']] as const;
 const PACKAGE_RUNNERS = new Set(['npx', 'dlx', 'bunx']);
@@ -720,17 +725,17 @@ type AgentStart = { agent: 'claude' | 'codex'; at: number; words: string[]; whol
  */
 function agentStarts(code: string): AgentStart[] {
   const out: AgentStart[] = [];
-  for (const [re, close] of [[SPAWN_CALL, ')'], [START_LIST, ']']] as const) {
-    for (const m of code.matchAll(re)) {
-      const start = m.index! + m[0].length;
-      const end = code.indexOf(m[1]!, start);
-      if (end === -1 || end - start > 200) continue;
-      const agent = agentName(code.slice(start, end));
-      if (!agent) continue;
-      const { words, whole } = startWords(code, end + 1, close);
-      out.push({ agent, at: start - 1, words, whole, free: whole && words.length === 1 && ['--version', '-v', '--help', '-h'].includes(words[0]!) });
-    }
-  }
+  const found = (m: RegExpMatchArray, quote: string, close: string) => {
+    const start = m.index! + m[0].length;
+    const end = code.indexOf(quote, start);
+    if (end === -1 || end - start > 200) return;
+    const agent = agentName(code.slice(start, end));
+    if (!agent) return;
+    const { words, whole, argv } = startWords(code, end + 1, close);
+    if (argv) out.push({ agent, at: start - 1, words, whole, free: whole && words.length === 1 && ['--version', '-v', '--help', '-h'].includes(words[0]!) });
+  };
+  for (const m of code.matchAll(SPAWN_CALL)) found(m, m[1]!, ')');
+  for (const m of code.matchAll(START_SEQUENCE)) found(m, m[2]!, m[1] === '[' ? ']' : ')');
   for (const [pkg, agent] of AGENT_PACKAGES) {
     for (let i = code.indexOf(pkg); i !== -1; i = code.indexOf(pkg, i + 1)) {
       if (/[\w/-]/.test(code[i + pkg.length] ?? '')) continue;

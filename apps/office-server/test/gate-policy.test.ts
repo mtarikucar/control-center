@@ -317,7 +317,26 @@ describe('gate policy — a nested Claude Code or Codex session is the owner’s
       [`python3 -c "import subprocess; subprocess.run(['npx', '-y', '@openai/codex', 'exec', t])"`, 'self'],
       [`python3 -c "import subprocess; subprocess.run(['pnpm', 'dlx', '@anthropic-ai/claude-code@latest', '-p', t])"`, 'self'],
       [`python3 -c "import subprocess; subprocess.run('bunx @anthropic-ai/claude-code -p ' + t, shell=True)"`, 'self'],
+      // Final re-review: a tuple is a list here, and a list a function hands back is one too.
+      [script('import subprocess\nsubprocess.run(("claude", "-p", p))'), 'self'],
+      [script('import subprocess\ncmd = ("claude", "-p", p)\nsubprocess.run(cmd)'), 'self'],
+      [script('import subprocess\nsubprocess.Popen(args=("codex", "exec", t))'), 'self'],
+      [script('import subprocess\ndef build(x):\n    return ["claude", "-p", x]\nsubprocess.run(build(task))'), 'self'],
+      [script('import subprocess\ndef starts():\n    yield ("codex", "exec", task)\nfor c in starts():\n    subprocess.run(c)'), 'self'],
     ]);
+    it('final re-review: a tuple that is no start is no start — printed with a number in it, read from, or a model’s name', () => {
+      for (const code of [
+        "import subprocess\nsubprocess.run(['git', 'status'])\nprint(('claude', 1))",
+        "import subprocess\nsubprocess.run(['git', 'status'])\nseen = ('codex', 2, True)",
+        "import subprocess\nrows = {}\nprint(rows[('claude',)])\nsubprocess.run(['git', 'status'])",
+        "import subprocess\nmodels = ('claude-3-5-sonnet', 'claude-2.1', 'gpt-4o')\nsubprocess.run(['git', 'status'])",
+        "import subprocess\nolder = ('claude-2.1', 'claude-2.0')\nsubprocess.run(['git', 'status'])",
+        "import subprocess\ndef pick():\n    return ['claude-instant-1.2', 'claude-2.0']\nsubprocess.run(['git', 'status'])",
+      ]) {
+        expect(nested(script(code)), code).toEqual([]);
+        expect(verdict(bash(script(code))), code).toBe('pass');
+      }
+    });
     it('code that only mentions them is not a start: a name printed, looked up or used as a key, their files and settings, a package read', () => {
       for (const code of [
         "import subprocess\nsubprocess.run(['git', 'status'])\nprint('claude')",
