@@ -26,7 +26,8 @@ const filled = (v: unknown) => (typeof v === 'string' && v.trim() !== '') || (ty
  */
 const DRAFT_KEY = 'draftid';
 const REPLY_ALL_KEY = 'replyall';
-const yes = (v: unknown) => v === true || (typeof v === 'string' && fold(v.trim()) === 'true');
+/** A yes as a tool takes one: true or 1, also written as text. */
+const yes = (v: unknown) => v === true || v === 1 || (typeof v === 'string' && ['true', '1'].includes(fold(v.trim())));
 
 /**
  * The input's texts and numbers, in their order, each marked when it names a recipient: a value under a recipient

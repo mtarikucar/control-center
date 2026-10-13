@@ -102,6 +102,11 @@ describe('the rules the system keeps (spec capabilities §6)', () => {
     expect(check({ 'draft-id': '' }, ['send']).rule).toBe(hidden);
     expect(check({ messageId: 'm1', replyAll: true, body: 'Teşekkürler' }, ['send']).rule).toBe(hidden);
     expect(check({ options: { reply_all: 'TRUE' } }, ['send']).rule).toBe(hidden);
+    // Final re-review: a one is a yes too, as a number or a text; a zero is not.
+    expect(check({ messageId: 'm1', replyAll: 1 }, ['send']).rule).toBe(hidden);
+    expect(check({ messageId: 'm1', reply_all: ' 1 ' }, ['send']).rule).toBe(hidden);
+    expect(check({ messageId: 'm1', replyAll: 0 }, ['send']).rule).toBeNull();
+    expect(check({ messageId: 'm1', replyAll: '0' }, ['send']).rule).toBeNull();
     expect(check({ messageId: 'm1', replyAll: false, body: 'x' }, ['send']).rule).toBeNull();
     expect(check({ messageId: 'm1', body: 'x' }, ['send']).rule).toBeNull();
     // Only a send: a post published from its draft goes to no one's mailbox.
