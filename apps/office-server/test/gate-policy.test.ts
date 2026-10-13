@@ -51,10 +51,22 @@ describe('gate policy (K1) — connector, browser, file and web tools', () => {
   tool('mcp__claude_ai_Gmail__send_message', { to: 'a@b.co', body: 'x' }, 'send');
   tool('mcp__claude_ai_Gmail__list_labels', {}, 'pass');
   tool('mcp__claude_ai_jeeta__jeeta_publish_social_post', { post_id: 'p1' }, 'publish');
+  // Spec capabilities §2: a connector call's kind is its capability's — an invitation is calendar, a dial a call.
+  tool('mcp__claude_ai_Google_Calendar__create_event', { summary: 'Tanışma', attendees: ['a@b.co'] }, 'calendar');
+  tool('mcp__claude_ai_jeeta__jeeta_click_to_dial', { phone: '+905321112233' }, 'call');
+  tool('mcp__claude_ai_jeeta__jeeta_send_message', { to: '+905321112233', text: 'x' }, 'send');
+  tool('mcp__claude_ai_jeeta__jeeta_reallocate_budget', { campaign_id: 'c1' }, 'pay');
+  tool('mcp__claude_ai_Gmail__trash_message', { id: 'm1' }, 'delete');
+  tool('mcp__claude_ai_jeeta__jeeta_read_conversation', { id: 'c1' }, 'pass');
   tool('mcp__foo__bar', {}, 'other');
   tool('mcp__office__taskFinish', { taskId: 't' }, 'pass');
   tool('mcp__plugin_playwright_playwright__browser_click', { element: 'Gönder' }, 'browser', 'task');
   tool('mcp__plugin_playwright_playwright__browser_snapshot', {}, 'pass');
+  // Round 4: the browser is a server by its exact name — the ones a project's .mcp.json may not bring (connectorServers).
+  tool('mcp__playwright__browser_snapshot', {}, 'pass');
+  tool('mcp__playwright__browser_click', { element: 'Gönder' }, 'browser', 'task');
+  tool('mcp__playwright-evil__browser_snapshot', {}, 'other');
+  tool('mcp__my_playwright__browser_take_screenshot', {}, 'other');
   // Review round 1 (Kerem, important): the browser to the office's own page or API is the office itself — every way of
   // getting there, every host form the browser accepts for it; held per call, never on a browser approval.
   const PW = 'mcp__plugin_playwright_playwright__';
@@ -119,6 +131,369 @@ describe('gate policy (K1) — self-approval and the gate guarding itself (revie
   // The desk's own memory folder under ~/.claude is the desk's own (Claude Code keeps it per working directory).
   file('Write', `${HOME}/.claude/projects/-home-x--control-center-desks-mert/memory/a.md`, 'pass');
   file('Write', `${HOME}/.claude/projects/-home-x--control-center-desks-ada/memory/a.md`, 'self');
+});
+
+describe('gate policy — connector identity: what defines a session’s MCP servers is the office’s own (Task 8 review, security)', () => {
+  // A Claude session (-p, project settings on) loads every .mcp.json from its folder up to / without asking, and the
+  // owner's ~/.claude.json (user and local servers); Codex its config.toml (~/.codex, a trusted project's .codex). A
+  // server written there under a connector's name would be classified as that connector — and get the system path.
+  const file = (name: string, path: string, want: Expect) =>
+    it(`${want === 'pass' ? 'geç' : `kapı (${want})`}: ${name} ${path.replace(HOME, '~')}`, () => {
+      const v = classifyCall(name, { file_path: path, content: '{}', old_string: 'a', new_string: 'b', edits: [] }, DESK, ctx);
+      expect(verdict(v), JSON.stringify(v.parts)).toBe(want);
+    });
+  file('Write', `${DESK}/.mcp.json`, 'self');
+  file('Write', `${HOME}/.mcp.json`, 'self');
+  file('Write', '/tmp/x/.mcp.json', 'self');
+  file('Edit', `${HOME}/Projects/site/.mcp.json`, 'self');
+  file('MultiEdit', `${HOME}/.claude.json`, 'self');
+  file('Write', `${DESK}/.codex/config.toml`, 'self');
+  file('Edit', `${HOME}/.codex/config.toml`, 'self');
+  file('Write', `${DESK}/mcp.json`, 'pass');
+  file('Write', `${DESK}/notes/.mcp.json.md`, 'pass');
+  file('Write', `${DESK}/config.toml`, 'pass');
+  file('Write', `${DESK}/codex/config.toml`, 'pass');
+  file('Write', `${DESK}/.claude.json`, 'pass');
+  // A file system that ignores case (macOS, Windows) opens .MCP.json as .mcp.json.
+  file('Write', `${DESK}/.MCP.json`, 'self');
+  it('a .mcp.json that is a link to a file elsewhere is still one; a link named otherwise to one is one too', () => {
+    const links: Record<string, string> = { [`${DESK}/.mcp.json`]: '/tmp/m.json', [`${DESK}/m.json`]: `${HOME}/.mcp.json` };
+    const linked = testContext({ realpath: (p) => links[p] ?? p });
+    expect(verdict(classifyCall('Write', { file_path: `${DESK}/.mcp.json`, content: '{}' }, DESK, linked))).toBe('self');
+    expect(verdict(classifyCall('Write', { file_path: `${DESK}/m.json`, content: '{}' }, DESK, linked))).toBe('self');
+    expect(verdict(classifyCall('Write', { file_path: '/tmp/m.json', content: '{}' }, DESK, linked))).toBe('pass');
+  });
+  it('the reason says what it is', () => {
+    expect(classifyCall('Write', { file_path: `${DESK}/.mcp.json`, content: '{}' }, DESK, ctx).parts).toEqual([
+      { kind: 'self', target: `Write ${DESK}/.mcp.json`, why: 'korunan yola yazar: MCP sunucu ayarları (.mcp.json)' },
+    ]);
+  });
+  rows([
+    [`echo '{"mcpServers":{"claude_ai_Gmail":{"command":"node","args":["x.js"]}}}' > .mcp.json`, 'self'],
+    ['cat /tmp/m.json > ~/.mcp.json', 'self'],
+    ['cp /tmp/m.json ~/.control-center/desks/mert/.mcp.json', 'self'],
+    ['mv /tmp/m.json .mcp.json', 'self'],
+    ['ln -s /tmp/m.json .mcp.json', 'self'],
+    // Into a folder a copy keeps its name.
+    ['cp /tmp/x/.mcp.json .', 'self'],
+    ['cp /tmp/y/a.json /tmp/x/.mcp.json ~/.control-center/desks/mert/', 'self'],
+    ['ln -s /tmp/x/.mcp.json ~', 'self'],
+    ['tee -a ~/.claude.json < /tmp/x', 'self'],
+    ["sed -i 's/a/b/' ~/.claude.json", 'self'],
+    ['cp /tmp/c.toml ~/.codex/config.toml', 'self'],
+    ['mkdir -p .codex && cp /tmp/c.toml /tmp/config.toml .codex/', 'self'],
+    ['mv /tmp/codex ~/.codex', 'self'],
+    ['rm -rf ~/.codex', 'self'],
+    [`python3 -c "open('.mcp.json', 'w').write('{}')"`, 'self'],
+    // Reading them, and files that only look alike, are free.
+    // A .mcp.json copied, linked or moved is held only where it lands as one: into a folder it is known to keep its
+    // name in (-t, several sources, a trailing /, ., .., ~, the desk or where the shell stands); elsewhere it is a copy.
+    ['cp /tmp/x/.mcp.json ~/.control-center/desks/mert', 'self'],
+    ['cp /tmp/x/.mcp.json ~', 'self'],
+    ['cp -t . /tmp/x/.mcp.json', 'self'],
+    ['cp -t /tmp/y /tmp/x/.mcp.json', 'self'],
+    ['cp /tmp/a.json /tmp/x/.mcp.json /tmp/y', 'self'],
+    ['cp /tmp/x/.mcp.json /tmp/y/', 'self'],
+    ['cp /tmp/x/.mcp.json ..', 'self', '/tmp/a/b'],
+    ['cp /tmp/x/.mcp.json .', 'self', '/tmp/a'],
+    ['mv ~/Projects/control-center/.mcp.json /tmp/m.json', 'self'],
+    ['cp .mcp.json .mcp.json.bak && cp .mcp.json /tmp/backup.json', 'pass'],
+    ['mv .mcp.json /tmp/old.json', 'pass'],
+    ['ln -s .mcp.json /tmp/m.json', 'pass'],
+    ['cp /tmp/x/.mcp.json /tmp/y', 'pass'],
+    ['cat .mcp.json ~/.claude.json ~/.codex/config.toml', 'pass'],
+    ['cp /tmp/m.json mcp.json && cp /tmp/c.toml config.toml', 'pass'],
+    ['cp ~/.codex/generated_images/a.png .', 'pass'],
+  ]);
+});
+
+describe('gate policy — a nested Claude Code or Codex session is the owner’s (hardening round 2)', () => {
+  // A session started from the shell gets none of the office's hook: it would reach every connector past the gate.
+  rows([
+    ['claude -p "müşteriye e-posta at"', 'self'],
+    ['claude', 'self'],
+    ['claude mcp add -s user gmail -- node x.js', 'self'],
+    ['claude mcp --help', 'self'],
+    ['claude --version --verbose', 'self'],
+    ['codex exec "merhaba"', 'self'],
+    ['codex mcp add x -- node y.js', 'self'],
+    // By its path or a versioned binary.
+    ['~/.local/bin/claude -p hi', 'self'],
+    [`${HOME}/.local/share/claude/versions/2.1.296 -p hi`, 'self'],
+    ['claude-2.1.296 -p hi', 'self'],
+    ['/usr/lib/chatgpt/resources/codex exec hi', 'self'],
+    // Through wrappers.
+    ['env FOO=1 claude -p hi', 'self'],
+    ['nohup claude -p hi > /tmp/out.log 2>&1 &', 'self'],
+    ['timeout 60 codex exec hi', 'self'],
+    ['nice -n 5 claude -p hi', 'self'],
+    ['echo hi | xargs claude -p', 'self'],
+    ['exec claude -p hi', 'self'],
+    ['exec -a gizli claude -p hi', 'self'],
+    ['command claude -p hi', 'self'],
+    [`sh -c 'claude -p hi'`, 'self'],
+    [`bash -c 'codex exec hi'`, 'self'],
+    [`zsh -c 'claude mcp list'`, 'self'],
+    [`script -q -c 'claude -p hi' /dev/null`, 'self'],
+    ['echo "$(claude -p hi)"', 'self'],
+    // Run as a package.
+    ['npx @anthropic-ai/claude-code -p hi', 'self'],
+    ['npx -y @openai/codex exec hi', 'self'],
+    ['pnpm dlx @anthropic-ai/claude-code@latest -p hi', 'self'],
+    ['pnpm exec claude -p hi', 'self'],
+    ['bunx @openai/codex@latest exec hi', 'self'],
+    ['yarn dlx @anthropic-ai/claude-code -p hi', 'self'],
+    ['npm exec @openai/codex -- exec hi', 'self'],
+    // Started from a program.
+    [`python3 -c "import subprocess; subprocess.run(['claude', '-p', 'hi'])"`, 'self'],
+    [`node -e "require('child_process').spawn('codex', ['exec', 'hi'])"`, 'self'],
+    [`node -e "require('child_process').execSync('claude -p hi')"`, 'self'],
+    // Free: asking only its version or its help, looking it up, other names.
+    ['claude --version', 'pass'],
+    ['claude -v', 'pass'],
+    ['codex --help', 'pass'],
+    ['codex -h', 'pass'],
+    ['~/.local/bin/claude --version', 'pass'],
+    ['npx @anthropic-ai/claude-code --version', 'pass'],
+    ['command -v claude', 'pass'],
+    ['which codex && type claude', 'pass'],
+    ['claudette -p hi', 'pass'],
+    ['git log --grep claude', 'pass'],
+  ]);
+  describe('round 3: a program that starts one with arguments known only when it runs', () => {
+    rows([
+      [`python3 -c "import subprocess; subprocess.run(['claude', '-p', prompt])"`, 'self'],
+      [`python3 -c 'import subprocess as sp; sp.check_output(["codex", "exec", task])'`, 'self'],
+      [`node -e "require('child_process').spawn('claude', args)"`, 'self'],
+      [`node -e "const { execFileSync } = require('child_process'); execFileSync('claude', args, { stdio: 'inherit' })"`, 'self'],
+      [`node -e "require('child_process').spawn('codex', ['exec', task])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['/home/x/.local/bin/claude', '-p', p])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['npx', '@anthropic-ai/claude-code', '-p', p])"`, 'self'],
+      [`ruby -e 'system("claude", prompt)'`, 'self'],
+      // Known in full but no question: a session on its input, or a list added to.
+      [`python3 -c "import subprocess; subprocess.run(['claude'], input=task)"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['claude'] + args)"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['claude', '--version'] + args)"`, 'self'],
+      ['cat > /tmp/r.py <<\'EOF\'\nimport subprocess\nsubprocess.run(["codex", "exec", task])\nEOF\npython3 /tmp/r.py', 'self'],
+      // Known in full, as before: its version is free; a program that only mentions one starts nothing.
+      [`node -e "require('child_process').spawn('claude', ['--version'])"`, 'pass'],
+      [`python3 -c "import subprocess; subprocess.run(['claude', '--help'])"`, 'pass'],
+      [`python3 -c "print(['claude', 'codex'])"`, 'pass'],
+      [`python3 -c "import subprocess; subprocess.run(['git', 'status', path])"`, 'pass'],
+    ]);
+    it('one part for one start, whichever way it was read', () => {
+      expect(bash(`node -e "require('child_process').spawn('claude', ['-p', prompt])"`).parts).toEqual([
+        { kind: 'self', target: 'claude -p', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
+      ]);
+      expect(bash(`python3 -c "import subprocess; subprocess.run(['claude', '-p', prompt])"`).parts).toEqual([
+        { kind: 'self', target: 'claude -p … (python3 kodundan)', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
+      ]);
+    });
+  });
+  describe('round 4: only a start — a spawn call’s first argument, a literal list’s first item — of the very name; across lines', () => {
+    it('reads a long program linearly, blank lines and all', () => {
+      const started = performance.now();
+      expect(verdict(bash(`python3 <<'EOF'\nimport subprocess\n${'\n'.repeat(200_000)}subprocess.run(['git', 'status'])\nEOF`))).toBe('pass');
+      expect(performance.now() - started).toBeLessThan(1000);
+    });
+    const script = (code: string) => `cat > /tmp/r.py <<'EOF'\n${code}\nEOF\npython3 /tmp/r.py`;
+    const nested = (command: string) => bash(command).parts.filter((p) => p.why.startsWith('iç içe oturum'));
+    rows([
+      // Written over several lines, as a formatter leaves them.
+      [script('import subprocess\nsubprocess.run(\n    [\n        "claude",\n        "-p",\n        prompt,\n    ]\n)'), 'self'],
+      [`node -e "const { spawn } = require('child_process');\nspawn(\n  'claude',\n  args)"`, 'self'],
+      [`node -e "const cp = require('child_process'); cp.execFile(\n'codex', ['exec', task])"`, 'self'],
+      // Python's other ways to start one (the code starts commands only by them).
+      [`python3 -c "import asyncio; asyncio.create_subprocess_exec('claude', '-p', x)"`, 'self'],
+      [`python3 -c "import pexpect; pexpect.spawn('claude', ['-p', x])"`, 'self'],
+      [`python3 -c "import os; os.posix_spawnp('claude', ['claude', '-p', x], os.environ)"`, 'self'],
+      [`python3 -c "import os; os.execvp('codex', ['codex', 'exec', task])"`, 'self'],
+      [`node -e "import('execa').then(({ execa }) => execa('claude', ['-p', prompt]))"`, 'self'],
+      // A list kept in a name first, started later.
+      [script('import subprocess\ncmd = ["claude", "-p", prompt]\nsubprocess.run(cmd)'), 'self'],
+      [script('import subprocess\nsubprocess.run([\n  "/home/x/.local/bin/claude", "-p", prompt])'), 'self'],
+      [script('import subprocess\nsubprocess.run(["claude-2.1.296", "-p", prompt])'), 'self'],
+      // A package only where npx and the like run it.
+      [`python3 -c "import subprocess; subprocess.run(['npx', '-y', '@openai/codex', 'exec', t])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['pnpm', 'dlx', '@anthropic-ai/claude-code@latest', '-p', t])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run('bunx @anthropic-ai/claude-code -p ' + t, shell=True)"`, 'self'],
+      // Final re-review: a tuple is a list here, and a list a function hands back is one too.
+      [script('import subprocess\nsubprocess.run(("claude", "-p", p))'), 'self'],
+      [script('import subprocess\ncmd = ("claude", "-p", p)\nsubprocess.run(cmd)'), 'self'],
+      [script('import subprocess\nsubprocess.Popen(args=("codex", "exec", t))'), 'self'],
+      [script('import subprocess\ndef build(x):\n    return ["claude", "-p", x]\nsubprocess.run(build(task))'), 'self'],
+      [script('import subprocess\ndef starts():\n    yield ("codex", "exec", task)\nfor c in starts():\n    subprocess.run(c)'), 'self'],
+    ]);
+    it('final re-review: a tuple that is no start is no start — printed with a number in it, read from, or a model’s name', () => {
+      for (const code of [
+        "import subprocess\nsubprocess.run(['git', 'status'])\nprint(('claude', 1))",
+        "import subprocess\nsubprocess.run(['git', 'status'])\nseen = ('codex', 2, True)",
+        "import subprocess\nrows = {}\nprint(rows[('claude',)])\nsubprocess.run(['git', 'status'])",
+        "import subprocess\nmodels = ('claude-3-5-sonnet', 'claude-2.1', 'gpt-4o')\nsubprocess.run(['git', 'status'])",
+        "import subprocess\nolder = ('claude-2.1', 'claude-2.0')\nsubprocess.run(['git', 'status'])",
+        "import subprocess\ndef pick():\n    return ['claude-instant-1.2', 'claude-2.0']\nsubprocess.run(['git', 'status'])",
+      ]) {
+        expect(nested(script(code)), code).toEqual([]);
+        expect(verdict(bash(script(code))), code).toBe('pass');
+      }
+    });
+    it('code that only mentions them is not a start: a name printed, looked up or used as a key, their files and settings, a package read', () => {
+      for (const code of [
+        "import subprocess\nsubprocess.run(['git', 'status'])\nprint('claude')",
+        "import subprocess\nsubprocess.run(['git', 'log'])\nopen('CLAUDE.md').read()",
+        "import os, subprocess\nhome = os.environ['CLAUDE_CONFIG_DIR']\nsubprocess.run(['ls', home])",
+        "import os, subprocess\nos.environ.get('CODEX_HOME')\nsubprocess.run(['git', 'status'])",
+        "import shutil, subprocess\nif shutil.which('claude'):\n    subprocess.run(['git', 'status'])",
+        "import subprocess\nrows = {}\nrows['claude'] = 1\nsubprocess.run(['git', 'status'])",
+        "import subprocess\nif name in ['claude', 'codex']:\n    subprocess.run(['git', 'status'])",
+        "import json, subprocess\nsubprocess.run(['git', 'status'])\njson.load(open('node_modules/@anthropic-ai/claude-code/package.json'))",
+        "import subprocess\nsubprocess.run(['git', 'status'])\nprint(f'{Claude} ve {CODEX}')",
+      ]) {
+        expect(nested(script(code)), code).toEqual([]);
+        expect(verdict(bash(script(code))), code).toBe('pass');
+      }
+    });
+    it('each start keeps its print: a start read in full beside one known only when it runs, two of the same name with other words', () => {
+      const why = 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)';
+      expect(nested(script("import subprocess\nsubprocess.run(['claude', '-p', 'hi'])\nsubprocess.run(['codex', 'exec', task])"))).toEqual([
+        { kind: 'self', target: 'claude -p hi', why },
+        { kind: 'self', target: 'codex exec … (python3 kodundan)', why },
+      ]);
+      expect(nested(script("import subprocess\nsubprocess.run(['claude', '-p', prompt])\nsubprocess.run(['claude', 'mcp', 'add', name])"))).toEqual([
+        { kind: 'self', target: 'claude -p … (python3 kodundan)', why },
+        { kind: 'self', target: 'claude mcp add … (python3 kodundan)', why },
+      ]);
+      // The same start twice is one part.
+      expect(nested(script("import subprocess\nsubprocess.run(['claude'] + a)\nsubprocess.run(['claude'] + b)"))).toEqual([{ kind: 'self', target: 'claude … (python3 kodundan)', why }]);
+    });
+  });
+  it('round 3: a wrapper by its path is the wrapper — what it runs is classified as without it', () => {
+    const cases: Array<[string, string]> = [
+      ['/usr/bin/env git push origin main', 'git push origin main'],
+      ['/usr/bin/env FOO=1 claude -p x', 'claude -p x'],
+      ['/usr/bin/timeout 60 git push origin main', 'git push origin main'],
+      ['/usr/bin/nohup rm -rf ~/Projects/control-center', 'rm -rf ~/Projects/control-center'],
+      ['/usr/bin/nice -n 5 git push origin main', 'git push origin main'],
+      ['/usr/bin/stdbuf -oL curl -X POST https://api.mail.io/send', 'curl -X POST https://api.mail.io/send'],
+      ['/usr/bin/setsid codex exec hi', 'codex exec hi'],
+      ['/usr/bin/time git push origin main', 'git push origin main'],
+      ['/usr/bin/sudo git push origin main', 'git push origin main'],
+      ['echo x | /usr/bin/xargs claude -p', 'echo x | xargs claude -p'],
+      ['/bin/sh -c "git push origin main"', 'git push origin main'],
+    ];
+    for (const [wrapped, plain] of cases) {
+      const want = bash(plain).parts;
+      expect(want.length, plain).toBeGreaterThan(0);
+      expect(bash(wrapped).parts, wrapped).toEqual(want);
+    }
+  });
+  it('round 3: only command’s own -v/-V before the name is a lookup — a -v of the command it runs frees nothing', () => {
+    for (const line of ['git push -v origin main', 'curl -v -X POST https://api.mail.io/send -d x', 'rm -rf -v ~/Projects/control-center', 'cp -v x ~/.claude/settings.json', 'claude -p hi -v']) {
+      const plain = bash(line).parts;
+      expect(plain.length, line).toBeGreaterThan(0);
+      expect(bash(`command ${line}`).parts, line).toEqual(plain);
+      expect(bash(`command -p ${line}`).parts, line).toEqual(plain);
+    }
+    expect(verdict(bash('command -v claude'))).toBe('pass');
+    expect(verdict(bash('command -V git'))).toBe('pass');
+    expect(verdict(bash('command -pv codex'))).toBe('pass');
+  });
+  it('the reason says why', () => {
+    expect(bash('claude -p "müşteriye yaz"').parts).toEqual([
+      { kind: 'self', target: 'claude -p müşteriye yaz', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
+    ]);
+    expect(bash('npx -y @openai/codex exec hi').parts[0]).toMatchObject({ kind: 'self', target: 'codex exec hi' });
+  });
+});
+
+describe('gate policy — what a downloader or a git checkout writes is checked as any write (hardening round 2)', () => {
+  rows([
+    ['curl -o ~/.claude/settings.json https://x.io/s.json', 'self'],
+    ['curl -sSLo .mcp.json https://x.io/m.json', 'self'],
+    ['curl --output ~/.claude.json https://x.io/c.json', 'self'],
+    ['curl --output=.codex/config.toml https://x.io/c.toml', 'self'],
+    ['curl --output-dir ~/.claude -o settings.json https://x.io/s.json', 'self'],
+    ['curl -o ~/.control-center/office.db https://x.io/db', 'self'],
+    // -O: the URL's last part, where curl stands; with -J the name is the server's, so only the folder counts.
+    ['curl -O https://x.io/files/.mcp.json', 'self'],
+    ['curl -fsSLO https://x.io/settings.json', 'self', `${DESK}/.claude`],
+    ['curl -OJ https://x.io/dl', 'self', `${HOME}/.claude`],
+    // The server's name may be the protected one: a folder that holds one is the question (and the URL's own name).
+    ['curl -OJ https://x.io/dl', 'self', `${HOME}/.codex`],
+    ['curl -OJ https://x.io/.mcp.json', 'self'],
+    ['wget -r https://x.io/', 'self', `${HOME}/.codex`],
+    ['wget https://x.io/', 'self', `${DESK}/.claude`],
+    ['curl --remote-name --output-dir ~/.codex https://x.io/config.toml', 'self'],
+    ['wget -O ~/.claude/settings.json https://x.io/s.json', 'self'],
+    ['wget -qO .mcp.json https://x.io/m.json', 'self'],
+    ['wget --output-document=.mcp.json https://x.io/m.json', 'self'],
+    ['wget -P ~/.claude https://x.io/settings.json', 'self'],
+    ['wget https://x.io/.mcp.json', 'self'],
+    ['wget -o ~/.claude.json https://x.io/a', 'self'],
+    ['wget -r -P ~/.claude https://x.io/', 'self'],
+    ['git checkout -- .mcp.json', 'self'],
+    ['git checkout main -- .claude/settings.json', 'self'],
+    ['git restore --source main .mcp.json', 'self'],
+    ['git restore -s HEAD~1 -- .codex/config.toml', 'self'],
+    ['git -C /tmp/r checkout -- .mcp.json', 'self'],
+    // Round 3: without --, a checkout's words after its options may be paths too.
+    ['git checkout origin/evil .mcp.json', 'self'],
+    ['git checkout .mcp.json', 'self'],
+    ['git checkout -b .claude/settings.json main', 'pass'],
+    ['git checkout -b feat/x origin/main && git checkout main', 'pass'],
+    // Round 3: wget's -O, -o and -a are where wget stands, not in -P's folder (that is for the files it names itself).
+    ['wget -P /tmp/dl -O settings.json https://x.io/s.json', 'self', `${DESK}/.claude`],
+    ['wget -P ~/.claude -O out.json https://x.io/a', 'pass'],
+    // Free: anything else they write.
+    ['curl -o out.json https://x.io/a', 'pass'],
+    ['curl -o - https://x.io/a', 'pass', `${HOME}/.claude`],
+    ['wget -qO- https://x.io/a', 'pass', `${HOME}/.claude`],
+    ['wget -O out.html https://x.io/.mcp.json', 'pass'],
+    ['wget -r https://x.io/', 'pass'],
+    ['curl -O https://x.io/a.json', 'pass'],
+    ['curl -OJ https://x.io/dl', 'pass'],
+    ['curl --output-dir /tmp/dl -O https://x.io/.mcp.json.txt', 'pass'],
+    ['wget -qO- https://x.io/a | jq .', 'pass'],
+    ['wget https://x.io/a.tar.gz && wget -P /tmp/dl https://x.io/b', 'pass'],
+    ['wget -r -P /tmp/site https://x.io/', 'pass'],
+    ['git checkout -- src/a.ts', 'pass'],
+    ['git restore --staged README.md', 'pass'],
+    ['git restore --staged .mcp.json', 'pass'],
+    ['git restore --staged --worktree .mcp.json', 'self'],
+    ['git checkout feat/x', 'pass'],
+  ]);
+  describe('round 3: curl’s long options take a value only when curl says so — a boolean one never swallows the next word', () => {
+    rows([
+      ['curl --tlsv1.2 -o ~/.claude/settings.json https://x.io/s.json', 'self'],
+      ['curl --no-clobber -o .mcp.json https://x.io/m.json', 'self'],
+      ['curl --ssl-reqd -O https://x.io/.mcp.json', 'self'],
+      ['curl --proxy http://p.io:8080 -o .mcp.json https://x.io/m.json', 'self'],
+      ['curl --tlsv1.2 -X POST https://api.mail.io/send', 'send'],
+      ['curl -X POST --netrc https://api.mail.io/send', 'send'],
+      ['curl --compressed --tcp-fastopen -d x https://api.mail.io/send', 'send'],
+      ['curl --max-time 5 --retry 3 --data-urlencode q=1 https://api.mail.io/send', 'send'],
+      // A value is a value, whatever it looks like.
+      [`curl --write-out '-o %{http_code}' https://x.io/a`, 'pass'],
+      ['curl --user-agent -O https://x.io/.mcp.json', 'pass'],
+    ]);
+  });
+  it('round 3: at the live checkout a checkout or restore of a path is one part — one approval', () => {
+    for (const line of ['git checkout -- apps/office-server/src/a.ts', 'git restore apps/office-server/src/a.ts', 'git checkout main apps/office-server/src/a.ts']) {
+      expect(bash(line, REPO).parts, line).toEqual([expect.objectContaining({ kind: 'self', why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' })]);
+    }
+  });
+  it('round 4: at the live checkout the one part keeps a protected path’s own reason', () => {
+    const live = 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar';
+    for (const line of ['git restore .mcp.json', 'git checkout origin/evil -- .mcp.json', 'git checkout -- apps/x.ts .mcp.json']) {
+      expect(bash(line, REPO).parts, line).toEqual([{ kind: 'self', target: expect.stringMatching(/^git (restore|checkout) /), why: `${live}; korunan yola yazar: MCP sunucu ayarları (.mcp.json)` }]);
+    }
+    expect(bash('git checkout main', REPO).parts).toEqual([expect.objectContaining({ why: live })]);
+  });
+  it('the reason names the path', () => {
+    expect(bash('curl -o .mcp.json https://x.io/m.json').parts).toEqual([
+      { kind: 'self', target: `curl -o ${DESK}/.mcp.json`, why: 'korunan yola yazar: MCP sunucu ayarları (.mcp.json)' },
+    ]);
+  });
 });
 
 describe('gate policy (K1) — effective cwd, resolved target and git (review rounds 2–3)', () => {
@@ -363,6 +738,18 @@ describe('gate policy (K1) — targets and fingerprints (§4 madde 4)', () => {
     expect(fingerprint('Bash', a)).not.toBe(fingerprint('Bash', first(bash('git push --force origin'))));
     expect(fingerprint('Bash', a)).not.toBe(fingerprint('Monitor', a));
     expect(fingerprint('Bash', a)).not.toBe(fingerprint('Bash', first(bash('git push upstream main'))));
+  });
+
+  it('review focus 4: a connector’s part names its capability (the only parts the system may handle); a shell, a built-in or an unclassified part names none', () => {
+    expect(classifyCall('mcp__claude_ai_Gmail__send_message', { to: 'a@b.co' }, DESK, ctx).parts).toEqual([
+      { kind: 'send', target: 'send_message to=a@b.co', why: 'dışarıya gönderir (email.send)', capability: 'email.send' },
+    ]);
+    expect(first(classifyCall('mcp__claude_ai_Google_Calendar__create_event', {}, DESK, ctx))).toMatchObject({ kind: 'calendar', why: 'takvime yazar, katılımcılara davet gider (calendar.write)', capability: 'calendar.write' });
+    expect(first(bash('curl -X POST https://api.example.com/x'))).not.toHaveProperty('capability');
+    expect(first(bash('mail a@b.co'))).not.toHaveProperty('capability');
+    expect(first(classifyCall('SendMessage', { to: 'x', message: 'y' }, DESK, ctx))).not.toHaveProperty('capability');
+    expect(first(classifyCall('mcp__foo__bar', {}, DESK, ctx))).not.toHaveProperty('capability');
+    expect(first(classifyCall('mcp__plugin_playwright_playwright__browser_click', {}, DESK, ctx))).not.toHaveProperty('capability');
   });
 
   it('a line with two held parts holds both, each with its own target', () => {

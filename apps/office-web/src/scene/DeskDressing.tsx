@@ -2,6 +2,7 @@ import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { CanvasTexture, Color, Object3D, RepeatWrapping, SRGBColorSpace, type InstancedMesh } from 'three';
 import { LAYOUT, type Desk } from '../office/layout.ts';
+import { useDarkDesks } from './rooms.ts';
 
 const SURFACE = 0.75;
 const CODE_COLORS = ['#7ec8ff', '#ffd27a', '#ff8fa3', '#9be28f', '#c8a8ff', '#e8edf5'];
@@ -36,7 +37,7 @@ function codeTexture(seed: number, background: string): CanvasTexture {
   return t;
 }
 
-function Monitor({ x, screen }: { x: number; screen: CanvasTexture }) {
+function Monitor({ x, screen }: { x: number; screen: CanvasTexture | null }) {
   return (
     <group position={[x, SURFACE, 0.1]}>
       <mesh position={[0, 0.02, 0]} castShadow>
@@ -51,17 +52,18 @@ function Monitor({ x, screen }: { x: number; screen: CanvasTexture }) {
         <boxGeometry args={[0.56, 0.34, 0.035]} />
         <meshStandardMaterial color="#1b1e23" roughness={0.45} />
       </mesh>
-      {/* The screen faces the person (local −z). */}
-      <mesh position={[0, 0.34, -0.019]} rotation={[0, Math.PI, 0]}>
+      {/* The screen faces the person (local −z); dark glass at an empty desk in a room no department holds. */}
+      <mesh name="screen" position={[0, 0.34, -0.019]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[0.52, 0.3]} />
-        <meshBasicMaterial map={screen} color={[1.7, 1.7, 1.7]} toneMapped={false} />
+        {screen ? <meshBasicMaterial map={screen} color={[1.7, 1.7, 1.7]} toneMapped={false} /> : <meshStandardMaterial color="#0d0f12" roughness={0.3} />}
       </mesh>
     </group>
   );
 }
 
-function DeskThings({ desk, index, screens }: { desk: Desk; index: number; screens: CanvasTexture[] }) {
-  const screen = screens[index % screens.length]!;
+function DeskThings({ desk, index, screens, off }: { desk: Desk; index: number; screens: CanvasTexture[]; off: boolean }) {
+  const screen = off ? null : screens[index % screens.length]!;
+  const second = off ? null : screens[(index + 1) % screens.length]!;
   const mug = MUGS[index % MUGS.length]!;
   return (
     // Local +z is the way the person faces, i.e. towards the far edge of the desk.
@@ -69,7 +71,7 @@ function DeskThings({ desk, index, screens }: { desk: Desk; index: number; scree
       {desk.monitors === 2 ? (
         <>
           <Monitor x={-0.3} screen={screen} />
-          <Monitor x={0.3} screen={screens[(index + 1) % screens.length]!} />
+          <Monitor x={0.3} screen={second} />
         </>
       ) : (
         <Monitor x={0} screen={screen} />
@@ -98,10 +100,12 @@ export function DeskDressing() {
       s.offset.y -= dt * (0.035 + i * 0.012);
     });
   });
+  // A department's room has its screens on; elsewhere in a room, only a desk someone sits at (the centre's overflow).
+  const dark = useDarkDesks();
   return (
     <group>
       {LAYOUT.desks.map((desk, i) => (
-        <DeskThings key={i} desk={desk} index={i} screens={screens} />
+        <DeskThings key={i} desk={desk} index={i} screens={screens} off={dark.has(i)} />
       ))}
     </group>
   );

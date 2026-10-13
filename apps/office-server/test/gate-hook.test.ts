@@ -175,7 +175,7 @@ describe('the real context (K2): git is asked about the live checkout’s worktr
     const events: unknown[] = [];
     const fresh = liveContext({ repoRoot: repo, dataDir: data, home: root, port: () => 4319, hosts: [] });
     const gate = new Gate({
-      approvals: { pass: () => ({ ok: false as const, missing: { kind: 'delete' as const, target: '', why: '' } }) } as never,
+      approvals: { match: () => ({ ok: false as const, missing: { kind: 'delete' as const, target: '', why: '' } }) } as never,
       events: { append: (_: unknown, e: unknown) => events.push(e) } as never,
       roster: { get: () => ({ slug: 'mert' }) } as never,
       enabled: () => true,

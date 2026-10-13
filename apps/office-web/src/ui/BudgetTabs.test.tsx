@@ -7,7 +7,7 @@ import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 const summary = (over: Partial<BudgetSummary> = {}): BudgetSummary => ({
   constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: 50, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17],
     coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' },
-    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
+    digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20, outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: [], sendsPerHour: 30, bulkRecipients: 5, callHours: [9, 19], callsPerDay: 20 },
   reserve: { active: true, limitPct: 75, fiveHourPct: 82, sevenDayPct: 40 },
   month: { key: '2026-10', usd: 31.5 },
   plans: { p1: { spentUsd: 25, claudeUsd: 3.2 } },
@@ -27,6 +27,8 @@ const ada: Employee = {
 
 beforeEach(() =>
   useOffice.setState({
+    // The Codex test sets it: left over, every later test would read Codex's names.
+    runtime: undefined,
     budget: summary(),
     plans: { p1: plan },
     views: { ada: { employee: ada, events: [], openTools: {}, idleSince: null, eventsLoaded: true } },
@@ -168,5 +170,112 @@ describe('ConstitutionTab', () => {
     fireEvent.change(field, { target: { value: '4' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
     expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ idleCapacityHours: 4, pulseHours: 6 }));
+  });
+
+  it('spec capabilities §5–§6: the outward policy (four choices), the special contacts (one per line) and the rules', async () => {
+    render(<ConstitutionTab />);
+    const group = screen.getByRole('group', { name: 'Otonomi politikası' });
+    expect(within(group).getAllByRole('combobox').map((s) => s.getAttribute('aria-label'))).toEqual(['Gönderim', 'Yayın', 'Arama', 'Takvim']);
+    expect(['Gönderim', 'Yayın', 'Arama', 'Takvim'].map((l) => (screen.getByLabelText(l) as HTMLSelectElement).value)).toEqual(['system', 'system', 'system', 'owner']);
+    expect([...(screen.getByLabelText('Takvim') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Sahibine sor', 'Sistem halletsin']);
+    expect(group.textContent).toMatch(/Ödeme, silme, tarayıcı, ofisin kendisi, sınıflandırılmamış araçlar ve komut satırından gönderim her zaman sana gelir/);
+    fireEvent.change(screen.getByLabelText('Gönderim'), { target: { value: 'owner' } });
+    fireEvent.change(screen.getByLabelText('Özel kişiler'), { target: { value: 'ali@firma.com\n\n +90 532 111 22 33 ' } });
+    fireEvent.change(screen.getByLabelText('Arama saatleri'), { target: { value: '10, 18' } });
+    fireEvent.change(screen.getByLabelText('Toplu gönderim eşiği (alıcı)'), { target: { value: '3' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({
+      outwardPolicy: { send: 'owner', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: ['ali@firma.com', '+90 532 111 22 33'],
+      callHours: [10, 18], bulkRecipients: 3, sendsPerHour: 30, callsPerDay: 20,
+    }));
+  });
+
+  it('refuses call hours that are not two whole hours, sending nothing', async () => {
+    render(<ConstitutionTab />);
+    fireEvent.change(screen.getByLabelText('Arama saatleri'), { target: { value: '9' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(screen.getByRole('alert').textContent).toMatch(/Arama saatleri: iki tam saat girin/);
+    expect(api.setConstitution).not.toHaveBeenCalled();
+  });
+
+  it('call hours: three hours, a fraction or a word are refused too; a dash or a space between the two reads', async () => {
+    render(<ConstitutionTab />);
+    // A dash right before a number and not right after one is a minus sign, not a separator: “-9, 19” and “9, -19”
+    // are not the window 9–19 (final re-review: anywhere, not only leading).
+    for (const bad of ['9, 12, 19', '9, 19.5', '9, akşam', '', '-9, 19', ' –9 19', '-9-19', '9, -19', '9,-19', '9 –19']) {
+      fireEvent.change(screen.getByLabelText('Arama saatleri'), { target: { value: bad } });
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+      expect(screen.getByRole('alert').textContent).toMatch(/Arama saatleri: iki tam saat girin/);
+    }
+    expect(api.setConstitution).not.toHaveBeenCalled();
+    for (const [typed, hours] of [['8-17', [8, 17]], ['8 – 17', [8, 17]], ['0 24', [0, 24]]] as const) {
+      vi.mocked(api.setConstitution).mockClear();
+      fireEvent.change(screen.getByLabelText('Arama saatleri'), { target: { value: typed } });
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+      expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({ callHours: hours }));
+    }
+  });
+
+  it('shows what the owner stored: the contacts one per line, the call window as “from, to”, each kind’s decider', () => {
+    useOffice.setState({
+      budget: summary({ constitution: { ...summary().constitution, outwardPolicy: { send: 'owner', publish: 'owner', call: 'system', calendar: 'system' }, specialContacts: ['ali@firma.com', 'Ahmet Yılmaz'], callHours: [8, 20] } }),
+    });
+    render(<ConstitutionTab />);
+    expect((screen.getByLabelText('Özel kişiler') as HTMLTextAreaElement).value).toBe('ali@firma.com\nAhmet Yılmaz');
+    expect((screen.getByLabelText('Arama saatleri') as HTMLInputElement).value).toBe('8, 20');
+    expect(['Gönderim', 'Yayın', 'Arama', 'Takvim'].map((l) => (screen.getByLabelText(l) as HTMLSelectElement).value)).toEqual(['owner', 'owner', 'system', 'system']);
+  });
+
+  it('saving without touching the policy keeps the gate as stored (off stays off) and the rules as they are', async () => {
+    render(<ConstitutionTab />);
+    expect((screen.getByLabelText('Geri alınamaz iş kapısı açık') as HTMLInputElement).checked).toBe(false);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
+    expect(api.setConstitution).toHaveBeenCalledWith(expect.objectContaining({
+      gateEnabled: false, outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: [], callHours: [9, 19],
+    }));
+  });
+
+  it('the policy offers only send, publish, call and calendar, two choices each — pay and delete are never offered, and the form says they are the owner’s', () => {
+    render(<ConstitutionTab />);
+    const group = screen.getByRole('group', { name: 'Otonomi politikası' });
+    expect(within(group).getAllByRole('combobox')).toHaveLength(4);
+    for (const s of within(group).getAllByRole('combobox')) expect([...(s as HTMLSelectElement).options].map((o) => o.value)).toEqual(['owner', 'system']);
+    expect(within(group).queryByLabelText(/Ödeme|Silme|Tarayıcı/)).toBeNull();
+    expect(group.textContent).toMatch(/Ödeme, silme, .* her zaman sana gelir/);
+  });
+
+  it('the policy’s choices keep their wording under Codex (they are not models)', () => {
+    useOffice.setState({ runtime: { provider: 'codex' } as never });
+    render(<ConstitutionTab />);
+    expect([...(screen.getByLabelText('Gönderim') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Sahibine sor', 'Sistem halletsin']);
+  });
+
+  it('task 11: a test starts without the provider an earlier one set (the Codex test above leaves none behind)', () => {
+    expect(useOffice.getState().runtime).toBeUndefined();
+    render(<ConstitutionTab />);
+    expect(screen.getByLabelText('Önbellek süresi (dk)').closest('label')!.textContent).toMatch(/Claude Code önbelleği yine bir saat tutar/);
+  });
+
+  it('says what the gate does now that the policy exists, and what a special contact can be', () => {
+    render(<ConstitutionTab />);
+    const gate = screen.getByLabelText('Geri alınamaz iş kapısı açık').closest('label')!;
+    expect(gate.textContent).toMatch(/Açıkken dışa dönük işler Otonomi politikasına göre: sistemce ya da sana/);
+    expect(gate.textContent).not.toMatch(/Açıkken yayın, gönderim/);
+    expect(gate.textContent).toMatch(/Ödeme, silme.* her zaman senin onayını bekler/);
+    const contacts = screen.getByLabelText('Özel kişiler').closest('label')!;
+    expect(contacts.textContent).toMatch(/e-posta, telefon numarası, kullanıcı adı, kişinin ya da firmanın adı ya da kişinin aday\/konuşma kimliği/);
+    expect(contacts.textContent).toMatch(/adlar bütün bir ifade olarak aranır/);
+    expect(contacts.textContent).toMatch(/satır başına bir/i);
+    // Final review C1/I4: the gate looks at what the call carries, and only with the gate on; the owner lists the ids too.
+    expect(contacts.textContent).toMatch(/Kapı açıkken, girdisinde bunlardan biri geçen çağrı — o kişiye giden ya da onu anan —, politika ne olursa olsun sana gelir/);
+    expect(contacts.textContent).toMatch(/Kapı yalnız çağrının girdisine bakar: kimlikle adreslenen bir çağrıda/);
+    expect(contacts.textContent).toMatch(/adresini, telefonunu ve kimliklerini birlikte yaz/);
+    expect(contacts.textContent).not.toMatch(/her zaman sana gelir|ulaşması gereken kişi/);
+  });
+
+  it('task 11: the rules’ hints say what 0 does — no sends, no calls', () => {
+    render(<ConstitutionTab />);
+    expect(screen.getByLabelText('Saatlik gönderim sınırı').closest('label')!.textContent).toMatch(/0 = sistem hiç göndermez/);
+    expect(screen.getByLabelText('Günlük arama sınırı').closest('label')!.textContent).toMatch(/0 = sistem hiç aramaz/);
   });
 });

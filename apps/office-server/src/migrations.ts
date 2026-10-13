@@ -614,4 +614,55 @@ export const MIGRATIONS: Migration[] = [
     down: `UPDATE employees SET session_started = CASE WHEN provider = 'claude' THEN session_started ELSE COALESCE(json_extract(provider_sessions, '$.claude'), 0) END;
       DROP TABLE quota_by_provider; ALTER TABLE employees DROP COLUMN provider_sessions; ALTER TABLE employees DROP COLUMN provider;`,
   },
+  {
+    // 24 on feat/departments; 25 once feat/b10-core's 24 (knowledge base) is on main (plan Task 15).
+    // room: office rooms (sub-project 2), added to this unreleased migration rather than a new one (spec office rooms §4.1).
+    version: 24,
+    name: 'departments: the rooms, their heads, an employee’s department and the notes on plan streams',
+    up: `CREATE TABLE IF NOT EXISTS departments (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, mission TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT '',
+        template TEXT, template_version INTEGER, head_id TEXT,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+        created_at INTEGER NOT NULL, closed_at INTEGER,
+        room INTEGER CHECK (room IS NULL OR room BETWEEN 0 AND 5)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS departments_room ON departments (room) WHERE status = 'open' AND room IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS stream_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id TEXT NOT NULL, stream_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('plan', 'report')), text TEXT NOT NULL, evidence TEXT NOT NULL DEFAULT '[]',
+        next TEXT, by TEXT NOT NULL, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS stream_notes_lookup ON stream_notes (plan_id, stream_id, kind, at);
+      ALTER TABLE employees ADD COLUMN department_id TEXT;`,
+    down: `DROP INDEX IF EXISTS departments_room;
+      DROP INDEX IF EXISTS stream_notes_lookup;
+      DROP TABLE IF EXISTS stream_notes;
+      ALTER TABLE employees DROP COLUMN department_id;
+      DROP TABLE IF EXISTS departments;`,
+  },
+  {
+    // 25 on feat/departments (after the departments' 24); renumbered at integration like the others (plan Task 13).
+    version: 25,
+    name: 'capabilities and autonomy: the company’s own capabilities and the outbox',
+    // New tables only: code from before ignores them, so rolling back is safe.
+    up: `CREATE TABLE IF NOT EXISTS custom_capabilities (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('read', 'send', 'calendar', 'call', 'publish', 'pay', 'delete')),
+        tools TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'rejected', 'retired')),
+        proposed_by TEXT NOT NULL, decided_by TEXT, note TEXT, created_at INTEGER NOT NULL, decided_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, employee_id TEXT NOT NULL, department_id TEXT, tool TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('send', 'publish', 'call', 'calendar')), target TEXT NOT NULL,
+        recipients TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '',
+        via TEXT NOT NULL CHECK (via IN ('system', 'owner')), approval_id TEXT, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS outbox_count ON outbox (via, department_id, employee_id, kind, at);
+      CREATE INDEX IF NOT EXISTS outbox_at ON outbox (at);`,
+    down: `DROP INDEX IF EXISTS outbox_at;
+      DROP INDEX IF EXISTS outbox_count;
+      DROP TABLE IF EXISTS outbox;
+      DROP TABLE IF EXISTS custom_capabilities;`,
+  },
 ];

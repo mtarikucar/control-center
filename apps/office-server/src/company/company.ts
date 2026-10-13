@@ -1,14 +1,17 @@
 import { statSync } from 'node:fs';
 import type { AgentProvider } from '@cc/shared';
 import { relative } from 'node:path';
-import type { CompanyProfile, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, PlanStream, PlanStreamView, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
+import type { CompanyProfile, Department, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, PlanStream, PlanStreamView, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, StreamNote, Task, TaskResult } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, ownerDepartment, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { NewEmployee, Roster } from '../roster.ts';
+import type { Seating } from '../seating.ts';
 import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
+import type { StreamNoteStore } from './department-store.ts';
+import type { Departments } from './departments.ts';
 import type { Memory } from './memory.ts';
 import type { CompanyStateStore, GoalStore } from './goal-store.ts';
 import { checkKpis } from './kpi.ts';
@@ -25,7 +28,7 @@ import { COORDINATOR_ROLE } from './roles.ts';
 import { DUE_MAX_DAYS, PARK_MAX_DAYS, REPARK_LIMIT } from './scheduling.ts';
 import { checkStreams } from './streams.ts';
 import type { NoticeStore, PlanStore, SchedulePatch, ScheduleStore, TaskPatch, TaskStore } from './store.ts';
-import { clean, lines } from './text.ts';
+import { clean, fold, lines } from './text.ts';
 import { formatWhen, minIntervalMinutes, nextCron, parseCron, parseUntil, type CronSpec } from './time.ts';
 
 /** The constitution's loop guards by default (spec §4.6); the owner changes them in the constitution. */
@@ -82,6 +85,12 @@ export interface CompanyDeps {
   schedules?: ScheduleStore;
   /** The office clock: told when a time changed, so it re-arms (absent in tests that do not care). */
   clock?: { touch(): void };
+  /** The departments (spec 2026-10-13-departments; absent: an office without them, as before). */
+  departments?: Departments;
+  /** The heads' plans of and reports on plan streams (absent: none). */
+  streamNotes?: StreamNoteStore;
+  /** Who sits where (spec 2026-10-13-office-rooms §3); absent: the roster's lowest free desk, as before rooms. */
+  seating?: Seating;
   now?: () => number;
 }
 
@@ -252,7 +261,10 @@ export class Company {
    * none given, the template's (or none).
    */
   hire(by: string, input: HireInput, o: { deny?: string[] } = {}): Employee {
-    if (by !== OWNER) this.#assertCoordinator(by);
+    const deps = this.#d.departments;
+    // A head hires into their own department (spec departments §5.2); anyone else but the owner must coordinate.
+    const heads = by !== OWNER && deps && this.#d.roster.get(by).kind === 'lead' ? deps.headOf(by) : null;
+    if (by !== OWNER && !heads) this.#assertCoordinator(by);
     const template = input.template === undefined || input.template === null || input.template === '' ? null : roleTemplate(input.template);
     const capabilities = input.capabilities === undefined || input.capabilities === null ? (template?.capabilities ?? []) : capabilityIds(input.capabilities, 'Yetenekler');
     const resolved: NewEmployee = template
@@ -268,9 +280,47 @@ export class Company {
       : { ...input, templateRef: null, capabilityIds: capabilities };
     const characters = this.#d.characters();
     const characterId = input.characterId && characters.includes(input.characterId) ? input.characterId : this.#leastUsedCharacter(characters);
-    const lead = resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
+    if (deps) deps.assertFreeName(typeof input.name === 'string' ? input.name : '');
+    // The room is checked before a department is resolved: a free-text team may open one, and a refused hire writes nothing.
     this.#assertRoom();
-    return this.#d.hire({ ...resolved, kind: 'member', characterId, reportsTo: lead?.id ?? input.reportsTo ?? null, ...(o.deny?.length ? { deskDeny: o.deny } : {}) });
+    // What the roster would refuse is refused before a department is opened for the hire (nothing may fail after that).
+    // Without a seat: a deskIndex in the body is not the hire's (the office chooses below), so it must not refuse it either.
+    const department = deps ? this.#hireDepartment(by, heads, input, template?.team, () => this.#d.roster.validate({ ...resolved, kind: 'member', characterId, deskIndex: undefined })) : null;
+    const lead = !deps && resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
+    const placement = deps ? { team: department?.name ?? '', departmentId: department?.id ?? null, reportsTo: department?.headId ?? null } : { reportsTo: lead?.id ?? input.reportsTo ?? null };
+    // Their seat (spec office rooms §3): their department's room, else the hub; none free, the roster's "Ofis dolu".
+    // Always set, and after the input: a deskIndex in the request body never chooses one.
+    const deskIndex = this.#d.seating?.forHire({ kind: 'member', room: department?.room ?? null }) ?? undefined;
+    const hired = this.#d.hire({ ...resolved, ...placement, kind: 'member', characterId, deskIndex, ...(o.deny?.length ? { deskDeny: o.deny } : {}) });
+    if (!deps) return hired;
+    if (department && input.head) deps.setHead(by, department.id, hired.id);
+    else deps.refreshDesks();
+    if (heads) this.#tellCoordinator(by, 'department.changed', `${this.nameOf(by)} ${heads.name} departmanına ${hired.name} adlı çalışanı aldı${hired.title ? ` (${hired.title})` : ''}.`);
+    return this.#d.roster.get(hired.id);
+  }
+
+  /** Where a hire goes (spec §5.5): a head's own department; the one given; a free-text team's (opened if need be); a template's team only if open. */
+  #hireDepartment(by: string, heads: Department | null, input: HireInput, templateTeam: string | undefined, validate: () => void): Department | null {
+    const deps = this.#d.departments!;
+    if (heads) {
+      if (input.head) throw new ForbiddenError('Başkan atamak koordinatörün işi; sen kendi departmanına üye alırsın.');
+      const elsewhere = (input.departmentId && input.departmentId !== heads.id) || (input.team?.trim() && fold(input.team) !== fold(heads.name));
+      if (elsewhere) throw new ForbiddenError(`Başkan yalnız kendi departmanına işe alır (${heads.name}).`);
+      return heads;
+    }
+    if (input.departmentId) return deps.open(input.departmentId);
+    if (input.team?.trim()) {
+      const found = deps.forTeam(by, input.team, { create: false });
+      if (found) return found;
+      // A department is about to open for this hire: the hire must be a valid one, and its person not named like it (spec §3).
+      const team = input.team.trim();
+      if (typeof input.name === 'string' && fold(input.name.trim()) === fold(team)) throw new ValidationError(`“${team}” bir departmanın adı olacak; çalışana başka bir ad ver.`);
+      validate();
+      return deps.forTeam(by, input.team, { create: true });
+    }
+    const joined = templateTeam ? deps.forTeam(by, templateTeam, { create: false }) : null;
+    if (!joined && input.head) throw new ValidationError('Başkan olarak almak için departmanı ver (departmentId ya da team).');
+    return joined;
   }
 
   /** Fable by default: planning and judgement are the hardest work in the company. */
@@ -279,7 +329,14 @@ export class Company {
     const characters = this.#d.characters();
     const characterId = characters.includes('manager') ? 'manager' : this.#leastUsedCharacter(characters);
     this.#assertRoom();
-    const hired = this.#d.hire({ name: 'Koordinatör', role: COORDINATOR_ROLE, model, provider, title: 'Koordinatör', kind: 'coordinator', characterId });
+    const input: NewEmployee = { name: 'Koordinatör', role: COORDINATOR_ROLE, model, provider, title: 'Koordinatör', kind: 'coordinator', characterId };
+    // Under the beam (spec office rooms §3): whoever sits at seat 0 moves off it first, so what the roster would refuse
+    // is refused before that (a failed hire moves nobody).
+    this.#d.roster.validate(input);
+    const deskIndex = this.#d.seating?.forHire({ kind: 'coordinator', room: null });
+    // No seat under the beam (it stays taken and the sitter has nowhere to go): never an arbitrary desk instead.
+    if (deskIndex === null) throw new ConflictError('Ofis dolu: koordinatörün masası (0) başkasında ve onu taşıyacak boş masa yok.');
+    const hired = this.#d.hire({ ...input, deskIndex });
     this.#emit(hired.id, { type: 'role.changed', kind: hired.kind, title: hired.title, team: hired.team });
     return hired;
   }
@@ -288,14 +345,19 @@ export class Company {
     const target = this.#d.roster.get(id);
     if (target.lifecycle === 'archived') throw new ConflictError('Bu çalışan işten çıkarıldı.');
     const previous = this.coordinator();
+    // The coordinator is in no department (spec §3): leave it first, as the head of one that leaves it headless.
+    if (target.kind !== 'coordinator') this.#d.departments?.move(OWNER, id, null);
     if (previous && previous.id !== id) {
       const demoted = this.#d.roster.update(previous.id, { kind: 'member' });
       writeRoleCard(this.#d.dataDir, demoted);
       this.#emit(demoted.id, { type: 'role.changed', kind: demoted.kind, title: demoted.title, team: demoted.team });
       this.#d.notices.add(demoted.id, 'role.changed', `Koordinatörlük ${target.name} adlı çalışana geçti; artık ekipte çalışansın. Rol kartın yenilendi.`);
       this.#d.reload?.(demoted.id);
+      // The former coordinator leaves the beam's desk for their place (a member of the centre: the hub).
+      this.#d.seating?.reseat(previous.id);
     }
     const next = this.#d.roster.update(id, { kind: 'coordinator', reportsTo: null });
+    this.#d.seating?.reseat(id);
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(next.id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
     if (previous && previous.id !== id) this.#rerouteProposals(previous.id);
@@ -308,16 +370,22 @@ export class Company {
       // A session reads its card and tool list only at start: without this the new coordinator has no coordinator tools.
       this.#d.reload?.(id);
     }
-    return next;
+    // Both desks' department blocks name the coordinator (or no longer do).
+    this.#d.departments?.refreshDesks();
+    // Read again: the walk to the beam's desk changed the seat.
+    return this.#d.roster.get(id);
   }
 
   /** `capabilities` (B7), when given, is the whole new list ([] clears it); not given, it stays. */
   editRoleCard(by: string, id: string, patch: { title?: string; team?: string; role?: string; capabilities?: unknown }): Employee {
     this.#assertCoordinator(by);
     const current = this.#d.roster.get(id);
+    const team = patch.team === undefined ? current.team : clean(patch.team, 'Ekip adı', 40, false);
+    // With departments the team is the department's name: moving and renaming have their own tools.
+    if (this.#d.departments && team !== current.team) throw new ValidationError('Ekip artık bir departman: kişiyi departmentMove ile taşı, departmanın adını departmentUpdate ile değiştir.');
     const next = this.#d.roster.update(id, {
       title: patch.title === undefined ? current.title : clean(patch.title, 'Unvan', 80, false),
-      team: patch.team === undefined ? current.team : clean(patch.team, 'Ekip adı', 40, false),
+      team,
       role: patch.role === undefined ? current.role : clean(patch.role, 'Rol tanımı', 4000, true),
       ...(patch.capabilities === undefined ? {} : { capabilities: capabilityIds(patch.capabilities, 'Yetenekler') }),
     });
@@ -330,7 +398,10 @@ export class Company {
   }
   /** The coordinator (or the owner) moves someone to another model; their session goes on with it, memory kept. */
   setModel(by: string, id: string, model: ModelAlias): Employee {
-    if (by !== OWNER) this.#assertCoordinator(by);
+    if (by !== OWNER) {
+      if (this.#d.departments) this.#assertManages(by, id);
+      else this.#assertCoordinator(by);
+    }
     if (!(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
     const current = this.#d.roster.get(id);
     if (current.lifecycle === 'archived') throw new ConflictError(`${current.name} işten çıkarıldı.`);
@@ -438,6 +509,17 @@ export class Company {
 
   /** Someone was fired: their open work waits again and the coordinator hands it out (spec §10); a hand-over is cancelled. */
   releaseTasksOf(id: string): void {
+    // The department step comes last and still runs if the release throws: a failure in either must not undo the other (a fired person's tasks go back; their department loses its head).
+    try {
+      this.#releaseWork(id);
+    } finally {
+      this.#d.departments?.left(id);
+      // Their seat is free: whoever waits for one (a room's overflow at the hub, the centre's past the hub) walks to it now (final review M1).
+      this.#d.seating?.reseatAll();
+    }
+  }
+
+  #releaseWork(id: string): void {
     this.#rerouteProposals(id);
     // Routines they do or review wait for someone new (spec §4.4): the coordinator gives one.
     for (const sch of this.#d.schedules?.list({ statuses: ['active', 'paused'] }) ?? []) {
@@ -914,8 +996,42 @@ export class Company {
     if (coordinator && coordinator.id !== by && coordinator.id !== task.requester) this.#d.notices.add(coordinator.id, 'task.finished', line);
     this.#taskEvent('finished', next);
     this.#d.memory?.learnedFrom(next, result);
+    this.#streamMaybeDone(next);
     if (task.planId) this.#maybeFinishPlan(task.planId);
     return next;
+  }
+
+  /** Each department's head hears of a stream that is newly theirs in a running plan (spec departments §6.2); `before`: the streams as they were (null: the plan just started). */
+  #assignStreams(plan: Plan, before: readonly PlanStream[] | null): void {
+    const deps = this.#d.departments;
+    if (!deps || plan.status !== 'approved') return;
+    for (const s of this.streamsOf([plan]).get(plan.id) ?? []) {
+      const depId = ownerDepartment(s.owner);
+      if (!depId || s.status === 'done') continue;
+      if (before?.some((b) => b.id === s.id && b.owner === s.owner)) continue;
+      const dep = deps.get(depId);
+      if (!dep.headId) continue;
+      const checks = plan.method?.checks?.length ? ` Planın kalite kontrolleri: ${plan.method.checks.join('; ')}.` : '';
+      const estimate = [plan.quotaPct !== null ? `kota %${plan.quotaPct}` : '', plan.usd !== null ? `$${plan.usd}` : '', plan.days !== null ? `${plan.days} gün` : ''].filter(Boolean).join(', ');
+      const waits = s.dependsOn.length ? ` Önce şu akışların bitmesini bekler: ${s.dependsOn.join(', ')}.` : '';
+      this.#d.notices.add(
+        dep.headId,
+        'stream.assigned',
+        `“${plan.title}” planının “${s.title}” akışı (${s.id}) ${dep.name} departmanının: hedef ${plan.goal}.${checks}${estimate ? ` Planın tahmini: ${estimate}.` : ''}${waits} streamPlan ile akışını planla (planId ${plan.id}, streamId ${s.id}), görevleri taskCreate ile planId ve streamId vererek aç ve odana dağıt; bitince streamReport ile raporla.`,
+      );
+    }
+  }
+
+  /** A department's stream whose last open task just closed: its head (or the coordinator) reports it (spec §6.2 step 5). */
+  #streamMaybeDone(task: Task): void {
+    const deps = this.#d.departments;
+    if (!deps || !task.planId || !task.streamId) return;
+    const plan = this.#d.plans.get(task.planId);
+    const stream = (this.streamsOf([plan]).get(plan.id) ?? []).find((s) => s.id === task.streamId);
+    const depId = stream ? ownerDepartment(stream.owner) : null;
+    if (!stream || !depId || stream.status !== 'done') return;
+    const to = deps.responsible(depId);
+    if (to) this.#d.notices.add(to.id, 'stream.done', `“${plan.title}” planının “${stream.title}” akışının açık görevi kalmadı. streamReport ile koordinatöre raporla: ne yapıldı, kanıtı ne, sırada ne var (planId ${plan.id}, streamId ${stream.id}).`);
   }
 
   /** A reviewer named for a task: someone in the office, not let go, and never the one who does it. */
@@ -949,6 +1065,7 @@ export class Company {
     if (!free) return plan;
     const started = this.#d.plans.update(plan.id, { status: 'approved', approvedAt: this.#now(), approvedBy: 'coordinator' });
     this.#emit(by, { type: 'plan.changed', change: 'approved', plan: started });
+    this.#assignStreams(started, null);
     return started;
   }
 
@@ -978,9 +1095,12 @@ export class Company {
       // A finished plan stays finished until it gets new work (a task reopens it): an empty "approved" would look running forever.
       // A stream still to do is work too: a revision that adds one starts the plan again.
       const status = current.status === 'done' && this.#d.tasks.openInPlan(planId) === 0 && this.#streamsDone(planId, streams) ? 'done' : 'approved';
+      // A draft's streams were never announced (it waited for the owner): it is compared with the version that ran, if any.
+      const before = current.status === 'draft' ? (this.#d.plans.approvedSnapshot(planId)?.streams ?? null) : (current.streams ?? []);
       const plan = this.#d.plans.update(planId, { ...merged, method, streams, version: current.version + 1, status, approvedAt: current.approvedAt ?? this.#now(), approvedBy: 'coordinator' });
       this.#d.plans.clearApproved(planId);
       this.#emit(by, { type: 'plan.changed', change: 'revised', plan });
+      this.#assignStreams(plan, before);
       // Dropping the last unfinished stream leaves nothing to do: the plan finishes as when its last task closes.
       if (status === 'approved' && streams.length > 0) this.#maybeFinishPlan(planId);
       return this.#d.plans.get(planId);
@@ -996,12 +1116,14 @@ export class Company {
   approve(planId: string): Plan {
     const current = this.#d.plans.get(planId);
     if (current.status !== 'draft') throw new ConflictError('Yalnız taslak bir plan onaylanabilir.');
+    const before = this.#d.plans.approvedSnapshot(planId)?.streams ?? null;
     const plan = this.#d.plans.update(planId, { status: 'approved', approvedAt: this.#now(), approvedBy: 'owner' });
     this.#d.plans.clearApproved(planId);
     const desk = this.#planDesk(plan);
     const next = this.#isBlueprint?.(plan.id) ? 'Bu bir kurulum planı: blueprintApply ile kur; yarıda kalırsa yeniden çalıştır, yapılmışı atlar.' : 'Görevleri aç ve dağıt.';
     this.#d.notices.add(desk, 'plan.approved', `Plan onaylandı: “${plan.title}” (sürüm ${plan.version}). ${next}`);
     this.#emit(desk, { type: 'plan.changed', change: 'approved', plan });
+    this.#assignStreams(plan, before);
     // An approved revision may leave nothing to do (it dropped the last unfinished stream, or its work closed while it
     // waited): the plan finishes now. Only a plan that has streams or has had work: a fresh one is only starting.
     if (this.#hadWork(plan)) this.#maybeFinishPlan(planId);
@@ -1026,6 +1148,55 @@ export class Company {
     this.#emit(desk, { type: 'plan.changed', change: 'declined', plan });
     return plan;
   }
+  // ── streams of departments ───────────────────────────────────────────────
+
+  /** A head's plan of their department's stream (spec §5.2): a new note each time, the latest shown. */
+  streamPlan(by: string, planId: string, streamId: string, text: string): StreamNote {
+    const { plan, stream } = this.#streamFor(by, planId, streamId);
+    const note = this.#notes().add({ planId: plan.id, streamId: stream.id, kind: 'plan', text: clean(text, 'Akış planı', 6000, true), evidence: [], next: null, by });
+    this.#emit(by, { type: 'stream.noted', note });
+    return note;
+  }
+
+  streamReport(by: string, planId: string, streamId: string, r: { summary: string; evidence?: string[]; next?: string }): StreamNote {
+    const { plan, stream } = this.#streamFor(by, planId, streamId);
+    const note = this.#notes().add({
+      planId: plan.id, streamId: stream.id, kind: 'report', text: clean(r.summary, 'Rapor', 4000, true), evidence: lines(r.evidence, 'Kanıt', 12, 600),
+      next: clean(r.next, 'Sırada', 1000, false) || null, by,
+    });
+    this.#emit(by, { type: 'stream.noted', note });
+    // The notice carries the start; the whole report is on the plan card and in departmentsRead.
+    const brief = note.text.length > 500 ? `${note.text.slice(0, 500)}…` : note.text;
+    this.#tellCoordinator(by, 'stream.report', `${this.nameOf(by)} “${plan.title}” planının “${stream.title}” akışını raporladı: ${brief}${note.next ? ` Sırada: ${note.next}` : ''}`);
+    return note;
+  }
+
+  /** The latest plan and report of each of a plan's streams (plan card, board, departmentsRead). */
+  streamNotes(planId: string): Array<{ streamId: string; plan: StreamNote | null; report: StreamNote | null }> {
+    const plan = this.#d.plans.get(planId);
+    const notes = this.#d.streamNotes;
+    return (plan.streams ?? []).map((s) => ({ streamId: s.id, plan: notes?.latest(plan.id, s.id, 'plan') ?? null, report: notes?.latest(plan.id, s.id, 'report') ?? null }));
+  }
+
+  /** The stream, if `by` may write on it: the coordinator any, a head their department's. */
+  #streamFor(by: string, planId: string, streamId: string): { plan: Plan; stream: PlanStream } {
+    const plan = this.#d.plans.get(planId);
+    // A running plan whose revision waits for the owner is a draft with its approved version kept: its work goes on.
+    const ran = plan.status === 'approved' || plan.status === 'done' || (plan.status === 'draft' && this.#d.plans.approvedSnapshot(planId) !== null);
+    if (!ran) throw new ConflictError(`“${plan.title}” planı sürmüyor; akış notu yalnız süren ya da bitmiş plana yazılır.`);
+    const stream = (plan.streams ?? []).find((s) => s.id === streamId);
+    if (!stream) throw new ValidationError(`“${plan.title}” planında “${streamId}” akışı yok.`);
+    if (this.#d.roster.get(by).kind === 'coordinator') return { plan, stream };
+    const depId = ownerDepartment(stream.owner);
+    if (!depId || this.#d.departments?.headOf(by)?.id !== depId) throw new ForbiddenError('Bu akış senin departmanının değil; akış notunu akışın departmanının başkanı ya da koordinatör yazar.');
+    return { plan, stream };
+  }
+
+  #notes(): StreamNoteStore {
+    if (!this.#d.streamNotes) throw new ConflictError('Bu ofiste akış notları açık değil.');
+    return this.#d.streamNotes;
+  }
+
   /** A plan's streams with the status their tasks give them (management cycle §3.4). */
   planStreams(planId: string): PlanStreamView[] {
     const plan = this.#d.plans.get(planId);
@@ -1400,6 +1571,22 @@ export class Company {
   /** The coordinator makes someone lead of a team (or ends it): the team's members report to them (spec §3.1). */
   appointLead(by: string, id: string, o: { team?: string; lead?: boolean } = {}): Employee {
     this.#assertCoordinator(by);
+    const deps = this.#d.departments;
+    if (deps) {
+      // With departments, a lead is a department's head (spec §5.1): the team names the department.
+      const target = this.#d.roster.get(id);
+      if (target.lifecycle === 'archived') throw new ConflictError(`${target.name} işten çıkarıldı.`);
+      if (target.kind === 'coordinator') throw new ConflictError('Koordinatör ekip lideri yapılamaz.');
+      if (o.lead === false) {
+        const headed = deps.headOf(id);
+        if (headed) deps.setHead(by, headed.id, null);
+        return this.#d.roster.get(id);
+      }
+      const team = o.team === undefined ? target.team : clean(o.team, 'Ekip adı', 40, false);
+      if (!team) throw new ValidationError('Ekip liderinin bir ekibi olmalı (team).');
+      deps.setHead(by, deps.forTeam(by, team, { create: true })!.id, id);
+      return this.#d.roster.get(id);
+    }
     const target = this.#d.roster.get(id);
     if (target.lifecycle === 'archived') throw new ConflictError(`${target.name} işten çıkarıldı.`);
     if (target.kind === 'coordinator') throw new ConflictError('Koordinatör ekip lideri yapılamaz.');
@@ -1602,7 +1789,8 @@ export class Company {
 
   /** A plan's streams as given, with their owners looked up by id or name (by id also someone let go: a stream they owned needs a new owner). */
   #streams(value: unknown): PlanStream[] {
-    return checkStreams(value, (who) => this.#d.roster.byIdOrName(who) ?? this.#person(who));
+    const deps = this.#d.departments;
+    return checkStreams(value, (who) => this.#d.roster.byIdOrName(who) ?? this.#person(who), (who) => deps?.find(who) ?? null, () => deps?.list({ status: 'open' }) ?? []);
   }
 
   /** A revision may change any stream but not drop one that tasks belong to: they would point at nothing. */
@@ -1699,12 +1887,35 @@ export class Company {
     if (this.#d.roster.list().length >= max) throw new ConflictError(`Anayasa en fazla ${max} çalışan diyor; yeni biri için sahibine getir.`);
   }
 
-  /** The coordinator manages everyone; a lead their own team (spec §3.1). */
+  /** The coordinator manages everyone; a head their own department (spec departments §5.2), a lead without departments their team (§3.1). */
   #assertManages(by: string, ...ids: string[]): void {
     const me = this.#d.roster.get(by);
     if (me.kind === 'coordinator') return;
+    const deps = this.#d.departments;
+    if (me.kind === 'lead' && deps) {
+      const mine = deps.headOf(by);
+      if (mine && ids.every((id) => id === by || this.#person(id)?.departmentId === mine.id)) return;
+      throw new ForbiddenError('Departman başkanı yalnız kendi departmanındaki işleri ve kişileri yönetir.');
+    }
     if (me.kind === 'lead' && me.team && ids.every((id) => id === by || this.#person(id)?.team === me.team)) return;
     throw new ForbiddenError(me.kind === 'lead' ? 'Ekip lideri yalnız kendi ekibindeki işleri dağıtır.' : 'Yalnız koordinatör bunu yapabilir.');
+  }
+
+  /** For the tools (setModel, sleep, wake, employeeNote): the owner and the coordinator anyone, a head their own department. */
+  assertManagesPerson(by: string, id: string): void {
+    if (by !== OWNER) this.#assertManages(by, id);
+  }
+
+  /** Someone stopped deciding proposals (a head no more): theirs go to the coordinator. */
+  rerouteProposalsOf(id: string): void {
+    this.#rerouteProposals(id);
+  }
+
+  /** Every not-done stream of a running plan, with its plan (the departments: what a headless one leaves). A plan whose revision waits for the owner (a draft with its approved version kept) runs on. */
+  liveStreams(): Array<{ plan: Plan; stream: PlanStreamView }> {
+    const live = this.#d.plans.list(1000).filter((p) => p.status === 'approved' || (p.status === 'draft' && this.#d.plans.approvedSnapshot(p.id) !== null));
+    const views = this.streamsOf(live);
+    return live.flatMap((plan) => (views.get(plan.id) ?? []).filter((s) => s.status !== 'done').map((stream) => ({ plan, stream })));
   }
 
   #assertCoordinator(by: string): void {

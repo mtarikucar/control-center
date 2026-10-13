@@ -95,6 +95,14 @@ export class ApprovalStore {
     return row ? fromRow(row) : null;
   }
 
+  /** The asker's newest refusal of this print decided after `since` (final review I3: the system path keeps it). */
+  denied(employeeId: string, fingerprint: string, since: number): Approval | null {
+    const row = this.#db
+      .prepare("SELECT * FROM approvals WHERE employee_id = ? AND fingerprint = ? AND status = 'denied' AND decided_at > ? ORDER BY decided_at DESC, rowid DESC LIMIT 1")
+      .get(employeeId, fingerprint, since) as unknown as ApprovalRow | undefined;
+    return row ? fromRow(row) : null;
+  }
+
   /** The owner decides a waiting request, once; null when it no longer waits. */
   decide(id: string, d: { approve: boolean; decidedBy: string; decidedVia: string; note: string | null; at: number; expiresAt: number | null }): Approval | null {
     const changed = this.#db

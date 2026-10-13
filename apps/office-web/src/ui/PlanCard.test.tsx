@@ -4,7 +4,7 @@ import type { Plan, PlanView } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { PlanCard } from './PlanCard.tsx';
 
-vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})) } }));
+vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})), streamNotes: vi.fn(async () => []) } }));
 const { api } = await import('../net/api.ts');
 
 const plan = (over: Partial<PlanView> = {}): PlanView => ({
@@ -12,7 +12,7 @@ const plan = (over: Partial<PlanView> = {}): PlanView => ({
   quotaPct: 10, usd: 25, days: 3, risks: 'kota', status: 'draft', version: 1, proposedBy: 'c', createdAt: 1, updatedAt: 1, approvedAt: null, ...over,
 });
 
-beforeEach(() => useOffice.setState({ plans: { p1: plan() }, tasks: {}, views: {} }));
+beforeEach(() => useOffice.setState({ plans: { p1: plan() }, tasks: {}, views: {}, departments: {}, streamNotesRev: 0 }));
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -46,7 +46,7 @@ describe('PlanCard', () => {
     useOffice.setState({
       plans: { p1: plan({ status: 'approved' }) },
       budget: {
-        constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
+        constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20, outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: [], sendsPerHour: 30, bulkRecipients: 5, callHours: [9, 19], callsPerDay: 20 },
         reserve: { active: false, limitPct: 75, fiveHourPct: null, sevenDayPct: null }, month: { key: '2026-10', usd: 0 }, plans: { p1: { spentUsd: 30, claudeUsd: 1.5 } },
       },
     });
@@ -116,5 +116,47 @@ describe('PlanCard', () => {
     expect(screen.getByText('Koordinatör başlattı')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Durdur' }));
     await waitFor(() => expect(api.stopPlan).toHaveBeenCalledWith('p1'));
+  });
+
+  it('a department’s stream: its name, and its latest plan and report', async () => {
+    vi.mocked(api.streamNotes).mockResolvedValueOnce([
+      {
+        streamId: 'tanitim',
+        plan: { id: 1, planId: 'p1', streamId: 'tanitim', kind: 'plan', text: 'Önce metin.', evidence: [], next: null, by: 'h', at: 1 },
+        report: { id: 2, planId: 'p1', streamId: 'tanitim', kind: 'report', text: 'Hazır.', evidence: ['dosya'], next: null, by: 'h', at: 2 },
+      },
+    ]);
+    const p = plan({ status: 'approved', streams: [{ id: 'tanitim', title: 'Tanıtım', owner: 'departman:d1', dependsOn: [], status: 'active' }] });
+    useOffice.setState({ plans: { p1: p }, departments: { d1: { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } } } as never);
+    render(<PlanCard plan={p} />);
+    expect(screen.getByText(/Pazarlama departmanı/)).toBeTruthy();
+    expect(await screen.findByText(/Akış planı: Önce metin\./)).toBeTruthy();
+    expect(screen.getByText(/Rapor: Hazır\./)).toBeTruthy();
+    expect(api.streamNotes).toHaveBeenCalledWith('p1');
+    // Folded away until opened (spec §8): the notes sit inside a closed <details> under its summary.
+    const notes = screen.getByText('Akış notları').closest('details')!;
+    expect(notes.className).toBe('plan-stream-notes');
+    expect(notes.open).toBe(false);
+    expect(within(notes).getByText(/Akış planı: Önce metin\./)).toBeTruthy();
+    expect(within(notes).getByText(/Rapor: Hazır\./)).toBeTruthy();
+  });
+
+  it('a plan without department streams asks for no notes', () => {
+    render(<PlanCard plan={plan()} />);
+    expect(api.streamNotes).not.toHaveBeenCalled();
+  });
+
+  it('reads a department’s notes again when a stream note arrives', async () => {
+    const p = plan({ status: 'approved', streams: [{ id: 'tanitim', title: 'Tanıtım', owner: 'departman:d1', dependsOn: [], status: 'active' }] });
+    useOffice.setState({ plans: { p1: p } } as never);
+    render(<PlanCard plan={p} />);
+    await waitFor(() => expect(api.streamNotes).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/Departman departmanı/)).toBeTruthy();
+    expect(screen.queryByText('Akış notları')).toBeNull();
+    vi.mocked(api.streamNotes).mockResolvedValueOnce([{ streamId: 'tanitim', plan: { id: 3, planId: 'p1', streamId: 'tanitim', kind: 'plan', text: 'Yeni plan.', evidence: [], next: null, by: 'h', at: 3 }, report: null }]);
+    act(() => useOffice.setState({ streamNotesRev: 1 }));
+    expect(await screen.findByText(/Akış planı: Yeni plan\./)).toBeTruthy();
+    expect(api.streamNotes).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText('Akış notları')).toHaveLength(1);
   });
 });

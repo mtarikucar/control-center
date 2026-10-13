@@ -9,18 +9,26 @@ import { formatWhenTR } from './format.ts';
 import { GoalsTab } from './GoalsTab.tsx';
 import { ManagementTab } from './ManagementTab.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
+import { DepartmentsTab } from './DepartmentsTab.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 import { streamOf } from './streams.ts';
 import { ApprovalsTab } from './ApprovalCard.tsx';
+import { CapabilitiesTab } from './CapabilitiesTab.tsx';
+import { waitingForOwner } from './capabilityWaiting.ts';
+import { OutboxTab } from './OutboxTab.tsx';
+import { useLiveRead } from './useLiveRead.ts';
 
 const TABS = [
   ['org', 'Örgüt'],
+  ['departments', 'Departmanlar'],
   ['goals', 'Hedefler'],
   ['agenda', 'Ajanda'],
   ['tasks', 'Görevler'],
   ['management', 'Yönetim'],
   ['proposals', 'Öneriler'],
   ['approvals', 'Onaylar'],
+  ['capabilities', 'Yetenekler'],
+  ['outbox', 'Giden kutusu'],
   ['decisions', 'Kararlar'],
   ['playbook', 'El kitabı'],
   ['notes', 'Notlar'],
@@ -82,13 +90,18 @@ function NoCoordinator({ people }: { people: Employee[] }) {
   );
 }
 
-function PersonCard({ e, current, onOpen }: { e: Employee; current: Task | undefined; onOpen: () => void }) {
+function PersonCard({ e, current, head = false, onOpen }: { e: Employee; current: Task | undefined; head?: boolean; onOpen: () => void }) {
   // "Koordinatör — Koordinatör [Koordinatör]" says one thing three times: show each word once.
   const title = e.title && e.title !== e.name ? e.title : '';
   const badge = e.kind !== 'member' && KIND_LABELS[e.kind] !== e.name && KIND_LABELS[e.kind] !== e.title ? KIND_LABELS[e.kind] : '';
   return (
     <button type="button" className="org-card" onClick={onOpen}>
       <strong>{e.name}</strong>
+      {head && (
+        <span className="org-head" title="Departman başkanı" aria-hidden="true">
+          ★
+        </span>
+      )}
       <span className="badge model">{e.provider === 'codex' ? 'Codex' : 'Claude'}</span>
       {title && <span className="muted"> — {title}</span>}
       {badge && <span className="badge">{badge}</span>}
@@ -171,6 +184,10 @@ export function CompanyView() {
   const [planFilter, setPlanFilter] = useState('');
   const people = useMemo(() => Object.values(views).map((v) => v.employee).filter((e) => e.lifecycle !== 'archived'), [views]);
   const coordinator = people.find((e) => e.kind === 'coordinator');
+  // What waits for the owner in the Yetenekler tab (final review I2), counted from the list the tab reads for itself too; unknown until it has been read, so no count then.
+  const capabilitiesRev = useOffice((s) => s.capabilitiesRev);
+  const companyCapabilities = useLiveRead(capabilitiesRev, () => api.customCapabilities());
+  const capabilitiesWaiting = companyCapabilities.data ? waitingForOwner(companyCapabilities.data, coordinator?.id ?? null) : 0;
   const allTasks = Object.values(tasks);
   const currentOf = (id: string) => allTasks.find((t) => t.assignee === id && t.status === 'in_progress');
   const nameOf = (id: string) => (id === 'owner' ? 'sahibi' : (views[id]?.employee.name ?? '—'));
@@ -179,11 +196,28 @@ export function CompanyView() {
     setCompanyOpen(false);
   };
 
-  const teams = new Map<string, Employee[]>();
-  for (const e of people) {
-    if (e.kind === 'coordinator') continue;
-    const team = e.team || 'Ekipsiz';
-    teams.set(team, [...(teams.get(team) ?? []), e]);
+  const departments = useOffice((s) => s.departments);
+  const openDepartments = Object.values(departments ?? {}).filter((x) => x.status === 'open').sort((a, b) => a.createdAt - b.createdAt);
+  /**
+   * The org chart's groups (spec departments §8): departments in opening order, the head first, then the centre;
+   * without departments, today's teams. Keyed by department id: a department may be named like the centre.
+   */
+  const groups: Array<{ key: string; label: string; headId: string | null; members: Employee[] }> = [];
+  if (openDepartments.length > 0) {
+    for (const dep of openDepartments) {
+      const members = people.filter((e) => e.kind !== 'coordinator' && e.departmentId === dep.id);
+      groups.push({ key: dep.id, label: dep.name, headId: dep.headId, members: [...members.filter((e) => e.id === dep.headId), ...members.filter((e) => e.id !== dep.headId)] });
+    }
+    const centre = people.filter((e) => e.kind !== 'coordinator' && !openDepartments.some((dep) => dep.id === e.departmentId));
+    if (centre.length) groups.push({ key: '__centre__', label: 'Merkez', headId: null, members: centre });
+  } else {
+    const teams = new Map<string, Employee[]>();
+    for (const e of people) {
+      if (e.kind === 'coordinator') continue;
+      const team = e.team || 'Ekipsiz';
+      teams.set(team, [...(teams.get(team) ?? []), e]);
+    }
+    for (const [team, members] of teams) groups.push({ key: team, label: team, headId: null, members });
   }
 
   const shown = allTasks.filter((t) => (!person || t.assignee === person) && (!planFilter || (planFilter === 'none' ? t.planId === null : t.planId === planFilter)));
@@ -197,6 +231,11 @@ export function CompanyView() {
             {TABS.map(([key, label]) => (
               <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
                 {label}
+                {key === 'capabilities' && capabilitiesWaiting > 0 && (
+                  <span className="count" aria-label={`${capabilitiesWaiting} karar bekliyor`}>
+                    {capabilitiesWaiting}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -213,16 +252,18 @@ export function CompanyView() {
               </section>
             )}
             <div className="org-teams">
-              {[...teams.entries()].map(([team, members]) => (
-                <section key={team} aria-label={team} className="org-team">
-                  <h3>{team}</h3>
+              {groups.map(({ key, label, headId, members }) => (
+                <section key={key} aria-label={label} className="org-team">
+                  <h3>{label}</h3>
                   {members.map((e) => (
-                    <PersonCard key={e.id} e={e} current={currentOf(e.id)} onOpen={() => open(e.id)} />
+                    <PersonCard key={e.id} e={e} head={e.id === headId} current={currentOf(e.id)} onOpen={() => open(e.id)} />
                   ))}
                 </section>
               ))}
             </div>
           </div>
+        ) : tab === 'departments' ? (
+          <DepartmentsTab />
         ) : tab === 'goals' ? (
           <GoalsTab />
         ) : tab === 'agenda' ? (
@@ -279,6 +320,10 @@ export function CompanyView() {
           <ProposalsTab />
         ) : tab === 'approvals' ? (
           <ApprovalsTab />
+        ) : tab === 'capabilities' ? (
+          <CapabilitiesTab />
+        ) : tab === 'outbox' ? (
+          <OutboxTab />
         ) : tab === 'decisions' ? (
           <DecisionsTab />
         ) : tab === 'playbook' ? (

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { STREAM_TO_HIRE, WORK_TYPE_LABELS, type Plan, type PlanStreamView } from '@cc/shared';
+import { useEffect, useMemo, useState } from 'react';
+import { STREAM_TO_HIRE, WORK_TYPE_LABELS, ownerDepartment, type Plan, type PlanStreamView, type StreamNote } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { PLAN_STATUS_LABELS, STREAM_STATUS_LABELS } from './labels.ts';
@@ -10,25 +10,58 @@ function estimates(p: Plan): string | null {
   return parts.length ? `Tahmin: ${parts.join(' · ')}` : null;
 }
 
-/** A plan's streams (management cycle §3.4): who carries each, what it waits for, and the status its tasks give it. */
-function PlanStreams({ streams }: { streams: PlanStreamView[] }) {
+type Notes = Array<{ streamId: string; plan: StreamNote | null; report: StreamNote | null }>;
+
+/** A plan's streams (management cycle §3.4): who carries each — a person, a role to hire or a department — what it waits for, its status, and a department's latest plan and report (spec departments §8). */
+function PlanStreams({ planId, streams }: { planId: string; streams: PlanStreamView[] }) {
   const views = useOffice((s) => s.views);
+  const departments = useOffice((s) => s.departments);
+  const rev = useOffice((s) => s.streamNotesRev);
+  const [notes, setNotes] = useState<Notes>([]);
+  const byDepartment = streams.some((x) => ownerDepartment(x.owner) !== null);
+  useEffect(() => {
+    if (!byDepartment) return;
+    let live = true;
+    api.streamNotes(planId).then((n) => live && setNotes(n), () => undefined);
+    return () => {
+      live = false;
+    };
+  }, [planId, byDepartment, rev]);
   const titles = new Map(streams.map((x) => [x.id, x.title]));
-  const owner = (o: string) => (o.startsWith(`${STREAM_TO_HIRE}:`) ? o : (views[o]?.employee.name ?? '—'));
+  const owner = (o: string) => {
+    if (o.startsWith(`${STREAM_TO_HIRE}:`)) return o;
+    const dep = ownerDepartment(o);
+    return dep ? `${departments?.[dep]?.name ?? 'Departman'} departmanı` : (views[o]?.employee.name ?? '—');
+  };
   return (
     <section className="plan-streams" aria-label="Akışlar">
       <h4>Akışlar</h4>
       <ul>
-        {streams.map((x) => (
-          <li key={x.id} className={`plan-stream ${x.status}`}>
-            <span className="plan-stream-title">{x.title}</span>
-            <span className={`badge stream-${x.status}`}>{STREAM_STATUS_LABELS[x.status]}</span>
-            <span className="muted plan-stream-meta">
-              {owner(x.owner)}
-              {x.dependsOn.length > 0 ? ` · önce: ${x.dependsOn.map((d) => titles.get(d) ?? d).join(', ')}` : ''}
-            </span>
-          </li>
-        ))}
+        {streams.map((x) => {
+          const n = notes.find((y) => y.streamId === x.id);
+          return (
+            <li key={x.id} className={`plan-stream ${x.status}`}>
+              <span className="plan-stream-title">{x.title}</span>
+              <span className={`badge stream-${x.status}`}>{STREAM_STATUS_LABELS[x.status]}</span>
+              <span className="muted plan-stream-meta">
+                {owner(x.owner)}
+                {x.dependsOn.length > 0 ? ` · önce: ${x.dependsOn.map((d) => titles.get(d) ?? d).join(', ')}` : ''}
+              </span>
+              {(n?.plan || n?.report) && (
+                <details className="plan-stream-notes">
+                  <summary>Akış notları</summary>
+                  {n.plan && <p className="plan-stream-note">Akış planı: {n.plan.text}</p>}
+                  {n.report && (
+                    <p className="plan-stream-note">
+                      Rapor: {n.report.text}
+                      {n.report.evidence.length > 0 ? ` (kanıt: ${n.report.evidence.join('; ')})` : ''}
+                    </p>
+                  )}
+                </details>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
@@ -111,7 +144,7 @@ export function PlanCard({ plan }: { plan: Plan }) {
           )}
         </section>
       )}
-      {streams.length > 0 && <PlanStreams streams={streams} />}
+      {streams.length > 0 && <PlanStreams planId={live.id} streams={streams} />}
       {live.steps.length > 0 && (
         <ol>
           {live.steps.map((step, i) => (

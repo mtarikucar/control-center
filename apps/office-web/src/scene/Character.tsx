@@ -142,7 +142,7 @@ export function Character({ employee, behavior, spot, asset, usage, selected, ta
             <span className={`dot ${employee.lifecycle}`} aria-hidden="true" />
             <strong className="tag-name">{employee.name}</strong>
             {employee.kind === 'lead' && (
-              <span className="tag-badge" aria-label="ekip lideri">
+              <span className="tag-badge" aria-label="departman başkanı">
                 ★
               </span>
             )}

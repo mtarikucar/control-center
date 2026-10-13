@@ -5,34 +5,16 @@ import { LAYOUT, type Wall } from '../office/layout.ts';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { PALETTE } from './palette.ts';
 import { ReflectiveFloor } from './ReflectiveFloor.tsx';
+import { frameOf, type WallFrame } from './wallFrame.ts';
 
 const T = 0.25; // wall thickness
 const CITY_URL = '/assets3d/backdrop/city.jpg';
 const CENTER = { x: LAYOUT.width / 2, z: LAYOUT.depth / 2 };
 
-interface Frame {
-  len: number;
-  /** +1 when the wall's local +z faces into the room, −1 otherwise. */
-  inside: 1 | -1;
-}
-
-function frameOf(wall: Wall): Frame & { cx: number; cz: number; rot: number } {
-  const dx = wall.x2 - wall.x1;
-  const dz = wall.z2 - wall.z1;
-  const rot = -Math.atan2(dz, dx);
-  const cx = (wall.x1 + wall.x2) / 2;
-  const cz = (wall.z1 + wall.z2) / 2;
-  // Local +z in world space after rotating by `rot` about y.
-  const nx = Math.sin(rot);
-  const nz = Math.cos(rot);
-  const inside = nx * (CENTER.x - cx) + nz * (CENTER.z - cz) >= 0 ? 1 : -1;
-  return { len: Math.hypot(dx, dz), inside, cx, cz, rot };
-}
-
 const box = (w: number, h: number, d: number) => <boxGeometry args={[w, h, d]} />;
 const paint = (color: string, extra: Record<string, unknown> = {}) => <meshStandardMaterial color={color} roughness={0.85} {...extra} />;
 
-function SolidWall({ wall, f }: { wall: Wall; f: Frame }) {
+function SolidWall({ wall, f }: { wall: Wall; f: WallFrame }) {
   return (
     <>
       <mesh position={[0, wall.height / 2, 0]} castShadow receiveShadow>
@@ -47,7 +29,7 @@ function SolidWall({ wall, f }: { wall: Wall; f: Frame }) {
   );
 }
 
-function LowWall({ wall, f }: { wall: Wall; f: Frame }) {
+function LowWall({ wall, f }: { wall: Wall; f: WallFrame }) {
   return (
     <>
       <mesh position={[0, wall.height / 2, 0]} castShadow receiveShadow>
@@ -64,7 +46,7 @@ function LowWall({ wall, f }: { wall: Wall; f: Frame }) {
 
 // Glass stays slightly rough: a near-mirror highlight overflows the half-float frame buffer and bloom spreads it
 // over the whole picture (a black screen when zoomed in).
-function GlassWall({ wall, f }: { wall: Wall; f: Frame }) {
+function GlassWall({ wall, f }: { wall: Wall; f: WallFrame }) {
   const posts = Math.max(1, Math.round(f.len / 1.2));
   return (
     <>
@@ -89,7 +71,7 @@ function GlassWall({ wall, f }: { wall: Wall; f: Frame }) {
 }
 
 /** Vertical oak slats on both faces of a backing panel; instanced, they are dozens of boards in one draw. */
-function SlatWall({ wall, f }: { wall: Wall; f: Frame }) {
+function SlatWall({ wall, f }: { wall: Wall; f: WallFrame }) {
   const ref = useRef<InstancedMesh>(null);
   const pitch = 0.11;
   const count = Math.max(1, Math.floor(f.len / pitch));
@@ -142,7 +124,7 @@ function CityPane({ len, height, offset, total, inside }: { len: number; height:
   );
 }
 
-function WindowWall({ wall, f }: { wall: Wall; f: Frame }) {
+function WindowWall({ wall, f }: { wall: Wall; f: WallFrame }) {
   const bays = Math.max(1, Math.round(f.len / 3));
   const bay = f.len / bays;
   const sill = 0.7;
@@ -220,7 +202,7 @@ function WindowWall({ wall, f }: { wall: Wall; f: Frame }) {
 }
 
 function WallMesh({ wall }: { wall: Wall }) {
-  const f = frameOf(wall);
+  const f = frameOf(wall, CENTER);
   return (
     <group position={[f.cx, 0, f.cz]} rotation={[0, f.rot, 0]}>
       {wall.kind === 'window' && <WindowWall wall={wall} f={f} />}

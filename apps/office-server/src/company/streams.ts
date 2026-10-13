@@ -1,4 +1,4 @@
-import { STREAM_TO_HIRE, type Employee, type PlanStream } from '@cc/shared';
+import { STREAM_TO_DEPARTMENT, STREAM_TO_HIRE, departmentOwner, type Department, type Employee, type PlanStream } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import { clean, fold } from './text.ts';
 
@@ -6,15 +6,21 @@ import { clean, fold } from './text.ts';
 export const MAX_STREAMS = 12;
 const ID_MAX = 32;
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const OWNER_HELP = 'ofisteki bir çalışanın adı ya da kimliği (officeStatus), ya da işe alınacaksa “alınacak: <rol>”';
+const OWNER_HELP = 'ofisteki bir çalışanın adı ya da kimliği (officeStatus), bir departman (“departman: <ad>”, departmentsRead) ya da işe alınacaksa “alınacak: <rol>”';
 
 /**
  * A plan's streams as the coordinator gave them, checked: each a short lowercase slug unique in the plan, a title, an
  * owner — someone at work in the office, stored by id (`person` is the office's lookup by id or name, null for no one;
  * it may give someone let go, who is refused as such), or `alınacak: <rol>` — and the ids of the plan's streams it
- * waits for, with no cycle. Absent: none.
+ * waits for, with no cycle. Absent: none. A department may own a stream too (`department`: the open one by id or name,
+ * null for none; `openDepartments` names the choices in the refusal): stored as `departman:<id>`.
  */
-export function checkStreams(value: unknown, person: (who: string) => Employee | null): PlanStream[] {
+export function checkStreams(
+  value: unknown,
+  person: (who: string) => Employee | null,
+  department: (who: string) => Department | null = () => null,
+  openDepartments: () => Department[] = () => [],
+): PlanStream[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new ValidationError('Akışlar (streams) bir liste olmalı: her biri id, title, owner ve dependsOn ile.');
   if (value.length > MAX_STREAMS) throw new ValidationError(`Bir planda en fazla ${MAX_STREAMS} akış olabilir; küçük parçaları bir akışta topla.`);
@@ -28,7 +34,7 @@ export function checkStreams(value: unknown, person: (who: string) => Employee |
     }
     if (streams.some((s) => s.id === id)) throw new ValidationError(`Aynı kimlikle iki akış var: “${id}”.`);
     const title = clean(typeof r.title === 'string' ? r.title : undefined, `“${id}” akışının başlığı`, 120, true);
-    const owner = ownerOf(id, typeof r.owner === 'string' ? r.owner : '', person);
+    const owner = ownerOf(id, typeof r.owner === 'string' ? r.owner : '', person, department, openDepartments);
     const deps = r.dependsOn ?? [];
     if (!Array.isArray(deps) || deps.some((d) => typeof d !== 'string')) {
       throw new ValidationError(`“${id}” akışının bağımlılıkları (dependsOn) aynı plandaki akışların kimliklerinden oluşan bir liste olmalı.`);
@@ -47,18 +53,42 @@ export function checkStreams(value: unknown, person: (who: string) => Employee |
   return streams;
 }
 
-/** `alınacak: <rol>` in one spelling, or the id of the person named. */
-function ownerOf(id: string, given: string, person: (who: string) => Employee | null): string {
+/** The open departments, named for a refusal that offers the choices. */
+const openList = (open: () => Department[]) => {
+  const names = open().map((d) => d.name);
+  return names.length ? `Açık departmanlar: ${names.join(', ')}.` : 'Açık departman yok.';
+};
+
+/** `alınacak: <rol>` in one spelling, `departman:<id>` for a department (by “departman: <ad>” or its plain name), or the id of the person named. */
+function ownerOf(
+  id: string,
+  given: string,
+  person: (who: string) => Employee | null,
+  department: (who: string) => Department | null,
+  openDepartments: () => Department[],
+): string {
   const text = given.trim();
   if (!text) throw new ValidationError(`“${id}” akışının sahibi (owner) boş olamaz: ${OWNER_HELP}.`);
   const colon = text.indexOf(':');
-  if (colon >= 0 && fold(text.slice(0, colon).trim()) === fold(STREAM_TO_HIRE)) {
+  const prefix = colon >= 0 ? fold(text.slice(0, colon).trim()) : '';
+  if (prefix === fold(STREAM_TO_HIRE)) {
     const role = clean(text.slice(colon + 1).replace(/\s+/g, ' '), `“${id}” akışının alınacak rolü`, 80, false);
     if (!role) throw new ValidationError(`“${id}” akışının sahibi alınacak biriyse rolünü de yaz: “alınacak: <rol>”.`);
     return `${STREAM_TO_HIRE}: ${role}`;
   }
+  if (prefix === fold(STREAM_TO_DEPARTMENT)) {
+    const name = text.slice(colon + 1).trim();
+    const dep = department(name);
+    if (!dep) throw new ValidationError(`“${id}” akışının sahibi departman bulunamadı: ${name}. ${openList(openDepartments)}`);
+    return departmentOwner(dep.id);
+  }
   const found = person(text);
-  if (!found) throw new ValidationError(`“${id}” akışının sahibi bulunamadı: ${text}. Sahip ${OWNER_HELP} olmalı.`);
+  if (!found) {
+    // A department by its plain name (a person is looked up first: no one is named like a department).
+    const dep = department(text);
+    if (dep) return departmentOwner(dep.id);
+    throw new ValidationError(`“${id}” akışının sahibi bulunamadı: ${text}. Sahip ${OWNER_HELP} olmalı.`);
+  }
   if (found.lifecycle === 'archived') throw new ValidationError(`“${id}” akışının sahibi ${found.name} işten ayrıldı; akışa yeni bir sahip ver: ${OWNER_HELP}.`);
   return found.id;
 }

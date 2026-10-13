@@ -43,6 +43,14 @@ describe('ApprovalCard (B9a)', () => {
     expect(screen.getByText(/tamam/)).toBeTruthy();
   });
 
+  it('spec capabilities §2: a calendar invitation and a call have labels of their own', () => {
+    const { unmount } = render(<ApprovalCard approval={approval({ kind: 'calendar', target: 'create_event summary=Tanışma' })} />);
+    expect(screen.getByRole('region', { name: 'Onay: takvim create_event summary=Tanışma' })).toBeTruthy();
+    unmount();
+    render(<ApprovalCard approval={approval({ kind: 'call', target: 'jeeta_click_to_dial phone=+905321112233' })} />);
+    expect(screen.getByText('arama')).toBeTruthy();
+  });
+
   it('shows the server’s error', async () => {
     vi.mocked(api.denyApproval).mockRejectedValueOnce(new Error('Bu onay isteği artık beklemiyor.'));
     render(<ApprovalCard approval={approval()} />);

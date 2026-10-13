@@ -196,17 +196,123 @@ sırasını kilitlemez.
   ScheduleWakeup RemoteTrigger` ile açılır. Bu araçlar oturuma özeldir, ofisten görünmez ve duraklatmayı dinlemez;
   zamana bağlı her iş ofisin saatinden geçer.
 
-## Öneriler ve ekip liderleri
+## Departmanlar ve öneriler
 
+- **Departman:** ofiste bir alanın sahibi, kendi **odası** olan bir ekip (aşağıda *Ofis odaları*): bir **başkanı** (o departmanın lideri) ve üyeleri olur; ad,
+  misyon ve "yapar / yapmaz" sınırı yazılıdır. Aynı anda en fazla **6** departman açık olabilir. Koordinatör
+  departmansızdır; başkansız bir departmanın işi koordinatöre gelir.
+- **Açmak:** beş hazır şablon var: Yazılım ve Otomasyon, Pazarlama, İç-Dış İletişim, Satış, Operasyon ve Finans. Her
+  biri misyonunu, sınırını, başkan rolünü ve önerilen rollerini taşır. **Şirket → Departmanlar** sekmesinden bir
+  şablondan ya da **Özel departman** olarak (ad, misyon, yapar / yapmaz) açarsınız; koordinatör de `departmentCreate`
+  ile açar, `departmentUpdate`, `departmentMove` ve `departmentClose` ile düzenler. Kapanan departmanın üyeleri
+  merkeze geçer, açık akışları koordinatöre döner.
+- **İş nasıl akar:** plan kartındaki akışların sahibi bir departman olabilir (`departman: Pazarlama`). Başkan akışını
+  duyar, `streamPlan` ile planını yazar, kendi ekibine görev açıp dağıtır ve akış bitince `streamReport` ile raporlar;
+  plan kartında akışın altında son plan ve rapor görünür, koordinatörün panosunda **Departmanlar** bölümü durur.
+  Başka bir departmandan iş istemek için `taskPass` bir departman adıyla da çalışır: görev o departmanın başkanına
+  gider (başkan yoksa koordinatöre).
+- **Başkan ne yapabilir:** kendi departmanına `hire` ile çalışan alır (hep üye olarak; Anayasa'nın çalışan sınırı
+  geçerlidir), kendi departmanındakilerin modelini değiştirir, onları uyutup uyandırır, çalışan dosyasına not yazar.
+  **Yapamaz:** departman açmak, kapatmak ya da düzenlemek, başkan atamak, başka departmana doğrudan görev açmak
+  (`taskPass` ile ister), plan kartı açmak ya da değiştirmek; işten çıkarmayı yalnız siz yaparsınız.
+- **Eski ekipler:** departmanlardan önce yazdığınız serbest `team` adları ofis her açıldığında kendiliğinden
+  departman olur (aynı ad tek departman; ekibin ilk lideri başkanı); elle bir şey yapmanız gerekmez.
 - Çalışanlar **ihtiyaç**, **fikir**, **itiraz** ("yanlış yoldayız") ve **satın alma** taleplerini `propose` ile açar.
-  Liderleri ya da koordinatör karara bağlar (karar defterine yazılır) ya da büyükse size getirir. **Satın almalar her
+  Başkanlar ya da koordinatör karara bağlar (karar defterine yazılır) ya da büyükse size getirir. **Satın almalar her
   zaman size gelir**: Şirket görünümünün **Öneriler** sekmesinde (ve koordinatörün sohbetinde) Onayla / Reddet. Şirket
   düğmesindeki sayı sizi bekleyen plan ve talepleri gösterir.
 - `askColleague`: bir çalışan arkadaşına onu bölmeden soru sorar.
-- Bir ekip büyüyünce koordinatör `appointLead` ile ekip lideri atar; lider kendi ekibine iş açar ve dağıtır, etiketinde
-  ★ görünür.
 - Bir revizyonu reddederseniz plan onaylı sürümüyle sürer. Koordinatör her gün kısa bir özet raporlar; okunmamış rapor
   etiketinde 📋 olarak görünür. Koordinatör sizinle plan konuşurken toplantı odasına geçer.
+
+## Ofis odaları
+
+Ofis 32 × 24 m'lik tek bir kat: ortada **merkez**, kuzeyinde ve güneyinde üçer cam duvarlı **departman odası**.
+
+- **Merkez:** koordinatörün masası ışık hüzmesinin altında; kuzeyinde toplantı masası, batıda kahve köşesi,
+  güneybatıda sunucu köşesi, doğuda lounge, koordinatörün iki yanında sekiz merkez masası.
+- **Işık hüzmesi** koordinatörün durumunu gösterir: çalışırken nabız gibi parlar, boştayken sakin, uyurken ya da
+  dururken sönük; koordinatör yoksa hüzme de yok.
+- **Odalar:** bir departman açılınca en küçük boş odayı alır, kapanınca oda boşalır. Departmanın odasının halısı
+  odanın renginde (her odanın kendi rengi), lambası ve ekranları açık; kapısının üstündeki tabelada departmanın ve
+  başkanının adı, odanın zemininde de her yakınlıkta okunan bir etikette odanın rengi ve departmanın adı yazar. Boş
+  oda karanlıktır, tabelasında "Boş oda" yazar; departmanı olmayan ama içinde oturan biri olan oda "Ortak oda"dır:
+  lambası ve oturulan masaların ekranları açık.
+- **Koltuklar (45):** koordinatör 0'da, oda r'nin altı masası 1 + 6r … 6 + 6r, merkez masaları 37 … 44. Departman
+  üyesi kendi odasına oturur; oda doluysa (departmanda kişi sınırı yok) merkezdeki bir masaya, departmansızlar
+  merkeze. Merkezin sekiz masası doluysa merkezdekiler hiçbir departmanın tutmadığı en yüksek numaralı odaya oturur
+  (yeni departman en küçük boş odayı aldığından yolunda durmazlar), o da yoksa öteki odalara; bir departman o odayı
+  alınca oradakiler boş bir yere yürür. Departmanı ya da koordinatörlüğü değişen kişi yeni yerine yürür, boşalan bir
+  masayı bekleyen hemen oturur; ofis her açılışta herkesi yerine oturtur (sekiz masalı eski ofis de böyle taşınır).
+- **Çalışan sınırı:** Anayasa'da varsayılan 12, en çok 45 (koltuk sayısı); kayıtlı bir değerin varsa o kalır.
+
+## Yetenekler ve otonomi
+
+- **Yetenek türleri:** sözlükteki her yetenek bir tür taşır — okuma, gönderim, takvim, arama, yayın, ödeme, silme
+  (sözlük sürüm 3); kapının onay türü buradan gelir (takvim daveti ve arama artık ayrı türler). `messages.read` gelen
+  SMS, WhatsApp ve sosyal medya mesajlarını ve yorumları okur.
+- **Şirketin eklediği yetenekler:** sözlükte olmayan bir bağlayıcı aracı dışa dönük sayılır, oturumda kapanır (oturumda
+  kapatma yalnız Claude çalışanlarında işler), kapıda tutulur. Çalışan `capabilityPropose` ile yetenek önerir;
+  koordinatör `capabilityDecide` ile karar verir — türü yalnız sıkılaştırabilir, ödeme ve silme türünü yalnız siz
+  değiştirirsiniz; koordinatörün kendi önerisi size gelir. Bir aracı **okuma** olarak sınıflandırmak yalnız sizin
+  kararınızdır (okuma araçları her oturumda açıktır ve kapıdan geçer): koordinatör bir okuma önerisini ancak dışa dönük
+  bir türe sıkılaştırarak kabul eder. Koordinatörün etkinleştirdiği dışa dönük bir yetenek, siz Yetenekler sekmesinden
+  sisteme açana dek kapıda sizindir: politika "Sistem halletsin" dese de çağrıları size gelir; kapıyı açtığınızda daha
+  önce koordinatörün etkinleştirdikleri de sizin sisteme açmanızı bekler. Sizin eklediğiniz, onayladığınız ya da
+  türünü değiştirdiğiniz yetenek ile ürünle gelenler sisteme açıktır. Şirket görünümünün **Yetenekler** sekmesinde
+  ürünle gelenleri görür, yenisini eklersiniz (hemen etkin; türü kendiniz seçersiniz, varsayılan yoktur, çünkü okuma
+  her oturumda açıktır ve kapıda serbesttir), bekleyenleri onaylar ya da reddeder, etkin olanın türünü değiştirir ya da
+  geri alırsınız (araçları yeniden sınıflandırılmamış olur). Koordinatörün etkinleştirdiğini satırındaki **Sisteme aç**
+  düğmesiyle sisteme açarsınız. Sekmenin adındaki sayı sizi bekleyenleri gösterir (koordinatörün kendi önerileri, okuma
+  önerileri, sisteme açılmamış etkinleştirmeler); koordinatörün önerisi ve etkinleştirmesi çalışanın yayınında da bir
+  satır olarak görünür. Yeni bir yetenek, rolüne eklenen kişinin bir sonraki oturumunda açılır.
+- **Otonomi politikası (Anayasa):** kapı açıkken bağlayıcıdan yapılan gönderim, yayın, arama ve takvim için "Sahibine
+  sor" ya da "Sistem halletsin". Varsayılan: gönderim, yayın, arama sistem; takvim size. Her zaman size gelenler:
+  - ödeme, silme, tarayıcı, ofisin kendisi ve sınıflandırılmamış araçlar;
+  - komut satırından (Bash) gönderim;
+  - kabuktan açılan iç içe bir Claude Code ya da Codex oturumu (yalnız `--version`/`--help` serbest);
+  - MCP ayarlarına (`.mcp.json`, `~/.claude.json`, `.codex/config.toml`), sahibinin `~/.claude` klasörüne ve masanın
+    `.claude` klasörüne yazma.
+
+  Politika "Sistem halletsin" dese de iki çağrı daha size kalır: çalışanın size sorduğu ve cevabınız gelmeyen ya da
+  bir günden az önce reddettiğiniz çağrı (onay yalnız aynı çağrının tekrarını açar; başka alıcı başka çağrıdır) ve
+  sisteme açmadığınız bir yeteneğin çağrısı (yukarıda).
+
+  Claude oturumları, bir bağlayıcının ya da ofisin adını taşıyan `.mcp.json` sunucusunu da yüklemez; kancası takılı her
+  ofis oturumunda, kapı açık olsun olmasın. **Kapı varsayılan kapalı ve bu iş onu açmaz:** politika ve kurallar yalnız
+  kapıyı siz açınca (Anayasa → Geri alınamaz iş kapısı) işler. **Bilinen sınır:** Codex çalışanlarının bağlayıcı
+  çağrıları kapıdan geçmez (ofis Codex'e, Claude'daki gibi her araç çağrısını gören bir kanca bağlamıyor); politika ve
+  kurallar Claude çalışanlarının bağlayıcı çağrılarına işler.
+- **Kurallar:** departman başına saatlik gönderim + yayın sınırı (`sendsPerHour`, 30; departmansız çalışan kendi
+  başına sayılır), toplu gönderim eşiği (`bulkRecipients`, 5'ten çok alıcı), özel kişiler (`specialContacts`: e-posta,
+  telefon, kullanıcı adı, kişinin ya da firmanın adı ya da kişinin aday ve konuşma kimliği; ad bütün bir ifade olarak
+  aranır, büyük-küçük harf ve telefonun yazılışı fark etmez), arama saatleri (`callHours`, 9–19) ve departman başına
+  günlük arama sınırı (`callsPerDay`, 20). Kuralı aşan çağrı size gelir; gerekçesi kuralı söyler. Kuralların sınırları:
+  - Özel kişi çağrının girdisinde her yerde aranır: onlara giden ya da onlar hakkındaki çağrı size gelir, ama yalnız
+    girdide yazılıysa. Kimlikle adreslenen bir çağrıda (aday ya da konuşma kimliğiyle e-posta, mesaj ya da arama) kapı
+    kişiyi göremez; listeye kişinin kimliklerini de yazın.
+  - Alıcıları girdide görünmeyen bir gönderim size gelir ("alıcılar girdide yok"): taslağı kimliğiyle göndermek ve
+    herkese yanıtlamak. Çalışanlara olağan bir yanıtın alıcılarını çağrıya yazmaları söylenir. Kimlikle yapılan tek
+    kişilik bir yanıt (Gmail `reply` gibi) tutulmaz; kişinin kimliği listede yoksa sistemce çıkabilir.
+  - Çok derin ya da çok büyük girdi sonuna kadar okunamaz ve tutulur ("okunamayan girdi").
+  - Gönderim, yayın, arama ya da davet yeteneği olan çalışanların masasında liste "Özel kişiler" bölümü olarak durur
+    (liste boşken hiçbir masaya yazılmaz; çalışan değişikliği bir sonraki oturumunda görür); yani o masalarda düz
+    metindir. Kapı kapalıyken bu kurallar mekanik değildir, rol metinlerindeki "göndermeden önce `approvalRequest` ile
+    sor" talimatına dayanır.
+- **Giden kutusu:** gönderim, yayın, arama ya da takvim parçası olan ve kapının sistem adına geçirdiği ya da sizin
+  onayladığınız her çağrı kaydedilir (kapı kapalıyken yazılmaz; `outboxRead` o zaman "Kapı kapalı: giden kutusuna
+  yazılmıyor" diye yanıtlar) — "izin verildi" kaydıdır, teslim değil; onaylanan ödeme, silme, tarayıcı, ofis ve diğer
+  işler Onaylar'da ve `gate.checked` olaylarında kalır. **Giden kutusu** sekmesi son 200'ü departmana ve türe göre
+  süzer; koordinatör hepsini, başkanlar kendi departmanınınkini `outboxRead` ile okur (kapı açıkken her gün örnek
+  okuma önerilir).
+- **Muhakeme:** herkesin rehberinde "Sistemin senin adına gönderdiği" bölümü var: para sözü, hukuki konu, kriz, bilgi
+  tabanında cevabı olmayan soru, ticari ileti izni (İYS) olmayan kişiye ilk tanıtım, toplu gönderim ve özel kişiye giden
+  ya da onu anan her şey çalışan göndermeden önce `approvalRequest` (aracın adı ve göndereceği girdi) ile size gelir;
+  kapı açıkken de kapalıyken de. Kapı içeriği okumaz. İletişim, Pazarlama ve Satış başkanları, müşteri temsilcisi, aday
+  araştırmacı ve sosyal medya uzmanı olağan gönderim ve yayını politikayla kendileri yapar; hepsi toplu gönderimi ve
+  özel kişiye giden ya da onu anan şeyi göndermeden önce size sorar. Pazarlama bülteni ve toplu e-postayı hazırlar,
+  gönderimi size sorar (Pazarlama'da e-posta gönderen rol yok); İçerik Yazarı metni teslim eder ve bu sınıfa girenleri
+  teslimde işaretler.
 
 ## office-server
 

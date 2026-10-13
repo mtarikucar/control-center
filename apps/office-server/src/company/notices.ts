@@ -40,6 +40,16 @@ export const NOTICE_TOPICS = {
   /** You are the coordinator now: take over. */
   'role.coordinator': 'decision',
   'role.changed': 'info',
+  /** A plan stream is your department's now: plan it (streamPlan), open its tasks, run it (spec departments §6.2). */
+  'stream.assigned': 'decision',
+  /** A department lost its head: its open streams are the coordinator's until one is named. */
+  'stream.returned': 'decision',
+  /** Your department's stream has no open task left: report it (streamReport). */
+  'stream.done': 'decision',
+  /** A head reported on a stream (the coordinator reads it on the board too). */
+  'stream.report': 'info',
+  /** A department was opened, renamed or closed, or a head hired into theirs. */
+  'department.changed': 'info',
   'reserve.changed': 'decision',
   /** The office paused itself at the owner's weekly line: nothing to decide while paused, so it waits for the board. */
   'quota.weekly_stop': 'info',
@@ -66,6 +76,10 @@ export const NOTICE_TOPICS = {
   'approval.requested': 'info',
   /** B9a: the owner approved (repeat the same call) or denied your request. */
   'approval.decided': 'decision',
+  /** Spec capabilities §4.2: someone proposed a capability for the vocabulary — accept it (with its kind) or reject it. */
+  'capability.proposed': 'decision',
+  /** Your proposed capability was decided; or the owner added, activated or retired one (put it on the roles that need it). */
+  'capability.decided': 'decision',
   /** B9a: owner endpoints were called not the page's way (no Origin or nonce): at most one note an hour per kind. */
   'owner.flagged': 'decision',
   /** A task you hold was cancelled (its plan was stopped): stop working on it. */

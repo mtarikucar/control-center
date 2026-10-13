@@ -50,6 +50,8 @@ export interface Employee {
   template?: TemplateRef | null;
   /** The capabilities the role declares (B7), ids of the vocabulary; empty when none were declared. */
   capabilities?: string[];
+  /** The open department they are in (spec departments §3); absent: the centre (and the coordinator). */
+  departmentId?: string | null;
 }
 
 /** Which role template, at which version (spec 2026-10-08-role-templates-design §5). */
@@ -92,4 +94,8 @@ export interface HireInput {
   team?: string;
   kind?: EmployeeKind;
   reportsTo?: string | null;
+  /** The department to hire into (spec departments §5); a head always hires into their own. */
+  departmentId?: string | null;
+  /** Hire as the department's head (the coordinator and the owner only). */
+  head?: boolean;
 }

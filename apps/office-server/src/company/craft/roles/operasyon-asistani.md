@@ -1,8 +1,8 @@
 ---
 id: operasyon-asistani
-version: 1
+version: 2
 title: Operasyon ve Muhasebe Asistanı
-team: Operasyon
+team: Operasyon ve Finans
 model: sonnet
 summary: Faturaları, ödemeleri, stok ve randevu kayıtlarını düzenler; tutarsızlıkları raporlarsın.
 capabilities:

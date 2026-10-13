@@ -1,8 +1,11 @@
 import { createServer } from 'node:http';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { Employee } from '@cc/shared';
+import { prepareCodexDesk } from '../src/codex/desk.ts';
+import { writeDepartmentFile } from '../src/desk.ts';
 import { Engine } from '../src/engine.ts';
 import { loadConfig } from '../src/config.ts';
 import { codexItem, codexQuota, codexUsage } from '../src/codex/normalize.ts';
@@ -58,6 +61,24 @@ describe('Codex office integration', () => {
     expect(start?.params).toMatchObject({ model: 'test-codex', sandbox: 'workspace-write', approvalPolicy: 'on-request', approvalsReviewer: 'user' });
     expect(start?.params.config).toEqual({ 'features.image_generation': true });
     expect(t.engine.runtime()).toEqual({ provider: 'codex', mode: 'mixed', costAvailable: false });
+  });
+  it('inlines the department block into AGENTS.md, and drops the import line when the desk has none (departments, final review)', () => {
+    const dataDir = tempDir();
+    const e = { id: 'e', slug: 'ada', name: 'Ada', role: 'Test yaz', title: '', team: 'Keşif', kind: 'member' } as Employee;
+    const agents = () => readFileSync(join(dataDir, 'desks', 'ada', 'AGENTS.md'), 'utf8');
+    // A desk from before departments: no department.md, so no import in the card and none in AGENTS.md.
+    prepareCodexDesk(dataDir, e);
+    expect(agents()).not.toContain('department.md');
+    expect(agents()).not.toContain('# Departmanın');
+    writeDepartmentFile(dataDir, 'ada', '# Departmanın\n\n**Keşif** — pazarı araştırır $& \n');
+    prepareCodexDesk(dataDir, e);
+    expect(agents()).toContain('# Departmanın\n\n**Keşif** — pazarı araştırır $& ');
+    expect(agents()).not.toContain('@department.md');
+    // The card says "@department.md" but the file was removed since: the line goes, not a dangling import.
+    unlinkSync(join(dataDir, 'desks', 'ada', 'department.md'));
+    prepareCodexDesk(dataDir, e);
+    expect(agents()).not.toContain('@department.md');
+    expect(agents()).not.toContain('# Departmanın');
   });
   it('delivers multiple messages once, accounts for per-turn tokens, and resumes the same native thread', async () => {
     const t = make(), e = t.engine.hire({ name: 'Ada', role: 'r' });

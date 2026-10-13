@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConstitutionStore } from '../src/company/budget-store.ts';
+import { CustomCapabilityStore } from '../src/company/custom-capability-store.ts';
 import { DecisionStore, NoteStore } from '../src/company/memory-store.ts';
 import { TaskStore } from '../src/company/store.ts';
 import { migrateUp, openDb } from '../src/db.ts';
@@ -193,6 +194,58 @@ describe('main.ts wiring: the office process', () => {
     await stop(office);
   }, 30_000);
 
+  it('departments: the teams of before them become departments at start, and the API and the snapshot carry them (`departments` given to Company, the API and the start)', async () => {
+    const { dir, db, ada } = prepared();
+    const lead = new Roster(db, 8).create({ name: 'Kaan', role: 'Araştırmacı', team: 'Keşif', kind: 'lead' });
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    const listed: Array<{ id: string; name: string; headId: string | null }> = await call(port, 'GET', '/api/departments');
+    expect(listed).toMatchObject([{ name: 'Keşif', headId: lead.id }]);
+    expect((await call(port, 'GET', '/api/office')).departments).toMatchObject([{ name: 'Keşif', headId: lead.id }]);
+    // The owner moves Ada in; her desk learns the department at once (the departments' reload is the engine's).
+    expect(await call(port, 'POST', `/api/employees/${ada.id}/department`, { departmentId: listed[0]?.id })).toMatchObject({ departmentId: listed[0]?.id, team: 'Keşif', reportsTo: lead.id });
+    await stop(office);
+  }, 30_000);
+
+  it('rooms: an office of before (eight desks) is reseated at its start — the coordinator under the beam, an adopted team in its room, the rest at the hub', async () => {
+    const dir = tempDir();
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db);
+    // Desks by hire order as before rooms, the coordinator third; Bora's team becomes a department (room 0) at the start.
+    const roster = new Roster(db, 8);
+    const ada = roster.create({ name: 'Ada', role: 'r' });
+    const bora = roster.create({ name: 'Bora', role: 'r', team: 'Keşif' });
+    const coordinator = roster.create({ name: 'Koordinatör', role: 'r', kind: 'coordinator' });
+    expect([ada, bora, coordinator].map((e) => e.deskIndex)).toEqual([0, 1, 2]);
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    const snapshot: { employees: Array<{ id: string; deskIndex: number }>; departments: Array<{ name: string; room: number }> } = await call(port, 'GET', '/api/office');
+    const seat = (id: string) => snapshot.employees.find((e) => e.id === id)!.deskIndex;
+    expect([seat(coordinator.id), seat(bora.id), seat(ada.id)]).toEqual([0, 1, 37]);
+    expect(snapshot.departments.map((d) => [d.name, d.room])).toEqual([['Keşif', 0]]);
+    await stop(office);
+    // The seats are reached once: a second start on the same data folder moves nobody (no seat.changed, the same desks).
+    const seats = () => {
+      const check = new DatabaseSync(join(dir, 'office.db'), { readOnly: true });
+      try {
+        return {
+          moves: (check.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'seat.changed'").get() as { n: number }).n,
+          desks: check.prepare('SELECT id, desk_index FROM employees ORDER BY id').all(),
+        };
+      } finally {
+        check.close();
+      }
+    };
+    const first = seats();
+    expect(first.moves).toBeGreaterThan(0);
+    const again = startOffice(dir);
+    await portOf(again);
+    await stop(again);
+    expect(seats()).toEqual(first);
+  }, 30_000);
+
   it('B8: with the precheck on, a task needing a capability its desk lacks is held, not handed out (`precheck` given to the dispatcher)', async () => {
     const { dir, db, ada, tasks } = prepared();
     new ConstitutionStore(db).set({ capabilityPrecheckEnabled: true });
@@ -264,6 +317,106 @@ describe('main.ts wiring: the office process', () => {
     const push = await ask('git push origin main');
     expect(push.code).toBe(2);
     expect(push.stderr).toContain('OFİS KAPISI');
+    await stop(office);
+  }, 30_000);
+
+  it('spec capabilities §5–§7: with the gate on, a connector send passes on the owner’s default policy and is in the outbox; a shell send waits; a capability the owner adds on the page classifies its tool (`autonomy` and the company capabilities wired)', async () => {
+    const { dir, db, ada } = prepared();
+    new ConstitutionStore(db).set({ gateEnabled: true });
+    db.close();
+    const log = join(tempDir(), 'argv.jsonl');
+    const office = startOffice(dir, { FAKE_CLAUDE_ARGV_LOG: log });
+    const port = await portOf(office);
+    await call(port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'merhaba' });
+    await until(() => existsSync(log) && readFileSync(log, 'utf8').trim() !== '', 15_000);
+    const start = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[0]!) as { args: string[]; cwd: string; gate: { url: string | null; token: string | null } };
+    const settings = JSON.parse(start.args[start.args.indexOf('--settings') + 1]!) as { hooks?: { PreToolUse?: Array<{ hooks: Array<{ command: string }> }> } };
+    const hook = settings.hooks?.PreToolUse?.[0]?.hooks[0]?.command ?? '';
+    /** The hook as Claude Code runs it, for any tool; its exit code (0: the call runs, 2: the gate holds it). */
+    const ask = (tool_name: string, tool_input: unknown) =>
+      new Promise<number | null>((resolve) => {
+        const child = spawn(hook, { shell: true, cwd: start.cwd, env: { ...process.env, OFFICE_GATE_URL: start.gate.url ?? '', OFFICE_GATE_TOKEN: start.gate.token ?? '' } });
+        child.on('exit', (code) => resolve(code));
+        child.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', cwd: start.cwd, tool_name, tool_input }));
+      });
+    expect(await ask('mcp__claude_ai_Gmail__send_message', { to: 'musteri@x.co', body: 'Siparişiniz yolda.' })).toBe(0);
+    expect(await ask('Bash', { command: 'curl -X POST https://api.mail.io/send -d to=a@x.co' })).toBe(2);
+    expect(await call(port, 'GET', '/api/outbox')).toEqual([expect.objectContaining({ employeeId: ada.id, kind: 'send', via: 'system', recipients: ['musteri@x.co'] })]);
+    expect(await ask('mcp__netgsm__send_sms', { to: '05321112233', text: 'x' })).toBe(2);
+    await call(port, 'POST', '/api/custom-capabilities', { id: 'sms.send', title: 'SMS gönderme', summary: 'Netgsm ile SMS.', kind: 'send', tools: ['mcp__netgsm__send_sms'] });
+    expect(await ask('mcp__netgsm__send_sms', { to: '05321112233', text: 'x' })).toBe(0);
+    expect((await call(port, 'GET', '/api/capabilities')).capabilities.at(-1)).toMatchObject({ id: 'sms.send', company: true });
+    await stop(office);
+  }, 30_000);
+
+  it('final review minor 1: an active company capability the product now overrides is warned of at the start — in the console and on the coordinator’s feed', async () => {
+    const { dir, db, ada } = prepared();
+    new Roster(db, 8).update(ada.id, { kind: 'coordinator' });
+    // Accepted before the product named the tool (a product upgrade): written past the service.
+    new CustomCapabilityStore(db).put({ id: 'ads.cheap', title: 'Ucuz reklam', summary: 's', kind: 'read', tools: ['mcp__claude_ai_jeeta__jeeta_reallocate_budget'], status: 'active', proposedBy: 'owner', decidedBy: 'owner', note: null, createdAt: 1, decidedAt: 1 });
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    const warning = 'Uyarı: şirketin ads.cheap yeteneği ürünle gelen sözlükle çakışıyor (mcp__claude_ai_jeeta__jeeta_reallocate_budget ürünün ads.manage yeteneğinde)';
+    expect(office.output()).toContain(warning);
+    const events: Array<{ event: { type: string; message?: string } }> = await call(port, 'GET', `/api/employees/${ada.id}/events?after=0`);
+    expect(events.filter((e) => e.event.type === 'error').map((e) => e.event.message)).toEqual([expect.stringContaining(warning)]);
+    await stop(office);
+  }, 30_000);
+
+  it('final review I4.2: the owner’s special contacts are on a sender’s desk from the start and follow the owner’s change (`SpecialContactsDesks` wired and refreshed at the start)', async () => {
+    const { dir, db, ada } = prepared({ capabilities: ['email.send'] });
+    new ConstitutionStore(db).set({ specialContacts: ['ali@firma.com'] });
+    db.close();
+    const block = join(dir, 'desks', ada.slug, 'special-contacts.md');
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    expect(readFileSync(block, 'utf8')).toContain('- `ali@firma.com`');
+    await call(port, 'POST', '/api/constitution', { specialContacts: ['veli@firma.com'] });
+    expect(readFileSync(block, 'utf8')).toContain('- `veli@firma.com`');
+    await stop(office);
+  }, 30_000);
+
+  it('spec capabilities §4, §7, §8: the office tools a session calls carry the outbox, the gate’s preview and the company’s capabilities (`outbox`, `gate` and `capabilities` given to officeTools)', async () => {
+    const { dir, db, ada } = prepared();
+    new ConstitutionStore(db).set({ gateEnabled: true });
+    new Roster(db, 8).update(ada.id, { kind: 'coordinator' });
+    db.close();
+    const log = join(tempDir(), 'argv.jsonl');
+    const office = startOffice(dir, { FAKE_CLAUDE_ARGV_LOG: log });
+    const port = await portOf(office);
+    await call(port, 'POST', `/api/employees/${ada.id}/messages`, { text: 'merhaba' });
+    await until(() => existsSync(log) && readFileSync(log, 'utf8').trim() !== '', 15_000);
+    const start = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[0]!) as { args: string[]; cwd: string; gate: { url: string | null; token: string | null } };
+    const settings = JSON.parse(start.args[start.args.indexOf('--settings') + 1]!) as { hooks?: { PreToolUse?: Array<{ hooks: Array<{ command: string }> }> } };
+    const hook = settings.hooks?.PreToolUse?.[0]?.hooks[0]?.command ?? '';
+    const mail = { to: 'musteri@x.co', body: 'Siparişiniz yolda.' };
+    await new Promise<void>((resolve) => {
+      const child = spawn(hook, { shell: true, cwd: start.cwd, env: { ...process.env, OFFICE_GATE_URL: start.gate.url ?? '', OFFICE_GATE_TOKEN: start.gate.token ?? '' } });
+      child.on('exit', () => resolve());
+      child.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', cwd: start.cwd, tool_name: 'mcp__claude_ai_Gmail__send_message', tool_input: mail }));
+    });
+    // The session's own token, as its MCP config carries it.
+    const token = (JSON.parse(start.args[start.args.indexOf('--mcp-config') + 1]!) as { mcpServers: { office: { headers: { Authorization: string } } } }).mcpServers.office.headers.Authorization;
+    const tool = (name: string, args: Record<string, unknown> = {}) =>
+      new Promise<string>((resolve, reject) => {
+        const req = httpRequest({ host: '127.0.0.1', port, method: 'POST', path: '/mcp', headers: { 'content-type': 'application/json', authorization: token } }, (res) => {
+          let data = '';
+          res.on('data', (c) => (data += c));
+          res.on('end', () => {
+            // A refusal comes as an error with no content: say what came, not a TypeError (Task 9 minor).
+            const text = (JSON.parse(data) as { result?: { content?: Array<{ text?: string }> } }).result?.content?.[0]?.text;
+            if (text === undefined) reject(new Error(`${name}: no text in ${data}`));
+            else resolve(text);
+          });
+        });
+        req.on('error', reject);
+        req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }));
+      });
+    expect(await tool('outboxRead')).toMatch(/^Giden kutusu \(herkes\) — son 1[\s\S]*Ada — gönderim “send_message to=musteri@x\.co” \(sistem\)/);
+    expect(await tool('approvalRequest', { tool: 'mcp__claude_ai_Gmail__send_message', input: mail, summary: 'İade sözü.' })).toMatch(/^Onay istendi \(no \S+\): gönderim — “send_message to=musteri@x\.co”/);
+    await call(port, 'POST', '/api/custom-capabilities', { id: 'sms.send', title: 'SMS gönderme', summary: 'Netgsm ile SMS.', kind: 'send', tools: ['mcp__netgsm__send_sms'] });
+    expect(await tool('capabilitiesRead')).toMatch(/Şirketin eklediği yetenekler[\s\S]*sms\.send — SMS gönderme/);
     await stop(office);
   }, 30_000);
 });

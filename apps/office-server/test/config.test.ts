@@ -1,5 +1,6 @@
 import { homedir, tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { SEAT_COUNT } from '@cc/shared';
 import { describe, expect, it } from 'vitest';
 import { REPO_ROOT, loadConfig } from '../src/config.ts';
 
@@ -10,7 +11,8 @@ describe('loadConfig', () => {
     expect(c.host).toBe('127.0.0.1');
     expect(c.port).toBe(4319);
     expect(c.claudeCommand).toEqual(['claude']);
-    expect(c.deskCount).toBe(8);
+    expect(c.deskCount).toBe(SEAT_COUNT);
+    expect(SEAT_COUNT).toBe(45);
     expect(c.allowedOrigins).toEqual([]);
     expect(c.allowedHosts).toEqual([]);
     expect(c.webDir).toBe(join(REPO_ROOT, 'apps', 'office-web', 'dist'));

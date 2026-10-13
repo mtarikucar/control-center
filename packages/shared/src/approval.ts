@@ -3,13 +3,15 @@
  * for with approvalRequest and given on the office page only.
  */
 
-/** What a held call would do: publish, send, pay or spend, delete, act in a browser, touch the office itself, other. */
-export const APPROVAL_KINDS = ['publish', 'send', 'pay', 'delete', 'browser', 'self', 'other'] as const;
+/** What a held call would do: publish, send, invite, call, pay or spend, delete, act in a browser, touch the office itself, other. */
+export const APPROVAL_KINDS = ['publish', 'send', 'calendar', 'call', 'pay', 'delete', 'browser', 'self', 'other'] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export const APPROVAL_KIND_LABELS: Record<ApprovalKind, string> = {
   publish: 'yayın',
   send: 'gönderim',
+  calendar: 'takvim',
+  call: 'arama',
   pay: 'ödeme/harcama',
   delete: 'silme',
   browser: 'tarayıcı',

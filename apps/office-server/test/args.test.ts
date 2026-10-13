@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { Capability } from '@cc/shared';
 import { DISALLOWED_TOOLS, employeeSettings, sessionArgs, sideQuestionArgs, terminalCommand, GATE_MATCHER, gateHookCommand } from '../src/claude/args.ts';
+import { productVocabulary, useCompanyCapabilities } from '../src/company/capabilities.ts';
 import { REPO_ROOT } from '../src/config.ts';
+
+afterEach(() => {
+  useCompanyCapabilities(null);
+});
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -20,7 +26,7 @@ describe('claude args', () => {
     expect(JSON.parse(flag(args, '--settings') ?? '')).toEqual(employeeSettings('/home/test'));
   });
 
-  it('employee settings disable superpowers, the personal CLAUDE.md and Claude attribution', () => {
+  it('employee settings disable superpowers, the personal CLAUDE.md and Claude attribution — without the gate’s hook nothing else (final review minor 4: as before the gate)', () => {
     expect(employeeSettings('/home/test')).toEqual({
       enabledPlugins: { 'superpowers@claude-plugins-official': false },
       claudeMdExcludes: ['/home/test/.claude/CLAUDE.md'],
@@ -28,10 +34,31 @@ describe('claude args', () => {
     });
   });
 
+  it('hardening round 2: a project’s .mcp.json may not bring a server named like a classified connector or the office — every session with the gate’s hook rejects them', () => {
+    const product = productVocabulary();
+    const servers = new Set(['office', ...product.capabilities.flatMap((c) => c.tools).filter((t) => t.startsWith('mcp__')).map((t) => t.split('__')[1]!)]);
+    const disabled = employeeSettings('/home/test', { hook: 'h' }).disabledMcpjsonServers!;
+    expect(disabled).toEqual(expect.arrayContaining([...servers]));
+    // The connectors known by name only (“claude.ai Slack”) by the name their tools carry, as Claude Code compares them.
+    expect(disabled).toEqual(expect.arrayContaining(['office', 'claude_ai_Gmail', 'claude_ai_Google_Calendar', 'claude_ai_jeeta', 'plugin_playwright_playwright', 'claude_ai_Slack', 'claude_ai_Google_Drive']));
+    expect(new Set(disabled).size).toBe(disabled.length);
+    // The usual name of the Playwright MCP server: a project's own would be taken for the browser.
+    expect(disabled).toContain('playwright');
+    // A company capability's connector too, from the session that starts after it.
+    const sms: Capability = { id: 'sms.send', title: 'SMS gönderme', summary: 'Netgsm ile SMS gönderir.', kind: 'send', outward: true, builtin: [], tools: ['mcp__netgsm__send_sms'], company: true };
+    useCompanyCapabilities(() => [sms]);
+    expect(employeeSettings('/home/test', { hook: 'h' }).disabledMcpjsonServers).toContain('netgsm');
+    // In the --settings a session with the hook is started with; the backstop of the hook, it goes where the hook goes.
+    expect(JSON.parse(flag(sessionArgs({ model: 'haiku', sessionId: 's', resume: false, home: '/home/test', hook: 'h' }), '--settings') ?? '').disabledMcpjsonServers).toContain('netgsm');
+    expect(JSON.parse(flag(sessionArgs({ model: 'haiku', sessionId: 's', resume: false, home: '/home/test' }), '--settings') ?? '')).not.toHaveProperty('disabledMcpjsonServers');
+    expect(JSON.parse(flag(sideQuestionArgs({ model: 'haiku', sessionId: 's', home: '/home/test' }), '--settings') ?? '')).not.toHaveProperty('disabledMcpjsonServers');
+  });
+
   it('B9a (K1-5, K1-8): with the gate, the settings carry the PreToolUse hook and disableAllHooks: false, which a desk file cannot turn off', () => {
     const settings = employeeSettings('/home/test', { hook: "'/usr/bin/node' '/r/apps/office-server/hooks/gate.mjs'" });
     expect(settings).toEqual({
       ...employeeSettings('/home/test'),
+      disabledMcpjsonServers: expect.arrayContaining(['office', 'playwright']),
       // Deney 6A/6B: a desk's .claude/settings.local.json with disableAllHooks: true turns the hook off unless --settings says false.
       disableAllHooks: false,
       hooks: { PreToolUse: [{ matcher: GATE_MATCHER, hooks: [{ type: 'command', command: "'/usr/bin/node' '/r/apps/office-server/hooks/gate.mjs'", timeout: 10 }] }] },

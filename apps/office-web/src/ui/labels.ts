@@ -37,7 +37,7 @@ export const modelLabels = (provider?: string): Record<ModelAlias, string> => pr
 /** A model's family name alone: “Opus”. */
 export const modelName = (m: ModelAlias, provider?: string): string => provider === 'codex' ? CODEX_LABELS[m] : MODEL_LABELS[m].split(' — ')[0] ?? m;
 
-export const KIND_LABELS: Record<EmployeeKind, string> = { coordinator: 'Koordinatör', lead: 'Ekip lideri', member: 'Çalışan' };
+export const KIND_LABELS: Record<EmployeeKind, string> = { coordinator: 'Koordinatör', lead: 'Departman başkanı', member: 'Çalışan' };
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   waiting: 'Bekliyor',

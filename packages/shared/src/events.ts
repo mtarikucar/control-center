@@ -1,6 +1,9 @@
 import type { Approval, ApprovalChange, ApprovalKind } from './approval.ts';
+import type { OutboxEntry } from './autonomy.ts';
 import type { BudgetSummary, Spend } from './budget.ts';
+import type { CapabilityChange, CustomCapability } from './capability.ts';
 import type { ClockStatus, CycleTrigger, Goal, GoalChange, Plan, PlanChange, PlanView, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
+import type { Department, DepartmentChange, StreamNote } from './department.ts';
 import type { AgentProvider, Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Integration } from './integration.ts';
 import type { Decision } from './memory.ts';
@@ -88,6 +91,10 @@ export type OfficeEvent = { provider?: AgentProvider } & (
   /** The onboarding moved; `round` with change 'round': the questions just asked (KÖ1 counts them). */
   | { type: 'onboarding.changed'; change: OnboardingChange; onboarding: Onboarding; round?: OnboardingRound }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
+  /** Someone sat down elsewhere (spec office rooms §3): their department or role changed, or the office reseated everyone at its start; never sent for a hire. */
+  | { type: 'seat.changed'; deskIndex: number }
+  | { type: 'department.changed'; change: DepartmentChange; department: Department }
+  | { type: 'stream.noted'; note: StreamNote }
   | { type: 'decision.recorded'; decision: Decision }
   | { type: 'playbook.updated'; topic: string; version: number; reason: string }
   | { type: 'note.written'; id: number; title: string; tags: string[] }
@@ -144,6 +151,10 @@ export type OfficeEvent = { provider?: AgentProvider } & (
   | { type: 'owner.request.flagged'; mark: OwnerRequestMark; outcome: 'rejected' | 'accepted'; method: string; path: string; userAgent: string }
   /** An approval was asked for, decided, used or ran out (B9a). */
   | { type: 'approval.changed'; change: ApprovalChange; approval: Approval }
+  /** Spec capabilities §4: a company capability was proposed, activated, rejected, retired or given another kind. */
+  | { type: 'capability.changed'; change: CapabilityChange; capability: CustomCapability }
+  /** Spec capabilities §7: the gate let an outward call out — by the system, or on the owner's approval. */
+  | { type: 'outbox.sent'; entry: OutboxEntry }
   /**
    * A tool call the gate held (B9a): denied, or let through on an approval. Calls the gate does not hold leave no event.
    * `kind` and `target` are of the first part that held it (a Bash line may hold more than one).
@@ -199,6 +210,8 @@ export interface OfficeSnapshot {
   approvals?: Approval[];
   /** Routines (all but stopped, plus the last 10 stopped). */
   schedules?: Schedule[];
+  /** Every department, open and closed (spec departments §7; absent from servers without them). */
+  departments?: Department[];
   clock?: ClockStatus;
 }
 

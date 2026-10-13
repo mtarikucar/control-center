@@ -1,5 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CapabilityChange, CustomCapability } from '@cc/shared';
+import { useOffice } from '../store/office.ts';
 import { EventItem } from './EventItem.tsx';
 
 afterEach(cleanup);
@@ -21,6 +23,15 @@ describe('EventItem', () => {
   it('says nothing when every connection is up', () => {
     const { container } = render(<EventItem stored={{ seq: 1, employeeId: 'e1', ts: 0, event: { type: 'session.started', model: 'm', mcp: [{ name: 'office', status: 'connected' }] } }} />);
     expect(container.textContent).toBe('');
+  });
+
+  it('spec capabilities §7: an outward call let out reads as its outbox line, saying who let it out', () => {
+    const entry = { id: 1, employeeId: 'e1', departmentId: null, tool: 'mcp__claude_ai_Gmail__send_message', kind: 'send' as const, target: 'send_message to=a@x.co', recipients: ['a@x.co'], summary: '{}', via: 'system' as const, approvalId: null, at: 0 };
+    render(<EventItem stored={{ seq: 1, employeeId: 'e1', ts: 0, event: { type: 'outbox.sent', entry } }} />);
+    expect(screen.getByText('Giden: gönderim — send_message to=a@x.co (sistem geçirdi)')).toBeTruthy();
+    cleanup();
+    render(<EventItem stored={{ seq: 2, employeeId: 'e1', ts: 0, event: { type: 'outbox.sent', entry: { ...entry, kind: 'call', target: 'jeeta_click_to_dial', via: 'owner', approvalId: 'a1' } } }} />);
+    expect(screen.getByText('Giden: arama — jeeta_click_to_dial (sahibinin onayıyla)')).toBeTruthy();
   });
 
   it('says a plan was reopened when a finished plan gets a new task', () => {
@@ -111,5 +122,50 @@ describe('EventItem', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('EventItem: capability.changed (final review I2)', () => {
+  beforeEach(() =>
+    useOffice.setState({
+      views: { koord: { employee: { id: 'koord', name: 'Koordinatör', kind: 'coordinator' } } as never, ada: { employee: { id: 'ada', name: 'Ada', kind: 'member' } } as never },
+    }),
+  );
+  const capability = (over: Partial<CustomCapability>): CustomCapability => ({
+    id: 'sms.send', title: 'SMS gönderme', summary: 'Netgsm ile SMS.', kind: 'send', tools: ['mcp__netgsm__send_sms', 'mcp__netgsm__send_bulk'], status: 'active',
+    proposedBy: 'ada', decidedBy: 'koord', note: null, createdAt: 1, decidedAt: 2, ...over,
+  });
+  const show = (change: CapabilityChange, c: CustomCapability, employeeId: string | null = 'koord') =>
+    render(<EventItem stored={{ seq: 1, employeeId, ts: 0, event: { type: 'capability.changed', change, capability: c } }} />).container;
+
+  it('the coordinator’s own proposal is the owner’s: it says so and where to decide', () => {
+    show('proposed', capability({ status: 'proposed', proposedBy: 'koord', decidedBy: null, decidedAt: null }));
+    expect(screen.getByText('Koordinatör bir yetenek önerdi: SMS gönderme (gönderim) — karar senin, Yetenekler sekmesinde.')).toBeTruthy();
+  });
+
+  it('an employee’s proposal is the coordinator’s to decide: the feed stays quiet', () => {
+    expect(show('proposed', capability({ status: 'proposed', proposedBy: 'ada', decidedBy: null, decidedAt: null }), 'ada').textContent).toBe('');
+  });
+
+  it('an activation by the coordinator names the kind and the tools, and says the gate asks the owner until it is opened to the system', () => {
+    show('activated', capability({}));
+    const line = screen.getByText(/Koordinatör bir yeteneği etkinleştirdi/).textContent ?? '';
+    expect(line).toContain('SMS gönderme (gönderim; araçlar: mcp__netgsm__send_sms, mcp__netgsm__send_bulk)');
+    expect(line).toMatch(/sisteme açılana dek kapıda sana sorulur/);
+    expect(line).toMatch(/Yetenekler sekmesinde/);
+  });
+
+  it('an activation of a kind the owner is always asked about does not promise a button that changes nothing', () => {
+    show('activated', capability({ kind: 'pay', tools: ['mcp__netgsm__buy_credits'] }));
+    const line = screen.getByText(/Koordinatör bir yeteneği etkinleştirdi/).textContent ?? '';
+    expect(line).toContain('ödeme/harcama; araçlar: mcp__netgsm__buy_credits');
+    expect(line).toMatch(/her zaman sana sorulur/);
+    expect(line).not.toMatch(/sisteme açılana dek/);
+  });
+
+  it('the owner’s own actions, and the coordinator’s rejection, leave the feed quiet', () => {
+    const owner = capability({ proposedBy: 'owner', decidedBy: 'owner' });
+    for (const change of ['activated', 'confirmed', 'kind', 'retired'] as const) expect([change, show(change, owner, null).textContent]).toEqual([change, '']);
+    expect(show('rejected', capability({ status: 'rejected', note: 'Gereksiz.' })).textContent).toBe('');
   });
 });

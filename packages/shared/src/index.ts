@@ -1,8 +1,10 @@
 export * from './approval.ts';
+export * from './autonomy.ts';
 export * from './blueprint.ts';
 export * from './budget.ts';
 export * from './capability.ts';
 export * from './company.ts';
+export * from './department.ts';
 export * from './employee.ts';
 export * from './events.ts';
 export * from './integration.ts';
@@ -11,4 +13,5 @@ export * from './metrics.ts';
 export * from './onboarding.ts';
 export * from './profile.ts';
 export * from './proposal.ts';
+export * from './seats.ts';
 export * from './text.ts';

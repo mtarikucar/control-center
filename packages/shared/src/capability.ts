@@ -5,18 +5,37 @@ import type { IntegrationDesk, IntegrationKind, IntegrationStatus } from './inte
  * office, in the product's own words, and which of the office's connectors give it.
  */
 
+/**
+ * What a capability does (spec 2026-10-13-capabilities-autonomy §2): the gate takes a connector call's approval kind
+ * from it, and every kind but `read` goes outward (the vocabulary keeps `outward` beside it, checked to agree).
+ */
+export const CAPABILITY_KINDS = ['read', 'send', 'calendar', 'call', 'publish', 'pay', 'delete'] as const;
+export type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
+export const CAPABILITY_KIND_LABELS: Record<CapabilityKind, string> = {
+  read: 'okuma', send: 'gönderim', calendar: 'takvim', call: 'arama', publish: 'yayın', pay: 'ödeme/harcama', delete: 'silme',
+};
+
 /** A capability of the vocabulary (product knowledge, shipped as craft/capabilities.json). */
 export interface Capability {
   /** `area.action`, e.g. `email.send`. */
   id: string;
   title: string;
   summary: string;
+  /** What it does (CAPABILITY_KINDS); `outward` is `kind !== 'read'`. */
+  kind: CapabilityKind;
   /** Goes outward and cannot be taken back: sending, publishing, paying, inviting (B9's gate looks at it). */
   outward: boolean;
   /** Claude Code's own tools that give it: every session has them, so it is open on every desk. */
   builtin: string[];
   /** Known connectors' tools that give it, by full name (`mcp__server__tool`); the connector is the name's prefix. */
   tools: string[];
+  /** Added by the company (custom_capabilities, spec capabilities §4), not shipped with the product. */
+  company?: true;
+  /**
+   * A company one whose kind the owner set — added it, accepted it, changed its kind — or confirmed after the coordinator
+   * activated it (final review I1): only then may the owner's outward policy leave its calls to the system.
+   */
+  confirmed?: true;
 }
 
 /**
@@ -85,3 +104,41 @@ export interface CapabilityCoverage {
   builtin: string[];
   providers: CapabilityProvider[];
 }
+
+/** A company capability's state (spec capabilities §4): proposed, then active or rejected; an active one the owner retires. */
+export const CUSTOM_CAPABILITY_STATUSES = ['proposed', 'active', 'rejected', 'retired'] as const;
+export type CustomCapabilityStatus = (typeof CUSTOM_CAPABILITY_STATUSES)[number];
+export const CUSTOM_CAPABILITY_STATUS_LABELS: Record<CustomCapabilityStatus, string> = {
+  proposed: 'karar bekliyor', active: 'etkin', rejected: 'reddedildi', retired: 'geri alındı',
+};
+
+/** A capability the company added to the vocabulary (spec capabilities §4.1; table custom_capabilities, v25). */
+export interface CustomCapability {
+  /** `area.action`, none of the product's. */
+  id: string;
+  title: string;
+  summary: string;
+  kind: CapabilityKind;
+  /** Connector tools by full name; none of them in a product capability or in another active company one. */
+  tools: string[];
+  status: CustomCapabilityStatus;
+  /** An employee's id, or 'owner'. */
+  proposedBy: string;
+  /** The coordinator's id or 'owner'; null while proposed. */
+  decidedBy: string | null;
+  note: string | null;
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+/** What a proposal or the owner's addition gives. */
+export interface NewCustomCapability {
+  id: string;
+  title: string;
+  summary: string;
+  kind: CapabilityKind;
+  tools: string[];
+}
+
+/** `confirmed`: the owner took over an active one the coordinator activated (final review I1), its kind unchanged. */
+export type CapabilityChange = 'proposed' | 'activated' | 'rejected' | 'retired' | 'kind' | 'confirmed';

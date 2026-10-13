@@ -41,6 +41,12 @@ describe('api', () => {
     await expect(api.fire('e1')).resolves.toBeNull();
   });
 
+  it('final review I1: the owner confirms a coordinator-activated capability with an empty POST to its confirm route', async () => {
+    const fetchFn = stubFetch(200, { id: 'sms.send' });
+    await api.confirmCapability('sms.send');
+    expect(requests(fetchFn)[0]).toEqual(['/api/custom-capabilities/sms.send/confirm', { method: 'POST', headers: { 'content-type': 'application/json', 'x-owner-nonce': 'n1' }, body: '{}' }]);
+  });
+
   it('reads the office metrics with a GET', async () => {
     const fetchFn = stubFetch(200, { generatedAt: 1 });
     await expect(api.metrics()).resolves.toEqual({ generatedAt: 1 });

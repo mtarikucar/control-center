@@ -1,3 +1,4 @@
+import { SEAT_COUNT } from '@cc/shared';
 import { describe, expect, it } from 'vitest';
 import { ConflictError, NotFoundError, ValidationError } from '../src/errors.ts';
 import { Roster, slugify } from '../src/roster.ts';
@@ -26,6 +27,34 @@ describe('Roster', () => {
     expect(b).toMatchObject({ model: 'opus', characterId: 'designer', deskIndex: 1 });
     expect(a.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(roster.get(a.id)).toEqual(a);
+  });
+
+  it('takes the seat the office chose when it is free and one of the office’s; without one, the lowest free as before (spec office rooms §5)', () => {
+    const { db } = setup();
+    const roster = new Roster(db, SEAT_COUNT);
+    expect(roster.deskCount).toBe(45);
+    expect(roster.create({ name: 'Ada', role: 'r', deskIndex: 37 }).deskIndex).toBe(37);
+    expect(roster.create({ name: 'Can', role: 'r' }).deskIndex).toBe(0);
+    expect(() => roster.create({ name: 'Ece', role: 'r', deskIndex: 37 })).toThrow('Masa 37 dolu (Ada).');
+    expect(() => roster.create({ name: 'Ece', role: 'r', deskIndex: 45 })).toThrow('Masa 0 ile 44 arasında bir tam sayı olmalı.');
+    expect(() => roster.create({ name: 'Ece', role: 'r', deskIndex: 1.5 })).toThrow(ValidationError);
+    expect(() => roster.validate({ name: 'Ece', role: 'r', deskIndex: 37 })).toThrow(ConflictError);
+    expect(roster.list().map((e) => e.name)).toEqual(['Can', 'Ada']);
+  });
+
+  it('moves someone to a free seat; a taken or unknown seat is refused and nothing changes; an archived one’s seat is free', () => {
+    const { db } = setup();
+    const roster = new Roster(db, SEAT_COUNT);
+    const ada = roster.create({ name: 'Ada', role: 'r' });
+    const can = roster.create({ name: 'Can', role: 'r' });
+    expect(roster.setDesk(ada.id, 13)).toMatchObject({ id: ada.id, deskIndex: 13 });
+    expect(roster.get(ada.id).deskIndex).toBe(13);
+    expect(roster.setDesk(ada.id, 13).deskIndex).toBe(13);
+    expect(() => roster.setDesk(ada.id, can.deskIndex)).toThrow(ConflictError);
+    expect(() => roster.setDesk(ada.id, -1)).toThrow(ValidationError);
+    expect(roster.get(ada.id).deskIndex).toBe(13);
+    roster.update(can.id, { lifecycle: 'archived' });
+    expect(roster.setDesk(ada.id, can.deskIndex).deskIndex).toBe(1);
   });
 
   it('validates input', () => {
@@ -131,5 +160,21 @@ describe('Roster — company fields', () => {
     expect(s.roster.update(e.id, { model: 'opus' }).model).toBe('opus');
     expect(s.roster.get(e.id).model).toBe('opus');
     s.cleanup();
+  });
+
+  it('keeps an employee’s department: written only when given, absent for the centre (spec departments §3)', () => {
+    const { roster, db } = setup();
+    const ada = roster.create({ name: 'Ada', role: 'r' });
+    expect(ada).not.toHaveProperty('departmentId');
+    const can = roster.create({ name: 'Can', role: 'r', team: 'Satış', departmentId: 'd1' });
+    expect(can).toMatchObject({ team: 'Satış', departmentId: 'd1' });
+    expect(roster.update(ada.id, { departmentId: 'd2', team: 'Pazarlama' })).toMatchObject({ departmentId: 'd2', team: 'Pazarlama' });
+    expect(roster.get(ada.id).departmentId).toBe('d2');
+    // A change that does not name the department leaves it alone.
+    roster.update(ada.id, { title: 'Yazar' });
+    expect(roster.get(ada.id).departmentId).toBe('d2');
+    roster.update(ada.id, { departmentId: null, team: '' });
+    expect(roster.get(ada.id)).not.toHaveProperty('departmentId');
+    expect(db.prepare('SELECT department_id FROM employees WHERE id = ?').get(ada.id)).toMatchObject({ department_id: null });
   });
 });

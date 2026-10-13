@@ -3,13 +3,14 @@ import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type PlanView, type ServerMessage } from '@cc/shared';
+import { isOutwardPolicyKind, OUTBOX_READ_MAX, OUTWARD_POLICY_KINDS, OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type OutwardPolicyKind, type PlanView, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { coordinatorHint } from './model-policy.ts';
 import type { AgentProvider } from '@cc/shared';
 import type { Company } from './company/company.ts';
 import { LOG_DEFAULT, LOG_MAX, type ManagementCycle } from './company/cycle.ts';
 import type { Memory } from './company/memory.ts';
+import type { OutboxStore } from './company/outbox-store.ts';
 import type { ProposalStore } from './company/proposal-store.ts';
 import { memoryKinds } from './company/search.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
@@ -21,9 +22,12 @@ import type { EventStore } from './event-store.ts';
 import { handleMcp, type McpTool } from './mcp/protocol.ts';
 import type { TokenRegistry } from './mcp/tokens.ts';
 import type { Blueprints } from './company/blueprint.ts';
+import type { CustomCapabilities } from './company/custom-capabilities.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
 import { OwnerGuard } from './owner-guard.ts';
 import { capabilityVocabulary, coverage, unclassifiedTools } from './company/capabilities.ts';
+import { listDepartmentTemplates } from './company/department-templates.ts';
+import type { Departments } from './company/departments.ts';
 import { listRoleTemplates } from './company/role-templates.ts';
 import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
@@ -51,6 +55,12 @@ export interface ApiDeps {
     blueprints?: Blueprints;
     /** The owner's approvals of calls the gate holds (B9a). */
     approvals?: Approvals;
+    /** The company's own capabilities (spec capabilities §4): the owner adds, decides, re-kinds and retires them. */
+    capabilities?: CustomCapabilities;
+    /** What the gate let out (spec capabilities §7): the owner's Giden kutusu tab. */
+    outbox?: OutboxStore;
+    /** The departments (spec departments §7; absent: an office without them). */
+    departments?: Departments;
   };
 }
 
@@ -80,8 +90,11 @@ const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
 const APPROVAL_ROUTE = /^\/api\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|deny)$/;
+const CUSTOM_CAPABILITY_ROUTE = /^\/api\/custom-capabilities\/([a-z]+\.[a-z]+)\/(accept|reject|retire|kind|confirm)$/;
+const DEPARTMENT_ROUTE = /^\/api\/departments\/([^/]+)(?:\/(close))?$/;
+const STREAM_NOTES_ROUTE = /^\/api\/plans\/([^/]+)\/stream-notes$/;
 const EMPLOYEE_ROUTE =
-  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file|provider|codex-requests))?$/;
+  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file|provider|codex-requests|department))?$/;
 
 /** What the owner sees of the proposals: everything still open or waiting for them, and the last 30 decided. */
 function visibleProposals(store: ProposalStore) {
@@ -104,6 +117,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
     ...base, tasks: [...open, ...closed], plans, budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
     goals: d.company.service.goals(), paused: d.company.service.paused(), schedules: d.company.service.schedules(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),
     ...(d.company.approvals ? { approvals: d.company.approvals.visible() } : {}),
+    ...(d.company.departments ? { departments: d.company.departments.list() } : {}),
   };
 }
 
@@ -119,6 +133,19 @@ export function checkRequest(req: IncomingMessage, port: number, allowedOrigins:
 
 function portOf(server: Server): number {
   return (server.address() as AddressInfo).port;
+}
+
+type DepartmentBody = { template?: string; name?: string; mission?: string; scope?: string; headId?: string | null; reason?: string };
+
+/** A department route's body: an object whose text fields are text and whose headId is an employee id or null (else 400, naming the field). */
+function departmentBody(raw: unknown): DepartmentBody {
+  if (raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) throw new ValidationError('Geçersiz istek gövdesi.');
+  const body = (raw ?? {}) as Record<string, unknown>;
+  for (const field of ['template', 'name', 'mission', 'scope', 'reason']) {
+    if (body[field] !== undefined && typeof body[field] !== 'string') throw new ValidationError(`${field} metin olmalı.`);
+  }
+  if (body.headId !== undefined && body.headId !== null && typeof body.headId !== 'string') throw new ValidationError('headId bir çalışan kimliği ya da null olmalı.');
+  return body as DepartmentBody;
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -285,6 +312,29 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
     if (method === 'GET' && url.pathname === '/api/role-templates') return sendJson(res, 200, listRoleTemplates());
+    // The departments (spec departments §7): reading is free; changing has passed the owner guard above.
+    const departments = d.company.departments;
+    if (departments) {
+      if (method === 'GET' && url.pathname === '/api/departments') return sendJson(res, 200, departments.list());
+      if (method === 'GET' && url.pathname === '/api/department-templates') return sendJson(res, 200, listDepartmentTemplates());
+      if (method === 'POST' && url.pathname === '/api/departments') {
+        return sendJson(res, 201, departments.create(OWNER, departmentBody(await readJson(req))));
+      }
+      const dep = DEPARTMENT_ROUTE.exec(url.pathname);
+      if (method === 'POST' && dep) {
+        const id = dep[1] ?? '';
+        const body = departmentBody(await readJson(req));
+        if (dep[2] === 'close') return sendJson(res, 200, departments.close(OWNER, id, body.reason ?? ''));
+        // The department and the head are checked whole before anything changes: a head who cannot be one (nobody, let go, the coordinator) leaves the department as it was.
+        departments.get(id);
+        if (typeof body.headId === 'string') departments.assertCanHead(body.headId);
+        let next = body.name !== undefined || body.mission !== undefined || body.scope !== undefined ? departments.update(OWNER, id, { name: body.name, mission: body.mission, scope: body.scope }) : departments.get(id);
+        if (body.headId !== undefined) next = departments.setHead(OWNER, id, body.headId);
+        return sendJson(res, 200, next);
+      }
+    }
+    const notes = STREAM_NOTES_ROUTE.exec(url.pathname);
+    if (method === 'GET' && notes) return sendJson(res, 200, company.streamNotes(notes[1] ?? ''));
     // The blueprint behind a plan card (B5): its steps, how far the install went, its closed mode.
     const blueprintRoute = /^\/api\/plans\/([^/]+)\/blueprint$/.exec(url.pathname);
     if (method === 'GET' && blueprintRoute && d.company.blueprints) return sendJson(res, 200, d.company.blueprints.read(blueprintRoute[1] ?? ''));
@@ -296,6 +346,27 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       const wanted = person ? (person.capabilities ?? []) : vocabulary.capabilities.map((c) => c.id);
       const registry = d.company.integrations.list();
       return sendJson(res, 200, { ...vocabulary, coverage: coverage(registry, wanted, person?.id), unclassified: unclassifiedTools(registry) });
+    }
+    // The company's own capabilities (spec capabilities §4.2): reading is free; every change has passed the owner guard.
+    const custom = d.company.capabilities;
+    if (custom) {
+      if (method === 'GET' && url.pathname === '/api/custom-capabilities') return sendJson(res, 200, custom.list());
+      if (method === 'POST' && url.pathname === '/api/custom-capabilities') {
+        const body = await readJson(req);
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
+        return sendJson(res, 201, custom.ownerAdd(body as Record<string, unknown>));
+      }
+      const action = CUSTOM_CAPABILITY_ROUTE.exec(url.pathname);
+      if (method === 'POST' && action) {
+        const id = action[1] ?? '';
+        const body = ((await readJson(req)) ?? {}) as { kind?: unknown; note?: unknown };
+        if (action[2] === 'retire') return sendJson(res, 200, custom.retire(id, body.note));
+        if (action[2] === 'kind') return sendJson(res, 200, custom.setKind(id, body.kind));
+        // Final review I1: what the coordinator activated goes to the system only once the owner confirms it here.
+        if (action[2] === 'confirm') return sendJson(res, 200, custom.confirm(id));
+        // A rejection needs a note (decide refuses one without): the page sends "Sahibi reddetti." when the owner writes none.
+        return sendJson(res, 200, custom.decide(OWNER, id, { accept: action[2] === 'accept', kind: body.kind, note: body.note }));
+      }
     }
     if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {
       const raw = url.searchParams.get('days');
@@ -325,6 +396,17 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       const body = (await readJson(req)) as { note?: unknown } | null;
       return sendJson(res, 200, d.company.approvals.decide(approval[1] ?? '', approval[2] === 'approve', { via: 'page', note: typeof body?.note === 'string' ? body.note : undefined }));
     }
+    // The outbox (spec capabilities §7): reading only, the newest OUTBOX_READ_MAX at most; the page filters what it shows.
+    if (method === 'GET' && url.pathname === '/api/outbox' && d.company.outbox) {
+      const p = url.searchParams;
+      const raw = p.get('limit');
+      const limit = raw === null ? OUTBOX_READ_MAX : Number(raw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > OUTBOX_READ_MAX) throw new ValidationError(`limit 1 ile ${OUTBOX_READ_MAX} arasında bir tam sayı olmalı.`);
+      const kind = p.get('kind');
+      if (kind !== null && !isOutwardPolicyKind(kind)) throw new ValidationError(`kind ${OUTWARD_POLICY_KINDS.join(', ')} olmalı.`);
+      const department = p.get('department');
+      return sendJson(res, 200, d.company.outbox.list({ departmentId: department === null ? undefined : department === 'none' ? null : department, kind: kind === null ? undefined : (kind as OutwardPolicyKind), limit }));
+    }
     const decide = PROPOSAL_ROUTE.exec(url.pathname);
     if (method === 'POST' && decide) {
       const note = (await readJson(req)) as { note?: unknown } | null;
@@ -351,6 +433,13 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       return sendEmpty(res, 204);
     }
     if (method === 'GET' && action === 'file' && d.company) return sendJson(res, 200, d.company.memory.employeeFile(id));
+    if (method === 'POST' && action === 'department' && d.company?.departments) {
+      // The key is required: a body without it must not send the person to the centre by accident.
+      const body = await readJson(req);
+      const to = typeof body === 'object' && body !== null && !Array.isArray(body) && 'departmentId' in body ? (body as { departmentId: unknown }).departmentId : undefined;
+      if (typeof to !== 'string' && to !== null) throw new ValidationError('departmentId gerekli (merkez için null).');
+      return sendJson(res, 200, d.company.departments.move(OWNER, id, to));
+    }
     if (method === 'POST' && action === 'messages') {
       const text = textOf(await readJson(req));
       // The owner talking to the coordinator (management cycle §3.5): with no plan running (none waits for the owner or

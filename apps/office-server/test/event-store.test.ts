@@ -43,6 +43,47 @@ describe('EventStore', () => {
     expect(seen).toEqual([first.seq]);
   });
 
+  it('hardening round 2: appends inside batch are written at once and heard only after it returns, in order; a batch that throws is never heard; a nested one with the outermost', () => {
+    const s = store();
+    const heard: string[] = [];
+    s.subscribe((e) => heard.push(e.event.type));
+    const out = s.batch(() => {
+      s.append('e1', { type: 'turn.started' });
+      expect(s.list().map((e) => e.event.type)).toEqual(['turn.started']);
+      s.batch(() => s.append('e1', { type: 'message.assistant', text: 'iç' }));
+      expect(heard).toEqual([]);
+      return 'tamam';
+    });
+    expect([out, heard]).toEqual(['tamam', ['turn.started', 'message.assistant']]);
+    expect(() =>
+      s.batch(() => {
+        s.append('e1', { type: 'turn.started' });
+        throw new Error('geri alındı');
+      }),
+    ).toThrow('geri alındı');
+    expect(heard).toEqual(['turn.started', 'message.assistant']);
+    s.append('e1', { type: 'turn.started' });
+    expect(heard).toHaveLength(3);
+  });
+
+  it('round 3: an event a listener appends while a batch is heard joins the queue — every listener hears them in order', () => {
+    const s = store();
+    const second: number[] = [];
+    let once = true;
+    s.subscribe((e) => {
+      if (once && e.event.type === 'turn.started') {
+        once = false;
+        s.append('e1', { type: 'turn.finished', ok: true, subtype: 'success', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, costUsd: 0, numTurns: 1 } as never);
+      }
+    });
+    s.subscribe((e) => second.push(e.seq));
+    s.batch(() => {
+      s.append('e1', { type: 'turn.started' });
+      s.append('e1', { type: 'message.assistant', text: 'iki' });
+    });
+    expect(second).toEqual([1, 2, 3]);
+  });
+
   it('finds the latest event of a type for an employee', () => {
     const s = store();
     expect(s.latest('e1', 'turn.started')).toBeNull();

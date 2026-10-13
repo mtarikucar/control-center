@@ -1,3 +1,4 @@
+import { OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, type OutwardPolicy } from './autonomy.ts';
 import type { Autonomy, TaskDifficulty } from './company.ts';
 import { MODEL_ALIASES, type ModelAlias } from './employee.ts';
 
@@ -12,7 +13,7 @@ export type CoordinatorTurn = (typeof COORDINATOR_TURNS)[number];
 
 /** The owner's fixed limits (spec §4.6, §6). */
 export interface Constitution {
-  /** Employees at most, the coordinator included (never more than the desks). */
+  /** Employees at most, the coordinator included (12 by default; never more than the seats, 45). */
   maxEmployees: number;
   /** Share of the Claude quota kept for the owner: above 100 − this %, the office starts only urgent work. */
   ownerReservePct: number;
@@ -54,9 +55,10 @@ export interface Constitution {
   capabilityPrecheckEnabled: boolean;
   /**
    * The gate for work that cannot be taken back (B9a), OFF by default (and in a database that has no such key): on,
-   * a tool call that publishes, sends, pays, deletes, acts in a browser or touches the office itself waits for the
-   * owner's approval on the office page. The hook is in every session either way; off, it lets every call through
-   * and nothing is written, so turning it on needs no restart.
+   * a tool call that publishes, sends, calls, invites, pays, deletes, acts in a browser or touches the office itself
+   * is held; who lets it out follows `outwardPolicy` — the system on its rules, or the owner's approval on the
+   * office page (pay, delete, the browser and the office itself are always the owner's). The hook is in every session
+   * either way; off, it lets every call through and nothing is written, so turning it on needs no restart.
    */
   gateEnabled: boolean;
   /** 'free': the coordinator sets goals and starts its plans without waiting (spec §6.2); 'plans': each plan waits for the owner. */
@@ -81,10 +83,26 @@ export interface Constitution {
   minScheduleMinutes: number;
   /** Routines at once, at most (stopped ones do not count). */
   maxSchedules: number;
+  /**
+   * Spec capabilities §5: for each outward kind of a connector's call, whether the owner is asked or the system lets it
+   * out on the rules below — only while the gate is on. Pay, delete, the browser, the office itself and unclassified
+   * tools are always the owner's; so are the sends and publishes of the shell and the built-in tools.
+   */
+  outwardPolicy: OutwardPolicy;
+  /** People whose every call goes to the owner: e-mails, phone numbers, user names (compared folded, a phone by its digits). */
+  specialContacts: string[];
+  /** System sends + publishes per department (someone without one: per person) in the last hour, at most. */
+  sendsPerHour: number;
+  /** A call to more recipients than this goes to the owner. */
+  bulkRecipients: number;
+  /** Local hours [from, to) the system may call in. */
+  callHours: [number, number];
+  /** System calls per department (someone without one: per person) today, at most. */
+  callsPerDay: number;
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
-  maxEmployees: 8,
+  maxEmployees: 12,
   ownerReservePct: 25,
   monthlyUsdCap: null,
   chainDepth: 5,
@@ -108,6 +126,12 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   defaultTaskMinutes: 45,
   minScheduleMinutes: 60,
   maxSchedules: 20,
+  outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' },
+  specialContacts: [],
+  sendsPerHour: 30,
+  bulkRecipients: 5,
+  callHours: [9, 19],
+  callsPerDay: 20,
 };
 
 const isModel = (v: unknown): v is ModelAlias => (MODEL_ALIASES as readonly unknown[]).includes(v);
@@ -119,11 +143,53 @@ function modelMapOf<T extends Record<string, ModelAlias>>(value: unknown, fallba
   return Object.fromEntries(Object.entries(fallback).map(([k, d]) => [k, Object.hasOwn(given, k) && isModel(given[k]) ? given[k] : d])) as T;
 }
 
+/** The outward policy with every kind, in its order: the given decider where it is one, else the default. */
+function policyOf(value: unknown): OutwardPolicy {
+  const given = isRecord(value) ? value : {};
+  const valid = (v: unknown) => (OUTWARD_DECIDERS as readonly unknown[]).includes(v);
+  return Object.fromEntries(OUTWARD_POLICY_KINDS.map((k) => [k, Object.hasOwn(given, k) && valid(given[k]) ? given[k] : DEFAULT_CONSTITUTION.outwardPolicy[k]])) as OutwardPolicy;
+}
+
+/**
+ * Two whole local hours of the day, the first before the second (24: midnight) — the window a call may be made in; the
+ * server's validator and the stored constitution's reader both ask it.
+ */
+export const isHourWindow = (v: unknown): v is [number, number] =>
+  Array.isArray(v) && v.length === 2 && v.every((h) => Number.isInteger(h) && h >= 0 && h <= 24) && v[0] < v[1];
+
+/**
+ * The rules' counts and their ranges, [min, max] whole numbers: the owner's form takes these (the server's validator
+ * is built from them), and a stored one out of range is no limit the owner set — a null, a text or NaN would make
+ * `count >= limit` never true, and the system would send without end.
+ */
+export const RULE_RANGES = { sendsPerHour: [0, 1000], bulkRecipients: [1, 1000], callsPerDay: [0, 1000] } as const;
+const inRange = (v: unknown, [min, max]: readonly [number, number]): v is number => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
+
+/** Special contacts as the owner's form takes them: at most 200, each trimmed and 1–200 characters. */
+export const SPECIAL_CONTACT_LIMITS = { count: 200, chars: 200 } as const;
+
+/**
+ * A kept contact list read entry by entry: a bad entry (not a text, empty, too long) is dropped, never the list —
+ * one broken entry must not let every special contact's calls go out without the owner.
+ */
+function contactsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const x of value) {
+    const contact = typeof x === 'string' ? x.trim() : '';
+    if (contact && contact.length <= SPECIAL_CONTACT_LIMITS.chars) out.push(contact);
+    if (out.length === SPECIAL_CONTACT_LIMITS.count) break;
+  }
+  return out;
+}
+
 /**
  * A constitution as it was kept — the database's rows, or a snapshot in the event log (a budget.changed) written by an
  * older office — read as today's: every key the constitution has, in its order, the default where one is missing, and
- * nothing else. A model map keeps the keys it knows with a known model and takes the default for the rest; the
- * coordinator's models from before the turn types (owner, decision, digest) meant other turns, so they are dropped.
+ * nothing else. A model map keeps the keys it knows with a known model and takes the default for the rest, and so does the
+ * outward policy with its deciders; the coordinator's models from before the turn types (owner, decision, digest) meant
+ * other turns, so they are dropped; special contacts keep their good entries (contactsOf); call hours that are not a
+ * window and a rule's count that is not a whole number in its range are the defaults.
  * Everything that reads a constitution reads it through this.
  */
 export function normalizeConstitution(raw: unknown): Constitution {
@@ -132,6 +198,10 @@ export function normalizeConstitution(raw: unknown): Constitution {
   for (const key of Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>) {
     const value = Object.hasOwn(stored, key) ? stored[key] : undefined;
     if (key === 'coordinatorModels' || key === 'difficultyModels') out[key] = modelMapOf(value, DEFAULT_CONSTITUTION[key]);
+    else if (key === 'outwardPolicy') out[key] = policyOf(value);
+    else if (key === 'specialContacts') out[key] = contactsOf(value);
+    else if (key === 'callHours') out[key] = isHourWindow(value) ? value : [...DEFAULT_CONSTITUTION.callHours];
+    else if (key === 'sendsPerHour' || key === 'bulkRecipients' || key === 'callsPerDay') out[key] = inRange(value, RULE_RANGES[key]) ? value : DEFAULT_CONSTITUTION[key];
     else out[key] = value === undefined ? DEFAULT_CONSTITUTION[key] : value;
   }
   return out as unknown as Constitution;

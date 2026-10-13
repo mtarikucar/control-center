@@ -28,14 +28,16 @@ const V20_TABLES = [...V19_TABLES, 'kpi_readings'].sort();
 const V21_TABLES = [...V20_TABLES, 'search_fts', 'search_fts_config', 'search_fts_data', 'search_fts_docsize', 'search_fts_idx', 'search_index'].sort();
 const V22_TABLES = [...V21_TABLES, 'approvals'].sort();
 const V23_TABLES = [...V22_TABLES, 'quota_by_provider'].sort();
+const V24_TABLES = [...V23_TABLES, 'departments', 'stream_notes'].sort();
+const V25_TABLES = [...V24_TABLES, 'custom_capabilities', 'outbox'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(23);
-    expect(tables(db)).toEqual(V23_TABLES);
+    expect(migrateUp(db)).toBe(25);
+    expect(tables(db)).toEqual(V25_TABLES);
   });
 
   it('review (Kerem): the applied migrations keep the names the live database has (checkApplied compares them; renaming one stops the office)', () => {
@@ -71,14 +73,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(23);
-    expect(tables(db)).toEqual(V23_TABLES);
+    expect(migrateUp(db)).toBe(25);
+    expect(tables(db)).toEqual(V25_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(23);
+    expect(migrateUp(db)).toBe(25);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -502,5 +504,57 @@ describe('migrations', () => {
     expect(db.prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all()).toEqual(before);
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
     expect(migrateUp(db, upTo(22))).toBe(22);
+  });
+
+  it('v24 adds the departments, the stream notes and an employee’s department, empty; v24 down restores v23 and keeps the employees', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(23));
+    db.prepare(
+      `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started, lifecycle, created_at, title, team, kind)
+       VALUES ('e1', 'ada', 'Ada', 'r', 'sonnet', 'coder', 0, 's1', 0, 'idle', 1, '', 'Keşif', 'member')`,
+    ).run();
+    const before = columns(db, 'employees');
+    expect(migrateUp(db, upTo(24))).toBe(24);
+    expect(tables(db)).toEqual(V24_TABLES);
+    expect(columns(db, 'departments')).toEqual(['id', 'name', 'mission', 'scope', 'template', 'template_version', 'head_id', 'status', 'created_at', 'closed_at', 'room']);
+    expect(columns(db, 'stream_notes')).toEqual(['id', 'plan_id', 'stream_id', 'kind', 'text', 'evidence', 'next', 'by', 'at']);
+    expect(columns(db, 'employees')).toEqual([...before, 'department_id']);
+    // Schema only: the team stays a team until the office adopts it (Departments.adoptTeams).
+    expect(db.prepare('SELECT COUNT(*) AS n FROM departments').get()).toMatchObject({ n: 0 });
+    expect(db.prepare("SELECT department_id FROM employees WHERE id = 'e1'").get()).toMatchObject({ department_id: null });
+    db.prepare("INSERT INTO departments (id, name, created_at) VALUES ('d1', 'Keşif', 1)").run();
+    expect(() => db.prepare("INSERT INTO departments (id, name, status, created_at) VALUES ('d2', 'X', 'gone', 1)").run()).toThrow();
+    // Office rooms (sub-project 2): a room is 0–5, and two open departments never share one; a closed one may keep its number.
+    db.prepare("INSERT INTO departments (id, name, created_at, room) VALUES ('d3', 'Y', 1, 0)").run();
+    expect(() => db.prepare("INSERT INTO departments (id, name, created_at, room) VALUES ('d4', 'Z', 1, 0)").run()).toThrow();
+    expect(() => db.prepare("INSERT INTO departments (id, name, created_at, room) VALUES ('d5', 'Z', 1, 6)").run()).toThrow();
+    db.prepare("INSERT INTO departments (id, name, status, created_at, room) VALUES ('d6', 'W', 'closed', 1, 0)").run();
+    expect(migrateDown(db, 23)).toBe(23);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'departments_room'").get()).toBeUndefined();
+    expect(tables(db)).toEqual(V23_TABLES);
+    expect(columns(db, 'employees')).toEqual(before);
+    expect(db.prepare("SELECT team FROM employees WHERE id = 'e1'").get()).toMatchObject({ team: 'Keşif' });
+    expect(migrateUp(db, upTo(24))).toBe(24);
+  });
+
+  it('v25 adds the company’s capabilities and the outbox, empty; v25 down restores v24', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(24));
+    expect(migrateUp(db, upTo(25))).toBe(25);
+    expect(tables(db)).toEqual(V25_TABLES);
+    expect(columns(db, 'custom_capabilities')).toEqual(['id', 'title', 'summary', 'kind', 'tools', 'status', 'proposed_by', 'decided_by', 'note', 'created_at', 'decided_at']);
+    expect(columns(db, 'outbox')).toEqual(['id', 'employee_id', 'department_id', 'tool', 'kind', 'target', 'recipients', 'summary', 'via', 'approval_id', 'at']);
+    db.prepare("INSERT INTO custom_capabilities (id, title, summary, kind, status, proposed_by, created_at) VALUES ('sms.send', 'SMS', 's', 'send', 'proposed', 'e1', 1)").run();
+    expect(() => db.prepare("INSERT INTO custom_capabilities (id, title, summary, kind, status, proposed_by, created_at) VALUES ('x.y', 'X', 's', 'spend', 'proposed', 'e1', 1)").run()).toThrow();
+    expect(() => db.prepare("INSERT INTO custom_capabilities (id, title, summary, kind, status, proposed_by, created_at) VALUES ('x.z', 'X', 's', 'send', 'pending', 'e1', 1)").run()).toThrow();
+    expect(() => db.prepare("INSERT INTO outbox (employee_id, tool, kind, target, via, at) VALUES ('e1', 't', 'pay', 'x', 'system', 1)").run()).toThrow();
+    expect(() => db.prepare("INSERT INTO outbox (employee_id, tool, kind, target, via, at) VALUES ('e1', 't', 'send', 'x', 'nobody', 1)").run()).toThrow();
+    const indexes = () => (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'outbox%' ORDER BY name").all() as Array<{ name: string }>).map((r) => r.name);
+    expect(indexes()).toEqual(['outbox_at', 'outbox_count']);
+    expect(migrateDown(db, 24)).toBe(24);
+    expect(tables(db)).toEqual(V24_TABLES);
+    expect(indexes()).toEqual([]);
+    expect(migrateDown(db, 24)).toBe(24);
+    expect(migrateUp(db, upTo(25))).toBe(25);
   });
 });

@@ -1,12 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Employee, PlanView, Task } from '@cc/shared';
+import type { CustomCapability, Employee, PlanView, Task } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { CompanyView } from './CompanyView.tsx';
 
 vi.mock('../net/api.ts', () => ({
   api: {
     hireCoordinator: vi.fn(async () => ({ id: 'new' })), appointCoordinator: vi.fn(async () => ({})), events: vi.fn(async () => []),
+    capabilities: vi.fn(async () => ({ version: 3, capabilities: [], knownConnectors: [], coverage: [], unclassified: [] })), customCapabilities: vi.fn(async () => []), outbox: vi.fn(async () => []),
     agenda: vi.fn(async () => ({ generatedAt: 0, horizonMs: 0, clock: { nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null }, employees: [] })),
     management: vi.fn(async () => ({ generatedAt: Date.now(), open: null, cycles: [
       { seq: 3, startedAt: Date.now() - 600_000, endedAt: Date.now() - 300_000, closed: true, model: 'opus', costUsd: 0.3, triggers: [{ kind: 'delivery', at: 1, note: '“Giriş” (Ada)', seq: 2 }], changes: ['Kayıt işini Can’a verdim'], reasoning: 'Can boştaydı.', next: null },
@@ -29,6 +30,7 @@ const office = (employees: Employee[], tasks: Task[] = []) =>
     views: Object.fromEntries(employees.map((e) => [e.id, { employee: e, events: [], openTools: {}, idleSince: null, eventsLoaded: true }])),
     tasks: Object.fromEntries(tasks.map((t) => [t.id, t])),
     plans: {},
+    departments: {},
   });
 
 beforeEach(() => office([]));
@@ -74,11 +76,80 @@ describe('CompanyView', () => {
     expect(screen.queryByText(/koordinatörü yok/)).toBeNull();
   });
 
+  it('the org chart groups people by department in opening order, the head first, then the centre', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('mert', { departmentId: 'd1' }), person('selin', { kind: 'lead', departmentId: 'd1' }), person('deniz', { departmentId: 'd2' }), person('ada')]);
+    useOffice.setState({
+      departments: {
+        d2: { id: 'd2', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 2, closedAt: null },
+        d1: { id: 'd1', name: 'Yazılım', mission: 'm', scope: '', template: null, headId: 'selin', status: 'open', createdAt: 1, closedAt: null },
+      },
+    } as never);
+    render(<CompanyView />);
+    const groups = screen.getAllByRole('region').map((r) => r.getAttribute('aria-label')).filter((l) => l !== 'Koordinatör');
+    expect(groups).toEqual(['Yazılım', 'Pazarlama', 'Merkez']);
+    const yazilim = screen.getByRole('region', { name: 'Yazılım' });
+    expect(within(yazilim).getAllByRole('button').map((b) => b.textContent)[0]).toMatch(/selin/);
+    expect(screen.getByRole('tab', { name: 'Departmanlar' })).toBeTruthy();
+  });
+
+  it('a department named like the centre does not swallow it: two sections, each with its own people', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('selin', { departmentId: 'd1' }), person('ada')]);
+    useOffice.setState({
+      departments: { d1: { id: 'd1', name: 'Merkez', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } },
+    } as never);
+    render(<CompanyView />);
+    const sections = screen.getAllByRole('region', { name: 'Merkez' });
+    expect(sections).toHaveLength(2);
+    expect(within(sections[0]!).getByText('selin')).toBeTruthy();
+    expect(within(sections[0]!).queryByText('ada')).toBeNull();
+    expect(within(sections[1]!).getByText('ada')).toBeTruthy();
+    expect(within(sections[1]!).queryByText('selin')).toBeNull();
+  });
+
+  it('a closed department draws no section of its own; its people are in the centre', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('mert', { departmentId: 'd1' }), person('deniz', { departmentId: 'd2' })]);
+    useOffice.setState({
+      departments: {
+        d1: { id: 'd1', name: 'Eski', mission: 'm', scope: '', template: null, headId: null, status: 'closed', createdAt: 1, closedAt: 5 },
+        d2: { id: 'd2', name: 'Yazılım', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 2, closedAt: null },
+      },
+    } as never);
+    render(<CompanyView />);
+    expect(screen.queryByRole('region', { name: 'Eski' })).toBeNull();
+    expect(within(screen.getByRole('region', { name: 'Merkez' })).getByText('mert')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Yazılım' })).queryByText('mert')).toBeNull();
+  });
+
+  it('marks the department head’s card with ★ and no other', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('mert', { departmentId: 'd1' }), person('selin', { kind: 'lead', departmentId: 'd1' }), person('ada')]);
+    useOffice.setState({
+      departments: { d1: { id: 'd1', name: 'Yazılım', mission: 'm', scope: '', template: null, headId: 'selin', status: 'open', createdAt: 1, closedAt: null } },
+    } as never);
+    render(<CompanyView />);
+    const cards = within(screen.getByRole('region', { name: 'Yazılım' })).getAllByRole('button');
+    expect(cards[0]!.textContent).toMatch(/selin/);
+    expect(cards[0]!.textContent).toContain('★');
+    expect(cards[1]!.textContent).not.toContain('★');
+    expect(within(screen.getByRole('region', { name: 'Merkez' })).getByRole('button').textContent).not.toContain('★');
+  });
+
+  it('the head’s ★ is decoration for a screen reader (the card names the role) and a tooltip for the eye', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('selin', { kind: 'lead', title: 'Departman başkanı', departmentId: 'd1' })]);
+    useOffice.setState({
+      departments: { d1: { id: 'd1', name: 'Yazılım', mission: 'm', scope: '', template: null, headId: 'selin', status: 'open', createdAt: 1, closedAt: null } },
+    } as never);
+    const { container } = render(<CompanyView />);
+    const star = container.querySelector('.org-head')!;
+    expect(star.getAttribute('title')).toBe('Departman başkanı');
+    expect(star.getAttribute('aria-hidden')).toBe('true');
+    expect(star.hasAttribute('aria-label')).toBe(false);
+  });
+
   it('does not repeat a word the name, title and role badge share', () => {
-    office([person('koor', { name: 'Koordinatör', kind: 'coordinator', title: 'Koordinatör' }), person('ada', { name: 'Ada', kind: 'lead', title: 'Ekip lideri' })]);
+    office([person('koor', { name: 'Koordinatör', kind: 'coordinator', title: 'Koordinatör' }), person('ada', { name: 'Ada', kind: 'lead', title: 'Departman başkanı' })]);
     render(<CompanyView />);
     expect(within(screen.getByRole('region', { name: 'Koordinatör' })).getAllByText(/Koordinatör/)).toHaveLength(1);
-    expect(within(screen.getByRole('region', { name: 'Ekipsiz' })).getAllByText(/Ekip lideri/)).toHaveLength(1);
+    expect(within(screen.getByRole('region', { name: 'Ekipsiz' })).getAllByText(/Departman başkanı/)).toHaveLength(1);
   });
 
   it('puts tasks in columns by state and filters them by person', () => {
@@ -169,5 +240,54 @@ describe('CompanyView', () => {
     expect(column.textContent).toContain('İnceleyen: Can');
     expect(column.textContent).toContain('tur 2');
     expect(within(screen.getByRole('region', { name: 'Bekliyor' })).getByText('İnceleme').className).toContain('review');
+  });
+
+  it('spec capabilities §9: has a Yetenekler tab and a Giden kutusu tab', async () => {
+    render(<CompanyView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Yetenekler' }));
+    expect(await screen.findByRole('region', { name: 'Ürünle gelenler' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Giden kutusu' }));
+    expect(await screen.findByText(/"izin verildi" kaydıdır/)).toBeTruthy();
+  });
+
+  describe('final review I2: the Yetenekler tab counts what waits for the owner', () => {
+    const capability = (id: string, over: Partial<CustomCapability>): CustomCapability => ({
+      id, title: id, summary: 's', kind: 'send', tools: [`mcp__x__${id}`], status: 'active', proposedBy: 'ada', decidedBy: 'koord', note: null, createdAt: 1, decidedAt: 2, ...over,
+    });
+    const proposed = { status: 'proposed', decidedBy: null, decidedAt: null } as const;
+
+    it('counts the coordinator’s own proposals, proposals as read and activations not yet opened to the system — and nothing else', async () => {
+      office([person('koord', { kind: 'coordinator', name: 'Koordinatör' }), person('ada', { name: 'Ada' })]);
+      vi.mocked(api.customCapabilities).mockResolvedValueOnce([
+        capability('own.send', { ...proposed, proposedBy: 'koord' }),
+        capability('team.read', { ...proposed, kind: 'read' }),
+        capability('team.send', proposed),
+        capability('active.send', {}),
+        capability('active.pay', { kind: 'pay' }),
+        capability('mine.send', { proposedBy: 'owner', decidedBy: 'owner' }),
+        capability('old.send', { status: 'retired', decidedBy: 'owner' }),
+      ]);
+      render(<CompanyView />);
+      const tab = await screen.findByRole('tab', { name: 'Yetenekler 3 karar bekliyor' });
+      expect(tab.textContent).toBe('Yetenekler3');
+    });
+
+    it('shows no count when nothing waits, and the count follows a change of the capabilities', async () => {
+      office([person('koord', { kind: 'coordinator', name: 'Koordinatör' })]);
+      render(<CompanyView />);
+      await waitFor(() => expect(api.customCapabilities).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('tab', { name: 'Yetenekler' }).textContent).toBe('Yetenekler');
+      vi.mocked(api.customCapabilities).mockResolvedValueOnce([capability('active.send', {})]);
+      act(() => useOffice.setState({ capabilitiesRev: useOffice.getState().capabilitiesRev + 1 }));
+      expect(await screen.findByRole('tab', { name: 'Yetenekler 1 karar bekliyor' }, { timeout: 3000 })).toBeTruthy();
+    });
+
+    it('does not guess when the capabilities cannot be read: no count', async () => {
+      office([person('koord', { kind: 'coordinator', name: 'Koordinatör' })]);
+      vi.mocked(api.customCapabilities).mockRejectedValueOnce(new Error('Sunucuya ulaşılamadı.'));
+      render(<CompanyView />);
+      await waitFor(() => expect(api.customCapabilities).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('tab', { name: 'Yetenekler' }).textContent).toBe('Yetenekler');
+    });
   });
 });

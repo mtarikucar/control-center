@@ -13,11 +13,18 @@ import { Company } from './company/company.ts';
 import { ManagementCycle } from './company/cycle.ts';
 import { Memory } from './company/memory.ts';
 import { DecisionStore, EmployeeNoteStore, NoteStore, PlaybookStore } from './company/memory-store.ts';
+import { DepartmentStore, StreamNoteStore } from './company/department-store.ts';
+import { Departments } from './company/departments.ts';
 import { Dispatcher } from './company/dispatcher.ts';
 import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { Blueprints } from './company/blueprint.ts';
 import { BlueprintStore } from './company/blueprint-store.ts';
 import { IntegrationRegistry } from './company/integrations.ts';
+import { companyCollisions, useCompanyCapabilities } from './company/capabilities.ts';
+import { asCapability, CustomCapabilities } from './company/custom-capabilities.ts';
+import { SpecialContactsDesks } from './company/special-contacts.ts';
+import { CustomCapabilityStore } from './company/custom-capability-store.ts';
+import { OutboxStore } from './company/outbox-store.ts';
 import { CapabilityPrecheck } from './company/precheck.ts';
 import { officeMetrics } from './company/office-metrics.ts';
 import { OnboardingStore } from './company/onboarding-store.ts';
@@ -47,6 +54,7 @@ import { officeTools } from './mcp/tools.ts';
 import { performanceReport } from './performance.ts';
 import { QuotaTracker } from './quota.ts';
 import { Roster } from './roster.ts';
+import { Seating } from './seating.ts';
 
 const config = loadConfig();
 let releaseLock: () => void;
@@ -109,7 +117,12 @@ const budget = new Budget({
   constitution: new ConstitutionStore(db), spend: new SpendStore(db), tasks, plans, roster, events, notices, quota, deskCount: config.deskCount,
 });
 const characters = manifestCharacters(config.assetsDir);
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db, Date.now, searchIndex), onboarding: new OnboardingStore(db) });
+// The departments (spec 2026-10-13-departments): the rooms, their heads and the notes on their streams.
+const streamNotes = new StreamNoteStore(db);
+const departments = new Departments({ store: new DepartmentStore(db), roster, events, notices, dataDir: config.dataDir, reload: (id) => engine.reload(id), reseat: (id) => seating.reseat(id), reseatAll: () => seating.reseatAll() });
+// Who sits where (spec 2026-10-13-office-rooms §3): the coordinator under the beam, a department in its room, the rest at the hub.
+const seating = new Seating({ roster, events, roomOf: (id) => departments.roomOf(id), heldRooms: () => departments.heldRooms() });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db, Date.now, searchIndex), onboarding: new OnboardingStore(db), departments, streamNotes, seating });
 // The project's pulse (spec §6.3): the dispatcher runs it only without the management cycle; here its facts are the board's (§3.6).
 const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, budget });
 // The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
@@ -119,15 +132,36 @@ company.attachClock(clock);
 // KPI measurement (B26): the office reads its own KPIs from the metrics (B4) and asks the coordinator for the rest.
 const kpis = new KpiReadings({ db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(db, o) });
 company.attachKpis(kpis);
+departments.attach({ openStreams: () => company.liveStreams(), headEnded: (id) => company.rerouteProposalsOf(id) });
+// The teams of before departments become departments, and every desk learns its department (idempotent).
+departments.adoptTeams();
+departments.refreshDesks();
+// Everyone to their seat (idempotent): on the first start the eight desks of before become the rooms and the hub.
+seating.reseatAll();
 // Which connectors the office has (B3): read from the sessions' reports and the coordinator's records. Before the
 // dispatcher, whose precheck (B8) reads it.
 const integrations = new IntegrationRegistry({ db, roster, events });
+// The company's own capabilities (spec capabilities §4): the vocabulary is the product's and the active ones — every
+// classification (sessions, the gate, coverage) reads it, so it is wired before the first session starts.
+const customCapabilities = new CustomCapabilities({ store: new CustomCapabilityStore(db), roster, events, notices, coordinator: () => company.coordinator() });
+useCompanyCapabilities(() => customCapabilities.active().map(asCapability));
+// The product wins a tool or an id a later product took from an active company capability (final review minor 1):
+// the operator hears it in the console, the owner on the coordinator's feed.
+for (const warning of companyCollisions()) {
+  console.warn(warning);
+  events.append(company.coordinator()?.id ?? null, { type: 'error', message: warning });
+}
+// The owner's special contacts on the desks of those who send, publish, call or invite (final review I4.2): written
+// now and after every change to the list, a role card or a company capability; nothing while the list is empty.
+new SpecialContactsDesks({ dataDir: config.dataDir, roster, events, contacts: () => budget.constitution().specialContacts }).refresh();
+// What the gate let out (spec capabilities §7): the system's on the owner's policy, and the owner's approvals.
+const outbox = new OutboxStore(db);
 // B8: holds a task whose required capability its desk lacks; the constitution's switch, off by default, turns it on.
 const precheck = new CapabilityPrecheck({ company, tasks, roster, integrations, proposals, events, enabled: () => budget.constitution().capabilityPrecheckEnabled });
 // Who does what when (spec §6.1): reads only, for the sheet, agendaRead and the management board.
 const agenda = new Agenda({ roster, tasks, schedules, company, budget, clock });
 // The coordinator's management cycle (management cycle §3.1): when the board is due, built from the office's services.
-const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota, kpis };
+const boardDeps = { db, events, roster, company, tasks, plans, state, agenda, budget, proposals, quota, kpis, departments };
 const cycle = new ManagementCycle({ events, state, company, roster, tasks, budget, clock, board: (o) => buildBoard(boardDeps, o) });
 // B12: each task message carries what the memory holds for it (the index read, no memory.searched event).
 // The owner's weekly line (constitution weeklyStopPct): the office pauses itself when the week's quota reaches it.
@@ -142,7 +176,11 @@ const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date
 // The gate for work that cannot be taken back (B9a): the owner's approvals, and the check the sessions' hook asks for.
 const approvals = new Approvals({ store: new ApprovalStore(db), events, notices, roster, tasks, coordinator: () => company.coordinator(), memory });
 const gateContext = liveContext({ repoRoot: REPO_ROOT, dataDir: config.dataDir, home: homedir(), port: () => port, hosts: config.allowedHosts });
-const gate = new Gate({ approvals, events, roster, enabled: () => budget.constitution().gateEnabled, context: gateContext, git: gateContext.git });
+const gate = new Gate({
+  approvals, events, roster, enabled: () => budget.constitution().gateEnabled, context: gateContext, git: gateContext.git,
+  // Spec capabilities §5: the policy acts only while the owner keeps the gate on; this never turns it on.
+  autonomy: { constitution: () => budget.constitution(), outbox },
+});
 // Owner endpoints called not the page's way: the coordinator hears, at most once an hour per kind.
 new OwnerFlags({ events, notices, coordinator: () => company.coordinator() });
 const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, memory, store: new BlueprintStore(db), integrations, constitution: () => budget.constitution() });
@@ -150,8 +188,8 @@ const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, me
 const api = createApi(
   {
     engine, roster, events, quota, gate,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis, approvals, gate, cycle }) },
-    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints, approvals, management: cycle },
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis, approvals, gate, cycle, departments, capabilities: customCapabilities, outbox }) },
+    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints, approvals, management: cycle, departments, capabilities: customCapabilities, outbox },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );

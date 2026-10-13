@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import type { ApprovalKind, ApprovalScope } from '@cc/shared';
-import { toolClass } from './capabilities.ts';
+import { capabilityKind, toolClass } from './capabilities.ts';
 import { literal, parseShell, ShellSyntaxError, type ShellAssign, type ShellNode, type ShellWord } from './shell.ts';
 
 /**
@@ -42,6 +42,11 @@ export interface GatePart {
   target: string;
   /** Why it is held, in Turkish, for the model and the owner. */
   why: string;
+  /**
+   * The connector capability this part comes from — only for a classified connector tool (spec capabilities §5): the
+   * only parts the owner's outward policy may leave to the system. Bash and built-in parts never carry one.
+   */
+  capability?: string;
 }
 
 export interface GateVerdict {
@@ -64,13 +69,12 @@ export function toolFamily(tool: string, target: string): string {
   return tool;
 }
 
-/** The connector capabilities that do something outside, by what they do (§3 Y1). */
-const KIND_BY_CAPABILITY: Record<string, ApprovalKind> = {
-  'email.send': 'send', 'calendar.write': 'send', 'messages.send': 'send', 'calls.make': 'send',
-  'social.publish': 'publish', 'web.publish': 'publish',
-  'payments.charge': 'pay', 'ads.manage': 'pay', 'media.generate': 'pay', 'automation.run': 'pay',
-  'email.delete': 'delete',
-};
+/**
+ * The browser's servers, by their exact names (hardening round 4): the plugin's and `playwright`, @playwright/mcp's
+ * usual name — both among the names a project's .mcp.json may not bring (connectorServers). Any other server's
+ * browser_ tools are a connector's like any.
+ */
+const BROWSER_SERVERS = new Set(['plugin_playwright_playwright', 'playwright']);
 
 /** Playwright's tools that only look (§3 Y3); every other browser_ tool acts and waits for an approval of the task. */
 const BROWSER_READ = new Set(['browser_navigate', 'browser_navigate_back', 'browser_snapshot', 'browser_take_screenshot', 'browser_find', 'browser_console_messages', 'browser_network_requests', 'browser_tabs', 'browser_wait_for', 'browser_resize', 'browser_hover', 'browser_close']);
@@ -92,7 +96,8 @@ const DYN = '\u0000';
 const MAX_DEPTH = 6;
 
 const KIND_WHY: Record<ApprovalKind, string> = {
-  publish: 'dışarıda yayımlar', send: 'dışarıya gönderir', pay: 'para harcar', delete: 'geri alınamaz siler', browser: 'tarayıcıda iş yapar', self: 'ofisin kendisine dokunur', other: 'ne yaptığı bilinmiyor',
+  publish: 'dışarıda yayımlar', send: 'dışarıya gönderir', calendar: 'takvime yazar, katılımcılara davet gider', call: 'telefonla arar', pay: 'para harcar',
+  delete: 'geri alınamaz siler', browser: 'tarayıcıda iş yapar', self: 'ofisin kendisine dokunur', other: 'ne yaptığı bilinmiyor',
 };
 
 const under = (p: string, root: string) => p === root || p.startsWith(root.endsWith('/') ? root : `${root}/`);
@@ -100,18 +105,41 @@ const under = (p: string, root: string) => p === root || p.startsWith(root.endsW
 /** Claude Code keeps a working folder's memory under ~/.claude/projects/<the folder, every other character a dash>. */
 const projectKey = (dir: string) => dir.replace(/[^A-Za-z0-9]/g, '-');
 
-/** Why writing at `path` is held (§3.1), or null; `recursive`: also when it holds a protected folder (rm -r, mv). */
-export function protectedWhy(path: string, ctx: GateContext, recursive = false): string | null {
+/**
+ * Connector identity (Task 8 review): the files that define the MCP servers a session loads. A Claude session (-p, the
+ * project's settings on) loads a .mcp.json from its folder and from every folder above it without asking, and the
+ * owner's ~/.claude.json holds the user's servers and each folder's own; Codex reads ~/.codex/config.toml and a
+ * trusted project's .codex/config.toml (its servers, and the trust, approvals and sandbox too). A server written there
+ * under a classified connector's name would be taken for that connector, and its sends for the system's.
+ */
+function mcpConfigWhy(p: string, home: string, mcpJson = true): string | null {
+  const name = posix.basename(p).toLowerCase();
+  if (name === '.mcp.json' && mcpJson) return 'MCP sunucu ayarları (.mcp.json)';
+  if (name === '.claude.json' && posix.dirname(p) === home) return 'sahibinin Claude ayarları (~/.claude.json: MCP sunucuları)';
+  if (name === 'config.toml' && posix.basename(posix.dirname(p)).toLowerCase() === '.codex') return 'Codex ayarları (.codex/config.toml: MCP sunucuları, onaylar)';
+  return null;
+}
+
+const LIVE_WHY = 'canlı checkout (kapının ve ofisin kodu)';
+
+/**
+ * Why writing at `path` is held (§3.1), or null; `recursive`: also when it holds a protected folder (rm -r, mv);
+ * `mcpJson` false: a .mcp.json there counts for nothing (one moved or linked away loads nothing; hardening round 2).
+ */
+export function protectedWhy(path: string, ctx: GateContext, recursive = false, mcpJson = true): string | null {
   const p = ctx.realpath(path);
   const { home } = ctx;
   if (under(p, `${home}/.ssh`) || under(p, `${home}/.config/gh`)) return 'kimlik dosyaları';
+  // By its name wherever it is — the path as written too: a .mcp.json that is a link to elsewhere is still one.
+  const mcp = mcpConfigWhy(p, home, mcpJson) ?? mcpConfigWhy(path, home, mcpJson);
+  if (mcp) return mcp;
   if (under(p, `${home}/.claude`)) return under(p, `${home}/.claude/projects/${projectKey(ctx.deskDir)}`) ? null : 'sahibinin Claude ayarları';
-  if (under(p, ctx.repoRoot)) return 'canlı checkout (kapının ve ofisin kodu)';
+  if (under(p, ctx.repoRoot)) return LIVE_WHY;
   if (under(p, ctx.deskDir)) return under(p, `${ctx.deskDir}/.claude`) ? 'masanın Claude ayarları (.claude)' : null;
   if (under(p, `${ctx.dataDir}/desks`)) return p === `${ctx.dataDir}/desks` ? 'masalar' : 'başkasının masası';
   if (under(p, ctx.dataDir)) return 'ofisin veri dizini (veritabanı, şirket hafızası)';
   if (recursive) {
-    for (const root of [`${home}/.ssh`, `${home}/.config/gh`, `${home}/.claude`, ctx.repoRoot, ctx.dataDir]) if (under(root, p)) return 'korunan bir klasörü içine alıyor';
+    for (const root of [`${home}/.ssh`, `${home}/.config/gh`, `${home}/.claude`, `${home}/.codex/config.toml`, ctx.repoRoot, ctx.dataDir]) if (under(root, p)) return 'korunan bir klasörü içine alıyor';
   }
   return null;
 }
@@ -265,7 +293,28 @@ function httpParts(cmd: string, reqs: Request[], ctx: GateContext): GatePart[] {
   return out;
 }
 
-const CURL_BOOL = new Set(['--silent', '--show-error', '--fail', '--fail-with-body', '--location', '--insecure', '--compressed', '--verbose', '--include', '--head', '--get', '--globoff', '--no-buffer', '--progress-bar', '--http1.0', '--http1.1', '--http2', '--http3', '--ipv4', '--ipv6', '--remote-name', '--remote-name-all', '--create-dirs', '--raw', '--no-progress-meter', '--retry-all-errors', '--location-trusted', '--fail-early', '--no-keepalive', '--tcp-nodelay', '--disable', '--anyauth', '--basic', '--digest', '--ntlm', '--negotiate', '--compressed-ssh', '--tr-encoding', '--remote-time', '--styled-output', '--no-styled-output']);
+/**
+ * curl's long options that take a value (`curl --help all`, 8.5, and a few newer ones); every other long option is a
+ * switch (hardening round 3): an unknown one must never swallow the next word — `--tlsv1.2 -o …`, `--netrc https://…`.
+ */
+const CURL_LONG_VALUE = new Set([
+  '--abstract-unix-socket', '--alt-svc', '--aws-sigv4', '--cacert', '--capath', '--cert', '--cert-type', '--ciphers', '--config', '--connect-timeout',
+  '--connect-to', '--continue-at', '--cookie', '--cookie-jar', '--create-file-mode', '--crlfile', '--curves', '--data', '--data-ascii', '--data-binary',
+  '--data-raw', '--data-urlencode', '--delegation', '--dns-interface', '--dns-ipv4-addr', '--dns-ipv6-addr', '--dns-servers', '--doh-url', '--dump-header',
+  '--ech', '--egd-file', '--engine', '--etag-compare', '--etag-save', '--expect100-timeout', '--form', '--form-string', '--ftp-account',
+  '--ftp-alternative-to-user', '--ftp-method', '--ftp-port', '--ftp-ssl-ccc-mode', '--happy-eyeballs-timeout-ms', '--header', '--hostpubmd5',
+  '--hostpubsha256', '--hsts', '--interface', '--ip-tos', '--ipfs-gateway', '--json', '--keepalive-time', '--key', '--key-type', '--knownhosts', '--krb',
+  '--libcurl', '--limit-rate', '--local-port', '--login-options', '--mail-auth', '--mail-from', '--mail-rcpt', '--max-filesize', '--max-redirs',
+  '--max-time', '--netrc-file', '--noproxy', '--oauth2-bearer', '--output', '--output-dir', '--parallel-max', '--pass', '--pinnedpubkey', '--preproxy',
+  '--proto', '--proto-default', '--proto-redir', '--proxy', '--proxy1.0', '--proxy-cacert', '--proxy-capath', '--proxy-cert', '--proxy-cert-type',
+  '--proxy-ciphers', '--proxy-crlfile', '--proxy-header', '--proxy-key', '--proxy-key-type', '--proxy-pass', '--proxy-pinnedpubkey',
+  '--proxy-service-name', '--proxy-tls13-ciphers', '--proxy-tlsauthtype', '--proxy-tlspassword', '--proxy-tlsuser', '--proxy-user', '--pubkey', '--quote',
+  '--random-file', '--range', '--rate', '--referer', '--request', '--request-target', '--resolve', '--retry', '--retry-delay', '--retry-max-time',
+  '--sasl-authzid', '--service-name', '--sigalgs', '--socks4', '--socks4a', '--socks5', '--socks5-gssapi-service', '--socks5-hostname', '--speed-limit',
+  '--speed-time', '--ssl-sessions', '--stderr', '--telnet-option', '--tftp-blksize', '--time-cond', '--tls13-ciphers', '--tlsauthtype', '--tls-max',
+  '--tlspassword', '--tlsuser', '--trace', '--trace-ascii', '--trace-config', '--unix-socket', '--upload-file', '--url', '--url-query', '--user',
+  '--user-agent', '--variable', '--vlan-priority', '--write-out',
+]);
 const CURL_SHORT_VALUE = new Set([...'AbcCdDeEFHKmoPQrtTuUwxXyYz']);
 
 function curlRequests(args: string[]): Request[] {
@@ -286,7 +335,7 @@ function curlRequests(args: string[]): Request[] {
         value();
       } else if (name === '--get') get = true;
       else if (name === '--head') head = true;
-      else if (!CURL_BOOL.has(name) && inline === null) i += 1;
+      else if (CURL_LONG_VALUE.has(name) && inline === null) i += 1;
       continue;
     }
     if (flag(t)) {
@@ -330,6 +379,79 @@ function wgetRequests(args: string[]): Request[] {
     urls.push(t);
   }
   return urls.filter((u) => urlOf(u) || u.includes(DYN)).map((url) => ({ method, url }));
+}
+
+/** A path the gate composes (a folder and a name), as a word: what it knows of it, DYN where it is known only at run time. */
+const composed = (text: string): ShellWord => ({ parts: [{ lit: text }], tilde: false, quoted: true });
+
+/** The last part of a URL's path — the name curl -O and wget give the file; DYN when the URL is known only at run time. */
+function remoteName(url: string): string {
+  if (url.includes(DYN)) return DYN;
+  const path = (urlOf(url)?.pathname ?? url.replace(/[?#].*$/, '')).replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '');
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+const WGET_SHORT_VALUE = new Set([...'OoaPeitTwlDQUBXIAR']);
+const WGET_LONG_VALUE = new Set(['--output-document', '--output-file', '--append-output', '--directory-prefix']);
+
+/**
+ * What a downloader writes (hardening round 2), checked as any write is: curl -o/--output (in --output-dir when
+ * relative) and -O/--remote-name — the URL's last part in --output-dir or where curl stands, and with -J a name known
+ * only at run time as well —; wget -O, its logs -o/-a, and without -O each URL's last part (index.html for none) in
+ * -P's folder or where wget stands — and names known only at run time when it recurses, reads its URLs from a file or
+ * takes the server's.
+ */
+function downloads(name: 'curl' | 'wget', words: ShellWord[], st: ShellState, run: Run): void {
+  const t = texts(words, st, run.ctx);
+  const outputs: ShellWord[] = [];
+  const urls: string[] = [];
+  let dir: string | null = null;
+  let remote = name === 'wget';
+  let unknown = false;
+  for (let i = 1; i < t.length; i += 1) {
+    const a = t[i]!;
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      const opt = eq === -1 ? a : a.slice(0, eq);
+      const valued = (name === 'curl' ? CURL_LONG_VALUE : WGET_LONG_VALUE).has(opt);
+      const word = !valued ? null : eq === -1 ? words[++i] : composed(a.slice(eq + 1));
+      const text = word ? textOf(word, st, run.ctx) : '';
+      if (opt === '--output' || (name === 'wget' && opt !== '--directory-prefix' && WGET_LONG_VALUE.has(opt))) {
+        if (word) outputs.push(word);
+        if (opt === '--output-document') remote = false;
+      } else if (opt === '--output-dir' || opt === '--directory-prefix') dir = text;
+      else if (opt === '--url') urls.push(text);
+      else if (opt === '--remote-name' || opt === '--remote-name-all') remote = true;
+      else if (['--remote-header-name', '--recursive', '--mirror', '--content-disposition', '--input-file'].includes(opt)) unknown = true;
+      continue;
+    }
+    if (flag(a)) {
+      for (let j = 1; j < a.length; j += 1) {
+        const c = a[j]!;
+        if (name === 'curl' && c === 'O') remote = true;
+        if ((name === 'curl' && c === 'J') || (name === 'wget' && 'rmi'.includes(c))) unknown = true;
+        if ((name === 'curl' ? CURL_SHORT_VALUE : WGET_SHORT_VALUE).has(c)) {
+          const word = a.length > j + 1 ? composed(a.slice(j + 1)) : words[++i];
+          if (word && (c === 'o' || (name === 'wget' && (c === 'O' || c === 'a')))) outputs.push(word);
+          if (name === 'wget' && c === 'O') remote = false;
+          if (word && name === 'wget' && c === 'P') dir = textOf(word, st, run.ctx);
+          break;
+        }
+      }
+      continue;
+    }
+    urls.push(a);
+  }
+  const at = (file: string) => composed(dir !== null && !file.startsWith('/') ? `${dir}/${file}` : file);
+  for (const w of outputs) {
+    const file = textOf(w, st, run.ctx);
+    // curl's --output-dir takes its -o along; wget's -P is only for the names wget gives the files itself.
+    if (file !== '-') writeTarget(run, `${name} -o`, file.startsWith('/') || dir === null || name === 'wget' ? w : at(file), st);
+  }
+  if (!remote) return;
+  // A name known only at run time is the folder's question; the URL's own name stays one (curl -J falls back to it).
+  const names = [...urls.map((u) => remoteName(u) || (name === 'wget' ? 'index.html' : '')).filter(Boolean), ...(unknown ? [DYN] : [])];
+  for (const file of names) writeTarget(run, `${name} -O`, at(dir === null ? `./${file}` : file), st);
 }
 
 function httpieRequests(args: string[]): Request[] {
@@ -519,30 +641,120 @@ function protectedLiterals(code: string, st: ShellState, ctx: GateContext): Arra
   return out;
 }
 
-const CMD_WORDS = '(?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh)';
+const CMD_WORDS = '(?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh|claude|codex)';
 
-/** The commands a program starts, as far as its text shows them: one string, perl/ruby quoting, or a list of strings. */
-function spawnedCommands(code: string): string[] {
-  const out: string[] = [];
-  for (const m of code.matchAll(new RegExp(`(['"\`])(${CMD_WORDS}\\s[^'"\`]*)\\1`, 'g'))) out.push(m[2]!);
-  for (const m of code.matchAll(new RegExp(`(?:q[qw]?|%[qQwW])\\s*[{(\\[<]\\s*(${CMD_WORDS}\\b[^})\\]>]*)[})\\]>]`, 'g'))) out.push(m[1]!);
+/**
+ * The commands a program starts, as far as its text shows them: one string, perl/ruby quoting, or a list of strings;
+ * `at`: where the command's name stands in the code (its opening quote), `list` when it was read from a list or a
+ * call's arguments.
+ */
+function spawnedCommands(code: string): Array<{ line: string; at: number; list: boolean }> {
+  const out: Array<{ line: string; at: number; list: boolean }> = [];
+  for (const m of code.matchAll(new RegExp(`(['"\`])(${CMD_WORDS}\\s[^'"\`]*)\\1`, 'g'))) out.push({ line: m[2]!, at: m.index!, list: false });
+  for (const m of code.matchAll(new RegExp(`(?:q[qw]?|%[qQwW])\\s*[{(\\[<]\\s*(${CMD_WORDS}\\b[^})\\]>]*)[})\\]>]`, 'g'))) out.push({ line: m[1]!, at: m.index!, list: false });
   const items = (list: string) => [...list.matchAll(/(['"])([^'"]*)\1/g)].map((x) => x[2]!);
   for (const m of code.matchAll(/[[(]\s*((?:(['"])[^'"]*\2\s*,\s*)+(['"])[^'"]*\3)\s*,?\s*[\])]/g)) {
     const list = items(m[1]!);
-    if (new RegExp(`^${CMD_WORDS}$`).test(list[0] ?? '')) out.push(list.join(' '));
+    if (new RegExp(`^${CMD_WORDS}$`).test(list[0] ?? '')) out.push({ line: list.join(' '), at: m.index! + m[0].search(/['"]/), list: true });
   }
-  for (const m of code.matchAll(new RegExp(`(['"])(${CMD_WORDS})\\1\\s*,\\s*\\[([^\\]]*)\\]`, 'g'))) out.push([m[2]!, ...items(m[3]!)].join(' '));
+  for (const m of code.matchAll(new RegExp(`(['"])(${CMD_WORDS})\\1\\s*,\\s*\\[([^\\]]*)\\]`, 'g'))) out.push({ line: [m[2]!, ...items(m[3]!)].join(' '), at: m.index!, list: true });
   return out;
 }
 
-/** A file the command writes: held when its resolved target is protected, or when it cannot be known. */
-function writeTarget(run: Run, verb: string, w: ShellWord, st: ShellState, recursive = false): void {
+/** A literal no program's argument list holds — a number, a truth value, nothing (subprocess and spawn take texts only). */
+const NOT_AN_ARGUMENT = /^(?:[+-]?\d[\w.]*|True|False|None|true|false|null|undefined)(?![\w.])/;
+
+/**
+ * The words of a start after its name (hardening round 4): from `from` to the list's or the call's close, its quoted
+ * words up to the first that is not one (commas, spaces and nested lists between them); `whole` when it holds nothing
+ * else and nothing is added to it after the close (`] + args`); `argv` false when that first other thing is a literal
+ * no argument list holds (`('claude', 1)`: data, not a start — final re-review).
+ */
+function startWords(code: string, from: number, close: string): { words: string[]; whole: boolean; argv: boolean } {
+  const words: string[] = [];
+  let depth = 0;
+  for (let i = from; i < code.length && i < from + 400; i += 1) {
+    const c = code[i]!;
+    if (c === '"' || c === "'" || c === '`') {
+      const end = code.indexOf(c, i + 1);
+      if (end === -1) return { words, whole: false, argv: true };
+      words.push(code.slice(i + 1, end));
+      i = end;
+    } else if (c === '[') depth += 1;
+    else if (c === ']' || c === ')') {
+      if (depth > 0) {
+        depth -= 1;
+        continue;
+      }
+      if (c !== close) return { words, whole: false, argv: true };
+      const after = /\S/.exec(code.slice(i + 1, i + 40))?.[0];
+      return { words, whole: after === undefined || [')', ',', ';', ']'].includes(after), argv: true };
+    } else if (c !== ',' && !/\s/.test(c)) return { words, whole: false, argv: !NOT_AN_ARGUMENT.test(code.slice(i, i + 40)) };
+  }
+  return { words, whole: false, argv: true };
+}
+
+/**
+ * Claude Code's or Codex's name as a program writes it to start one (hardening round 4): exactly claude or codex, a
+ * path ending in one, claude-<version> (three numbers: claude-2.1 is a model's name — final re-review), or Claude
+ * Code's versions folder. Case counts — CLAUDE.md, CLAUDE_CONFIG_DIR and CODEX_HOME are other names.
+ */
+const AGENT_NAME = /^(?:[^\s'"`]*\/)?(claude|codex)(?:-\d+\.\d+\.\d+)?$/;
+const agentName = (name: string): 'claude' | 'codex' | null =>
+  (AGENT_NAME.exec(name)?.[1] as 'claude' | 'codex' | undefined) ?? (/\/claude\/versions\/[^/\s]+$/.test(name) ? 'claude' : null);
+
+/**
+ * Where a start's name stands (hardening round 4): a spawn call's first argument — Python's subprocess, os, pty,
+ * pexpect and asyncio, Node's child_process and execa, Ruby's and Perl's system and exec — or the first item of a
+ * literal list or tuple, opened after `(`, `=`, `,`, at a line's start, or after `return` or `yield` (`cmd = ["claude",
+ * …]`, `run(("claude", …))`, `run(\n  [\n  "claude"`; final re-review: tuples and handed-back lists), never one read
+ * from (`rows['claude']`, `rows[('claude',)]`). Space between, new lines too.
+ */
+const SPAWN_CALL = /(?<![\w$])(?:run|call|check_call|check_output|Popen|spawn\w*|exec\w*|system|popen|create_subprocess_exec|execa|posix_spawn\w*)\s*\(\s*(['"`])/g;
+const START_SEQUENCE = /(?:[(=,]\s*|^[ \t]*|\b(?:return|yield)[ \t]+)([[(])\s*(['"`])/gm;
+/** Either package's name, as npx and the like run it: @anthropic-ai/claude-code, @openai/codex@latest. */
+const AGENT_PACKAGES = [['@anthropic-ai/claude-code', 'claude'], ['@openai/codex', 'codex']] as const;
+const PACKAGE_RUNNERS = new Set(['npx', 'dlx', 'bunx']);
+
+type AgentStart = { agent: 'claude' | 'codex'; at: number; words: string[]; whole: boolean; free: boolean };
+
+/**
+ * Claude Code or Codex started from code (hardening rounds 3–4), each start with its own words: its name at a start
+ * (above), or either package's name right after npx, dlx or bunx (flags between). `free`: known in full, asking its
+ * version or its help alone, as on the shell. `at`: where the name stands. Scanned linearly.
+ */
+function agentStarts(code: string): AgentStart[] {
+  const out: AgentStart[] = [];
+  const found = (m: RegExpMatchArray, quote: string, close: string) => {
+    const start = m.index! + m[0].length;
+    const end = code.indexOf(quote, start);
+    if (end === -1 || end - start > 200) return;
+    const agent = agentName(code.slice(start, end));
+    if (!agent) return;
+    const { words, whole, argv } = startWords(code, end + 1, close);
+    if (argv) out.push({ agent, at: start - 1, words, whole, free: whole && words.length === 1 && ['--version', '-v', '--help', '-h'].includes(words[0]!) });
+  };
+  for (const m of code.matchAll(SPAWN_CALL)) found(m, m[1]!, ')');
+  for (const m of code.matchAll(START_SEQUENCE)) found(m, m[2]!, m[1] === '[' ? ']' : ')');
+  for (const [pkg, agent] of AGENT_PACKAGES) {
+    for (let i = code.indexOf(pkg); i !== -1; i = code.indexOf(pkg, i + 1)) {
+      if (/[\w/-]/.test(code[i + pkg.length] ?? '')) continue;
+      // The word before it, flags passed over: npx -y @openai/codex, ['pnpm', 'dlx', '@anthropic-ai/claude-code'].
+      const before = code.slice(Math.max(0, i - 120), i).split(/[\s'"`,[\]()+]+/).filter((w) => w && !w.startsWith('-'));
+      if (PACKAGE_RUNNERS.has(posix.basename(before.at(-1) ?? ''))) out.push({ agent, at: i, words: [], whole: false, free: false });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/** A file the command writes: held when its resolved target is protected, or when it cannot be known (`mcpJson`: protectedWhy's). */
+function writeTarget(run: Run, verb: string, w: ShellWord, st: ShellState, recursive = false, mcpJson = true): void {
   const at = pathOf(w, st, run.ctx);
   if (!at) {
     add(run, { kind: 'self', target: `${verb} ${shown(textOf(w, st, run.ctx))}`, why: 'yazdığı yer çalışınca belli olur (temkinli: kapıda)' });
     return;
   }
-  const why = protectedWhy(at.path, run.ctx, recursive || at.partial);
+  const why = protectedWhy(at.path, run.ctx, recursive || at.partial, mcpJson);
   if (why) add(run, { kind: 'self', target: `${verb} ${at.path}`, why: `korunan yola yazar: ${why}` });
 }
 
@@ -567,12 +779,25 @@ function deleteTarget(run: Run, verb: string, w: ShellWord, st: ShellState): voi
   add(run, { kind: 'delete', target: `${verb} ${at.path}`, why: 'serbest silme alanı (masa, /tmp) dışında' });
 }
 
+/**
+ * Claude Code or Codex: by its name or a versioned one (claude-2.1.296, codex-x86_64…), a package's own name run by npx
+ * and the like (@anthropic-ai/claude-code, @openai/codex@latest), or Claude Code's versions folder (…/claude/versions/2.1.296).
+ */
+const AGENT_CLI = /^(claude|codex)([-_.@][\w.@-]*)?$/i;
+const NESTED_WHY = 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)';
+function agentCli(cmd: string): 'claude' | 'codex' | null {
+  const name = posix.basename(cmd);
+  if (AGENT_CLI.test(name)) return name.toLowerCase().startsWith('codex') ? 'codex' : 'claude';
+  return /\/claude\/versions\/[^/]+$/.test(cmd) ? 'claude' : null;
+}
+
 function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Array<{ op: string; target: ShellWord | null; body?: string }>, st: ShellState, run: Run): void {
   const { ctx } = run;
   let words = all;
   // Wrappers that run the rest as a command.
   for (;;) {
-    const head = literal(words[0]!) ?? '';
+    // By its name wherever it lies: /usr/bin/env is env (hardening round 3).
+    const head = posix.basename(literal(words[0]!) ?? '');
     const t = texts(words, st, ctx);
     if (head === 'sudo') {
       let i = 1;
@@ -603,8 +828,12 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
       while (i < t.length && flag(t[i]!)) i += /^-[ncioe]$/.test(t[i]!) ? 2 : 1;
       words = words.slice(i);
     } else if (['nohup', 'command', 'builtin', 'exec', 'setsid', 'time', 'chronic', 'unbuffer'].includes(head)) {
+      // command's own -v/-V (before the name it runs) only says what a name is; exec -a names the process (its value is
+      // no command). A -v after the name is that command's.
       let i = 1;
-      while (i < t.length && flag(t[i]!)) i += 1;
+      for (; i < t.length && flag(t[i]!); i += head === 'exec' && t[i] === '-a' ? 2 : 1) {
+        if (head === 'command' && /^-[a-zA-Z]*[vV]/.test(t[i]!)) return;
+      }
       words = words.slice(i);
     } else if (head === 'xargs') {
       let i = 1;
@@ -635,6 +864,15 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
   const cmd = t[0]!;
   const name = cmd.includes('/') ? posix.basename(cmd) : cmd;
   const args = t.slice(1);
+
+  // A nested Claude Code or Codex session (hardening round 2) runs with none of the office's hook: through it every
+  // connector of the owner is reached past the gate, and `mcp add` changes what the sessions load. Its version or its
+  // help alone is only a question.
+  const agent = agentCli(cmd);
+  if (agent) {
+    if (args.length === 1 && ['--version', '-v', '--help', '-h'].includes(args[0]!)) return;
+    return add(run, { kind: 'self', target: `${agent} ${shown(args.join(' '))}`.trim().slice(0, 80), why: NESTED_WHY });
+  }
 
   // The shell's own state.
   if (cmd === 'cd' || cmd === 'pushd') {
@@ -756,8 +994,10 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
 
   if (name === 'git') return git(words, env, st, run);
   if (name === 'gh') return gh(args, run);
-  if (name === 'curl') return void httpParts('curl', curlRequests(args), ctx).forEach((p) => add(run, p));
-  if (name === 'wget') return void httpParts('wget', wgetRequests(args), ctx).forEach((p) => add(run, p));
+  if (name === 'curl' || name === 'wget') {
+    httpParts(name, (name === 'curl' ? curlRequests : wgetRequests)(args), ctx).forEach((p) => add(run, p));
+    return downloads(name, words, st, run);
+  }
   if (['http', 'https', 'xh', 'xhs'].includes(name)) return void httpParts(name, httpieRequests(args), ctx).forEach((p) => add(run, p));
   if (['npm', 'pnpm', 'yarn', 'bun'].includes(name)) return packages(name, words, env, st, run);
   if (name === 'npx' || name === 'bunx') {
@@ -840,7 +1080,7 @@ function shellIndirect(name: string, words: ShellWord[], redirects: Array<{ op: 
  * script writes into a test — is only text).
  */
 const DB_ACCESS: Record<string, RegExp> = {
-  python: /^\s*(import|from)\s+sqlite3\b|sqlite3\.connect\(/m,
+  python: /^[ \t]*(import|from)\s+sqlite3\b|sqlite3\.connect\(/m,
   node: /node:sqlite|DatabaseSync\(|better-sqlite3|openDb\(|\/db\.ts['"]/,
   other: /sqlite|DBI->connect|\.connect\(/i,
 };
@@ -848,8 +1088,9 @@ const dbAccess = (name: string, code: string) => (DB_ACCESS[name.startsWith('pyt
 /** Code that starts commands: only then do its string literals run as commands. */
 /** Code that starts commands, in its own language (an edit script's strings that only mention one are text). */
 const SPAWNS: Record<string, RegExp> = {
-  python: /\bsubprocess\b|\bos\.(system|popen|exec\w*|spawn\w*)\(|\bPopen\(|\bpty\.spawn\(/,
-  node: /child_process|(?<![.\w])(exec|execFile|spawn)(Sync)?\(|Deno\.(run|Command)\b|Bun\.spawn|(^|[\s=(;,])\$`/m,
+  // `subprocess` anywhere: asyncio's create_subprocess_exec too (hardening round 4), as pexpect, posix_spawn and execa.
+  python: /subprocess|\bos\.(system|popen|exec\w*|spawn\w*|posix_spawn\w*)\(|\bPopen\(|\bpty\.spawn\(|\bpexpect\b|\bexeca\b/,
+  node: /child_process|\bexeca\b|(?<![.\w])(exec|execFile|spawn)(Sync)?\(|Deno\.(run|Command)\b|Bun\.spawn|(^|[\s=(;,])\$`/m,
   other: /\bsystem\s*[(\s'"q%]|\bexec\s*[(\s]|`[^`]*`|\bqx\s*[{(\[<]|%x\s*[{(\[<]|IO\.popen|Open3/,
 };
 const spawns = (name: string, code: string) => SPAWNS[name.startsWith('python') ? 'python' : ['node', 'deno', 'bun', 'tsx', 'ts-node'].includes(name) ? 'node' : 'other']!.test(code);
@@ -918,7 +1159,24 @@ function interpreter(name: string, words: ShellWord[], redirects: Array<{ op: st
     }
     const filter = (name === 'perl' || name === 'ruby') && t.slice(1).some((a) => /^-\w*[pni]/.test(a));
     if (filter ? !FILTER_SPAWNS.test(code) : !spawns(name, code)) continue;
-    for (const line of spawnedCommands(code)) shellLine(line, copyState(st), { ...run, depth: run.depth + 1 });
+    // One part for one start (hardening rounds 3–4): a nested session a command read here holds that start; every
+    // other start keeps its own part, its words to the first known only at run time in its target. A list naming
+    // either that is no start is only a mention (`if name in ['claude', 'codex']`).
+    const starts = agentStarts(code);
+    const at = new Set(starts.map((x) => x.at));
+    const read = new Set<number>();
+    for (const c of spawnedCommands(code)) {
+      if (c.list && /^(claude|codex) /.test(`${c.line} `) && !at.has(c.at)) continue;
+      const sub: Run = { ...run, parts: [], depth: run.depth + 1 };
+      shellLine(c.line, copyState(st), sub);
+      if (sub.parts.some((p) => p.why === NESTED_WHY)) read.add(c.at);
+      for (const p of sub.parts) add(run, p);
+    }
+    for (const start of starts) {
+      if (start.free || read.has(start.at)) continue;
+      const words = [...start.words, ...(start.whole ? [] : ['…'])].join(' ');
+      add(run, { kind: 'self', target: `${`${start.agent} ${shown(words)}`.trim().slice(0, 60)} (${name} kodundan)`, why: NESTED_WHY });
+    }
   }
 }
 
@@ -1000,10 +1258,37 @@ function git(words: ShellWord[], env: Map<string, string | null>, st: ShellState
     }
     return;
   }
-  if (GIT_REWRITE.has(sub) && !(sub === 'stash' && ['list', 'show'].includes(restT[0] ?? ''))) {
-    if (top === ctx.repoRoot) add(run, { kind: 'self', target: `git ${sub} ${ctx.repoRoot}`, why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' });
-    else if (top === UNKNOWN) add(run, { kind: 'self', target: `git ${sub} (dizin belirsiz)`, why: 'hangi depoda çalışacağı belli değil (temkinli: kapıda)' });
+  // The paths a checkout or a restore writes (hardening rounds 2–3): `git checkout -- .mcp.json` brings one back as any
+  // write would. Its operands after `--`, else every word after its options — a branch is a path that holds nothing
+  // protected (`git checkout origin/evil .mcp.json`). A restore of the index alone (--staged without --worktree) writes
+  // no file.
+  const indexOnly = sub === 'restore' && restT.some((a) => a === '--staged' || a === '-S') && !restT.some((a) => a === '--worktree' || a === '-W');
+  const paths: ShellWord[] = [];
+  if ((sub === 'checkout' || sub === 'restore') && !indexOnly) {
+    const dash = restT.indexOf('--');
+    if (dash !== -1) paths.push(...rest.slice(dash + 1));
+    else {
+      for (let k = 0; k < restT.length; k += 1) {
+        if (['-s', '--source', '--pathspec-from-file', '-b', '-B', '--orphan'].includes(restT[k]!)) k += 1;
+        else if (!flag(restT[k]!)) paths.push(rest[k]!);
+      }
+    }
   }
+  const written = (into: Run) => {
+    for (const w of paths) writeTarget(into, `git ${sub}`, w, { ...st, cwd: repo ?? null });
+  };
+  if (GIT_REWRITE.has(sub) && !(sub === 'stash' && ['list', 'show'].includes(restT[0] ?? ''))) {
+    // The whole tree is the question here: its paths add no second part (round 3: one approval), but a path protected
+    // for its own sake keeps its reason in that part (round 4) — the live checkout's own is the part's already.
+    if (top === ctx.repoRoot) {
+      const scratch: Run = { ...run, parts: [] };
+      written(scratch);
+      const own = [...new Set(scratch.parts.map((p) => p.why).filter((why) => why !== `korunan yola yazar: ${LIVE_WHY}`))];
+      return add(run, { kind: 'self', target: `git ${sub} ${ctx.repoRoot}`, why: ['canlı checkout’un çalışma ağacını ya da dalını yeniden yazar', ...own].join('; ') });
+    }
+    if (top === UNKNOWN) return add(run, { kind: 'self', target: `git ${sub} (dizin belirsiz)`, why: 'hangi depoda çalışacağı belli değil (temkinli: kapıda)' });
+  }
+  written(run);
 }
 
 function gh(args: string[], run: Run): void {
@@ -1211,13 +1496,29 @@ function fileWrites(name: string, words: ShellWord[], env: Map<string, string | 
       if (name === 'ln' && t.slice(1).some((a) => a === '--symbolic' || /^-[a-zA-Z]*s/.test(a))) {
         for (const w of dir ? ops : ops.slice(0, -1)) {
           const at = pathOf(w, st, ctx);
-          const why = at && !at.partial ? protectedWhy(at.path, ctx, true) : null;
+          // A link to a .mcp.json is no way into a protected folder: a write through it is checked where it lands.
+          const why = at && !at.partial ? protectedWhy(at.path, ctx, true, false) : null;
           if (why) add(run, { kind: 'self', target: `ln -s ${at!.path}`, why: `korunan bir yola bağ kurar: ${why}` });
         }
       }
       if (dest) writeTarget(run, name, dest, st, name === 'mv');
-      // A move takes its sources away from where they were.
-      if (name === 'mv') for (const w of dir ? ops : ops.slice(0, -1)) writeTarget(run, 'mv', w, st, true);
+      const sources = dir ? ops : ops.slice(0, -1);
+      // Into a folder a source keeps its name: `cp x/.mcp.json desk/` writes desk/.mcp.json (connector identity) — when
+      // the destination is known to be a folder: -t, several sources, a trailing /, .., where the shell stands (.), or
+      // the desk or a folder above it (~ among them); `cp .mcp.json /tmp/yedek.json` is a copy under another name.
+      const into = dest ? pathOf(dest, st, ctx) : null;
+      const destText = dest ? textOf(dest, st, ctx) : '';
+      const folder = into !== null && !into.partial && (dir !== null || sources.length > 1 || destText.endsWith('/') || destText === '..' || into.path === st.cwd || under(ctx.deskDir, into.path));
+      if (folder) {
+        for (const w of sources) {
+          const from = pathOf(w, st, ctx);
+          const path = from && !from.partial ? posix.join(into.path, posix.basename(from.path)) : null;
+          const why = path ? protectedWhy(path, ctx) : null;
+          if (why) add(run, { kind: 'self', target: `${name} ${path}`, why: `korunan yola yazar: ${why}` });
+        }
+      }
+      // A move takes its sources away from where they were (a .mcp.json moved away loads nothing).
+      if (name === 'mv') for (const w of sources) writeTarget(run, 'mv', w, st, true, false);
       return;
     }
     case 'awk':
@@ -1347,7 +1648,7 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
   const server = cut === -1 ? tool.slice(5) : tool.slice(5, cut);
   const short = cut === -1 ? tool : tool.slice(cut + 2);
   if (server === 'office') return done([]);
-  if (server.includes('playwright') && short.startsWith('browser_')) {
+  if (BROWSER_SERVERS.has(server) && short.startsWith('browser_')) {
     const office = browserOffice(short, input, ctx);
     if (office !== null) return done([{ kind: 'self', target: `${short} ${office}`, why: 'tarayıcıyla ofisin kendi sayfasına ya da API’sine gider (sahibi onayı yalnız sahibinin sayfasından sayılır)' }]);
     return done(BROWSER_READ.has(short) ? [] : [{ kind: 'browser', target: short, why: KIND_WHY.browser }]);
@@ -1356,8 +1657,10 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
   if (c.kind === 'office' || c.kind === 'builtin') return done([]);
   if (c.kind === 'classified') {
     if (!c.outward) return done([]);
-    const kind = KIND_BY_CAPABILITY[c.capability] ?? 'other';
-    return done([{ kind, target: mcpTarget(short, input), why: `${KIND_WHY[kind]} (${c.capability})` }]);
+    // The capability's own kind (spec capabilities §2); an outward id the vocabulary lost meanwhile is 'other'.
+    const k = capabilityKind(c.capability);
+    const kind: ApprovalKind = k === null || k === 'read' ? 'other' : k;
+    return done([{ kind, target: mcpTarget(short, input), why: `${KIND_WHY[kind]} (${c.capability})`, capability: c.capability }]);
   }
   return done([{ kind: 'other', target: mcpTarget(short, input), why: 'sınıflandırılmamış bağlayıcı aracı (ne yaptığı sözlükte yok)' }]);
 }

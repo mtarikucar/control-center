@@ -1,4 +1,4 @@
-import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, TASK_DIFFICULTIES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
+import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, RULE_RANGES, SPECIAL_CONTACT_LIMITS, TASK_DIFFICULTIES, fold, isHourWindow, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { AgentProvider } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
@@ -24,7 +24,7 @@ export interface BudgetDeps {
 
 const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri', capabilityPrecheckEnabled: 'Yetenek ön-kontrolü', gateEnabled: 'Geri alınamaz iş kapısı' } as const;
 type SwitchKey = keyof typeof SWITCHES;
-type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | SwitchKey>;
+type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | 'outwardPolicy' | 'specialContacts' | 'callHours' | SwitchKey>;
 
 const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
@@ -42,6 +42,10 @@ const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number
   defaultTaskMinutes: { label: 'Varsayılan görev süresi (dk)', min: 5, max: () => 480, integer: true },
   minScheduleMinutes: { label: 'Rutin aralığı en az (dk)', min: 1, max: () => 1440, integer: true },
   maxSchedules: { label: 'En fazla rutin', min: 0, max: () => 100, integer: true },
+  // The outward rules' ranges are shared: normalizeConstitution reads a stored value by the same ones (review M3).
+  sendsPerHour: { label: 'Saatlik gönderim sınırı', min: RULE_RANGES.sendsPerHour[0], max: () => RULE_RANGES.sendsPerHour[1], integer: true },
+  bulkRecipients: { label: 'Toplu gönderim eşiği (alıcı)', min: RULE_RANGES.bulkRecipients[0], max: () => RULE_RANGES.bulkRecipients[1], integer: true },
+  callsPerDay: { label: 'Günlük arama sınırı', min: RULE_RANGES.callsPerDay[0], max: () => RULE_RANGES.callsPerDay[1], integer: true },
 };
 
 const MODEL_MAPS = {
@@ -69,11 +73,66 @@ function digestHours(value: unknown): number[] {
 
 const AUTONOMY_LABELS: Record<Autonomy, string> = { free: 'tam serbest', plans: 'planlar sahibine' };
 
+const POLICY_LABELS: Record<OutwardPolicyKind, string> = { send: 'gönderim', publish: 'yayın', call: 'arama', calendar: 'takvim' };
+
+/** A change to the outward policy: known kinds, owner or system; the kinds not given stay as they are. */
+function outwardPolicy(value: unknown, current: OutwardPolicy): OutwardPolicy {
+  const ok =
+    typeof value === 'object' && value !== null && !Array.isArray(value) &&
+    Object.entries(value).every(([k, v]) => (OUTWARD_POLICY_KINDS as readonly string[]).includes(k) && (OUTWARD_DECIDERS as readonly unknown[]).includes(v));
+  if (!ok) throw new ValidationError(`Anayasa: Otonomi politikası ${OUTWARD_POLICY_KINDS.join(', ')} için owner (sahibine sor) ya da system (sistem halletsin) olmalı.`);
+  return { ...current, ...(value as Partial<OutwardPolicy>) };
+}
+
+/**
+ * Up to 200 people, each an e-mail, a phone, a user name, a name or a record's id (a lead's, a conversation's: a call
+ * that names its person only by reference is matched by that — final review C1); trimmed, empty ones dropped, each
+ * once (folded).
+ */
+function specialContacts(value: unknown): string[] {
+  const { count, chars } = SPECIAL_CONTACT_LIMITS;
+  if (!Array.isArray(value) || value.length > count || value.some((x) => typeof x !== 'string' || x.trim().length > chars)) {
+    throw new ValidationError(`Anayasa: Özel kişiler en çok ${count} metinden oluşan bir liste olmalı (e-posta, telefon, kullanıcı adı, ad soyad ya da aday/konuşma kimliği; her biri en çok ${chars} karakter).`);
+  }
+  const out: string[] = [];
+  for (const raw of value as string[]) {
+    const x = raw.trim();
+    if (x && !out.some((y) => fold(y) === fold(x))) out.push(x);
+  }
+  return out;
+}
+
+/** Two whole local hours, the first before the second (24: midnight): the window the stored constitution is read by. */
+function callHours(value: unknown): [number, number] {
+  if (!isHourWindow(value)) throw new ValidationError('Anayasa: Arama saatleri 0 ile 24 arasında iki tam saat olmalı, başlangıç bitişten önce (ör. 9, 19).');
+  return [value[0], value[1]];
+}
+
+/** At most this many of the added or the removed special contacts are named in a change line; the rest are counted. */
+const NAMED_CONTACTS = 10;
+
+/**
+ * A change of the special contacts, as the owner's notice and the board tell it: the counts and who was added or
+ * removed (folded, as the list keeps them) — never the whole list (Task 6 minor); null when the same people stand.
+ */
+function contactsChange(before: readonly string[], after: readonly string[]): string | null {
+  const has = (list: readonly string[], x: string) => list.some((y) => fold(y) === fold(x));
+  const added = after.filter((x) => !has(before, x));
+  const removed = before.filter((x) => !has(after, x));
+  if (added.length === 0 && removed.length === 0) return null;
+  const count = (list: readonly string[]) => (list.length ? `${list.length} kişi` : 'yok');
+  const named = (list: string[]) => `${list.slice(0, NAMED_CONTACTS).join(', ')}${list.length > NAMED_CONTACTS ? `, … +${list.length - NAMED_CONTACTS}` : ''}`;
+  const who = [...(added.length ? [`eklenen: ${named(added)}`] : []), ...(removed.length ? [`çıkarılan: ${named(removed)}`] : [])];
+  return `Özel kişiler ${count(before)} → ${count(after)} (${who.join('; ')})`;
+}
+
 /** A setting as the coordinator reads it when the owner changes it: its label and value; the owner's share as the office's limit. */
 function described(key: keyof Constitution, c: Constitution): [label: string, value: string] {
   if (key === 'ownerReservePct') return ['Ofisin kota sınırı', `%${100 - c.ownerReservePct}`];
   if (key === 'digestHours') return ['Özet saatleri', c.digestHours.join(', ')];
   if (key === 'autonomy') return ['Serbestlik', AUTONOMY_LABELS[c.autonomy]];
+  if (key === 'outwardPolicy') return ['Otonomi politikası', OUTWARD_POLICY_KINDS.map((k) => `${POLICY_LABELS[k]} ${c.outwardPolicy[k] === 'system' ? 'sistem' : 'sahibine'}`).join(', ')];
+  if (key === 'callHours') return ['Arama saatleri', `${c.callHours[0]}–${c.callHours[1]}`];
   if (key === 'coordinatorModels' || key === 'difficultyModels') {
     const map: Record<string, string> = c[key];
     return [MODEL_MAPS[key].label, MODEL_MAPS[key].keys.map((k) => map[k]).join(' / ')];
@@ -86,6 +145,10 @@ function described(key: keyof Constitution, c: Constitution): [label: string, va
 /** What differs between two constitutions, `Label old → new` in the constitution's order (the owner's notice and the board). */
 export function constitutionChanges(before: Constitution, after: Constitution): string[] {
   return (Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>).flatMap((key) => {
+    if (key === 'specialContacts') {
+      const line = contactsChange(before.specialContacts, after.specialContacts);
+      return line ? [line] : [];
+    }
     const [label, was] = described(key, before);
     const is = described(key, after)[1];
     return was === is ? [] : [`${label} ${was} → ${is}`];
@@ -170,6 +233,18 @@ export class Budget {
       if (key === 'autonomy') {
         if (!(AUTONOMY_LEVELS as readonly unknown[]).includes(value)) throw new ValidationError('Anayasa: Serbestlik free (tam serbest) ya da plans (planlar sahibine) olmalı.');
         checked.autonomy = value as Autonomy;
+        continue;
+      }
+      if (key === 'outwardPolicy') {
+        checked.outwardPolicy = outwardPolicy(value, this.constitution().outwardPolicy);
+        continue;
+      }
+      if (key === 'specialContacts') {
+        checked.specialContacts = specialContacts(value);
+        continue;
+      }
+      if (key === 'callHours') {
+        checked.callHours = callHours(value);
         continue;
       }
       if (Object.hasOwn(SWITCHES, key)) {

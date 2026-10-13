@@ -62,4 +62,13 @@ describe('CharactersLayer', () => {
     expect(drawn.get('koor')).toMatchObject({ task: null, reports: 2, spot: spotFor(LAYOUT, 'meeting', 0) });
     await r.unmount();
   });
+
+  it('review focus: two idle people whose seats would share a lounge spot (13 and 37) go to two places, by their order', async () => {
+    const long = Date.now() - 10 * 60_000;
+    office({ ...person('ada', 13), createdAt: long }, { ...person('can', 37), createdAt: long });
+    const r = await ReactThreeTestRenderer.create(<CharactersLayer />);
+    expect(drawn.get('ada')?.spot).toBe(LAYOUT.coffeeSpots[0]);
+    expect(drawn.get('can')?.spot).toBe(LAYOUT.loungeSpots[0]);
+    await r.unmount();
+  });
 });

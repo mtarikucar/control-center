@@ -1,4 +1,4 @@
-import type { AgendaReport, Approval, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, ManagementLog, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
+import type { AgendaReport, Approval, BudgetSummary, CapabilityCoverage, CapabilityKind, CapabilityVocabulary, Constitution, CustomCapability, Decision, Department, DepartmentInput, DepartmentTemplate, Employee, EmployeeFile, Goal, HireInput, ManagementLog, NewCustomCapability, Note, OfficeMetrics, OfficeSnapshot, OutboxEntry, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, StreamNote, Task, UnclassifiedTools } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -116,4 +116,23 @@ export const api = {
   releaseTask: (id: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/release`),
   prioritizeTask: (id: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/prioritize`, { priority: 1 }),
   scheduleAction: (id: string, action: 'pause' | 'resume' | 'stop') => request<Schedule>('POST', `/api/schedules/${encodeURIComponent(id)}/${action}`),
+  departments: () => request<Department[]>('GET', '/api/departments'),
+  departmentTemplates: () => request<DepartmentTemplate[]>('GET', '/api/department-templates'),
+  createDepartment: (input: DepartmentInput) => request<Department>('POST', '/api/departments', input),
+  updateDepartment: (id: string, patch: { name?: string; mission?: string; scope?: string; headId?: string | null }) => request<Department>('POST', `/api/departments/${encodeURIComponent(id)}`, patch),
+  closeDepartment: (id: string, reason: string) => request<Department>('POST', `/api/departments/${encodeURIComponent(id)}/close`, { reason }),
+  moveEmployee: (id: string, departmentId: string | null) => request<Employee>('POST', `${employee(id)}/department`, { departmentId }),
+  streamNotes: (planId: string) => request<Array<{ streamId: string; plan: StreamNote | null; report: StreamNote | null }>>('GET', `/api/plans/${encodeURIComponent(planId)}/stream-notes`),
+  /** Spec capabilities §4: the vocabulary (the product's and the company's active ones) and how the office has each. */
+  capabilities: () => request<CapabilityVocabulary & { coverage: CapabilityCoverage[]; unclassified: UnclassifiedTools[] }>('GET', '/api/capabilities'),
+  customCapabilities: () => request<CustomCapability[]>('GET', '/api/custom-capabilities'),
+  addCapability: (input: NewCustomCapability) => request<CustomCapability>('POST', '/api/custom-capabilities', input),
+  decideCapability: (id: string, accept: boolean, o: { kind?: CapabilityKind; note?: string } = {}) =>
+    request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/${accept ? 'accept' : 'reject'}`, o),
+  retireCapability: (id: string, note?: string) => request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/retire`, note ? { note } : {}),
+  /** Final review I1: the owner opens an active capability the coordinator activated to the system, its kind as it is. */
+  confirmCapability: (id: string) => request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/confirm`, {}),
+  setCapabilityKind: (id: string, kind: CapabilityKind) => request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/kind`, { kind }),
+  /** Spec capabilities §7: what the gate let out, the newest 200 (the tab filters them). */
+  outbox: () => request<OutboxEntry[]>('GET', '/api/outbox'),
 };

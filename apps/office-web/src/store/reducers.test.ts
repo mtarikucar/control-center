@@ -54,6 +54,14 @@ describe('applyEvent', () => {
     expect(openToolSince(d.views.e1!)).toBe(2000);
   });
 
+  it('walks someone to their new seat at once (seat.changed), without waiting for a snapshot', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ employees: [employee({ deskIndex: 37 })] }));
+    const ev = stored({ type: 'seat.changed', deskIndex: 13 });
+    d = applyEvent(d, ev);
+    expect(d.views.e1?.employee.deskIndex).toBe(13);
+    expect(needsRefresh(ev, d)).toBe(false);
+  });
+
   it('review focus: ignores a replayed event it already has', () => {
     const e = stored({ type: 'message.assistant', text: 'bir kez' });
     const d = applyEvent(applyEvent(base(), e), e);
@@ -263,7 +271,7 @@ describe('company memory', () => {
 
 describe('budget', () => {
   const summary = (pct: number): BudgetSummary => ({
-    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20 },
+    constitution: { maxEmployees: 8, ownerReservePct: pct, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20, outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: [], sendsPerHour: 30, bulkRecipients: 5, callHours: [9, 19], callsPerDay: 20 },
     reserve: { active: false, limitPct: 100 - pct, fiveHourPct: null, sevenDayPct: null },
     month: { key: '2026-10', usd: 0 },
     plans: {},
@@ -329,6 +337,21 @@ describe('proposals, passes and reports', () => {
     expect(d.goals.g1?.status).toBe('dropped');
     d = applyEvent(d, stored({ type: 'company.paused', paused: false }, 'c', 11));
     expect(d.paused).toBe(false);
+  });
+});
+
+describe('capabilities and the outbox', () => {
+  it('spec capabilities §4, §7: a capability change and an outbox line move their revisions (the open tabs read again); a live snapshot too, an HTTP one not', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot(), 'live');
+    const [caps, out] = [d.capabilitiesRev, d.outboxRev];
+    d = applyEvent(d, stored({ type: 'capability.changed', change: 'activated', capability: { id: 'sms.send' } } as never, null));
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 1, out]);
+    d = applyEvent(d, stored({ type: 'outbox.sent', entry: { id: 1 } } as never));
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 1, out + 1]);
+    d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 1 }), 'http');
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 1, out + 1]);
+    d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 2 }), 'live');
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 2, out + 2]);
   });
 });
 
@@ -401,3 +424,29 @@ describe('approvals (B9a)', () => {
   });
 });
 
+
+describe('departments', () => {
+  it('keeps the departments from the snapshot and their changes; a department change asks for a fresh snapshot; a stream note bumps its revision', () => {
+    const dep = { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null, room: null } as const;
+    let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 1, departments: [dep] });
+    expect(d.departments).toEqual({ d1: dep });
+    const ev = { seq: 2, ts: 2, employeeId: null, event: { type: 'department.changed', change: 'updated', department: { ...dep, name: 'Büyüme' } } } as never;
+    d = applyEvent(d, ev);
+    expect(d.departments.d1?.name).toBe('Büyüme');
+    expect(needsRefresh(ev)).toBe(true);
+    const rev = d.streamNotesRev;
+    d = applyEvent(d, { seq: 3, ts: 3, employeeId: 'e', event: { type: 'stream.noted', note: { id: 1 } } } as never);
+    expect(d.streamNotesRev).toBe(rev + 1);
+  });
+
+  it('a live snapshot moves streamNotesRev on — even one that starts the office over, never back to 0 — and an http one keeps it', () => {
+    let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 900 });
+    d = applyEvent(d, { seq: 901, ts: 3, employeeId: 'e', event: { type: 'stream.noted', note: { id: 1 } } } as never);
+    d = applyEvent(d, { seq: 902, ts: 4, employeeId: 'e', event: { type: 'stream.noted', note: { id: 2 } } } as never);
+    const before = d.streamNotesRev;
+    expect(before).toBeGreaterThan(1);
+    const fresh = applySnapshot(d, { employees: [], quota: null, usage: {}, lastSeq: 3 }, 'live');
+    expect(fresh.streamNotesRev).toBe(before + 1);
+    expect(applySnapshot(fresh, { employees: [], quota: null, usage: {}, lastSeq: 3 }, 'http').streamNotesRev).toBe(before + 1);
+  });
+});

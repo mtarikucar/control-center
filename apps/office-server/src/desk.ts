@@ -13,6 +13,40 @@ export const GUIDE_FILE = 'office-guide.md';
 const GUIDE_IMPORT = `@${GUIDE_FILE}`;
 const BRIEF_IMPORT = `@${BRIEF_FILE}`;
 
+/** Each desk's department block (spec departments §5.4): rewritten on every change, imported by the card once. */
+export const DEPARTMENT_FILE = 'department.md';
+const DEPARTMENT_IMPORT = `@${DEPARTMENT_FILE}`;
+
+/**
+ * The owner's special contacts on the desk of someone who sends, publishes, calls or invites (final review I4.2):
+ * rewritten on every change, imported by the card once; the file carries its own heading, so an emptied one shows
+ * nothing.
+ */
+export const SPECIAL_CONTACTS_FILE = 'special-contacts.md';
+const SPECIAL_CONTACTS_IMPORT = `@${SPECIAL_CONTACTS_FILE}`;
+
+/** The card imports the desk's blocks it has (a card written anew, or one from before them). */
+function keepImports(dir: string): void {
+  const card = join(dir, 'CLAUDE.md');
+  if (!existsSync(card)) return;
+  if (existsSync(join(dir, DEPARTMENT_FILE)) && !readFileSync(card, 'utf8').includes(DEPARTMENT_IMPORT)) appendFileSync(card, `\n## Departman\n\n${DEPARTMENT_IMPORT}\n`);
+  if (existsSync(join(dir, SPECIAL_CONTACTS_FILE)) && !readFileSync(card, 'utf8').includes(SPECIAL_CONTACTS_IMPORT)) appendFileSync(card, `\n${SPECIAL_CONTACTS_IMPORT}\n`);
+}
+
+export function writeDepartmentFile(dataDir: string, slug: string, text: string): void {
+  const dir = deskDir(dataDir, slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, DEPARTMENT_FILE), text);
+  keepImports(dir);
+}
+
+export function writeSpecialContactsFile(dataDir: string, slug: string, text: string): void {
+  const dir = deskDir(dataDir, slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, SPECIAL_CONTACTS_FILE), text);
+  keepImports(dir);
+}
+
 export function guideText(kind: EmployeeKind): string {
   return `# Ofiste nasıl çalışırsın\n\n${officeGuide(kind)}\n`;
 }
@@ -51,6 +85,7 @@ export function prepareDesk(dataDir: string, e: Employee): string {
     if (!text.includes(GUIDE_IMPORT)) appendFileSync(card, `\n## Ofiste nasıl çalışırsın\n\n${GUIDE_IMPORT}\n`);
     if (!text.includes(BRIEF_IMPORT)) appendFileSync(card, `\n## Şirket\n\n${BRIEF_IMPORT}\n`);
   }
+  keepImports(dir);
   writeFileSync(join(dir, GUIDE_FILE), guideText(e.kind));
   const handoff = '@provider-handoff.md';
   if (existsSync(join(dir, 'provider-handoff.md')) && !readFileSync(card, 'utf8').includes(handoff)) appendFileSync(card, `\n## Sağlayıcı devri\n\n${handoff}\n`);
@@ -77,5 +112,6 @@ export function writeRoleCard(dataDir: string, e: Employee): void {
   const dir = deskDir(dataDir, e.slug);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'CLAUDE.md'), roleCard(e));
+  keepImports(dir);
   writeFileSync(join(dir, GUIDE_FILE), guideText(e.kind));
 }

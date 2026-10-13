@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOffice } from '../store/office.ts';
 import { HireDialog } from './HireDialog.tsx';
@@ -18,6 +18,7 @@ beforeEach(() => {
   useOffice.setState({
     hireOpen: true,
     selectedId: null,
+    departments: {},
     manifest: { items: [{ id: 'designer', kind: 'character', name: 'Tasarımcı', file: 'c/base.glb', height: 1.7, clips: {} }] },
   });
 });
@@ -73,5 +74,63 @@ describe('HireDialog', () => {
     render(<HireDialog />);
     const options = [...(screen.getByLabelText('Model') as HTMLSelectElement).options].map((o) => o.textContent);
     expect(options).toEqual(['Fable — en güçlü', 'Opus — güçlü', 'Sonnet — dengeli', 'Haiku — hızlı ve ucuz']);
+  });
+
+  it('hires into a department, as its head when ticked; without departments nothing changes', async () => {
+    useOffice.setState({ departments: { d1: { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } } } as never);
+    render(<HireDialog />);
+    fireEvent.change(screen.getByLabelText('Ad'), { target: { value: 'Ece' } });
+    fireEvent.change(screen.getByLabelText('Rol tanımı'), { target: { value: 'r' } });
+    expect(screen.getByLabelText('Başkan olarak')).toHaveProperty('disabled', true);
+    fireEvent.change(screen.getByLabelText('Departman'), { target: { value: 'd1' } });
+    fireEvent.click(screen.getByLabelText('Başkan olarak'));
+    fireEvent.click(screen.getByRole('button', { name: 'İşe al' }));
+    await waitFor(() => expect(api.hire).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'd1', head: true })));
+  });
+
+  it('hires into a department without making its person the head unless ticked; an office without departments shows neither field', async () => {
+    const { unmount } = render(<HireDialog />);
+    expect(screen.queryByLabelText('Departman')).toBeNull();
+    expect(screen.queryByLabelText('Başkan olarak')).toBeNull();
+    unmount();
+    useOffice.setState({ departments: { d1: { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null }, d2: { id: 'd2', name: 'Eski', mission: 'm', scope: '', template: null, headId: null, status: 'closed', createdAt: 1, closedAt: 2 } } } as never);
+    render(<HireDialog />);
+    expect([...(screen.getByLabelText('Departman') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Merkez', 'Pazarlama']);
+    fireEvent.change(screen.getByLabelText('Ad'), { target: { value: 'Ece' } });
+    fireEvent.change(screen.getByLabelText('Rol tanımı'), { target: { value: 'r' } });
+    fireEvent.change(screen.getByLabelText('Departman'), { target: { value: 'd1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'İşe al' }));
+    await waitFor(() => expect(api.hire).toHaveBeenCalledWith({ name: 'Ece', role: 'r', model: 'sonnet', provider: 'claude', characterId: 'designer', departmentId: 'd1' }));
+  });
+
+  it('never sends a department that closed after it was chosen: the select goes back to Merkez and the call has no departmentId or head', async () => {
+    const dep = { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } as const;
+    useOffice.setState({ departments: { d1: dep, d2: { ...dep, id: 'd2', name: 'Satış', createdAt: 2 } } } as never);
+    render(<HireDialog />);
+    fireEvent.change(screen.getByLabelText('Ad'), { target: { value: 'Ece' } });
+    fireEvent.change(screen.getByLabelText('Rol tanımı'), { target: { value: 'r' } });
+    fireEvent.change(screen.getByLabelText('Departman'), { target: { value: 'd1' } });
+    fireEvent.click(screen.getByLabelText('Başkan olarak'));
+    act(() => useOffice.setState({ departments: { d1: { ...dep, status: 'closed', closedAt: 5 }, d2: { ...dep, id: 'd2', name: 'Satış', createdAt: 2 } } } as never));
+    expect((screen.getByLabelText('Departman') as HTMLSelectElement).value).toBe('');
+    expect(screen.getByLabelText('Başkan olarak')).toHaveProperty('checked', false);
+    expect(screen.getByLabelText('Başkan olarak')).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'İşe al' }));
+    await waitFor(() => expect(api.hire).toHaveBeenCalledWith({ name: 'Ece', role: 'r', model: 'sonnet', provider: 'claude', characterId: 'designer' }));
+  });
+
+  it('checks the department against the store at the moment of submit, whatever the form last showed', async () => {
+    const dep = { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } as const;
+    useOffice.setState({ departments: { d1: dep } } as never);
+    render(<HireDialog />);
+    fireEvent.change(screen.getByLabelText('Ad'), { target: { value: 'Ece' } });
+    fireEvent.change(screen.getByLabelText('Rol tanımı'), { target: { value: 'r' } });
+    fireEvent.change(screen.getByLabelText('Departman'), { target: { value: 'd1' } });
+    fireEvent.click(screen.getByLabelText('Başkan olarak'));
+    // The store changes and the form submits in the same tick, before React shows the change.
+    useOffice.setState({ departments: { d1: { ...dep, status: 'closed', closedAt: 5 } } } as never);
+    fireEvent.submit(screen.getByRole('dialog'));
+    await waitFor(() => expect(api.hire).toHaveBeenCalledTimes(1));
+    expect(api.hire).toHaveBeenCalledWith({ name: 'Ece', role: 'r', model: 'sonnet', provider: 'claude', characterId: 'designer' });
   });
 });

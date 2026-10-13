@@ -41,6 +41,8 @@ interface Row {
   template_version: number | null;
   /** Absent in a database before v18. */
   capabilities?: string | null;
+  /** Absent in a database before v24. */
+  department_id?: string | null;
 }
 
 function fromRow(r: Row): Employee {
@@ -65,6 +67,8 @@ function fromRow(r: Row): Employee {
     createdAt: r.created_at,
     template: r.template ? { id: r.template, version: r.template_version ?? 1 } : null,
     capabilities: r.capabilities ? (JSON.parse(r.capabilities) as string[]) : [],
+    // Only when set: an office without departments sends the same employee JSON as before them.
+    ...(r.department_id ? { departmentId: r.department_id } : {}),
   };
 }
 
@@ -73,11 +77,38 @@ function fromRow(r: Row): Employee {
  * capabilities checked against the vocabulary (never the raw list), and the deny rules the desk gets before its first
  * session (B5's closed mode; the engine writes them).
  */
-export type NewEmployee = HireInput & { templateRef?: TemplateRef | null; capabilityIds?: string[]; deskDeny?: string[] };
+export type NewEmployee = HireInput & {
+  templateRef?: TemplateRef | null;
+  capabilityIds?: string[];
+  deskDeny?: string[];
+  /** The seat the office chose (Seating, spec office rooms §3): free and one of the office's; absent: the lowest free one. */
+  deskIndex?: number;
+};
 
 export type EmployeePatch = Partial<
-  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities'>
+  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities' | 'departmentId'>
 >;
+
+/** What a new employee must be (the messages are the hire's). */
+function checkNewEmployee(input: NewEmployee) {
+  if (input.provider !== undefined && !(AGENT_PROVIDERS as readonly unknown[]).includes(input.provider)) throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const role = typeof input.role === 'string' ? input.role.trim() : '';
+  if (!name) throw new ValidationError('Ad boş olamaz.');
+  if (name.length > 60) throw new ValidationError('Ad en fazla 60 karakter olabilir.');
+  if (!role) throw new ValidationError('Rol tanımı boş olamaz.');
+  const model = input.model === undefined ? 'sonnet' : input.model;
+  if (!(MODEL_ALIASES as readonly unknown[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}`);
+  const characterId = typeof input.characterId === 'string' && input.characterId.trim() ? input.characterId.trim() : 'coder';
+  const title = typeof input.title === 'string' ? input.title.trim() : '';
+  if (title.length > 80) throw new ValidationError('Unvan en fazla 80 karakter olabilir.');
+  const team = typeof input.team === 'string' ? input.team.trim() : '';
+  if (team.length > 40) throw new ValidationError('Ekip adı en fazla 40 karakter olabilir.');
+  const kind = input.kind ?? 'member';
+  if (!(EMPLOYEE_KINDS as readonly unknown[]).includes(kind)) throw new ValidationError(`Bilinmeyen çalışan türü: ${String(kind)}`);
+  const reportsTo = typeof input.reportsTo === 'string' && input.reportsTo ? input.reportsTo : null;
+  return { name, role, model, characterId, title, team, kind, reportsTo };
+}
 
 export class Roster {
   readonly #db: Db;
@@ -93,33 +124,23 @@ export class Roster {
     this.#slugTaken = slugTaken;
   }
 
-  create(input: NewEmployee): Employee {
-    if (input.provider !== undefined && !(AGENT_PROVIDERS as readonly unknown[]).includes(input.provider)) throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
-    const name = typeof input.name === 'string' ? input.name.trim() : '';
-    const role = typeof input.role === 'string' ? input.role.trim() : '';
-    if (!name) throw new ValidationError('Ad boş olamaz.');
-    if (name.length > 60) throw new ValidationError('Ad en fazla 60 karakter olabilir.');
-    if (!role) throw new ValidationError('Rol tanımı boş olamaz.');
-    const model = input.model === undefined ? 'sonnet' : input.model;
-    if (!(MODEL_ALIASES as readonly unknown[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}`);
-    const characterId = typeof input.characterId === 'string' && input.characterId.trim() ? input.characterId.trim() : 'coder';
-    const title = typeof input.title === 'string' ? input.title.trim() : '';
-    if (title.length > 80) throw new ValidationError('Unvan en fazla 80 karakter olabilir.');
-    const team = typeof input.team === 'string' ? input.team.trim() : '';
-    if (team.length > 40) throw new ValidationError('Ekip adı en fazla 40 karakter olabilir.');
-    const kind = input.kind ?? 'member';
-    if (!(EMPLOYEE_KINDS as readonly unknown[]).includes(kind)) throw new ValidationError(`Bilinmeyen çalışan türü: ${String(kind)}`);
-    const reportsTo = typeof input.reportsTo === 'string' && input.reportsTo ? input.reportsTo : null;
+  /** The seats this office has (SEAT_COUNT in main.ts; a test office may have fewer). */
+  get deskCount(): number {
+    return this.#deskCount;
+  }
 
-    const used = new Set(this.list().map((e) => e.deskIndex));
-    let deskIndex = -1;
-    for (let i = 0; i < this.#deskCount; i += 1) {
-      if (!used.has(i)) {
-        deskIndex = i;
-        break;
-      }
-    }
-    if (deskIndex < 0) throw new ConflictError(`Ofis dolu: ${this.#deskCount} masanın hepsi dolu.`);
+  /**
+   * Throws what `create` would throw for this input (a field, or no free desk) and writes nothing: for callers that must
+   * refuse a hire before they do something else for it (Company.hire opens a department only for a hire that will succeed).
+   */
+  validate(input: NewEmployee): void {
+    checkNewEmployee(input);
+    this.#deskOf(input);
+  }
+
+  create(input: NewEmployee): Employee {
+    const { name, role, model, characterId, title, team, kind, reportsTo } = checkNewEmployee(input);
+    const deskIndex = this.#deskOf(input);
 
     const employee: Employee = {
       ...(input.provider ? { provider: input.provider } : {}),
@@ -142,6 +163,7 @@ export class Roster {
       createdAt: this.#now(),
       template: input.templateRef ?? null,
       capabilities: input.capabilityIds ?? [],
+      ...(input.departmentId ? { departmentId: input.departmentId } : {}),
     };
     // A free-text hire with no capabilities writes the row exactly as before templates (v17) and capabilities (v18);
     // the template columns only for a template hire, the capabilities only when some are declared.
@@ -159,8 +181,34 @@ export class Roster {
       columns.push('capabilities');
       values.push(JSON.stringify(employee.capabilities));
     }
+    if (employee.departmentId) {
+      columns.push('department_id');
+      values.push(employee.departmentId);
+    }
     this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
     return this.get(employee.id);
+  }
+
+  /** A newcomer's seat: the one the office chose (checked), else the lowest free. */
+  #deskOf(input: NewEmployee): number {
+    return input.deskIndex === undefined ? this.#freeDesk() : this.#checkDesk(input.deskIndex, null);
+  }
+
+  /** `deskIndex`, when it is one of the office's seats and nobody at work but `self` has it. */
+  #checkDesk(deskIndex: number, self: string | null): number {
+    if (!Number.isInteger(deskIndex) || deskIndex < 0 || deskIndex >= this.#deskCount) {
+      throw new ValidationError(`Masa 0 ile ${this.#deskCount - 1} arasında bir tam sayı olmalı.`);
+    }
+    const holder = this.list().find((e) => e.deskIndex === deskIndex && e.id !== self);
+    if (holder) throw new ConflictError(`Masa ${deskIndex} dolu (${holder.name}).`);
+    return deskIndex;
+  }
+
+  /** The lowest free desk. */
+  #freeDesk(): number {
+    const used = new Set(this.list().map((e) => e.deskIndex));
+    for (let i = 0; i < this.#deskCount; i += 1) if (!used.has(i)) return i;
+    throw new ConflictError(`Ofis dolu: ${this.#deskCount} masanın hepsi dolu.`);
   }
 
   /** Slugs are unique across archived employees too, because desk folders are never deleted. */
@@ -210,7 +258,20 @@ export class Roster {
     if (patch.capabilities !== undefined) {
       this.#db.prepare('UPDATE employees SET capabilities = ? WHERE id = ?').run(patch.capabilities.length ? JSON.stringify(patch.capabilities) : null, id);
     }
-    return next;
+    // Only when given, like the capabilities: works on a database before v24.
+    if (patch.departmentId !== undefined) {
+      this.#db.prepare('UPDATE employees SET department_id = ? WHERE id = ?').run(patch.departmentId, id);
+    }
+    // The re-read keeps the rule that an employee without a department has no departmentId key (next would carry null).
+    return patch.departmentId !== undefined ? this.get(id) : next;
+  }
+
+  /** Someone to another seat (Seating): one of the office's that nobody else at work has. */
+  setDesk(id: string, deskIndex: number): Employee {
+    this.get(id);
+    this.#checkDesk(deskIndex, id);
+    this.#db.prepare('UPDATE employees SET desk_index = ? WHERE id = ?').run(deskIndex, id);
+    return this.get(id);
   }
 
   /** Save each provider's readiness independently; native transcripts remain in their own session stores. */

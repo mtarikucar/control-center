@@ -9,6 +9,7 @@ import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { boundsOf, fitToBox, fitToHeight } from './fit.ts';
 import { PALETTE } from './palette.ts';
 import { repairNormals } from './repair.ts';
+import { useDarkRooms } from './rooms.ts';
 
 function VoxelBox({ p }: { p: Placement }) {
   return (
@@ -55,23 +56,26 @@ function Sway({ seed, children }: { seed: number; children: ReactNode }) {
 }
 
 const BULB = new Color(PALETTE.bulb).multiplyScalar(5);
+const BULB_OFF = new Color('#3a3328');
 
-/** A lamp's bulb glows (and blooms) and lights its corner of the room. */
-function Glow({ p }: { p: Placement }) {
+/** A lamp's bulb glows (and blooms) and, unless it is a desk lamp in a room, lights its corner; a room's lamps are off while no department holds it and nobody sits there. */
+function Glow({ p, off }: { p: Placement; off: boolean }) {
   const y = p.h * (p.glowAt ?? 0.5);
   return (
     <group position={[0, y, 0]}>
       <mesh>
         <sphereGeometry args={[0.07, 12, 8]} />
-        <meshBasicMaterial color={BULB} toneMapped={false} />
+        <meshBasicMaterial color={off ? BULB_OFF : BULB} toneMapped={false} />
       </mesh>
-      <pointLight color={PALETTE.lampLight} intensity={p.glow} distance={5} decay={1.6} />
+      {/* Kept at 0 rather than removed: adding or taking away a light recompiles every material's shader. */}
+      {p.bulbOnly ? null : <pointLight color={PALETTE.lampLight} intensity={off ? 0 : p.glow} distance={5} decay={1.6} />}
     </group>
   );
 }
 
 export function FurnitureLayer() {
   const manifest = useOffice((s) => s.manifest);
+  const dark = useDarkRooms();
   return (
     <group>
       {LAYOUT.furniture.map((p, i) => {
@@ -89,7 +93,7 @@ export function FurnitureLayer() {
         return (
           <group key={i} position={[p.x, p.y, p.z]} rotation={[0, p.rotY, 0]}>
             {p.sway ? <Sway seed={i}>{model}</Sway> : model}
-            {p.glow ? <Glow p={p} /> : null}
+            {p.glow ? <Glow p={p} off={p.room !== undefined && dark.has(p.room)} /> : null}
           </group>
         );
       })}
