@@ -150,8 +150,11 @@ function policyOf(value: unknown): OutwardPolicy {
   return Object.fromEntries(OUTWARD_POLICY_KINDS.map((k) => [k, Object.hasOwn(given, k) && valid(given[k]) ? given[k] : DEFAULT_CONSTITUTION.outwardPolicy[k]])) as OutwardPolicy;
 }
 
-/** Two whole local hours of the day, the first before the second (24: midnight) — the window a call may be made in. */
-const isHourWindow = (v: unknown): v is [number, number] =>
+/**
+ * Two whole local hours of the day, the first before the second (24: midnight) — the window a call may be made in; the
+ * server's validator and the stored constitution's reader both ask it.
+ */
+export const isHourWindow = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && v.every((h) => Number.isInteger(h) && h >= 0 && h <= 24) && v[0] < v[1];
 
 /**

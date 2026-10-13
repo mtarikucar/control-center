@@ -1,4 +1,4 @@
-import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, RULE_RANGES, SPECIAL_CONTACT_LIMITS, TASK_DIFFICULTIES, fold, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
+import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, RULE_RANGES, SPECIAL_CONTACT_LIMITS, TASK_DIFFICULTIES, fold, isHourWindow, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { AgentProvider } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
@@ -102,12 +102,28 @@ function specialContacts(value: unknown): string[] {
   return out;
 }
 
-/** Two whole local hours, the first before the second (24: midnight). */
+/** Two whole local hours, the first before the second (24: midnight): the window the stored constitution is read by. */
 function callHours(value: unknown): [number, number] {
-  if (!Array.isArray(value) || value.length !== 2 || value.some((h) => typeof h !== 'number' || !Number.isInteger(h) || h < 0 || h > 24) || value[0] >= value[1]) {
-    throw new ValidationError('Anayasa: Arama saatleri 0 ile 24 arasında iki tam saat olmalı, başlangıç bitişten önce (ör. 9, 19).');
-  }
-  return [value[0] as number, value[1] as number];
+  if (!isHourWindow(value)) throw new ValidationError('Anayasa: Arama saatleri 0 ile 24 arasında iki tam saat olmalı, başlangıç bitişten önce (ör. 9, 19).');
+  return [value[0], value[1]];
+}
+
+/** At most this many of the added or the removed special contacts are named in a change line; the rest are counted. */
+const NAMED_CONTACTS = 10;
+
+/**
+ * A change of the special contacts, as the owner's notice and the board tell it: the counts and who was added or
+ * removed (folded, as the list keeps them) — never the whole list (Task 6 minor); null when the same people stand.
+ */
+function contactsChange(before: readonly string[], after: readonly string[]): string | null {
+  const has = (list: readonly string[], x: string) => list.some((y) => fold(y) === fold(x));
+  const added = after.filter((x) => !has(before, x));
+  const removed = before.filter((x) => !has(after, x));
+  if (added.length === 0 && removed.length === 0) return null;
+  const count = (list: readonly string[]) => (list.length ? `${list.length} kişi` : 'yok');
+  const named = (list: string[]) => `${list.slice(0, NAMED_CONTACTS).join(', ')}${list.length > NAMED_CONTACTS ? `, … +${list.length - NAMED_CONTACTS}` : ''}`;
+  const who = [...(added.length ? [`eklenen: ${named(added)}`] : []), ...(removed.length ? [`çıkarılan: ${named(removed)}`] : [])];
+  return `Özel kişiler ${count(before)} → ${count(after)} (${who.join('; ')})`;
 }
 
 /** A setting as the coordinator reads it when the owner changes it: its label and value; the owner's share as the office's limit. */
@@ -116,7 +132,6 @@ function described(key: keyof Constitution, c: Constitution): [label: string, va
   if (key === 'digestHours') return ['Özet saatleri', c.digestHours.join(', ')];
   if (key === 'autonomy') return ['Serbestlik', AUTONOMY_LABELS[c.autonomy]];
   if (key === 'outwardPolicy') return ['Otonomi politikası', OUTWARD_POLICY_KINDS.map((k) => `${POLICY_LABELS[k]} ${c.outwardPolicy[k] === 'system' ? 'sistem' : 'sahibine'}`).join(', ')];
-  if (key === 'specialContacts') return ['Özel kişiler', c.specialContacts.length ? c.specialContacts.join(', ') : 'yok'];
   if (key === 'callHours') return ['Arama saatleri', `${c.callHours[0]}–${c.callHours[1]}`];
   if (key === 'coordinatorModels' || key === 'difficultyModels') {
     const map: Record<string, string> = c[key];
@@ -130,6 +145,10 @@ function described(key: keyof Constitution, c: Constitution): [label: string, va
 /** What differs between two constitutions, `Label old → new` in the constitution's order (the owner's notice and the board). */
 export function constitutionChanges(before: Constitution, after: Constitution): string[] {
   return (Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>).flatMap((key) => {
+    if (key === 'specialContacts') {
+      const line = contactsChange(before.specialContacts, after.specialContacts);
+      return line ? [line] : [];
+    }
     const [label, was] = described(key, before);
     const is = described(key, after)[1];
     return was === is ? [] : [`${label} ${was} → ${is}`];

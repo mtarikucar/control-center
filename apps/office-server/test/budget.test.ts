@@ -311,15 +311,31 @@ describe('Budget — the owner’s constitution change reaches the coordinator',
     const after = { ...DEFAULT_CONSTITUTION, outwardPolicy: { ...DEFAULT_CONSTITUTION.outwardPolicy, calendar: 'system' as const }, specialContacts: ['ali@firma.com'], sendsPerHour: 10, callHours: [10, 18] as [number, number] };
     expect(constitutionChanges(DEFAULT_CONSTITUTION, after)).toEqual([
       'Otonomi politikası gönderim sistem, yayın sistem, arama sistem, takvim sahibine → gönderim sistem, yayın sistem, arama sistem, takvim sistem',
-      'Özel kişiler yok → ali@firma.com',
+      'Özel kişiler yok → 1 kişi (eklenen: ali@firma.com)',
       'Saatlik gönderim sınırı 30 → 10',
       'Arama saatleri 9–19 → 10–18',
     ]);
     expect(constitutionChanges(after, { ...after, specialContacts: ['ali@firma.com', '+90 532 111 22 33'], bulkRecipients: 2, callsPerDay: 0 })).toEqual([
-      'Özel kişiler ali@firma.com → ali@firma.com, +90 532 111 22 33',
+      'Özel kişiler 1 kişi → 2 kişi (eklenen: +90 532 111 22 33)',
       'Toplu gönderim eşiği (alıcı) 5 → 2',
       'Günlük arama sınırı 20 → 0',
     ]);
+  });
+
+  it('Task 6 minor: a change of the special contacts is told as a count and who was added or removed, never the whole list; the same people in another case are no change', () => {
+    const many = Array.from({ length: 12 }, (_, i) => `k${i}@x.co`);
+    const at = (specialContacts: string[]) => ({ ...DEFAULT_CONSTITUTION, specialContacts });
+    expect(constitutionChanges(at(['ali@firma.com', 'Ahmet Yılmaz']), at(['Ahmet Yılmaz', 'veli@firma.com']))).toEqual(['Özel kişiler 2 kişi → 2 kişi (eklenen: veli@firma.com; çıkarılan: ali@firma.com)']);
+    expect(constitutionChanges(at(['ali@firma.com']), at([]))).toEqual(['Özel kişiler 1 kişi → yok (çıkarılan: ali@firma.com)']);
+    expect(constitutionChanges(at(['ali@firma.com']), at(['ALI@firma.com']))).toEqual([]);
+    expect(constitutionChanges(at([]), at(many))).toEqual([`Özel kişiler yok → 12 kişi (eklenen: ${many.slice(0, 10).join(', ')}, … +2)`]);
+  });
+
+  it('Task 6 minor: the outward policy changes kind by kind — a later change of one kind leaves the owner’s earlier choice for another', () => {
+    const t = make();
+    t.budget.setConstitution({ outwardPolicy: { send: 'owner' } });
+    expect(t.budget.setConstitution({ outwardPolicy: { call: 'owner' } }).outwardPolicy).toEqual({ send: 'owner', publish: 'system', call: 'owner', calendar: 'owner' });
+    expect(t.budget.constitution().outwardPolicy).toEqual({ send: 'owner', publish: 'system', call: 'owner', calendar: 'owner' });
   });
 
   it('the owner’s form sends every field: a changed policy and rules reach the coordinator in one notice, an unchanged form says nothing', () => {
@@ -328,7 +344,7 @@ describe('Budget — the owner’s constitution change reaches the coordinator',
     const form = t.budget.constitution();
     t.budget.ownerSetConstitution({ ...form, outwardPolicy: { ...form.outwardPolicy, send: 'owner' }, specialContacts: ['ali@firma.com'], callHours: [10, 18], callsPerDay: 5 });
     expect(changed(t, c.id).map((n) => n.text)).toEqual([
-      'Sahibi anayasayı değiştirdi: Otonomi politikası gönderim sistem, yayın sistem, arama sistem, takvim sahibine → gönderim sahibine, yayın sistem, arama sistem, takvim sahibine; Özel kişiler yok → ali@firma.com; Arama saatleri 9–19 → 10–18; Günlük arama sınırı 20 → 5. Süren planlarını yeni sınırlara göre gözden geçir.',
+      'Sahibi anayasayı değiştirdi: Otonomi politikası gönderim sistem, yayın sistem, arama sistem, takvim sahibine → gönderim sahibine, yayın sistem, arama sistem, takvim sahibine; Özel kişiler yok → 1 kişi (eklenen: ali@firma.com); Arama saatleri 9–19 → 10–18; Günlük arama sınırı 20 → 5. Süren planlarını yeni sınırlara göre gözden geçir.',
     ]);
     // The same fields again, as the form would resend them: nothing changed.
     t.budget.ownerSetConstitution({ ...t.budget.constitution() });
