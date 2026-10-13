@@ -151,6 +151,18 @@ export class Approvals {
     return { ok: true, byPart, calls };
   }
 
+  /**
+   * What the owner said, or has yet to say, about this very call (final review I3): a request of the asker's for a
+   * part's print still waiting (either scope), or refused within an approval's time. The system path never lets such a
+   * call out on the policy: the asker asked because it is the owner's.
+   */
+  asked(employeeId: string, tool: string, parts: GatePart[]): 'pending' | 'denied' | null {
+    const since = this.#now() - (this.#d.ttlMs ?? APPROVAL_TTL_MS);
+    const prints = parts.map((p) => fingerprint(tool, p));
+    if (prints.some((f) => this.#d.store.pending(employeeId, f, 'call') ?? this.#d.store.pending(employeeId, f, 'task'))) return 'pending';
+    return prints.some((f) => this.#d.store.denied(employeeId, f, since)) ? 'denied' : null;
+  }
+
   /** Uses a matched call's one-call approvals (all of them, once); a task's approval stays for the task's other calls. */
   spend(employeeId: string, calls: readonly string[]): void {
     const now = this.#now();

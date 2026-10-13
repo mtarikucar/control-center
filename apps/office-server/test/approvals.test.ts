@@ -83,6 +83,24 @@ describe('the approval store (K1-2)', () => {
   });
 });
 
+describe('the approval store: what the owner said no to (final review I3)', () => {
+  it('denied: the asker’s refusal of this print decided after a time — the newest; not another’s, another print’s, an older one’s, nor a yes', async () => {
+    const t = make();
+    const base = { employeeId: t.ada.id, taskId: null, kind: 'send' as const, tool: 'mcp__claude_ai_Gmail__send_message', target: 'send_message to=a@x.co', fingerprint: 'f3', summary: 'iade', scope: 'call' as const };
+    const no = (fp: string, at: number, employeeId = t.ada.id) => t.store.decide(t.store.create({ ...base, employeeId, fingerprint: fp }).id, { approve: false, decidedBy: OWNER, decidedVia: 'page', note: null, at, expiresAt: null })!;
+    expect(t.store.denied(t.ada.id, 'f3', 0)).toBeNull();
+    const first = no('f3', 10);
+    const second = no('f3', 20);
+    no('f4', 30);
+    no('f3', 40, t.coordinator.id);
+    t.store.decide(t.store.create(base).id, { approve: true, decidedBy: OWNER, decidedVia: 'page', note: null, at: 50, expiresAt: 1_000 });
+    expect(t.store.denied(t.ada.id, 'f3', 0)?.id).toBe(second.id);
+    expect(t.store.denied(t.ada.id, 'f3', 15)?.id).toBe(second.id);
+    expect(t.store.denied(t.ada.id, 'f3', 20)).toBeNull();
+    expect(first.status).toBe('denied');
+  });
+});
+
 describe('requests, the owner’s decision, notes and the ledger (K1-3)', () => {
   it('a request waits for the owner: event, an info note to the coordinator; the owner approves: the ledger, a decision note to the asker', async () => {
     const t = make();
@@ -267,6 +285,14 @@ describe('the tools (K1-3): approvalRequest and approvalsRead', () => {
     const reply = await t.call(t.ada, 'approvalRequest', { kind: 'send', tool: 'mcp__claude_ai_Gmail__send_message', target: 'send_message to=a@b.co', summary: 'Müşteriye cevap' });
     expect(reply).toMatch(/taskPark/);
     expect(t.store.list({ statuses: ['pending'] })).toEqual([expect.objectContaining({ kind: 'send', target: 'send_message to=a@b.co' })]);
+  });
+
+  it('final review I3 (Task 9 minor): approvalRequest says an approval is used only by the very call — exact with input for a connector, not quite for the shell or a call of several parts — and that an asked call waits for the owner', () => {
+    const t = make();
+    const description = t.tools.find((x) => x.name === 'approvalRequest')!.description;
+    expect(description).toContain('Only an identical repeat uses the approval: another recipient or other words in its target make it another call.');
+    expect(description).toContain('With input the print is exact for a connector’s call; a shell command’s is read without your working folder, and a call with several held parts is approved for its first part only.');
+    expect(description).toContain('While your request waits, and for a day after the owner says no, the gate keeps that very call for the owner whatever the outward policy says.');
   });
 
   it('approvalsRead: one’s own; the coordinator sees everyone’s', async () => {

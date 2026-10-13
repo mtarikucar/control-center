@@ -124,9 +124,9 @@ export class Gate {
    * Spec capabilities §5: a call is the system's when every part comes from a connector's classified tool, of a kind
    * the owner's policy leaves to the system — the shell's and the built-in tools' sends and publishes never are, and
    * never make the gate read the constitution (Task 8 review M4). Then true — it passes, and its outbox line is
-   * written — or why it stays the owner's: a rule of §6 (`rule`), or the owner's own say over it (a capability the
-   * coordinator alone activated, final review I1). null: the owner's, as before; also when the system cannot decide
-   * or write the call (M4: held, never a 500).
+   * written — or why it stays the owner's: a rule of §6 (`rule`), or the owner's own say over it (a request for this
+   * very call waiting or refused, final review I3; a capability the coordinator alone activated, I1). null: the
+   * owner's, as before; also when the system cannot decide or write the call (M4: held, never a 500).
    */
   #system(employee: Employee, tool: string, input: unknown, parts: GatePart[]): true | { why: string; rule: boolean } | null {
     const a = this.#d.autonomy;
@@ -138,6 +138,9 @@ export class Gate {
         if (!isOutwardPolicyKind(p.kind) || c.outwardPolicy[p.kind] !== 'system') return null;
         kinds.push(p.kind);
       }
+      // Asked of the owner and not answered, or refused: the employee judged it the owner's, the policy does not undo that (final review I3).
+      const asked = this.#d.approvals.asked(employee.id, tool, parts);
+      if (asked) return { why: asked === 'pending' ? 'sahibine soruldu, cevap bekleniyor' : 'sahibi bu çağrıyı reddetti', rule: false };
       // The coordinator classifies a tool for the sessions; handing its calls to the system is the owner's (final review I1).
       if (parts.some((p) => !systemEligible(p.capability!))) return { why: 'koordinatörün açtığı yetenek: sahibi sisteme açana dek sahibine sorulur', rule: false };
       const departmentId = employee.departmentId ?? null;

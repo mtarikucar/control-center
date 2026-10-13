@@ -203,6 +203,36 @@ describe('the gate lets the system send (spec capabilities §5–§7)', () => {
     expect(t.outbox.list().map((e) => e.tool)).toEqual([GMAIL, 'mcp__wa__send_message', SMS]);
   });
 
+  it('final review I3: a call the employee asked the owner about is never the system’s while the owner has not answered, nor for a day after a no; a yes is used as the owner’s', async () => {
+    const t = make();
+    const ada = t.hire('Ada');
+    const args = { to: 'musteri@x.co', subject: 'İade', body: 'İadenizi yapacağız.' };
+    const ask = (summary: string) => {
+      const seen = t.gate.preview(ada.id, GMAIL, args)!;
+      return t.approvals.request(ada.id, { kind: seen.kind, tool: GMAIL, target: seen.target, summary });
+    };
+    const pending = ask('İade sözü');
+    const waiting = await t.ask(ada, GMAIL, args);
+    expect(waiting).toMatchObject({ decision: 'deny', kind: 'send', target: 'send_message to=musteri@x.co' });
+    expect(waiting.reason).toMatch(/onaysız yapılamaz \(sahibine soruldu, cevap bekleniyor\)\. approvalRequest/);
+    // Another call to someone else is still the system's.
+    expect((await t.mail(ada, 'baska@x.co')).decision).toBe('allow');
+    t.approvals.decide(pending.id, false, { via: 'page', note: 'İade yok.' });
+    t.advance(23 * HOUR);
+    expect((await t.ask(ada, GMAIL, args)).reason).toMatch(/onaysız yapılamaz \(sahibi bu çağrıyı reddetti\)\. approvalRequest/);
+    // A refusal holds as long as an approval would stand: a day.
+    t.advance(HOUR);
+    expect(await t.ask(ada, GMAIL, args)).toMatchObject({ decision: 'allow', reason: 'sistemce (otonomi politikası)' });
+    const yes = ask('İkinci iade');
+    t.approvals.decide(yes.id, true, { via: 'page' });
+    expect(await t.ask(ada, GMAIL, args)).toMatchObject({ decision: 'allow', reason: 'sahibinin onayıyla', approvalId: yes.id });
+    expect(t.outbox.list().map((e) => `${e.via}:${e.recipients.join()}`)).toEqual(['owner:musteri@x.co', 'system:musteri@x.co', 'system:baska@x.co']);
+    // Someone else's request for the same call is theirs alone.
+    const can = t.hire('Can');
+    t.approvals.request(can.id, { kind: 'send', tool: GMAIL, target: 'send_message to=musteri@x.co', summary: 's' });
+    expect((await t.ask(ada, GMAIL, args)).decision).toBe('allow');
+  });
+
   it('an outward call the owner approved is an outbox line whatever its tool (a git push is a publish); a payment is not', async () => {
     const t = make();
     const ada = t.hire('Ada');
