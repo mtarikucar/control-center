@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Employee, PlanView, Task } from '@cc/shared';
+import type { CustomCapability, Employee, PlanView, Task } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { CompanyView } from './CompanyView.tsx';
 
@@ -248,5 +248,46 @@ describe('CompanyView', () => {
     expect(await screen.findByRole('region', { name: 'Ürünle gelenler' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: 'Giden kutusu' }));
     expect(await screen.findByText(/"izin verildi" kaydıdır/)).toBeTruthy();
+  });
+
+  describe('final review I2: the Yetenekler tab counts what waits for the owner', () => {
+    const capability = (id: string, over: Partial<CustomCapability>): CustomCapability => ({
+      id, title: id, summary: 's', kind: 'send', tools: [`mcp__x__${id}`], status: 'active', proposedBy: 'ada', decidedBy: 'koord', note: null, createdAt: 1, decidedAt: 2, ...over,
+    });
+    const proposed = { status: 'proposed', decidedBy: null, decidedAt: null } as const;
+
+    it('counts the coordinator’s own proposals, proposals as read and activations not yet opened to the system — and nothing else', async () => {
+      office([person('koord', { kind: 'coordinator', name: 'Koordinatör' }), person('ada', { name: 'Ada' })]);
+      vi.mocked(api.customCapabilities).mockResolvedValueOnce([
+        capability('own.send', { ...proposed, proposedBy: 'koord' }),
+        capability('team.read', { ...proposed, kind: 'read' }),
+        capability('team.send', proposed),
+        capability('active.send', {}),
+        capability('active.pay', { kind: 'pay' }),
+        capability('mine.send', { proposedBy: 'owner', decidedBy: 'owner' }),
+        capability('old.send', { status: 'retired', decidedBy: 'owner' }),
+      ]);
+      render(<CompanyView />);
+      const tab = await screen.findByRole('tab', { name: 'Yetenekler 3 karar bekliyor' });
+      expect(tab.textContent).toBe('Yetenekler3');
+    });
+
+    it('shows no count when nothing waits, and the count follows a change of the capabilities', async () => {
+      office([person('koord', { kind: 'coordinator', name: 'Koordinatör' })]);
+      render(<CompanyView />);
+      await waitFor(() => expect(api.customCapabilities).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('tab', { name: 'Yetenekler' }).textContent).toBe('Yetenekler');
+      vi.mocked(api.customCapabilities).mockResolvedValueOnce([capability('active.send', {})]);
+      act(() => useOffice.setState({ capabilitiesRev: useOffice.getState().capabilitiesRev + 1 }));
+      expect(await screen.findByRole('tab', { name: 'Yetenekler 1 karar bekliyor' }, { timeout: 3000 })).toBeTruthy();
+    });
+
+    it('does not guess when the capabilities cannot be read: no count', async () => {
+      office([person('koord', { kind: 'coordinator', name: 'Koordinatör' })]);
+      vi.mocked(api.customCapabilities).mockRejectedValueOnce(new Error('Sunucuya ulaşılamadı.'));
+      render(<CompanyView />);
+      await waitFor(() => expect(api.customCapabilities).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('tab', { name: 'Yetenekler' }).textContent).toBe('Yetenekler');
+    });
   });
 });

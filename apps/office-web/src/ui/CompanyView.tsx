@@ -14,7 +14,9 @@ import { ProposalCard } from './ProposalCard.tsx';
 import { streamOf } from './streams.ts';
 import { ApprovalsTab } from './ApprovalCard.tsx';
 import { CapabilitiesTab } from './CapabilitiesTab.tsx';
+import { waitingForOwner } from './capabilityWaiting.ts';
 import { OutboxTab } from './OutboxTab.tsx';
+import { useLiveRead } from './useLiveRead.ts';
 
 const TABS = [
   ['org', 'Örgüt'],
@@ -182,6 +184,10 @@ export function CompanyView() {
   const [planFilter, setPlanFilter] = useState('');
   const people = useMemo(() => Object.values(views).map((v) => v.employee).filter((e) => e.lifecycle !== 'archived'), [views]);
   const coordinator = people.find((e) => e.kind === 'coordinator');
+  // What waits for the owner in the Yetenekler tab (final review I2), counted from the list the tab reads for itself too; unknown until it has been read, so no count then.
+  const capabilitiesRev = useOffice((s) => s.capabilitiesRev);
+  const companyCapabilities = useLiveRead(capabilitiesRev, () => api.customCapabilities());
+  const capabilitiesWaiting = companyCapabilities.data ? waitingForOwner(companyCapabilities.data, coordinator?.id ?? null) : 0;
   const allTasks = Object.values(tasks);
   const currentOf = (id: string) => allTasks.find((t) => t.assignee === id && t.status === 'in_progress');
   const nameOf = (id: string) => (id === 'owner' ? 'sahibi' : (views[id]?.employee.name ?? '—'));
@@ -225,6 +231,11 @@ export function CompanyView() {
             {TABS.map(([key, label]) => (
               <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
                 {label}
+                {key === 'capabilities' && capabilitiesWaiting > 0 && (
+                  <span className="count" aria-label={`${capabilitiesWaiting} karar bekliyor`}>
+                    {capabilitiesWaiting}
+                  </span>
+                )}
               </button>
             ))}
           </div>

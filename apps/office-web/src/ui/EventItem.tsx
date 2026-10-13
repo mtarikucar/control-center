@@ -1,4 +1,6 @@
-import { APPROVAL_KIND_LABELS, APPROVAL_STATUS_LABELS, OUTBOX_VIA_LABELS, PROFILE_SPEC, reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
+import { APPROVAL_KIND_LABELS, APPROVAL_STATUS_LABELS, CAPABILITY_KIND_LABELS, OUTBOX_VIA_LABELS, OWNER, PROFILE_SPEC, reviewTally, type CapabilityChange, type CustomCapability, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
+import { useOffice } from '../store/office.ts';
+import { needsConfirm } from './capabilityWaiting.ts';
 import { formatClock, formatCost, formatTokens, formatWhenTR, summarizeToolInput } from './format.ts';
 import { lifecycleLabel, modelName } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
@@ -26,6 +28,26 @@ const SCHEDULE_CHANGE: Record<ScheduleChange, string> = {
   resumed: 'sürdürüldü',
   stopped: 'durduruldu',
 };
+
+/**
+ * A company capability change in the feed (final review I2): what the owner has to know of, and nothing else. The
+ * coordinator's own proposal is the owner's to decide; an activation by the coordinator leaves the capability the
+ * owner's at the gate until the owner opens it to the system. An employee's proposal is the coordinator's to decide, and
+ * the owner's own actions need no telling (the server files them under no employee anyway).
+ */
+function CapabilityNote({ change, c }: { change: CapabilityChange; c: CustomCapability }) {
+  const byCoordinator = useOffice((s) => s.views[c.proposedBy]?.employee.kind === 'coordinator');
+  const kind = CAPABILITY_KIND_LABELS[c.kind];
+  if (change === 'proposed') return byCoordinator ? <div className="note warn">{`Koordinatör bir yetenek önerdi: ${c.title} (${kind}) — karar senin, Yetenekler sekmesinde.`}</div> : null;
+  if (change !== 'activated' || c.decidedBy === null || c.decidedBy === OWNER) return null;
+  // Pay and delete are the owner's at the gate whatever is decided, so there is nothing to open for the system.
+  const asked = needsConfirm(c)
+    ? ' — sisteme açılana dek kapıda sana sorulur; Yetenekler sekmesinde “Sisteme aç”.'
+    : c.kind === 'pay' || c.kind === 'delete'
+      ? ' — bu türün çağrıları her zaman sana sorulur.'
+      : '.';
+  return <div className="note warn">{`Koordinatör bir yeteneği etkinleştirdi: ${c.title} (${kind}; araçlar: ${c.tools.join(', ')})${asked}`}</div>;
+}
 
 export function EventItem({ stored }: { stored: StoredEvent }) {
   const e = stored.event;
@@ -199,6 +221,8 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note">{`Giden: ${APPROVAL_KIND_LABELS[e.entry.kind]} — ${e.entry.target} (${e.entry.via === 'system' ? 'sistem geçirdi' : OUTBOX_VIA_LABELS.owner})`}</div>;
     case 'approval.changed':
       return e.change === 'requested' ? <ApprovalCard approval={e.approval} /> : <div className="note">{`Onay “${e.approval.target}”: ${APPROVAL_STATUS_LABELS[e.approval.status]}`}</div>;
+    case 'capability.changed':
+      return <CapabilityNote change={e.change} c={e.capability} />;
     case 'proposal.changed':
       return e.change === 'opened' || e.change === 'escalated' ? <ProposalCard proposal={e.proposal} /> : <div className="note">{`Öneri “${e.proposal.title}”: ${e.change === 'accepted' ? 'kabul edildi' : 'reddedildi'}`}</div>;
     default:
