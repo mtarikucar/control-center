@@ -106,11 +106,13 @@ export function invalidateVocabulary(): void {
 function current(): { vocabulary: CapabilityVocabulary; byTool: Map<string, Capability> } {
   if (built?.generation === generation) return built;
   const base = productVocabulary();
+  // Taken before the source is read: an invalidate fired while it is read leaves this build stale, so the next read builds again.
+  const gen = generation;
   const company = companyCapabilities();
   const capabilities = [...base.capabilities, ...company];
   const classified = (k: KnownConnector) => company.some((c) => c.tools.some((t) => t.startsWith(mcpToolPrefix(k.name))));
   built = {
-    generation,
+    generation: gen,
     // A connector the company classified a tool of is known by that tool now, not by its name only.
     vocabulary: { version: base.version, capabilities, knownConnectors: base.knownConnectors.filter((k) => !classified(k)) },
     byTool: new Map(capabilities.flatMap((c) => c.tools.map((t) => [t, c] as const))),

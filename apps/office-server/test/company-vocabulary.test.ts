@@ -41,6 +41,19 @@ describe('the vocabulary with the company’s capabilities (spec capabilities §
     expect(classifyCall(SMS, {}, DESK, ctx).parts[0]).not.toHaveProperty('capability');
   });
 
+  it('an invalidate fired while the source is read is not swallowed: the next read builds again', () => {
+    let list = [sms()];
+    let fire = true;
+    useCompanyCapabilities(() => {
+      const seen = list;
+      // The company changed under the read (the source returned what it had before).
+      if (fire) { fire = false; list = []; invalidateVocabulary(); }
+      return seen;
+    });
+    expect(toolClass(SMS).kind).toBe('classified');
+    expect(toolClass(SMS)).toEqual({ kind: 'unclassified', outward: true });
+  });
+
   it('a session closes a company capability’s outward tools unless its role declares it; a read one stays open; a classified tool is no longer listed unclassified', () => {
     useCompanyCapabilities(() => [sms(), sms({ id: 'sms.read', kind: 'read', outward: false, tools: ['mcp__netgsm__inbox'] })]);
     expect(sessionDeny({ capabilities: [], seen: [], closedServers: [] })).toContain(SMS);

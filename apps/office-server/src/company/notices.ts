@@ -76,6 +76,10 @@ export const NOTICE_TOPICS = {
   'approval.requested': 'info',
   /** B9a: the owner approved (repeat the same call) or denied your request. */
   'approval.decided': 'decision',
+  /** Spec capabilities §4.2: someone proposed a capability for the vocabulary — accept it (with its kind) or reject it. */
+  'capability.proposed': 'decision',
+  /** Your proposed capability was decided; or the owner added, activated or retired one (put it on the roles that need it). */
+  'capability.decided': 'decision',
   /** B9a: owner endpoints were called not the page's way (no Origin or nonce): at most one note an hour per kind. */
   'owner.flagged': 'decision',
   /** A task you hold was cancelled (its plan was stopped): stop working on it. */
