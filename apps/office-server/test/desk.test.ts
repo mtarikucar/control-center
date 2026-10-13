@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Employee } from '@cc/shared';
 import { BRIEF_FILE, DEFAULT_BRIEF, readBrief, writeBrief } from '../src/company/brief.ts';
-import { GUIDE_FILE, deskDir, prepareDesk, roleCard, writeRoleCard } from '../src/desk.ts';
+import { GUIDE_FILE, deskDir, prepareDesk, roleCard, writeDepartmentFile, writeRoleCard } from '../src/desk.ts';
 import { setup, tempDir } from './helpers.ts';
 
 describe('desk folder', () => {
@@ -105,6 +105,17 @@ describe('desk', () => {
     expect(readFileSync(join(deskDir(dataDir, e.slug), 'CLAUDE.md'), 'utf8')).toContain('Artık sürüm çıkarır.');
     writeRoleCard(dataDir, { ...e, kind: 'coordinator' });
     expect(readFileSync(join(deskDir(dataDir, e.slug), GUIDE_FILE), 'utf8')).toContain('planPropose');
+  });
+
+  it('a card from before departments gets the department import once the desk has the file; one without the file gets none', () => {
+    const dataDir = tempDir();
+    const e = { id: 'e', slug: 'ada', name: 'Ada', role: 'r', title: '', team: '', kind: 'member' } as Employee;
+    prepareDesk(dataDir, e);
+    const card = () => readFileSync(join(deskDir(dataDir, 'ada'), 'CLAUDE.md'), 'utf8');
+    expect(card()).not.toContain('@department.md');
+    writeDepartmentFile(dataDir, 'ada', '# Departmanın\n');
+    prepareDesk(dataDir, e);
+    expect(card().match(/@department\.md/g)).toHaveLength(1);
   });
 });
 
