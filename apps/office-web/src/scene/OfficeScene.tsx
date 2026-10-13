@@ -16,6 +16,10 @@ import { RoomsLayer } from './RoomsLayer.tsx';
 // The view sized from the floor (spec office rooms §6): start zoom, zoom-out limit, where the floor sits, how far it drags.
 const ORIGIN = sceneOrigin(LAYOUT.width, LAYOUT.depth);
 const PAN = panLimits(LAYOUT.width, LAYOUT.depth);
+// At module scope: drei connects the controls again whenever this handler changes.
+const holdOverFloor = (e?: { target: unknown }) => {
+  if (e?.target) keepInView(e.target as Pannable, PAN);
+};
 
 export function OfficeScene() {
   const select = useOffice((s) => s.select);
@@ -51,9 +55,7 @@ export function OfficeScene() {
         maxAzimuthAngle={AZIMUTH.max}
         minZoom={minZoom(LAYOUT.width, LAYOUT.depth)}
         maxZoom={MAX_ZOOM}
-        onChange={(e) => {
-          if (e?.target) keepInView(e.target as Pannable, PAN);
-        }}
+        onChange={holdOverFloor}
       />
       <Effects />
     </Canvas>

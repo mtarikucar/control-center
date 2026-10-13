@@ -19,7 +19,7 @@ const LIGHT = new Color('#ffe2b0');
 const FIXTURE = new Color('#ffe9c4').multiplyScalar(4);
 
 /** Every lifecycle's beam, as a table the compiler checks: a state added to the shared list has no beam until it is given one here. */
-const LEVELS: Record<Lifecycle, BeamLevel> = {
+const BEAM_LEVELS: Record<Lifecycle, BeamLevel> = {
   working: 'pulse',
   idle: 'calm',
   starting: 'calm',
@@ -34,7 +34,8 @@ const LEVELS: Record<Lifecycle, BeamLevel> = {
 
 /** What the beam says about the coordinator (spec office rooms §4.3): working pulses, idle or starting is calm, any other state dim; no coordinator, no beam. */
 export function beamLevel(lifecycle: Lifecycle | null): BeamLevel {
-  return lifecycle === null ? 'off' : LEVELS[lifecycle];
+  // A state only a newer server knows is not in the table: dim, like any state that is not at work.
+  return lifecycle === null ? 'off' : (BEAM_LEVELS[lifecycle] ?? 'dim');
 }
 
 /** The beam's brightness (0–1) at `seconds`: a slow breath while working, steady otherwise. */

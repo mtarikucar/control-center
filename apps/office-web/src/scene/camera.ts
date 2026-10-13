@@ -20,14 +20,35 @@ export function minZoom(width: number, depth: number): number {
   return Math.round(startZoom(width, depth) * 0.53);
 }
 
-/** How far the view's centre may be dragged from the floor's middle, metres: to the floor's edge and a step beyond. */
-export function panLimits(width: number, depth: number): { x: number; z: number } {
-  return { x: width / 2 + 1, z: depth / 2 + 1 };
+/**
+ * Where the floor's corner goes: its middle at the origin (the camera, light and controls all aim there), nudged
+ * towards the camera so the far corner clears the top bar (1.1 m for 18 × 14 m, as tuned by hand).
+ */
+export function sceneOrigin(width: number, depth: number): [number, number, number] {
+  const nudge = (width + depth) / 29;
+  return [-width / 2 + nudge, 0, -depth / 2 + nudge];
 }
 
-/** A view centre kept within the limits (the scene's origin is the floor's middle). */
-export function clampTarget(p: { x: number; z: number }, limits: { x: number; z: number }): { x: number; z: number } {
-  return { x: Math.min(limits.x, Math.max(-limits.x, p.x)), z: Math.min(limits.z, Math.max(-limits.z, p.z)) };
+/** The box the view's centre may be dragged within, in world metres. */
+export interface PanLimits {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+/**
+ * Where the view's centre may be dragged: the floor's extents a step (1 m) beyond each side. The floor's middle is not
+ * the world's origin (sceneOrigin nudges it towards the camera), so the box follows the floor, not the origin.
+ */
+export function panLimits(width: number, depth: number): PanLimits {
+  const [x, , z] = sceneOrigin(width, depth);
+  return { minX: x - 1, maxX: x + width + 1, minZ: z - 1, maxZ: z + depth + 1 };
+}
+
+/** A view centre kept within the limits. */
+export function clampTarget(p: { x: number; z: number }, limits: PanLimits): { x: number; z: number } {
+  return { x: Math.min(limits.maxX, Math.max(limits.minX, p.x)), z: Math.min(limits.maxZ, Math.max(limits.minZ, p.z)) };
 }
 
 /** What the owner drags: the controls' target and their camera. */
@@ -37,7 +58,7 @@ export interface Pannable {
 }
 
 /** Holds the view over the floor: the camera moves back with its target, so dragging stops at the edge without turning the view. */
-export function keepInView(c: Pannable, limits: { x: number; z: number }): void {
+export function keepInView(c: Pannable, limits: PanLimits): void {
   const next = clampTarget(c.target, limits);
   const dx = next.x - c.target.x;
   const dz = next.z - c.target.z;
@@ -46,15 +67,6 @@ export function keepInView(c: Pannable, limits: { x: number; z: number }): void 
   c.target.z += dz;
   c.object.position.x += dx;
   c.object.position.z += dz;
-}
-
-/**
- * Where the floor's corner goes: its middle at the origin (the camera, light and controls all aim there), nudged
- * towards the camera so the far corner clears the top bar (1.1 m for 18 × 14 m, as tuned by hand).
- */
-export function sceneOrigin(width: number, depth: number): [number, number, number] {
-  const nudge = (width + depth) / 29;
-  return [-width / 2 + nudge, 0, -depth / 2 + nudge];
 }
 
 /** Half the sun's shadow box, metres: the floor's half-diagonal and a margin (14 for 18 × 14 m). */

@@ -25,11 +25,12 @@ describe('the beam’s brightness (spec office rooms §4.3)', () => {
     expect(beamLevel('archived')).toBe('off');
   });
 
-  it('says something for every lifecycle there is: a state added later is dim until the table says otherwise (the table is compiler-checked)', () => {
+  it('says something for every lifecycle there is, and a state a newer server adds stays dim (the table is compiler-checked)', () => {
     for (const lifecycle of LIFECYCLES) {
       const expected = lifecycle === 'working' ? 'pulse' : lifecycle === 'idle' || lifecycle === 'starting' ? 'calm' : lifecycle === 'archived' ? 'off' : 'dim';
       expect(beamLevel(lifecycle), lifecycle).toBe(expected);
     }
+    expect(beamLevel('hibernating' as Lifecycle)).toBe('dim');
   });
 
   it('a working beam breathes every 2.5 s between half and full; calm is steady and brighter than dim', () => {
