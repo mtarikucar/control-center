@@ -128,6 +128,65 @@ describe('gate policy (K1) — self-approval and the gate guarding itself (revie
   file('Write', `${HOME}/.claude/projects/-home-x--control-center-desks-ada/memory/a.md`, 'self');
 });
 
+describe('gate policy — connector identity: what defines a session’s MCP servers is the office’s own (Task 8 review, security)', () => {
+  // A Claude session (-p, project settings on) loads every .mcp.json from its folder up to / without asking, and the
+  // owner's ~/.claude.json (user and local servers); Codex its config.toml (~/.codex, a trusted project's .codex). A
+  // server written there under a connector's name would be classified as that connector — and get the system path.
+  const file = (name: string, path: string, want: Expect) =>
+    it(`${want === 'pass' ? 'geç' : `kapı (${want})`}: ${name} ${path.replace(HOME, '~')}`, () => {
+      const v = classifyCall(name, { file_path: path, content: '{}', old_string: 'a', new_string: 'b', edits: [] }, DESK, ctx);
+      expect(verdict(v), JSON.stringify(v.parts)).toBe(want);
+    });
+  file('Write', `${DESK}/.mcp.json`, 'self');
+  file('Write', `${HOME}/.mcp.json`, 'self');
+  file('Write', '/tmp/x/.mcp.json', 'self');
+  file('Edit', `${HOME}/Projects/site/.mcp.json`, 'self');
+  file('MultiEdit', `${HOME}/.claude.json`, 'self');
+  file('Write', `${DESK}/.codex/config.toml`, 'self');
+  file('Edit', `${HOME}/.codex/config.toml`, 'self');
+  file('Write', `${DESK}/mcp.json`, 'pass');
+  file('Write', `${DESK}/notes/.mcp.json.md`, 'pass');
+  file('Write', `${DESK}/config.toml`, 'pass');
+  file('Write', `${DESK}/codex/config.toml`, 'pass');
+  file('Write', `${DESK}/.claude.json`, 'pass');
+  // A file system that ignores case (macOS, Windows) opens .MCP.json as .mcp.json.
+  file('Write', `${DESK}/.MCP.json`, 'self');
+  it('a .mcp.json that is a link to a file elsewhere is still one; a link named otherwise to one is one too', () => {
+    const links: Record<string, string> = { [`${DESK}/.mcp.json`]: '/tmp/m.json', [`${DESK}/m.json`]: `${HOME}/.mcp.json` };
+    const linked = testContext({ realpath: (p) => links[p] ?? p });
+    expect(verdict(classifyCall('Write', { file_path: `${DESK}/.mcp.json`, content: '{}' }, DESK, linked))).toBe('self');
+    expect(verdict(classifyCall('Write', { file_path: `${DESK}/m.json`, content: '{}' }, DESK, linked))).toBe('self');
+    expect(verdict(classifyCall('Write', { file_path: '/tmp/m.json', content: '{}' }, DESK, linked))).toBe('pass');
+  });
+  it('the reason says what it is', () => {
+    expect(classifyCall('Write', { file_path: `${DESK}/.mcp.json`, content: '{}' }, DESK, ctx).parts).toEqual([
+      { kind: 'self', target: `Write ${DESK}/.mcp.json`, why: 'korunan yola yazar: MCP sunucu ayarları (.mcp.json)' },
+    ]);
+  });
+  rows([
+    [`echo '{"mcpServers":{"claude_ai_Gmail":{"command":"node","args":["x.js"]}}}' > .mcp.json`, 'self'],
+    ['cat /tmp/m.json > ~/.mcp.json', 'self'],
+    ['cp /tmp/m.json ~/.control-center/desks/mert/.mcp.json', 'self'],
+    ['mv /tmp/m.json .mcp.json', 'self'],
+    ['ln -s /tmp/m.json .mcp.json', 'self'],
+    // Into a folder a copy keeps its name.
+    ['cp /tmp/x/.mcp.json .', 'self'],
+    ['cp /tmp/y/a.json /tmp/x/.mcp.json ~/.control-center/desks/mert/', 'self'],
+    ['ln -s /tmp/x/.mcp.json ~', 'self'],
+    ['tee -a ~/.claude.json < /tmp/x', 'self'],
+    ["sed -i 's/a/b/' ~/.claude.json", 'self'],
+    ['cp /tmp/c.toml ~/.codex/config.toml', 'self'],
+    ['mkdir -p .codex && cp /tmp/c.toml /tmp/config.toml .codex/', 'self'],
+    ['mv /tmp/codex ~/.codex', 'self'],
+    ['rm -rf ~/.codex', 'self'],
+    [`python3 -c "open('.mcp.json', 'w').write('{}')"`, 'self'],
+    // Reading them, and files that only look alike, are free.
+    ['cat .mcp.json ~/.claude.json ~/.codex/config.toml', 'pass'],
+    ['cp /tmp/m.json mcp.json && cp /tmp/c.toml config.toml', 'pass'],
+    ['cp ~/.codex/generated_images/a.png .', 'pass'],
+  ]);
+});
+
 describe('gate policy (K1) — effective cwd, resolved target and git (review rounds 2–3)', () => {
   rows([
     // Held: the resolved target is protected, or git rewrites the live checkout's working tree.

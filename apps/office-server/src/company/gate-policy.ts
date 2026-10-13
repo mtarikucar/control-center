@@ -98,18 +98,36 @@ const under = (p: string, root: string) => p === root || p.startsWith(root.endsW
 /** Claude Code keeps a working folder's memory under ~/.claude/projects/<the folder, every other character a dash>. */
 const projectKey = (dir: string) => dir.replace(/[^A-Za-z0-9]/g, '-');
 
+/**
+ * Connector identity (Task 8 review): the files that define the MCP servers a session loads. A Claude session (-p, the
+ * project's settings on) loads a .mcp.json from its folder and from every folder above it without asking, and the
+ * owner's ~/.claude.json holds the user's servers and each folder's own; Codex reads ~/.codex/config.toml and a
+ * trusted project's .codex/config.toml (its servers, and the trust, approvals and sandbox too). A server written there
+ * under a classified connector's name would be taken for that connector, and its sends for the system's.
+ */
+function mcpConfigWhy(p: string, home: string): string | null {
+  const name = posix.basename(p).toLowerCase();
+  if (name === '.mcp.json') return 'MCP sunucu ayarları (.mcp.json)';
+  if (name === '.claude.json' && posix.dirname(p) === home) return 'sahibinin Claude ayarları (~/.claude.json: MCP sunucuları)';
+  if (name === 'config.toml' && posix.basename(posix.dirname(p)).toLowerCase() === '.codex') return 'Codex ayarları (.codex/config.toml: MCP sunucuları, onaylar)';
+  return null;
+}
+
 /** Why writing at `path` is held (§3.1), or null; `recursive`: also when it holds a protected folder (rm -r, mv). */
 export function protectedWhy(path: string, ctx: GateContext, recursive = false): string | null {
   const p = ctx.realpath(path);
   const { home } = ctx;
   if (under(p, `${home}/.ssh`) || under(p, `${home}/.config/gh`)) return 'kimlik dosyaları';
+  // By its name wherever it is — the path as written too: a .mcp.json that is a link to elsewhere is still one.
+  const mcp = mcpConfigWhy(p, home) ?? mcpConfigWhy(path, home);
+  if (mcp) return mcp;
   if (under(p, `${home}/.claude`)) return under(p, `${home}/.claude/projects/${projectKey(ctx.deskDir)}`) ? null : 'sahibinin Claude ayarları';
   if (under(p, ctx.repoRoot)) return 'canlı checkout (kapının ve ofisin kodu)';
   if (under(p, ctx.deskDir)) return under(p, `${ctx.deskDir}/.claude`) ? 'masanın Claude ayarları (.claude)' : null;
   if (under(p, `${ctx.dataDir}/desks`)) return p === `${ctx.dataDir}/desks` ? 'masalar' : 'başkasının masası';
   if (under(p, ctx.dataDir)) return 'ofisin veri dizini (veritabanı, şirket hafızası)';
   if (recursive) {
-    for (const root of [`${home}/.ssh`, `${home}/.config/gh`, `${home}/.claude`, ctx.repoRoot, ctx.dataDir]) if (under(root, p)) return 'korunan bir klasörü içine alıyor';
+    for (const root of [`${home}/.ssh`, `${home}/.config/gh`, `${home}/.claude`, `${home}/.codex/config.toml`, ctx.repoRoot, ctx.dataDir]) if (under(root, p)) return 'korunan bir klasörü içine alıyor';
   }
   return null;
 }
@@ -1214,6 +1232,16 @@ function fileWrites(name: string, words: ShellWord[], env: Map<string, string | 
         }
       }
       if (dest) writeTarget(run, name, dest, st, name === 'mv');
+      // Into a folder a source keeps its name: `cp x/.mcp.json desk/` writes desk/.mcp.json (connector identity).
+      const into = dest ? pathOf(dest, st, ctx) : null;
+      if (into && !into.partial) {
+        for (const w of dir ? ops : ops.slice(0, -1)) {
+          const from = pathOf(w, st, ctx);
+          const path = from && !from.partial ? posix.join(into.path, posix.basename(from.path)) : null;
+          const why = path ? protectedWhy(path, ctx) : null;
+          if (why) add(run, { kind: 'self', target: `${name} ${path}`, why: `korunan yola yazar: ${why}` });
+        }
+      }
       // A move takes its sources away from where they were.
       if (name === 'mv') for (const w of dir ? ops : ops.slice(0, -1)) writeTarget(run, 'mv', w, st, true);
       return;
