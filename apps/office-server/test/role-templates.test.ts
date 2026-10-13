@@ -78,7 +78,9 @@ Dikkatle.
 Teslim edildiğinde.
 `;
 
-const OUTWARD = ['sosyal-medya', 'musteri-temsilcisi', 'satis-asistani', 'operasyon-asistani'];
+// Templates whose capabilities reach outside or whose work is sent out in the company's name: their "how to work"
+// says the owner approves.
+const OUTWARD = ['sosyal-medya', 'musteri-temsilcisi', 'satis-asistani', 'operasyon-asistani', 'icerik-yazari', 'iletisim-yoneticisi', 'yonetici-asistani', 'satis-muduru', 'aday-arastirmaci', 'operasyon-finans-yoneticisi', 'satin-alma-uzmani', 'pazarlama-muduru', 'teknik-lider'];
 
 describe('Role templates — the format', () => {
   it('parses the front matter (scalars and lists) and the body', () => {
@@ -116,7 +118,11 @@ describe('Role templates — the format', () => {
 describe('Role templates — the catalog (ships with the office)', () => {
   it('holds the first general small-business archetypes, each whole and on the office’s models and methods', () => {
     const all = listRoleTemplates();
-    expect(all.map((t) => t.id)).toEqual(['arastirmaci', 'editor', 'icerik-yazari', 'musteri-temsilcisi', 'operasyon-asistani', 'satis-asistani', 'sosyal-medya']);
+    expect(all.map((t) => t.id)).toEqual([
+      'aday-arastirmaci', 'arastirmaci', 'editor', 'gelistirici', 'icerik-yazari', 'iletisim-yoneticisi', 'musteri-temsilcisi', 'operasyon-asistani',
+      'operasyon-finans-yoneticisi', 'otomasyon-test-uzmani', 'pazarlama-muduru', 'satin-alma-uzmani', 'satis-asistani', 'satis-muduru', 'sosyal-medya',
+      'teknik-lider', 'yonetici-asistani',
+    ]);
     expect(new Set(all.map((t) => t.title)).size).toBe(all.length);
     for (const t of all) {
       expect(MODEL_ALIASES, t.id).toContain(t.model);
@@ -130,7 +136,22 @@ describe('Role templates — the catalog (ships with the office)', () => {
     const howTo = (id: string) => /### Nasıl çalışırsın\n([\s\S]*?)\n### /.exec(roleTemplate(id).body)?.[1] ?? '';
     for (const id of OUTWARD) expect(howTo(id), id).toMatch(/sahibinin onayı/);
     expect(roleTemplate('operasyon-asistani').capabilities).not.toContain('payments.charge');
-    expect(() => roleTemplate('yok')).toThrow(/Bilinmeyen rol şablonu: yok\. Şablonlar: arastirmaci, editor, icerik-yazari/);
+    expect(() => roleTemplate('yok')).toThrow(/Bilinmeyen rol şablonu: yok\. Şablonlar: aday-arastirmaci, arastirmaci, editor/);
+  });
+
+  it('the department heads and their suggested roles are on the office’s models (spec departments §4.3)', () => {
+    const heads = { 'teknik-lider': 'opus', 'pazarlama-muduru': 'sonnet', 'iletisim-yoneticisi': 'sonnet', 'satis-muduru': 'sonnet', 'operasyon-finans-yoneticisi': 'sonnet' };
+    for (const [id, model] of Object.entries(heads)) expect(roleTemplate(id).model, id).toBe(model);
+    expect(roleTemplate('sosyal-medya')).toMatchObject({ version: 2, title: 'Sosyal Medya ve Reklam Uzmanı', team: 'Pazarlama' });
+    expect(roleTemplate('sosyal-medya').capabilities).toContain('ads.manage');
+    expect(roleTemplate('icerik-yazari')).toMatchObject({ version: 2, team: 'Pazarlama' });
+    expect(roleTemplate('icerik-yazari').capabilities).toContain('media.generate');
+    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 2, team: 'İç-Dış İletişim' });
+    expect(roleTemplate('satis-asistani')).toMatchObject({ version: 2, team: 'Satış' });
+    expect(roleTemplate('operasyon-asistani')).toMatchObject({ version: 2, team: 'Operasyon ve Finans' });
+    // The assistant of the owner keeps the owner's mail out of the company memory.
+    expect(roleTemplate('yonetici-asistani').body).toMatch(/şirket hafızasına/);
+    expect(roleTemplate('iletisim-yoneticisi').body).toMatch(/DM/);
   });
 });
 
@@ -140,7 +161,7 @@ describe('Role templates — hiring', () => {
     const c = t.coordinator.id;
     const ece = t.company.hire(c, { name: 'Ece', template: 'icerik-yazari', role: 'Marka dili: samimi, kısa cümleler.' } as never);
     const tpl = roleTemplate('icerik-yazari');
-    expect(ece).toMatchObject({ title: 'İçerik Yazarı', team: 'İçerik', model: 'sonnet', template: { id: 'icerik-yazari', version: tpl.version } });
+    expect(ece).toMatchObject({ title: 'İçerik Yazarı', team: 'Pazarlama', model: 'sonnet', template: { id: 'icerik-yazari', version: tpl.version } });
     expect(ece.role).toBe(templateRole(tpl, 'Marka dili: samimi, kısa cümleler.'));
     expect(t.roster.get(ece.id)).toMatchObject({ template: { id: 'icerik-yazari', version: tpl.version } });
     const card = await t.card(ece);
@@ -175,7 +196,7 @@ describe('Role templates — tools', () => {
     const t = make();
     expect(t.tools.find((x) => x.name === 'roleTemplates')?.kinds).toEqual(['lead', 'coordinator']);
     const list = await t.call(t.coordinator, 'roleTemplates');
-    expect(list).toContain('# Rol şablonları (7)');
+    expect(list).toContain('# Rol şablonları (17)');
     expect(list).toContain(`• icerik-yazari — İçerik Yazarı (sonnet; yöntem: content): ${roleTemplate('icerik-yazari').summary}`);
     const one = await t.call(t.coordinator, 'roleTemplates', { id: 'editor' });
     const e = roleTemplate('editor');
@@ -189,7 +210,7 @@ describe('Role templates — tools', () => {
     const t = make();
     const reply = await t.call(t.coordinator, 'hire', { name: 'Ece', template: 'icerik-yazari', role: 'Kanallar: Instagram.' });
     // B7: a template hire also says the capabilities it declares (no registry here: only the list).
-    expect(reply).toMatch(/^İşe alındı: Ece \(.+\), masa \d+, model sonnet, şablon icerik-yazari \(sürüm \d+\)\.\nYetenekler: docs\.write, web\.fetch\.$/);
+    expect(reply).toMatch(/^İşe alındı: Ece \(.+\), masa \d+, model sonnet, şablon icerik-yazari \(sürüm \d+\)\.\nYetenekler: docs\.write, web\.fetch, media\.generate\.$/);
     expect(t.roster.list().find((e) => e.name === 'Ece')!.role).toContain('### Bu şirkette\n\nKanallar: Instagram.');
     expect(await t.call(t.coordinator, 'hire', { name: 'Ada', role: 'r', model: 'haiku' })).toMatch(/^İşe alındı: Ada \(.+\), masa \d+, model haiku\.$/);
     await expect(t.call(t.coordinator, 'hire', { name: 'Can', model: 'haiku' })).rejects.toThrow(/role gerekli/);
