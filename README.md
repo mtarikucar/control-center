@@ -246,6 +246,47 @@ Ofis 32 × 24 m'lik tek bir kat: ortada **merkez**, kuzeyinde ve güneyinde üç
   masayı bekleyen hemen oturur; ofis her açılışta herkesi yerine oturtur (sekiz masalı eski ofis de böyle taşınır).
 - **Çalışan sınırı:** Anayasa'da varsayılan 12, en çok 45 (koltuk sayısı); kayıtlı bir değerin varsa o kalır.
 
+## Yetenekler ve otonomi
+
+- **Yetenek türleri:** sözlükteki her yetenek bir tür taşır — okuma, gönderim, takvim, arama, yayın, ödeme, silme
+  (sözlük sürüm 3); kapının onay türü buradan gelir (takvim daveti ve arama artık ayrı türler). `messages.read` gelen
+  SMS, WhatsApp ve sosyal medya mesajlarını ve yorumları okur.
+- **Şirketin eklediği yetenekler:** sözlükte olmayan bir bağlayıcı aracı dışa dönük sayılır, oturumda kapanır, kapıda
+  tutulur. Çalışan `capabilityPropose` ile yetenek önerir; koordinatör `capabilityDecide` ile karar verir — türü yalnız
+  sıkılaştırabilir, ödeme ve silme türünü yalnız siz değiştirirsiniz; koordinatörün kendi önerisi size gelir. Bir aracı
+  **okuma** olarak sınıflandırmak yalnız sizin kararınızdır (okuma araçları her oturumda açıktır ve kapıdan geçer):
+  koordinatör bir okuma önerisini ancak dışa dönük bir türe sıkılaştırarak kabul eder. Şirket görünümünün
+  **Yetenekler** sekmesinde ürünle gelenleri görür, yenisini eklersiniz (hemen etkin), bekleyenleri onaylar ya da
+  reddeder, etkin olanın türünü değiştirir ya da geri alırsınız (araçları yeniden sınıflandırılmamış olur). Yeni bir
+  yetenek, rolüne eklenen kişinin bir sonraki oturumunda açılır.
+- **Otonomi politikası (Anayasa):** kapı açıkken bağlayıcıdan yapılan gönderim, yayın, arama ve takvim için "Sahibine
+  sor" ya da "Sistem halletsin". Varsayılan: gönderim, yayın, arama sistem; takvim size. Ödeme, silme, tarayıcı,
+  ofisin kendisi ve sınıflandırılmamış araçlar her zaman size gelir; komut satırından (Bash) gönderim, kabuktan
+  açılan iç içe bir Claude Code ya da Codex oturumu (yalnız `--version`/`--help` serbest) ve MCP ayarlarına
+  (`.mcp.json`, `~/.claude.json`, `.codex/config.toml`) ya da `.claude/` klasörüne yazma da öyle. Claude oturumları,
+  bir bağlayıcının ya da ofisin adını taşıyan `.mcp.json` sunucusunu da yüklemez. **Kapı varsayılan kapalı ve bu iş
+  onu açmaz:** politika ve kurallar yalnız kapıyı siz açınca (Anayasa → Geri alınamaz iş kapısı) işler.
+  **Bilinen sınır:** Codex çalışanlarının bağlayıcı çağrıları kapıdan geçmez (Codex'te böyle bir kanca yok); politika
+  ve kurallar Claude çalışanlarının bağlayıcı çağrılarına işler.
+- **Kurallar:** departman başına saatlik gönderim + yayın sınırı (`sendsPerHour`, 30; departmansız çalışan kendi
+  başına sayılır), toplu gönderim eşiği (`bulkRecipients`, 5'ten çok alıcı), özel kişiler (`specialContacts`: e-posta,
+  telefon, kullanıcı adı ya da kişinin ya da firmanın adı; ad bütün bir ifade olarak aranır, büyük-küçük harf ve
+  telefonun yazılışı fark etmez), arama saatleri (`callHours`, 9–19) ve departman başına günlük arama sınırı
+  (`callsPerDay`, 20). Özel kişi çağrının girdisinde her yerde aranır: onlara giden ya da onlar hakkındaki çağrı size
+  gelir. Çok derin ya da çok büyük girdi sonuna kadar okunamaz ve tutulur ("okunamayan girdi"). Kuralı aşan çağrı
+  size gelir; gerekçesi kuralı söyler.
+- **Giden kutusu:** gönderim, yayın, arama ya da takvim parçası olan ve kapının sistem adına geçirdiği ya da sizin
+  onayladığınız her çağrı kaydedilir — "izin verildi" kaydıdır, teslim değil; onaylanan ödeme, silme, tarayıcı, ofis
+  ve diğer işler Onaylar'da ve `gate.checked` olaylarında kalır. **Giden kutusu** sekmesi son 200'ü departmana ve
+  türe göre süzer; koordinatör hepsini, başkanlar kendi departmanınınkini `outboxRead` ile okur (her gün örnek okuma
+  önerilir).
+- **Muhakeme:** herkesin rehberinde "Sistemin senin adına gönderdiği" bölümü var: para sözü, hukuki konu, kriz, bilgi
+  tabanında cevabı olmayan soru ve ticari ileti izni (İYS) olmayan kişiye ilk tanıtım çalışan göndermeden önce
+  `approvalRequest` (aracın adı ve göndereceği girdi) ile size gelir. Kapı içeriği okumaz. İletişim, Pazarlama ve
+  Satış başkanları ile müşteri temsilcisi olağan gönderim ve yayını politikayla kendileri yapar; toplu gönderimi ve
+  özel kişiye gideni İletişim ve Pazarlama başkanları ile müşteri temsilcisi göndermeden önce `approvalRequest` ile
+  size sorar (kapı açıkken de kapalıyken de).
+
 ## office-server
 
 Gereken: Node 24+, pnpm 9, giriş yapılmış `claude` CLI.

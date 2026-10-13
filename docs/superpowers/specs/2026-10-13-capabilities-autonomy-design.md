@@ -27,8 +27,9 @@
    kendisi ve sınıflandırılmamış araçlar **her zaman sahibine** (ayarla değişmez).
 5. **Kapının kuralları** (sistem hallederken, mekanik): departman başına saatlik gönderim sınırı, toplu gönderim
    eşiği, özel kişiler listesi, arama için mesai saatleri ve günlük sınır; aşılınca çağrı sahibine gider.
-6. **Giden kutusu:** kapının sistem adına geçirdiği ve sahibinin onayladığı her dışa dönük çağrının kaydı;
-   koordinatör ve başkanlar okur (`outboxRead`), sahibi Şirket görünümünde görür.
+6. **Giden kutusu:** gönderim, yayın, arama ya da takvim parçası olan, kapının sistem adına geçirdiği ya da sahibinin
+   onayladığı her çağrının kaydı; onaylanan ödeme, silme, tarayıcı, ofis ve diğer işler onaylarda ve `gate.checked`
+   olaylarında kalır. Koordinatör ve başkanlar okur (`outboxRead`), sahibi Şirket görünümünde görür.
 7. **Muhakeme katmanı:** kritik durumlar (para sözü, hukuki, kriz, cevabı bilinmeyen, ticari ileti izni) rol ve
    yöntem metinlerinde; çalışan bunlarda göndermez, `approvalRequest` ile sahibine getirir.
 8. **Şablonlar:** İletişim, Müşteri Temsilcisi, Pazarlama, Satış ve ilgili departman şablonları yeni sürüm.
@@ -140,6 +141,9 @@ Anayasa alanları (varsayılanlarla):
 
 ## 7. Giden kutusu
 
+- Kapsam: gönderim, yayın, arama ya da takvim parçası olan her çağrı — sistemce geçen de sahibinin onayıyla geçen de.
+  Onaylanan ödeme, silme, tarayıcı, ofis ve diğer (`other`) işler giden kutusuna girmez; onaylarda ve `gate.checked`
+  olaylarında durur.
 - Tablo `outbox` (göç v25): kimlik, çalışan, departman, araç, tür, hedef (kapının bugünkü kısa hedefi), alıcılar
   (en çok 20), özet (girdinin ilk 300 karakteri, gizli anahtar alanları çıkarılmış), `via` ('system' | 'owner'),
   onay kimliği, zaman.
