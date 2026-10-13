@@ -38,7 +38,8 @@ export function asCapability(c: CustomCapability): Capability {
 
 /**
  * The coordinator keeps a proposal's kind or makes it stricter: read → any outward kind, any kind → pay or delete. Pay
- * and delete never move; loosening (an outward kind → read, or sideways among the policy's kinds) is the owner's.
+ * and delete never move; loosening (an outward kind → read, or sideways among the policy's kinds) is the owner's. Read
+ * kept as read passes here, but accepting it so is the owner's alone too (decide refuses it: amendment #10).
  */
 export function coordinatorMayChange(from: CapabilityKind, to: CapabilityKind): boolean {
   if (from === to) return true;
@@ -119,7 +120,8 @@ export class CustomCapabilities {
       if (current.proposedBy === who.id) throw new ForbiddenError('Kendi önerini karara bağlayamazsın; sahibi Yetenekler sekmesinden karar verir.');
     }
     const note = clean(text(d.note), 'Not', 500, !d.accept) || null;
-    const kind = d.kind === undefined || d.kind === null || d.kind === '' ? current.kind : kindOf(d.kind);
+    // A rejection activates nothing: the row keeps the kind it was proposed with, whatever kind came with it.
+    const kind = !d.accept || d.kind === undefined || d.kind === null || d.kind === '' ? current.kind : kindOf(d.kind);
     if (!owner && !coordinatorMayChange(current.kind, kind)) {
       throw new ForbiddenError(
         STRICTNESS[current.kind] === 2
@@ -231,10 +233,11 @@ export class CustomCapabilities {
    * the tool, so the company's would name it for nothing), not in another active company one.
    */
   #assertFree(tools: string[], id: string): void {
+    const active = this.active();
     for (const tool of tools) {
       const product = productToolOwner(tool);
       if (product) throw new ValidationError(`“${tool}” ürünle gelen ${product} yeteneğinde; bir araç yalnız bir yetenekte durur.`);
-      const other = this.active().find((c) => c.id !== id && c.tools.includes(tool));
+      const other = active.find((c) => c.id !== id && c.tools.includes(tool));
       if (other) throw new ConflictError(`“${tool}” şirketin ${other.id} yeteneğinde; bir araç yalnız bir yetenekte durur.`);
     }
   }

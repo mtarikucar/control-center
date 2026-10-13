@@ -80,10 +80,21 @@ describe('company capabilities — proposing and deciding (spec capabilities §4
     expect([coordinatorMayChange('delete', 'pay'), coordinatorMayChange('calendar', 'delete'), coordinatorMayChange('call', 'send'), coordinatorMayChange('read', 'call')]).toEqual([false, true, false, true]);
   });
 
+  it('a rejection keeps the proposed kind, whatever kind comes with it: nothing is activated, nothing to tighten or loosen (Task 4 minor)', () => {
+    const t = make();
+    t.caps.propose(t.ada.id, proposal({ id: 'sms.credits', kind: 'pay', tools: ['mcp__netgsm__buy_credits'] }));
+    expect(t.caps.decide(t.coordinator.id, 'sms.credits', { accept: false, kind: 'read', note: 'Kredi elle alınır.' })).toMatchObject({ status: 'rejected', kind: 'pay', note: 'Kredi elle alınır.' });
+    t.caps.propose(t.ada.id, proposal());
+    expect(t.caps.decide(OWNER, 'sms.send', { accept: false, kind: 'delete', note: 'Gerek yok.' })).toMatchObject({ status: 'rejected', kind: 'send' });
+  });
+
   it('review focus 3: a read proposal is accepted as read by the owner alone — the coordinator tightens it to an outward kind or leaves it to the owner', () => {
     const t = make();
     const inbox = proposal({ id: 'sms.inbox', title: 'SMS gelen kutusu', summary: 'Netgsm gelen kutusunu okur.', kind: 'read', tools: ['mcp__netgsm__inbox'] });
     t.caps.propose(t.ada.id, inbox);
+    // Told up front (Task 4 minor): what the coordinator may do with a read proposal.
+    expect(t.said(t.coordinator)).toContain('Okuma (read) olarak yalnız sahibi kabul eder: capabilityDecide ile dışa dönük bir türe (kind) sıkılaştırarak kabul edebilir, reddedebilir (note yaz) ya da sahibine bırakabilirsin.');
+    expect(t.said(t.coordinator)).not.toContain('kabul ederken türü aynı bırakabilir');
     // A read tool is open in every session and passes the gate: unchanged, the coordinator may not accept it — saying what it can do.
     for (const accept of [{ accept: true }, { accept: true, kind: 'read' }]) {
       expect(() => t.caps.decide(t.coordinator.id, 'sms.inbox', accept)).toThrow(/Bir aracı okuma \(read\) olarak sınıflandırmak sahibinin kararı; dışa dönük bir türle kabul edebilirsin/);
@@ -284,7 +295,7 @@ describe('company capabilities — the tools (spec capabilities §4.2)', () => {
     await call(t.ada, 'capabilityPropose', proposal());
     await call(t.ada, 'capabilityPropose', proposal({ id: 'sms.credits', kind: 'pay', tools: ['mcp__netgsm__buy_credits'] }));
     await call(t.ada, 'capabilityPropose', proposal({ id: 'sms.inbox', kind: 'read', tools: ['mcp__netgsm__inbox'] }));
-    await expect(call(t.coordinator, 'capabilityDecide', { id: 'sms.credits', decision: 'reject' })).rejects.toThrow(/Not/);
+    await expect(call(t.coordinator, 'capabilityDecide', { id: 'sms.credits', decision: 'reject' })).rejects.toThrow(/^Not boş olamaz/);
     expect(await call(t.coordinator, 'capabilityDecide', { id: 'sms.credits', decision: 'reject', note: 'Kredi elle alınır.' })).toBe('sms.credits reddedildi.');
     await expect(call(t.coordinator, 'capabilityDecide', { id: 'sms.inbox', decision: 'accept' })).rejects.toThrow(/okuma \(read\) olarak sınıflandırmak sahibinin kararı/);
     t.caps.decide(OWNER, 'sms.send', { accept: true });
