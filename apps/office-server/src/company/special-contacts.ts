@@ -36,8 +36,12 @@ export function specialContactsBlock(contacts: readonly string[]): string {
   ].join('\n');
 }
 
-/** Topics after which a desk's block may be due again: the constitution, someone's role card or hiring, a company capability's kind. */
-const DUE = new Set(['budget.changed', 'role.changed', 'capability.changed']);
+/**
+ * Topics after which a desk's block may be due again: the constitution, a hire (heard before the engine prepares the
+ * new desk for its first session, so the card imports the block from the start), someone's role card, a company
+ * capability's kind.
+ */
+const DUE = new Set(['budget.changed', 'employee.hired', 'role.changed', 'capability.changed']);
 
 export interface SpecialContactsDesksDeps {
   dataDir: string;

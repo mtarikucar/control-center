@@ -85,6 +85,18 @@ describe('the special contacts on the senders’ desks (final review I4.2)', () 
     expect([t.block(t.ada), t.block(t.can)]).toEqual(['', '']);
   });
 
+  it('final re-review: someone hired after the list is set has it from their first session if they send — the hire is heard before their desk is prepared; a reader hired has none', () => {
+    const t = make();
+    t.budget.ownerSetConstitution({ specialContacts: ['ali@firma.com'] });
+    const nil = t.company.hire(OWNER, { name: 'Nil', role: 'r', capabilities: ['email.read', 'email.send'] });
+    const ece = t.company.hire(OWNER, { name: 'Ece', role: 'r', capabilities: ['email.read'] });
+    expect(t.block(nil)).toContain('- `ali@firma.com`');
+    // The card the first session reads, as the engine prepared it at the hire — not prepared again here.
+    expect(readFileSync(join(deskDir(t.dataDir, nil.slug), 'CLAUDE.md'), 'utf8').match(/@special-contacts\.md/g)).toHaveLength(1);
+    expect(t.block(ece)).toBeNull();
+    expect(readFileSync(join(deskDir(t.dataDir, ece.slug), 'CLAUDE.md'), 'utf8')).not.toContain(SPECIAL_CONTACTS_FILE);
+  });
+
   it('a company capability counts by its kind, also when the owner changes it; a Codex desk gets the list inline', () => {
     const t = make();
     t.budget.ownerSetConstitution({ specialContacts: ['ali@firma.com'] });
