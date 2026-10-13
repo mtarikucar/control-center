@@ -1,6 +1,7 @@
 import type { Approval, ApprovalChange, ApprovalKind } from './approval.ts';
 import type { BudgetSummary, Spend } from './budget.ts';
 import type { ClockStatus, CycleTrigger, Goal, GoalChange, Plan, PlanChange, PlanView, Schedule, ScheduleChange, Task, TaskChange } from './company.ts';
+import type { Department, DepartmentChange, StreamNote } from './department.ts';
 import type { AgentProvider, Employee, EmployeeKind, Lifecycle, ModelAlias } from './employee.ts';
 import type { Integration } from './integration.ts';
 import type { Decision } from './memory.ts';
@@ -88,6 +89,8 @@ export type OfficeEvent = { provider?: AgentProvider } & (
   /** The onboarding moved; `round` with change 'round': the questions just asked (KÖ1 counts them). */
   | { type: 'onboarding.changed'; change: OnboardingChange; onboarding: Onboarding; round?: OnboardingRound }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
+  | { type: 'department.changed'; change: DepartmentChange; department: Department }
+  | { type: 'stream.noted'; note: StreamNote }
   | { type: 'decision.recorded'; decision: Decision }
   | { type: 'playbook.updated'; topic: string; version: number; reason: string }
   | { type: 'note.written'; id: number; title: string; tags: string[] }
@@ -199,6 +202,8 @@ export interface OfficeSnapshot {
   approvals?: Approval[];
   /** Routines (all but stopped, plus the last 10 stopped). */
   schedules?: Schedule[];
+  /** Every department, open and closed (spec departments §7; absent from servers without them). */
+  departments?: Department[];
   clock?: ClockStatus;
 }
 

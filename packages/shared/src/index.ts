@@ -3,6 +3,7 @@ export * from './blueprint.ts';
 export * from './budget.ts';
 export * from './capability.ts';
 export * from './company.ts';
+export * from './department.ts';
 export * from './employee.ts';
 export * from './events.ts';
 export * from './integration.ts';
