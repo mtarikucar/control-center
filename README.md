@@ -198,7 +198,7 @@ sırasını kilitlemez.
 
 ## Departmanlar ve öneriler
 
-- **Departman:** ofiste bir alanın sahibi, bir tür oda: bir **başkanı** (o departmanın lideri) ve üyeleri olur; ad,
+- **Departman:** ofiste bir alanın sahibi, kendi **odası** olan bir ekip (aşağıda *Ofis odaları*): bir **başkanı** (o departmanın lideri) ve üyeleri olur; ad,
   misyon ve "yapar / yapmaz" sınırı yazılıdır. Aynı anda en fazla **6** departman açık olabilir. Koordinatör
   departmansızdır; başkansız bir departmanın işi koordinatöre gelir.
 - **Açmak:** beş hazır şablon var: Yazılım ve Otomasyon, Pazarlama, İç-Dış İletişim, Satış, Operasyon ve Finans. Her
@@ -224,6 +224,23 @@ sırasını kilitlemez.
 - `askColleague`: bir çalışan arkadaşına onu bölmeden soru sorar.
 - Bir revizyonu reddederseniz plan onaylı sürümüyle sürer. Koordinatör her gün kısa bir özet raporlar; okunmamış rapor
   etiketinde 📋 olarak görünür. Koordinatör sizinle plan konuşurken toplantı odasına geçer.
+
+## Ofis odaları
+
+Ofis 32 × 24 m'lik tek bir kat: ortada **merkez**, kuzeyinde ve güneyinde üçer cam duvarlı **departman odası**.
+
+- **Merkez:** koordinatörün masası ışık hüzmesinin altında; kuzeyinde toplantı masası, batıda kahve köşesi,
+  güneybatıda sunucu köşesi, doğuda lounge, koordinatörün iki yanında sekiz merkez masası.
+- **Işık hüzmesi** koordinatörün durumunu gösterir: çalışırken nabız gibi parlar, boştayken sakin, uyurken ya da
+  dururken sönük; koordinatör yoksa hüzme de yok.
+- **Odalar:** bir departman açılınca en küçük boş odayı alır, kapanınca oda boşalır. Dolu odanın halısı departmanın
+  renginde, lambası ve ekranları açık; kapısının üstündeki tabelada departmanın ve başkanının adı yazar. Boş oda
+  karanlıktır, tabelasında "Boş oda" yazar.
+- **Koltuklar (45):** koordinatör 0'da, oda r'nin altı masası 1 + 6r … 6 + 6r, merkez masaları 37 … 44. Departman
+  üyesi kendi odasına oturur; oda doluysa (departmanda kişi sınırı yok) merkezdeki bir masaya, departmansızlar
+  merkeze. Departmanı ya da koordinatörlüğü değişen kişi yeni yerine yürür; ofis her açılışta herkesi yerine
+  oturtur (sekiz masalı eski ofis de böyle taşınır).
+- **Çalışan sınırı:** Anayasa'da varsayılan 12, en çok 45 (koltuk sayısı); kayıtlı bir değerin varsa o kalır.
 
 ## office-server
 
