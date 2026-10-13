@@ -16,16 +16,16 @@ afterEach(async () => {
 
 const flat = (text: string) => text.replace(/\s+/g, ' ');
 
-/** The office's tools as a coordinator's session gets them (the management cycle wired: cycleClose too). */
+/** The office's tools as a coordinator's session gets them (the management cycle and the departments wired: cycleClose and the department tools too). */
 function tools() {
   const s = setup();
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
-  const c = companyFor(s, f);
+  const c = companyFor(s, f, undefined, undefined, undefined, { departments: true });
   const agenda = new Agenda({ roster: s.roster, tasks: c.tasks, schedules: c.schedules, company: c.company, budget: c.budget });
   return officeTools({
     company: c.company, roster: s.roster, tasks: c.tasks, characters: () => ['coder'], memory: c.memory, budget: c.budget, engine: f.engine, plans: () => c.plans.list(), agenda,
-    cycle: { acting: (_id, fn) => fn(), close: () => ({ changes: [] }) },
+    cycle: { acting: (_id, fn) => fn(), close: () => ({ changes: [] }) }, departments: c.departments!,
   });
 }
 
@@ -218,12 +218,9 @@ describe('the coordination craft (ships with the office)', () => {
     const known = new Set([...coordinator.map((t) => t.name), ...all.flatMap((t) => [...fieldsOf(t.inputSchema)])]);
     // Claude's own scheduler, named only to say it is closed here.
     const closed = new Set(['CronCreate']);
-    // The guides name the departments' tools before the task that adds them; they leave this list the moment the tools exist.
-    const ahead = new Set(['departmentsRead', 'departmentTemplates', 'departmentCreate', 'departmentUpdate', 'departmentMove', 'departmentClose', 'streamPlan', 'streamReport']);
     const named = [...officeGuide('coordinator').matchAll(/`([A-Za-z][A-Za-z0-9]*)`/g)].map((m) => m[1]!);
     expect(named.length).toBeGreaterThan(30);
-    expect([...ahead].filter((n) => known.has(n))).toEqual([]);
-    expect([...new Set(named)].filter((n) => !known.has(n) && !closed.has(n) && !ahead.has(n))).toEqual([]);
+    expect([...new Set(named)].filter((n) => !known.has(n) && !closed.has(n))).toEqual([]);
     for (const tool of ['cycleClose', 'planPropose', 'planRevise', 'taskCreate', 'agendaRead', 'reportToOwner', 'restUntil']) expect(named).toContain(tool);
     expect(named).toContain('streams');
     expect(named).toContain('streamId');

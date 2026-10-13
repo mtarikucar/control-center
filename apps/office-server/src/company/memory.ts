@@ -195,7 +195,8 @@ export class Memory {
   // ── employee files ────────────────────────────────────────────────────────
 
   addEmployeeNote(by: string, employeeId: string, text: string): EmployeeNote {
-    if (this.#d.roster.get(by).kind !== 'coordinator') throw new ForbiddenError('Yalnız koordinatör bunu yapabilir.');
+    // Whose file a head may write is the tool's to check (Company.assertManagesPerson); here only that it is a manager at all.
+    if (this.#d.roster.get(by).kind === 'member') throw new ForbiddenError('Yalnız koordinatör ya da departman başkanı bunu yapabilir.');
     const employee = this.#d.roster.get(employeeId);
     return this.#d.employeeNotes.add({ employeeId: employee.id, by, text: clean(text, 'Not', 2000, true) });
   }

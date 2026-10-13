@@ -1,7 +1,9 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, ownerDepartment, type Department } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
+import type { Departments } from '../company/departments.ts';
+import { departmentTemplate, listDepartmentTemplates } from '../company/department-templates.ts';
 import { methodText, onboardingGuideText } from '../company/craft.ts';
 import { applyText, blueprintText, type Blueprints } from '../company/blueprint.ts';
 import { capabilityVocabulary, coverage, coverageBrief, coverageLines, knownConnectorLines, unclassifiedLines, unknownCapabilities } from '../company/capabilities.ts';
@@ -95,7 +97,7 @@ const streamItems = {
   properties: {
     id: s('Short lowercase slug, unique in the plan (a-z, 0-9 and -), e.g. "api".'),
     title: s('Stream title.'),
-    owner: s('Who carries it: an employee id or name, or "alınacak: <role>" for a role still to hire.'),
+    owner: s('Who carries it: a department ("departman: <name>", recommended: its head plans and runs it), an employee id or name, or "alınacak: <role>".'),
     dependsOn: strings('Ids of streams of this plan that must be done first (no cycles).'),
   },
   required: ['id', 'title', 'owner'],
@@ -151,6 +153,8 @@ export function officeTools(o: {
   approvals?: Approvals;
   /** The gate: the last call it held for each employee (approvalRequest with no tool and target). */
   gate?: { lastHeld(employeeId: string): HeldCall | null };
+  /** The departments (spec 2026-10-13-departments); absent (or null, as companyFor gives an office without them): no departments and none of their tools. */
+  departments?: Departments | null;
 }): McpTool[] {
   const { company, roster, tasks, memory, budget, engine, plans, agenda } = o;
 
@@ -168,6 +172,50 @@ export function officeTools(o: {
 
   const characterList = () => [...o.characters(), 'voxel'];
 
+  const deps = o.departments;
+  /** An open department by name or id; with none, a NotFoundError that lists the open ones. */
+  const findDepartment = (who: string): Department => {
+    const found = deps?.find(who.replace(/^\s*departman\s*:/i, '')) ?? null;
+    if (found) return found;
+    const open = deps?.list({ status: 'open' }).map((d) => d.name) ?? [];
+    throw new NotFoundError(`Departman bulunamadı: ${who}. Açık departmanlar: ${open.length ? open.join(', ') : 'yok'}.`);
+  };
+  const STREAM_STATUS_TR = { planned: 'planlı', active: 'sürüyor', blocked: 'takıldı', done: 'bitti' } as const;
+  const departmentLine = (d: Department): string => {
+    const members = deps!.members(d.id);
+    const head = d.headId ? company.nameOf(d.headId) : 'yok (koordinatör yönetir)';
+    const tpl = d.template ? ` · şablon ${d.template.id} (sürüm ${d.template.version})` : ' · özel';
+    return `• ${d.name} — başkan ${head} · ${members.length} kişi${tpl}\n  Misyon: ${d.mission}`;
+  };
+  const clip = (text: string) => (text.length > 500 ? `${text.slice(0, 500)}…` : text);
+  /** A department's open streams, each with the head's last plan and report on it (the notes are cut: the full text is on the plan card). */
+  const departmentStreams = (d: Department): string[] =>
+    company.liveStreams().filter((x) => ownerDepartment(x.stream.owner) === d.id).map((x) => {
+      const notes = company.streamNotes(x.plan.id).find((n) => n.streamId === x.stream.id);
+      const report = notes?.report;
+      return [
+        `“${x.plan.title}” › ${x.stream.title} (${x.stream.id}, ${STREAM_STATUS_TR[x.stream.status]})`,
+        notes?.plan ? `  Son plan: ${clip(notes.plan.text)}` : '',
+        report ? `  Son rapor: ${clip(report.text)}${report.evidence.length ? ` — kanıt: ${report.evidence.join('; ')}` : ''}${report.next ? ` — sırada: ${report.next}` : ''}` : '',
+      ].filter(Boolean).join('\n');
+    });
+
+  /** taskPass's `to`: a person, or a department (its head, else the coordinator). */
+  const passTarget = (who: string): { to: Employee; department: Department | null } => {
+    // An office without departments names only people, as before.
+    if (!deps) return { to: findPerson(who), department: null };
+    const person = /^\s*departman\s*:/i.test(who) ? null : roster.byIdOrName(who);
+    if (person) return { to: person, department: null };
+    const dep = deps.find(who.replace(/^\s*departman\s*:/i, ''));
+    if (!dep) {
+      const open = deps.list({ status: 'open' }).map((d) => d.name);
+      throw new NotFoundError(`Çalışan ya da departman bulunamadı: ${who.trim()}. Açık departmanlar: ${open.length ? open.join(', ') : 'yok'}. officeStatus ve departmentsRead ile bakabilirsin.`);
+    }
+    const to = deps.responsible(dep.id);
+    if (!to) throw new ConflictError(`${dep.name} departmanının başkanı da koordinatör de yok.`);
+    return { to, department: dep };
+  };
+
   /** " Akışlar: API → Ada; Arayüz → alınacak: tasarımcı (önce: API)." — how the office understood the streams ('' for none). */
   const streamsLine = (plan: Plan): string => {
     const list = plan.streams ?? [];
@@ -178,7 +226,7 @@ export function officeTools(o: {
         : '';
     }
     const titleOf = (id: string) => list.find((x) => x.id === id)?.title ?? id;
-    const owner = (who: string) => (who.startsWith(`${STREAM_TO_HIRE}:`) ? who : company.nameOf(who));
+    const owner = (who: string) => (who.startsWith(`${STREAM_TO_HIRE}:`) ? who : ownerDepartment(who) ? `${deps?.get(ownerDepartment(who)!).name ?? 'departman'} departmanı` : company.nameOf(who));
     return ` Akışlar: ${list.map((x) => `${x.title} → ${owner(x.owner)}${x.dependsOn.length ? ` (önce: ${x.dependsOn.map(titleOf).join(', ')})` : ''}`).join('; ')}.`;
   };
 
@@ -333,15 +381,19 @@ export function officeTools(o: {
     {
       name: 'taskPass',
       description: 'Pass a piece of work to a colleague (by id or name). It goes to the end of their queue; they are not interrupted. Say what, why and when it counts as done.',
-      inputSchema: object({ to: s('Colleague id or name.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer, startAfter, dueAt, requires }, ['to', 'title']),
+      inputSchema: object({ to: s('Colleague id or name, or a department’s name (“departman: <ad>” or just its name): it goes to its head, or the coordinator when it has none.'), title: s('Short title.'), description: s('What is needed and why.'), done: strings('Definition of done, one item each.'), priority: integer('1 = most urgent … 5 = whenever (default 3).', 1, 5), difficulty: { ...difficulty, description: `${difficulty.description} critical is for the coordinator and team leads; from anyone else it counts as hard.` }, reviewer, startAfter, dueAt, requires }, ['to', 'title']),
       kinds: EVERYONE,
       run: ({ employee }, args) => {
         // Arguments first: a malformed call should say what is malformed, not that a person was not found.
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt'), requires: list(args, 'requires') };
-        const to = findPerson(str(args, 'to'));
-        const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
-        const lowered = input.difficulty === 'critical' && task.difficulty === 'hard' ? ' Zorluk “kritik” yerine “zor” sayıldı: kritik işi koordinatör ya da ekip lideri açar.' : '';
-        return `“${task.title}” ${to.name} adlı çalışanın sırasına eklendi (görev ${task.id}).${lowered}${deskBrief(task.requires, to.id, `Gereken yetenekler, ${to.name} masasında`, 'Görev yine açıldı')}`;
+        const { to, department } = passTarget(str(args, 'to'));
+        const description = department ? `${department.name} departmanına: ${input.description ?? ''}`.trim() : input.description;
+        const task = company.createTask(employee.id, { assignee: to.id, ...input, description, reviewer: reviewerArg(args) });
+        const lowered = input.difficulty === 'critical' && task.difficulty === 'hard' ? ` Zorluk “kritik” yerine “zor” sayıldı: kritik işi koordinatör ya da ${deps ? 'departman başkanı' : 'ekip lideri'} açar.` : '';
+        const where = department
+          ? department.headId === to.id ? `${department.name} departmanına gitti: başkanı ${to.name}` : `${department.name} departmanına gitti; başkanı yok; koordinatöre gitti (${to.name})`
+          : `${to.name} adlı çalışanın sırasına eklendi`;
+        return `“${task.title}” ${where} (görev ${task.id}).${lowered}${deskBrief(task.requires, to.id, `Gereken yetenekler, ${to.name} masasında`, 'Görev yine açıldı')}`;
       },
     },
     {
@@ -516,12 +568,13 @@ export function officeTools(o: {
     },
     {
       name: 'employeeNote',
-      description: 'The employee file (coordinator): with text, add an observation about someone (what they are good at, what to watch); without text, read their file (your notes and their finished work). Look at it before handing out work.',
+      description: 'The employee file (coordinator; a head for their own department): with text, add an observation about someone (what they are good at, what to watch); without text, read their file (your notes and their finished work). Look at it before handing out work.',
       inputSchema: object({ employee: s('Employee id or name.'), text: s('Your observation.') }, ['employee']),
-      kinds: COORDINATOR,
+      kinds: LEADS,
       run: ({ employee }, args) => {
         const text = optStr(args, 'text');
         const who = findPerson(str(args, 'employee'));
+        company.assertManagesPerson(employee.id, who.id);
         if (text) {
           memory.addEmployeeNote(employee.id, who.id, text);
           return `${who.name} adlı çalışanın dosyasına not eklendi.`;
@@ -555,12 +608,13 @@ export function officeTools(o: {
     },
     {
       name: 'setModel',
-      description: `Move an employee to another model (coordinator): ${MODEL_ALIASES.join(', ')}. Their session goes on with the new model and keeps its memory.`,
+      description: `Move an employee to another model (coordinator; a head for their own department): ${MODEL_ALIASES.join(', ')}. Their session goes on with the new model and keeps its memory.`,
       inputSchema: object({ employee: s('Employee id or name.'), model: { type: 'string', enum: [...MODEL_ALIASES] } }, ['employee', 'model']),
-      kinds: COORDINATOR,
+      kinds: LEADS,
       run: ({ employee }, args) => {
         const model = str(args, 'model') as ModelAlias;
         const who = findPerson(str(args, 'employee'));
+        company.assertManagesPerson(employee.id, who.id);
         const next = company.setModel(employee.id, who.id, model);
         return `${next.name} artık ${next.model} ile çalışıyor (oturumu yeniden açılıyor; hafızası korunur).`;
       },
@@ -568,11 +622,12 @@ export function officeTools(o: {
     {
       name: 'sleep',
       description:
-        'Put an idle employee to sleep to free the machine (coordinator). Their session is kept; a task for them or a message wakes them. Not while they hold a task in progress: sleeping stops their running work, so park it first or let it finish.',
+        'Put an idle employee to sleep to free the machine (coordinator; a head for their own department). Their session is kept; a task for them or a message wakes them. Not while they hold a task in progress: sleeping stops their running work, so park it first or let it finish.',
       inputSchema: object({ employee: s('Employee id or name.') }, ['employee']),
-      kinds: COORDINATOR,
+      kinds: LEADS,
       run: async ({ employee }, args) => {
         const who = findPerson(str(args, 'employee'));
+        company.assertManagesPerson(employee.id, who.id);
         if (who.id === employee.id) throw new ValidationError('Kendini uyutamazsın.');
         // Sleeping ends the session's process, and with it anything the session runs in the background.
         const running = tasks.inProgressOf(who.id);
@@ -585,11 +640,12 @@ export function officeTools(o: {
     },
     {
       name: 'wake',
-      description: 'Wake a sleeping employee (coordinator).',
+      description: 'Wake a sleeping employee (coordinator; a head for their own department).',
       inputSchema: object({ employee: s('Employee id or name.') }, ['employee']),
-      kinds: COORDINATOR,
-      run: (_ctx, args) => {
+      kinds: LEADS,
+      run: ({ employee }, args) => {
         const who = findPerson(str(args, 'employee'));
+        company.assertManagesPerson(employee.id, who.id);
         engine.wake(who.id);
         return `${who.name} uyandı.`;
       },
@@ -709,8 +765,13 @@ export function officeTools(o: {
       run: ({ employee }, args) => {
         const input = { title: str(args, 'title'), description: optStr(args, 'description'), done: list(args, 'done'), priority: num(args, 'priority'), difficulty: difficultyArg(args), planId: optStr(args, 'planId') ?? null, streamId: optStr(args, 'streamId') ?? null, dependsOn: list(args, 'dependsOn'), startAfter: optStr(args, 'startAfter'), dueAt: optStr(args, 'dueAt'), requires: list(args, 'requires') };
         const to = findPerson(str(args, 'assignee'));
-        if (employee.kind === 'lead' && to.id !== employee.id && to.team !== employee.team) {
-          throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
+        if (employee.kind === 'lead' && to.id !== employee.id) {
+          if (deps) {
+            const mine = deps.headOf(employee.id);
+            if (!mine || to.departmentId !== mine.id) throw new ForbiddenError('Departman başkanı taskCreate ile yalnız kendi departmanına görev açar; başka departmana taskPass ile pasla (to: departmanın adı).');
+          } else if (to.team !== employee.team) {
+            throw new ForbiddenError('Ekip lideri taskCreate ile yalnız kendi ekibine görev açar; başkasına taskPass ile pasla.');
+          }
         }
         const task = company.createTask(employee.id, { assignee: to.id, ...input, reviewer: reviewerArg(args) });
         const stream = task.streamId ? (plans().find((p) => p.id === task.planId)?.streams?.find((x) => x.id === task.streamId)?.title ?? task.streamId) : null;
@@ -941,7 +1002,7 @@ export function officeTools(o: {
     },
     {
       name: 'hire',
-      description: `Hire a new employee (coordinator). Choose provider: claude or codex independently of your own provider; both share office tasks, reviews and memory. Codex uses the model aliases as reasoning presets (haiku low, sonnet medium, opus high, fable xhigh), with the configured Codex model. From a role template (template; read them with roleTemplates): role text, title, team and model come from it; role is this company's own part and title, team or model given override the template. Without a template: role and model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
+      description: `Hire a new employee (coordinator). A department’s head may hire into their own department (when a need arises, not because a desk is free). Choose provider: claude or codex independently of your own provider; both share office tasks, reviews and memory. Codex uses the model aliases as reasoning presets (haiku low, sonnet medium, opus high, fable xhigh), with the configured Codex model. From a role template (template; read them with roleTemplates): role text, title, team and model come from it; role is this company's own part and title, team or model given override the template. Without a template: role and model (${MODEL_ALIASES.join(', ')}) are required. Desks are limited.`,
       inputSchema: {
         ...object(
           {
@@ -950,11 +1011,13 @@ export function officeTools(o: {
             provider: { type: 'string', enum: ['claude', 'codex'], description: 'The employee runtime; choose independently of the coordinator.' },
             capabilities: strings('The capabilities the role needs, from the vocabulary (capabilitiesRead): the whole list, replacing the template’s; none given, the template’s. The reply says how the new desk has each.'),
             characterId: { type: 'string', enum: characterList(), description: 'Look in the 3D office.' },
+            department: s('Department name or id to hire into (coordinator). A head always hires into their own.'),
+            head: { type: 'boolean', description: 'Hire as the department’s head (coordinator).' },
           },
           ['name'],
         ),
       },
-      kinds: COORDINATOR,
+      kinds: LEADS,
       run: ({ employee }, args) => {
         const template = optStr(args, 'template');
         // Without a template, as before: role and model are required.
@@ -963,9 +1026,12 @@ export function officeTools(o: {
         const role = template === undefined ? str(args, 'role') : (optStr(args, 'role') ?? '');
         const provider = optStr(args, 'provider');
         if (provider !== undefined && provider !== 'claude' && provider !== 'codex') throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
-        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, provider, characterId: optStr(args, 'characterId'), reportsTo: null, capabilities: list(args, 'capabilities') });
+        const department = optStr(args, 'department');
+        const hired = company.hire(employee.id, { name: str(args, 'name'), role, template, title: optStr(args, 'title'), team: optStr(args, 'team'), model, provider, characterId: optStr(args, 'characterId'), reportsTo: null, capabilities: list(args, 'capabilities'), departmentId: department ? findDepartment(department).id : undefined, head: bool(args, 'head') });
         const from = hired.template ? `, şablon ${hired.template.id} (sürüm ${hired.template.version})` : '';
-        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}${from}.${hired.provider === 'codex' ? ' Sağlayıcı: Codex.' : ''}${deskBrief(hired.capabilities, hired.id, 'Yetenekler')}`;
+        const placed = roster.get(hired.id);
+        const where = hired.departmentId ? ` → ${placed.team} departmanı${placed.kind === 'lead' ? ' (başkan)' : ''}` : '';
+        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}${from}${where}.${hired.provider === 'codex' ? ' Sağlayıcı: Codex.' : ''}${deskBrief(hired.capabilities, hired.id, 'Yetenekler')}`;
       },
     },
     {
@@ -1085,6 +1151,109 @@ export function officeTools(o: {
       },
     },
   ];
+  if (deps) {
+    tools.push(
+      {
+        name: 'departmentsRead',
+        description: 'The departments: without department, each with its head, size, template and mission; with one, its whole scope (does / does not / goes to the owner), members and open streams with their last plan and report.',
+        inputSchema: object({ department: s('Department name or id.') }),
+        kinds: EVERYONE,
+        run: (_ctx, args) => {
+          const one = optStr(args, 'department');
+          if (!one) {
+            const open = deps.list({ status: 'open' });
+            if (open.length === 0) return `Açık departman yok (en fazla ${MAX_DEPARTMENTS}).`;
+            return [`Departmanlar (${open.length}/${MAX_DEPARTMENTS}):`, ...open.map(departmentLine)].join('\n');
+          }
+          const d = findDepartment(one);
+          const people = deps.members(d.id).map((e) => `• ${e.name}${e.title ? ` — ${e.title}` : ''}${e.id === d.headId ? ' ★ başkan' : ''}`);
+          const streams = departmentStreams(d);
+          return [departmentLine(d), '', 'Kişiler:', ...(people.length ? people : ['• yok']), '', 'Açık akışlar:', ...(streams.length ? streams.map((x) => `• ${x}`) : ['• yok']), '', d.scope || '(Sınır metni yok.)'].join('\n');
+        },
+      },
+      {
+        name: 'departmentTemplates',
+        description: 'The department template catalog: without id, the list; with id, one template whole (mission, head role, suggested roles and when to hire them, methods, routine suggestions, checks, measures, scope).',
+        inputSchema: object({ id: s('Template id.') }),
+        kinds: LEADS,
+        run: (_ctx, args) => {
+          const id = optStr(args, 'id');
+          if (!id) return listDepartmentTemplates().map((t) => `• ${t.id} — ${t.name}: ${t.mission} Başkan: ${t.head}; önerilen: ${t.roles.map((r) => r.template).join(', ')}.`).join('\n');
+          const t = departmentTemplate(id);
+          return [`${t.id} (sürüm ${t.version}) — ${t.name}`, `Misyon: ${t.mission}`, `Başkan: ${t.head}`, 'Önerilen roller:', ...t.roles.map((r) => `• ${r.template}: ${r.when}`), `Yöntemler: ${t.methods.join(', ')}`, 'Rutin önerileri:', ...t.routines.map((r) => `• ${r}`), '', t.body].join('\n');
+        },
+      },
+      {
+        name: 'departmentCreate',
+        description: `Open a department (coordinator; at most ${MAX_DEPARTMENTS}). From a template (departmentTemplates): name, mission and scope come from it unless given. Custom: name and mission required, scope optional. head: someone at work to head it (moved into it); none: headless — you run its streams until you name one.`,
+        inputSchema: object({ template: { type: 'string', enum: listDepartmentTemplates().map((t) => t.id) }, name: s('Name (unique; not a person’s name).'), mission: s('One paragraph: what it is for.'), scope: s('Does / does not / goes to the owner (Markdown).'), head: s('Employee id or name.') }),
+        kinds: COORDINATOR,
+        run: ({ employee }, args) => {
+          const head = optStr(args, 'head');
+          const d = deps.create(employee.id, { template: optStr(args, 'template'), name: optStr(args, 'name'), mission: optStr(args, 'mission'), scope: optStr(args, 'scope'), headId: head ? findPerson(head).id : null });
+          return `${d.name} departmanı açıldı; ${d.headId ? `başkanı ${company.nameOf(d.headId)}` : 'başkansız (akışlarını sen yönetirsin)'}. Akış vermek için plan kartında owner: "departman: ${d.name}".`;
+        },
+      },
+      {
+        name: 'departmentUpdate',
+        description: 'Change a department (coordinator): name, mission, scope; head: an employee (moved into it and made head; the former head stays as a member) or "" for none.',
+        inputSchema: object({ department: s('Department name or id.'), name: s('New name.'), mission: s('New mission.'), scope: s('New scope.'), head: s('Employee id or name; "" ends the headship.') }, ['department']),
+        kinds: COORDINATOR,
+        run: ({ employee }, args) => {
+          const d = findDepartment(str(args, 'department'));
+          const patch = { name: optStr(args, 'name'), mission: optStr(args, 'mission'), scope: optStr(args, 'scope') };
+          let next = patch.name !== undefined || patch.mission !== undefined || patch.scope !== undefined ? deps.update(employee.id, d.id, patch) : d;
+          const head = optStr(args, 'head');
+          if (head !== undefined) next = deps.setHead(employee.id, d.id, head.trim() ? findPerson(head).id : null);
+          return `${next.name} departmanı güncellendi; ${next.headId ? `başkanı artık ${company.nameOf(next.headId)}` : 'başkansız'}.`;
+        },
+      },
+      {
+        name: 'departmentMove',
+        description: 'Move an employee into a department, or to the centre without department (coordinator). Moving a head leaves their department headless.',
+        inputSchema: object({ employee: s('Employee id or name.'), department: s('Department name or id; none: the centre.') }, ['employee']),
+        kinds: COORDINATOR,
+        run: ({ employee }, args) => {
+          const who = findPerson(str(args, 'employee'));
+          const to = optStr(args, 'department');
+          const moved = deps.move(employee.id, who.id, to?.trim() ? findDepartment(to).id : null);
+          return moved.departmentId ? `${moved.name} artık ${moved.team} departmanında.` : `${moved.name} artık merkezde (koordinatöre bağlı).`;
+        },
+      },
+      {
+        name: 'departmentClose',
+        description: 'Close a department (coordinator): its people go to the centre, its open streams come back to you; tasks stay with their assignees.',
+        inputSchema: object({ department: s('Department name or id.'), reason: s('Why.') }, ['department', 'reason']),
+        kinds: COORDINATOR,
+        run: ({ employee }, args) => {
+          const d = deps.close(employee.id, findDepartment(str(args, 'department')).id, str(args, 'reason'));
+          return `${d.name} departmanı kapandı; kişileri merkezde, açık akışları sende.`;
+        },
+      },
+      {
+        name: 'streamPlan',
+        description: 'Write the plan of your department’s stream (its head; the coordinator for any): approach, tasks, dependencies, risks. Each call is a new version; the plan card shows the latest. Then open its tasks with taskCreate planId + streamId.',
+        inputSchema: object({ planId: s('Plan id.'), streamId: s('Stream id.'), text: s('The stream’s plan.') }, ['planId', 'streamId', 'text']),
+        kinds: LEADS,
+        run: ({ employee }, args) => {
+          const note = company.streamPlan(employee.id, str(args, 'planId'), str(args, 'streamId'), str(args, 'text'));
+          const plan = plans().find((p) => p.id === note.planId);
+          return `“${plan?.streams?.find((x) => x.id === note.streamId)?.title ?? note.streamId}” akışının planı yazıldı.`;
+        },
+      },
+      {
+        name: 'streamReport',
+        description: 'Report on your department’s stream to the coordinator (its head; usually when it is done, also when it is stuck): what was done, the evidence, what comes next.',
+        inputSchema: object({ planId: s('Plan id.'), streamId: s('Stream id.'), summary: s('What was done.'), evidence: strings('Evidence, one item each.'), next: s('What comes next.') }, ['planId', 'streamId', 'summary']),
+        kinds: LEADS,
+        run: ({ employee }, args) => {
+          const note = company.streamReport(employee.id, str(args, 'planId'), str(args, 'streamId'), { summary: str(args, 'summary'), evidence: list(args, 'evidence'), next: optStr(args, 'next') });
+          const plan = plans().find((p) => p.id === note.planId);
+          return `“${plan?.streams?.find((x) => x.id === note.streamId)?.title ?? note.streamId}” akışının raporu koordinatöre gitti.`;
+        },
+      },
+    );
+  }
   const cycle = o.cycle;
   if (!cycle) return tools;
   tools.push({
