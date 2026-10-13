@@ -49,6 +49,7 @@ import { officeTools } from './mcp/tools.ts';
 import { performanceReport } from './performance.ts';
 import { QuotaTracker } from './quota.ts';
 import { Roster } from './roster.ts';
+import { Seating } from './seating.ts';
 
 const config = loadConfig();
 let releaseLock: () => void;
@@ -113,8 +114,10 @@ const budget = new Budget({
 const characters = manifestCharacters(config.assetsDir);
 // The departments (spec 2026-10-13-departments): the rooms, their heads and the notes on their streams.
 const streamNotes = new StreamNoteStore(db);
-const departments = new Departments({ store: new DepartmentStore(db), roster, events, notices, dataDir: config.dataDir, reload: (id) => engine.reload(id) });
-const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db, Date.now, searchIndex), onboarding: new OnboardingStore(db), departments, streamNotes });
+const departments = new Departments({ store: new DepartmentStore(db), roster, events, notices, dataDir: config.dataDir, reload: (id) => engine.reload(id), reseat: (id) => seating.reseat(id) });
+// Who sits where (spec 2026-10-13-office-rooms §3): the coordinator under the beam, a department in its room, the rest at the hub.
+const seating = new Seating({ roster, events, roomOf: (id) => departments.roomOf(id) });
+const company = new Company({ roster, events, tasks, plans, notices, dataDir: config.dataDir, hire: (input) => engine.hire(input), characters, reload: (id) => engine.reload(id), memory, constitution: () => budget.constitution(), proposals, goals, state, schedules, profile: new ProfileStore(db, Date.now, searchIndex), onboarding: new OnboardingStore(db), departments, streamNotes, seating });
 // The project's pulse (spec §6.3): the dispatcher runs it only without the management cycle; here its facts are the board's (§3.6).
 const pulse = new Pulse({ company, roster, goals, state, plans, tasks, notices, budget });
 // The office's one timer (spec §5): built after the company (the scheduling service needs it) and attached to it, so every time change re-arms it.
@@ -128,6 +131,8 @@ departments.attach({ openStreams: () => company.liveStreams(), headEnded: (id) =
 // The teams of before departments become departments, and every desk learns its department (idempotent).
 departments.adoptTeams();
 departments.refreshDesks();
+// Everyone to their seat (idempotent): on the first start the eight desks of before become the rooms and the hub.
+seating.reseatAll();
 // Which connectors the office has (B3): read from the sessions' reports and the coordinator's records. Before the
 // dispatcher, whose precheck (B8) reads it.
 const integrations = new IntegrationRegistry({ db, roster, events });

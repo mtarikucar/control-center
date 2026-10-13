@@ -118,6 +118,23 @@ describe('Seating', () => {
     expect(t.seatEvents()).toHaveLength(sent);
   });
 
+  it('review (task 4): reseatAll is a cascade — a move frees a seat for someone already passed, so a second pass seats the earlier hired in their room; then nobody moves', () => {
+    const t = office();
+    // X (room 0, hired first) sits on room 1's seat 7; five of room 0 on 2 … 6; Y (the centre, hired later) on room 0's seat 1; the hub is empty.
+    const x = t.roster.create({ name: 'X', role: 'r', deskIndex: 7 });
+    const mates = range(2, 6).map((seat) => t.roster.create({ name: `Üye ${seat}`, role: 'r', deskIndex: seat }));
+    const y = t.roster.create({ name: 'Y', role: 'r', deskIndex: 1 });
+    for (const e of [x, ...mates]) t.rooms.set(e.id, 0);
+    // The first pass sends X to the hub (room 0 is full) and Y off room 0's seat; only the second can seat X there.
+    expect(t.seating.reseatAll()).toBe(2);
+    expect(roomOfSeat(t.roster.get(x.id).deskIndex)).toBe(0);
+    expect(HUB_SEATS).toContain(t.roster.get(y.id).deskIndex);
+    expect(mates.map((e) => t.roster.get(e.id).deskIndex)).toEqual(range(2, 6));
+    const sent = t.seatEvents().length;
+    expect(t.seating.reseatAll()).toBe(0);
+    expect(t.seatEvents()).toHaveLength(sent);
+  });
+
   it('review focus 3: a department of seven — the room’s six, the seventh at the hub, nobody on another’s chair', () => {
     const t = office();
     const seats = range(1, 7).map((i) => t.roster.create({ name: `Kişi ${i}`, role: 'r', deskIndex: t.seating.forHire(member(4))! }).deskIndex);

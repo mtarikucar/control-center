@@ -207,6 +207,26 @@ describe('main.ts wiring: the office process', () => {
     await stop(office);
   }, 30_000);
 
+  it('rooms: an office of before (eight desks) is reseated at its start — the coordinator under the beam, an adopted team in its room, the rest at the hub', async () => {
+    const dir = tempDir();
+    const db = openDb(join(dir, 'office.db'));
+    migrateUp(db);
+    // Desks by hire order as before rooms, the coordinator third; Bora's team becomes a department (room 0) at the start.
+    const roster = new Roster(db, 8);
+    const ada = roster.create({ name: 'Ada', role: 'r' });
+    const bora = roster.create({ name: 'Bora', role: 'r', team: 'Keşif' });
+    const coordinator = roster.create({ name: 'Koordinatör', role: 'r', kind: 'coordinator' });
+    expect([ada, bora, coordinator].map((e) => e.deskIndex)).toEqual([0, 1, 2]);
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    const snapshot: { employees: Array<{ id: string; deskIndex: number }>; departments: Array<{ name: string; room: number }> } = await call(port, 'GET', '/api/office');
+    const seat = (id: string) => snapshot.employees.find((e) => e.id === id)!.deskIndex;
+    expect([seat(coordinator.id), seat(bora.id), seat(ada.id)]).toEqual([0, 1, 37]);
+    expect(snapshot.departments.map((d) => [d.name, d.room])).toEqual([['Keşif', 0]]);
+    await stop(office);
+  }, 30_000);
+
   it('B8: with the precheck on, a task needing a capability its desk lacks is held, not handed out (`precheck` given to the dispatcher)', async () => {
     const { dir, db, ada, tasks } = prepared();
     new ConstitutionStore(db).set({ capabilityPrecheckEnabled: true });

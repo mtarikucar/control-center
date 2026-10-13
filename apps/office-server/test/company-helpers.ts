@@ -6,6 +6,7 @@ import { DepartmentStore, StreamNoteStore } from '../src/company/department-stor
 import { Departments } from '../src/company/departments.ts';
 import { KpiReadings } from '../src/company/kpi-readings.ts';
 import { performanceReport } from '../src/performance.ts';
+import { Seating } from '../src/seating.ts';
 import { CompanyStateStore, GoalStore } from '../src/company/goal-store.ts';
 import { Memory } from '../src/company/memory.ts';
 import { OnboardingStore } from '../src/company/onboarding-store.ts';
@@ -50,15 +51,17 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
   // Departments (spec 2026-10-13-departments), wired like main.ts; opt-in so every older test keeps today's company.
   const streamNotes = o.departments ? new StreamNoteStore(s.db, now) : null;
   const departments = o.departments
-    ? new Departments({ store: new DepartmentStore(s.db, now), roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => { reloaded.push(id); reload?.(id); } })
+    ? new Departments({ store: new DepartmentStore(s.db, now), roster: s.roster, events: s.events, notices, dataDir: s.dataDir, reload: (id) => { reloaded.push(id); reload?.(id); }, reseat: (id) => seating.reseat(id) })
     : null;
+  // Who sits where (spec 2026-10-13-office-rooms §3), wired like main.ts in every office; the rooms come from the departments.
+  const seating = new Seating({ roster: s.roster, events: s.events, ...(departments ? { roomOf: (id: string) => departments.roomOf(id) } : {}) });
   const company = new Company({
     roster: s.roster, events: s.events, tasks, plans, notices, dataDir: s.dataDir, hire: (i) => f.engine.hire(i), characters: () => characters, memory, constitution: () => budget.constitution(), proposals, goals, state,
     reload: (id) => {
       reloaded.push(id);
       reload?.(id);
     }, schedules, clock, now, profile: new ProfileStore(s.db, now, index), onboarding: new OnboardingStore(s.db, now),
-    ...(departments ? { departments, streamNotes: streamNotes! } : {}),
+    ...(departments ? { departments, streamNotes: streamNotes! } : {}), seating,
   });
   // KPI measurement (B26), wired like main.ts.
   const kpis = new KpiReadings({ db: s.db, goals, plans, notices, state, coordinator: () => company.coordinator(), performance: (o) => performanceReport(s.db, o), now });
@@ -76,7 +79,7 @@ export function companyFor(s: TestSetup, f: FakeEngine, characters: string[] = [
     };
   };
   return {
-    tasks, plans, notices, memory, company, reloaded, index, budget, proposals, goals, state, schedules, scheduling, freshScheduling, breakReturnOf, kpis, departments, streamNotes,
+    tasks, plans, notices, memory, company, reloaded, index, budget, proposals, goals, state, schedules, scheduling, freshScheduling, breakReturnOf, kpis, departments, streamNotes, seating,
     /** How often the fake clock was touched so far (a function: the tests spread this object, which would freeze a getter). */
     clockTouches: () => touched,
     setQuota: (q: QuotaState | null) => {

@@ -45,7 +45,11 @@ export class Seating {
     this.#d = d;
   }
 
-  /** A newcomer's seat (they are not in the roster yet); null: none free (the roster then says "Ofis dolu"). */
+  /**
+   * A newcomer's seat (they are not in the roster yet); null: none free (the roster then says "Ofis dolu").
+   * Side effect, for a coordinator only: whoever sits at seat 0 is moved off it first (and seat.changed is sent), so
+   * call it only for a hire that will happen — ask `Roster.validate` before.
+   */
   forHire(who: Seatee): number | null {
     if (who.kind === 'coordinator') this.#clearCoordinatorDesk(null);
     return seatFor(who, null, this.#taken(null), this.#d.roster.deskCount);

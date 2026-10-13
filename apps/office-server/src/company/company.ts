@@ -7,6 +7,7 @@ import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
 import type { NewEmployee, Roster } from '../roster.ts';
+import type { Seating } from '../seating.ts';
 import { archiveTask } from './archive.ts';
 import { briefPath, readBrief, writeBrief } from './brief.ts';
 import type { StreamNoteStore } from './department-store.ts';
@@ -88,6 +89,8 @@ export interface CompanyDeps {
   departments?: Departments;
   /** The heads' plans of and reports on plan streams (absent: none). */
   streamNotes?: StreamNoteStore;
+  /** Who sits where (spec 2026-10-13-office-rooms §3); absent: the roster's lowest free desk, as before rooms. */
+  seating?: Seating;
   now?: () => number;
 }
 
@@ -284,7 +287,10 @@ export class Company {
     const department = deps ? this.#hireDepartment(by, heads, input, template?.team, () => this.#d.roster.validate({ ...resolved, kind: 'member', characterId })) : null;
     const lead = !deps && resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
     const placement = deps ? { team: department?.name ?? '', departmentId: department?.id ?? null, reportsTo: department?.headId ?? null } : { reportsTo: lead?.id ?? input.reportsTo ?? null };
-    const hired = this.#d.hire({ ...resolved, ...placement, kind: 'member', characterId, ...(o.deny?.length ? { deskDeny: o.deny } : {}) });
+    // Their seat (spec office rooms §3): their department's room, else the hub; none free, the roster's "Ofis dolu".
+    // Always set, and after the input: a deskIndex in the request body never chooses one.
+    const deskIndex = this.#d.seating?.forHire({ kind: 'member', room: department?.room ?? null }) ?? undefined;
+    const hired = this.#d.hire({ ...resolved, ...placement, kind: 'member', characterId, deskIndex, ...(o.deny?.length ? { deskDeny: o.deny } : {}) });
     if (!deps) return hired;
     if (department && input.head) deps.setHead(by, department.id, hired.id);
     else deps.refreshDesks();
@@ -322,7 +328,14 @@ export class Company {
     const characters = this.#d.characters();
     const characterId = characters.includes('manager') ? 'manager' : this.#leastUsedCharacter(characters);
     this.#assertRoom();
-    const hired = this.#d.hire({ name: 'Koordinatör', role: COORDINATOR_ROLE, model, provider, title: 'Koordinatör', kind: 'coordinator', characterId });
+    const input: NewEmployee = { name: 'Koordinatör', role: COORDINATOR_ROLE, model, provider, title: 'Koordinatör', kind: 'coordinator', characterId };
+    // Under the beam (spec office rooms §3): whoever sits at seat 0 moves off it first, so what the roster would refuse
+    // is refused before that (a failed hire moves nobody).
+    this.#d.roster.validate(input);
+    const deskIndex = this.#d.seating?.forHire({ kind: 'coordinator', room: null });
+    // No seat under the beam (it stays taken and the sitter has nowhere to go): never an arbitrary desk instead.
+    if (deskIndex === null) throw new ConflictError('Ofis dolu: koordinatörün masası (0) başkasında ve onu taşıyacak boş masa yok.');
+    const hired = this.#d.hire({ ...input, deskIndex });
     this.#emit(hired.id, { type: 'role.changed', kind: hired.kind, title: hired.title, team: hired.team });
     return hired;
   }
@@ -339,8 +352,11 @@ export class Company {
       this.#emit(demoted.id, { type: 'role.changed', kind: demoted.kind, title: demoted.title, team: demoted.team });
       this.#d.notices.add(demoted.id, 'role.changed', `Koordinatörlük ${target.name} adlı çalışana geçti; artık ekipte çalışansın. Rol kartın yenilendi.`);
       this.#d.reload?.(demoted.id);
+      // The former coordinator leaves the beam's desk for their place (a member of the centre: the hub).
+      this.#d.seating?.reseat(previous.id);
     }
     const next = this.#d.roster.update(id, { kind: 'coordinator', reportsTo: null });
+    this.#d.seating?.reseat(id);
     writeRoleCard(this.#d.dataDir, next);
     this.#emit(next.id, { type: 'role.changed', kind: next.kind, title: next.title, team: next.team });
     if (previous && previous.id !== id) this.#rerouteProposals(previous.id);
@@ -355,7 +371,8 @@ export class Company {
     }
     // Both desks' department blocks name the coordinator (or no longer do).
     this.#d.departments?.refreshDesks();
-    return next;
+    // Read again: the walk to the beam's desk changed the seat.
+    return this.#d.roster.get(id);
   }
 
   /** `capabilities` (B7), when given, is the whole new list ([] clears it); not given, it stays. */
