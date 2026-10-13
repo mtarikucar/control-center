@@ -7,6 +7,7 @@ import { CompanyView } from './CompanyView.tsx';
 vi.mock('../net/api.ts', () => ({
   api: {
     hireCoordinator: vi.fn(async () => ({ id: 'new' })), appointCoordinator: vi.fn(async () => ({})), events: vi.fn(async () => []),
+    capabilities: vi.fn(async () => ({ version: 3, capabilities: [], knownConnectors: [], coverage: [], unclassified: [] })), customCapabilities: vi.fn(async () => []), outbox: vi.fn(async () => []),
     agenda: vi.fn(async () => ({ generatedAt: 0, horizonMs: 0, clock: { nextDueAt: null, nextDueLabel: null, lastRunAt: null, lastJumpAt: null }, employees: [] })),
     management: vi.fn(async () => ({ generatedAt: Date.now(), open: null, cycles: [
       { seq: 3, startedAt: Date.now() - 600_000, endedAt: Date.now() - 300_000, closed: true, model: 'opus', costUsd: 0.3, triggers: [{ kind: 'delivery', at: 1, note: '“Giriş” (Ada)', seq: 2 }], changes: ['Kayıt işini Can’a verdim'], reasoning: 'Can boştaydı.', next: null },
@@ -239,5 +240,13 @@ describe('CompanyView', () => {
     expect(column.textContent).toContain('İnceleyen: Can');
     expect(column.textContent).toContain('tur 2');
     expect(within(screen.getByRole('region', { name: 'Bekliyor' })).getByText('İnceleme').className).toContain('review');
+  });
+
+  it('spec capabilities §9: has a Yetenekler tab and a Giden kutusu tab', async () => {
+    render(<CompanyView />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Yetenekler' }));
+    expect(await screen.findByRole('region', { name: 'Ürünle gelenler' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Giden kutusu' }));
+    expect(await screen.findByText(/"izin verildi" kaydıdır/)).toBeTruthy();
   });
 });

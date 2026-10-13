@@ -417,3 +417,15 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .cycle-nochange { color: var(--muted); font-style: italic; }
 .cycle-warn { font-size: 13px; color: var(--bad); }
 .cycle-more summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+
+/* Spec capabilities §9: the Yetenekler and Giden kutusu tabs. */
+.capabilities ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.capabilities li.capability { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.capabilities li.capability.retired, .capabilities li.capability.rejected { opacity: 0.7; }
+.capabilities li.capability .row { align-items: flex-start; flex-wrap: wrap; }
+.capabilities .badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.capability-add { display: grid; gap: 6px; margin: 12px 0; }
+.capability-add label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+.badge.new { color: var(--ok); }
+.outbox table { width: 100%; }
+.outbox td.summary { font-family: monospace; font-size: 12px; word-break: break-all; }
