@@ -24,6 +24,8 @@ import type { Blueprints } from './company/blueprint.ts';
 import type { IntegrationRegistry } from './company/integrations.ts';
 import { OwnerGuard } from './owner-guard.ts';
 import { capabilityVocabulary, coverage, unclassifiedTools } from './company/capabilities.ts';
+import { listDepartmentTemplates } from './company/department-templates.ts';
+import type { Departments } from './company/departments.ts';
 import { listRoleTemplates } from './company/role-templates.ts';
 import type { PerformanceReport } from './performance.ts';
 import type { QuotaTracker } from './quota.ts';
@@ -51,6 +53,8 @@ export interface ApiDeps {
     blueprints?: Blueprints;
     /** The owner's approvals of calls the gate holds (B9a). */
     approvals?: Approvals;
+    /** The departments (spec departments §7; absent: an office without them). */
+    departments?: Departments;
   };
 }
 
@@ -80,8 +84,10 @@ const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
 const APPROVAL_ROUTE = /^\/api\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|deny)$/;
+const DEPARTMENT_ROUTE = /^\/api\/departments\/([^/]+)(?:\/(close))?$/;
+const STREAM_NOTES_ROUTE = /^\/api\/plans\/([^/]+)\/stream-notes$/;
 const EMPLOYEE_ROUTE =
-  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file|provider|codex-requests))?$/;
+  /^\/api\/employees\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(messages|side-questions|stop|resume|terminal|events|file|provider|codex-requests|department))?$/;
 
 /** What the owner sees of the proposals: everything still open or waiting for them, and the last 30 decided. */
 function visibleProposals(store: ProposalStore) {
@@ -104,6 +110,7 @@ export function snapshot(d: ApiDeps): OfficeSnapshot {
     ...base, tasks: [...open, ...closed], plans, budget: d.company.budget.summary(), proposals: visibleProposals(d.company.proposals),
     goals: d.company.service.goals(), paused: d.company.service.paused(), schedules: d.company.service.schedules(), ...(d.company.clock ? { clock: d.company.clock.status() } : {}),
     ...(d.company.approvals ? { approvals: d.company.approvals.visible() } : {}),
+    ...(d.company.departments ? { departments: d.company.departments.list() } : {}),
   };
 }
 
@@ -285,6 +292,30 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
     if (method === 'GET' && url.pathname === '/api/role-templates') return sendJson(res, 200, listRoleTemplates());
+    // The departments (spec departments §7): reading is free; changing has passed the owner guard above.
+    const departments = d.company.departments;
+    if (departments) {
+      if (method === 'GET' && url.pathname === '/api/departments') return sendJson(res, 200, departments.list());
+      if (method === 'GET' && url.pathname === '/api/department-templates') return sendJson(res, 200, listDepartmentTemplates());
+      if (method === 'POST' && url.pathname === '/api/departments') {
+        const body = (await readJson(req)) as { template?: string; name?: string; mission?: string; scope?: string; headId?: string | null } | null;
+        return sendJson(res, 201, departments.create(OWNER, body ?? {}));
+      }
+      const dep = DEPARTMENT_ROUTE.exec(url.pathname);
+      if (method === 'POST' && dep) {
+        const id = dep[1] ?? '';
+        const body = ((await readJson(req)) ?? {}) as { name?: string; mission?: string; scope?: string; headId?: string | null; reason?: string };
+        if (dep[2] === 'close') return sendJson(res, 200, departments.close(OWNER, id, body.reason ?? ''));
+        // The head is found before anything changes: a head that is nobody's leaves the department as it was.
+        departments.get(id);
+        if (typeof body.headId === 'string') d.roster.get(body.headId);
+        let next = body.name !== undefined || body.mission !== undefined || body.scope !== undefined ? departments.update(OWNER, id, { name: body.name, mission: body.mission, scope: body.scope }) : departments.get(id);
+        if (body.headId !== undefined) next = departments.setHead(OWNER, id, body.headId);
+        return sendJson(res, 200, next);
+      }
+    }
+    const notes = STREAM_NOTES_ROUTE.exec(url.pathname);
+    if (method === 'GET' && notes) return sendJson(res, 200, company.streamNotes(notes[1] ?? ''));
     // The blueprint behind a plan card (B5): its steps, how far the install went, its closed mode.
     const blueprintRoute = /^\/api\/plans\/([^/]+)\/blueprint$/.exec(url.pathname);
     if (method === 'GET' && blueprintRoute && d.company.blueprints) return sendJson(res, 200, d.company.blueprints.read(blueprintRoute[1] ?? ''));
@@ -351,6 +382,10 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       return sendEmpty(res, 204);
     }
     if (method === 'GET' && action === 'file' && d.company) return sendJson(res, 200, d.company.memory.employeeFile(id));
+    if (method === 'POST' && action === 'department' && d.company?.departments) {
+      const body = ((await readJson(req)) ?? {}) as { departmentId?: string | null };
+      return sendJson(res, 200, d.company.departments.move(OWNER, id, body.departmentId ?? null));
+    }
     if (method === 'POST' && action === 'messages') {
       const text = textOf(await readJson(req));
       // The owner talking to the coordinator (management cycle §3.5): with no plan running (none waits for the owner or

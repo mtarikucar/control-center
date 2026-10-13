@@ -193,6 +193,20 @@ describe('main.ts wiring: the office process', () => {
     await stop(office);
   }, 30_000);
 
+  it('departments: the teams of before them become departments at start, and the API and the snapshot carry them (`departments` given to Company, the API and the start)', async () => {
+    const { dir, db, ada } = prepared();
+    const lead = new Roster(db, 8).create({ name: 'Kaan', role: 'Araştırmacı', team: 'Keşif', kind: 'lead' });
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    const listed: Array<{ id: string; name: string; headId: string | null }> = await call(port, 'GET', '/api/departments');
+    expect(listed).toMatchObject([{ name: 'Keşif', headId: lead.id }]);
+    expect((await call(port, 'GET', '/api/office')).departments).toMatchObject([{ name: 'Keşif', headId: lead.id }]);
+    // The owner moves Ada in; her desk learns the department at once (the departments' reload is the engine's).
+    expect(await call(port, 'POST', `/api/employees/${ada.id}/department`, { departmentId: listed[0]?.id })).toMatchObject({ departmentId: listed[0]?.id, team: 'Keşif', reportsTo: lead.id });
+    await stop(office);
+  }, 30_000);
+
   it('B8: with the precheck on, a task needing a capability its desk lacks is held, not handed out (`precheck` given to the dispatcher)', async () => {
     const { dir, db, ada, tasks } = prepared();
     new ConstitutionStore(db).set({ capabilityPrecheckEnabled: true });
