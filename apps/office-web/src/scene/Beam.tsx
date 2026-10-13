@@ -18,12 +18,23 @@ const LIGHT = new Color('#ffe2b0');
 /** The fixture at the top is the beam's bright part: above the bloom's threshold (0.92), so it glows a little. */
 const FIXTURE = new Color('#ffe9c4').multiplyScalar(4);
 
+/** Every lifecycle's beam, as a table the compiler checks: a state added to the shared list has no beam until it is given one here. */
+const LEVELS: Record<Lifecycle, BeamLevel> = {
+  working: 'pulse',
+  idle: 'calm',
+  starting: 'calm',
+  sleeping: 'dim',
+  stopped: 'dim',
+  limited: 'dim',
+  error: 'dim',
+  interrupted: 'dim',
+  in_terminal: 'dim',
+  archived: 'off',
+};
+
 /** What the beam says about the coordinator (spec office rooms §4.3): working pulses, idle or starting is calm, any other state dim; no coordinator, no beam. */
 export function beamLevel(lifecycle: Lifecycle | null): BeamLevel {
-  if (lifecycle === null || lifecycle === 'archived') return 'off';
-  if (lifecycle === 'working') return 'pulse';
-  if (lifecycle === 'idle' || lifecycle === 'starting') return 'calm';
-  return 'dim';
+  return lifecycle === null ? 'off' : LEVELS[lifecycle];
 }
 
 /** The beam's brightness (0–1) at `seconds`: a slow breath while working, steady otherwise. */
@@ -41,7 +52,9 @@ export function coordinatorLifecycle(views: Readonly<Record<string, EmployeeView
 
 /**
  * The light over the coordinator's desk: a see-through cone (added light that writes no depth, so the coordinator shows
- * through it) and a spot light on the desk, both as bright as the coordinator's state says.
+ * through it) and a spot light on the desk, both as bright as the coordinator's state says. Without a coordinator the
+ * cone and the fixture are hidden and the spot's intensity is 0, but the spot stays: a light is never added or removed
+ * (every material's shader would compile again).
  */
 export function Beam() {
   const level = beamLevel(useOffice((s) => coordinatorLifecycle(s.views)));
@@ -59,17 +72,17 @@ export function Beam() {
     if (fixture.current) fixture.current.opacity = b;
     if (spot.current) spot.current.intensity = SPOT_INTENSITY * b;
   });
-  if (level === 'off') return null;
   const { x, z } = LAYOUT.beam;
   const start = beamBrightness(level, 0);
+  const shown = level !== 'off';
   return (
     <group name="beam">
       <primitive object={target} />
-      <mesh name="beam-cone" position={[x, BEAM_TOP / 2, z]}>
+      <mesh name="beam-cone" position={[x, BEAM_TOP / 2, z]} visible={shown}>
         <coneGeometry args={[RADIUS, BEAM_TOP, 48, 1, true]} />
         <meshBasicMaterial ref={cone} color={LIGHT} transparent opacity={CONE_OPACITY * start} blending={AdditiveBlending} depthWrite={false} side={DoubleSide} toneMapped={false} />
       </mesh>
-      <mesh position={[x, BEAM_TOP, z]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh name="beam-fixture" position={[x, BEAM_TOP, z]} rotation={[Math.PI / 2, 0, 0]} visible={shown}>
         <circleGeometry args={[0.28, 32]} />
         <meshBasicMaterial ref={fixture} color={FIXTURE} transparent opacity={start} side={DoubleSide} toneMapped={false} />
       </mesh>

@@ -1,7 +1,7 @@
 import ReactThreeTestRenderer from '@react-three/test-renderer';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Mesh, SpotLight } from 'three';
-import type { Employee, EmployeeKind, Lifecycle } from '@cc/shared';
+import { AdditiveBlending, type Mesh, type MeshBasicMaterial, type SpotLight } from 'three';
+import { LIFECYCLES, type Employee, type EmployeeKind, type Lifecycle } from '@cc/shared';
 import { LAYOUT } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
 import type { EmployeeView } from '../store/reducers.ts';
@@ -25,6 +25,13 @@ describe('the beam’s brightness (spec office rooms §4.3)', () => {
     expect(beamLevel('archived')).toBe('off');
   });
 
+  it('says something for every lifecycle there is: a state added later is dim until the table says otherwise (the table is compiler-checked)', () => {
+    for (const lifecycle of LIFECYCLES) {
+      const expected = lifecycle === 'working' ? 'pulse' : lifecycle === 'idle' || lifecycle === 'starting' ? 'calm' : lifecycle === 'archived' ? 'off' : 'dim';
+      expect(beamLevel(lifecycle), lifecycle).toBe(expected);
+    }
+  });
+
   it('a working beam breathes every 2.5 s between half and full; calm is steady and brighter than dim', () => {
     const at = (t: number) => beamBrightness('pulse', t);
     expect(PULSE_SECONDS).toBe(2.5);
@@ -45,17 +52,58 @@ describe('the beam’s brightness (spec office rooms §4.3)', () => {
 });
 
 describe('Beam', () => {
-  it('stands over the coordinator’s desk while there is a coordinator, with one spot light; without one it is gone', async () => {
+  it('stands over the coordinator’s desk while there is a coordinator, with one spot light aimed at the desk from the beam’s own group', async () => {
     useOffice.setState({ views: { k: view(someone('k', 'coordinator', 'working')) } });
     const r = await ReactThreeTestRenderer.create(<Beam />);
+    const group = r.scene.findByProps({ name: 'beam' }).instance;
     const cone = r.scene.findByProps({ name: 'beam-cone' }).instance as Mesh;
     expect([cone.position.x, cone.position.z]).toEqual([LAYOUT.beam.x, LAYOUT.beam.z]);
-    expect(r.scene.findAll((n) => n.type === 'SpotLight')).toHaveLength(1);
+    expect(cone.visible).toBe(true);
+    const spots = r.scene.findAll((n) => n.type === 'SpotLight').map((n) => n.instance as SpotLight);
+    expect(spots).toHaveLength(1);
+    const spot = spots[0]!;
+    expect(spot.parent).toBe(group);
+    expect([spot.target.position.x, spot.target.position.y, spot.target.position.z]).toEqual([LAYOUT.beam.x, 0, LAYOUT.beam.z]);
+    expect(spot.target.parent, 'the target is in the scene, so its world position follows the room').toBe(group);
     await r.unmount();
-    useOffice.setState({ views: {} });
-    const none = await ReactThreeTestRenderer.create(<Beam />);
-    expect(none.scene.children).toHaveLength(0);
-    await none.unmount();
+  });
+
+  it('the cone is added light that writes no depth, so the coordinator shows through it', async () => {
+    useOffice.setState({ views: { k: view(someone('k', 'coordinator', 'working')) } });
+    const r = await ReactThreeTestRenderer.create(<Beam />);
+    const material = (r.scene.findByProps({ name: 'beam-cone' }).instance as Mesh).material as MeshBasicMaterial;
+    expect(material.transparent).toBe(true);
+    expect(material.blending).toBe(AdditiveBlending);
+    expect(material.depthWrite).toBe(false);
+    await r.unmount();
+  });
+
+  it('without a coordinator the light stays mounted at intensity 0 and only the cone and the fixture are hidden — a light is never added or removed', async () => {
+    const r = await ReactThreeTestRenderer.create(<Beam />);
+    const spots = r.scene.findAll((n) => n.type === 'SpotLight').map((n) => n.instance as SpotLight);
+    expect(spots).toHaveLength(1);
+    await r.advanceFrames(2, 0.1);
+    expect(spots[0]!.intensity).toBe(0);
+    const meshes = r.scene.findAll((n) => n.type === 'Mesh').map((n) => n.instance as Mesh);
+    expect(meshes).toHaveLength(2);
+    expect(meshes.filter((m) => m.visible)).toEqual([]);
+    // A coordinator hired later lights the very same spot and shows the cone and the fixture.
+    await ReactThreeTestRenderer.act(async () => {
+      useOffice.setState({ views: { k: view(someone('k', 'coordinator', 'working')) } });
+    });
+    await r.advanceFrames(1, 0.1);
+    expect(r.scene.findAll((n) => n.type === 'SpotLight').map((n) => n.instance)).toEqual(spots);
+    expect(spots[0]!.intensity).toBeGreaterThan(0);
+    expect(meshes.filter((m) => m.visible)).toHaveLength(2);
+    // And an archived coordinator puts it out again, the light still in place.
+    await ReactThreeTestRenderer.act(async () => {
+      useOffice.setState({ views: { k: view(someone('k', 'coordinator', 'archived')) } });
+    });
+    await r.advanceFrames(1, 0.1);
+    expect(r.scene.findAll((n) => n.type === 'SpotLight').map((n) => n.instance)).toEqual(spots);
+    expect(spots[0]!.intensity).toBe(0);
+    expect(meshes.filter((m) => m.visible)).toEqual([]);
+    await r.unmount();
   });
 
   it('keeps its one spot light when the coordinator’s state changes — only the intensity moves', async () => {
