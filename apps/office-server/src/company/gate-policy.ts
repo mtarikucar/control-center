@@ -748,7 +748,8 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
   let words = all;
   // Wrappers that run the rest as a command.
   for (;;) {
-    const head = literal(words[0]!) ?? '';
+    // By its name wherever it lies: /usr/bin/env is env (hardening round 3).
+    const head = posix.basename(literal(words[0]!) ?? '');
     const t = texts(words, st, ctx);
     if (head === 'sudo') {
       let i = 1;

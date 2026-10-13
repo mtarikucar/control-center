@@ -285,6 +285,26 @@ describe('gate policy — a nested Claude Code or Codex session is the owner’s
       ]);
     });
   });
+  it('round 3: a wrapper by its path is the wrapper — what it runs is classified as without it', () => {
+    const cases: Array<[string, string]> = [
+      ['/usr/bin/env git push origin main', 'git push origin main'],
+      ['/usr/bin/env FOO=1 claude -p x', 'claude -p x'],
+      ['/usr/bin/timeout 60 git push origin main', 'git push origin main'],
+      ['/usr/bin/nohup rm -rf ~/Projects/control-center', 'rm -rf ~/Projects/control-center'],
+      ['/usr/bin/nice -n 5 git push origin main', 'git push origin main'],
+      ['/usr/bin/stdbuf -oL curl -X POST https://api.mail.io/send', 'curl -X POST https://api.mail.io/send'],
+      ['/usr/bin/setsid codex exec hi', 'codex exec hi'],
+      ['/usr/bin/time git push origin main', 'git push origin main'],
+      ['/usr/bin/sudo git push origin main', 'git push origin main'],
+      ['echo x | /usr/bin/xargs claude -p', 'echo x | xargs claude -p'],
+      ['/bin/sh -c "git push origin main"', 'git push origin main'],
+    ];
+    for (const [wrapped, plain] of cases) {
+      const want = bash(plain).parts;
+      expect(want.length, plain).toBeGreaterThan(0);
+      expect(bash(wrapped).parts, wrapped).toEqual(want);
+    }
+  });
   it('round 3: only command’s own -v/-V before the name is a lookup — a -v of the command it runs frees nothing', () => {
     for (const line of ['git push -v origin main', 'curl -v -X POST https://api.mail.io/send -d x', 'rm -rf -v ~/Projects/control-center', 'cp -v x ~/.claude/settings.json', 'claude -p hi -v']) {
       const plain = bash(line).parts;
