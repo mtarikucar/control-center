@@ -416,7 +416,7 @@ describe('departments', () => {
     expect(d.streamNotesRev).toBe(rev + 1);
   });
 
-  it('a snapshot moves streamNotesRev on and never back to 0 — even one that starts the office over — so an open plan reads its notes again', () => {
+  it('a live snapshot moves streamNotesRev on — even one that starts the office over, never back to 0 — and an http one keeps it', () => {
     let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 900 });
     d = applyEvent(d, { seq: 901, ts: 3, employeeId: 'e', event: { type: 'stream.noted', note: { id: 1 } } } as never);
     d = applyEvent(d, { seq: 902, ts: 4, employeeId: 'e', event: { type: 'stream.noted', note: { id: 2 } } } as never);
@@ -424,6 +424,6 @@ describe('departments', () => {
     expect(before).toBeGreaterThan(1);
     const fresh = applySnapshot(d, { employees: [], quota: null, usage: {}, lastSeq: 3 }, 'live');
     expect(fresh.streamNotesRev).toBe(before + 1);
-    expect(applySnapshot(fresh, { employees: [], quota: null, usage: {}, lastSeq: 3 }, 'http').streamNotesRev).toBe(before + 2);
+    expect(applySnapshot(fresh, { employees: [], quota: null, usage: {}, lastSeq: 3 }, 'http').streamNotesRev).toBe(before + 1);
   });
 });

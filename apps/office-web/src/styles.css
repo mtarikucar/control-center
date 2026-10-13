@@ -375,6 +375,8 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .plan-stream.done { border-left-color: var(--ok); }
 .plan-stream-title { font-weight: 600; overflow-wrap: anywhere; }
 .plan-stream-meta { flex-basis: 100%; font-size: 12px; overflow-wrap: anywhere; }
+.plan-stream-notes { flex-basis: 100%; }
+.plan-stream-note { margin: 2px 0 0; overflow-wrap: anywhere; }
 .plan-stream .badge { font-size: 11px; padding: 1px 7px; }
 .badge.stream-planned { color: var(--muted); }
 .badge.stream-active { color: var(--info); }

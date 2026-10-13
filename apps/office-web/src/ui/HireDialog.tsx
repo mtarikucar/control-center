@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { MODEL_ALIASES, type ModelAlias } from '@cc/shared';
 import { VOXEL_CHARACTER, characterAssets } from '../assets/manifest.ts';
 import { api } from '../net/api.ts';
@@ -25,13 +25,22 @@ export function HireDialog() {
   const [head, setHead] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A department closed while the form is open leaves the list: the choice goes back to Merkez rather than naming it still.
+  useEffect(() => {
+    if (departmentId && !departments.some((x) => x.id === departmentId)) {
+      setDepartmentId('');
+      setHead(false);
+    }
+  }, [departments, departmentId]);
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const hired = await api.hire({ name, role, model, provider, characterId: character, ...(departmentId ? { departmentId, ...(head ? { head: true } : {}) } : {}) });
+      // Checked against the store as of now: the form may not have shown yet that the department closed.
+      const into = departmentId && useOffice.getState().departments?.[departmentId]?.status === 'open' ? departmentId : '';
+      const hired = await api.hire({ name, role, model, provider, characterId: character, ...(into ? { departmentId: into, ...(head ? { head: true } : {}) } : {}) });
       setHireOpen(false);
       admit(hired);
       select(hired.id);

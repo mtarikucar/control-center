@@ -47,12 +47,17 @@ function PlanStreams({ planId, streams }: { planId: string; streams: PlanStreamV
                 {owner(x.owner)}
                 {x.dependsOn.length > 0 ? ` · önce: ${x.dependsOn.map((d) => titles.get(d) ?? d).join(', ')}` : ''}
               </span>
-              {n?.plan && <p className="plan-stream-note">Akış planı: {n.plan.text}</p>}
-              {n?.report && (
-                <p className="plan-stream-note">
-                  Rapor: {n.report.text}
-                  {n.report.evidence.length > 0 ? ` (kanıt: ${n.report.evidence.join('; ')})` : ''}
-                </p>
+              {(n?.plan || n?.report) && (
+                <details className="plan-stream-notes">
+                  <summary>Akış notları</summary>
+                  {n.plan && <p className="plan-stream-note">Akış planı: {n.plan.text}</p>}
+                  {n.report && (
+                    <p className="plan-stream-note">
+                      Rapor: {n.report.text}
+                      {n.report.evidence.length > 0 ? ` (kanıt: ${n.report.evidence.join('; ')})` : ''}
+                    </p>
+                  )}
+                </details>
               )}
             </li>
           );

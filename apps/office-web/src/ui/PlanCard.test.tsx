@@ -133,6 +133,12 @@ describe('PlanCard', () => {
     expect(await screen.findByText(/Akış planı: Önce metin\./)).toBeTruthy();
     expect(screen.getByText(/Rapor: Hazır\./)).toBeTruthy();
     expect(api.streamNotes).toHaveBeenCalledWith('p1');
+    // Folded away until opened (spec §8): the notes sit inside a closed <details> under its summary.
+    const notes = screen.getByText('Akış notları').closest('details')!;
+    expect(notes.className).toBe('plan-stream-notes');
+    expect(notes.open).toBe(false);
+    expect(within(notes).getByText(/Akış planı: Önce metin\./)).toBeTruthy();
+    expect(within(notes).getByText(/Rapor: Hazır\./)).toBeTruthy();
   });
 
   it('a plan without department streams asks for no notes', () => {
@@ -146,9 +152,11 @@ describe('PlanCard', () => {
     render(<PlanCard plan={p} />);
     await waitFor(() => expect(api.streamNotes).toHaveBeenCalledTimes(1));
     expect(screen.getByText(/Departman departmanı/)).toBeTruthy();
+    expect(screen.queryByText('Akış notları')).toBeNull();
     vi.mocked(api.streamNotes).mockResolvedValueOnce([{ streamId: 'tanitim', plan: { id: 3, planId: 'p1', streamId: 'tanitim', kind: 'plan', text: 'Yeni plan.', evidence: [], next: null, by: 'h', at: 3 }, report: null }]);
     act(() => useOffice.setState({ streamNotesRev: 1 }));
     expect(await screen.findByText(/Akış planı: Yeni plan\./)).toBeTruthy();
     expect(api.streamNotes).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText('Akış notları')).toHaveLength(1);
   });
 });
