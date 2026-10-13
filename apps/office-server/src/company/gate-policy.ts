@@ -69,6 +69,13 @@ export function toolFamily(tool: string, target: string): string {
   return tool;
 }
 
+/**
+ * The browser's servers, by their exact names (hardening round 4): the plugin's and `playwright`, @playwright/mcp's
+ * usual name — both among the names a project's .mcp.json may not bring (connectorServers). Any other server's
+ * browser_ tools are a connector's like any.
+ */
+const BROWSER_SERVERS = new Set(['plugin_playwright_playwright', 'playwright']);
+
 /** Playwright's tools that only look (§3 Y3); every other browser_ tool acts and waits for an approval of the task. */
 const BROWSER_READ = new Set(['browser_navigate', 'browser_navigate_back', 'browser_snapshot', 'browser_take_screenshot', 'browser_find', 'browser_console_messages', 'browser_network_requests', 'browser_tabs', 'browser_wait_for', 'browser_resize', 'browser_hover', 'browser_close']);
 
@@ -113,6 +120,8 @@ function mcpConfigWhy(p: string, home: string, mcpJson = true): string | null {
   return null;
 }
 
+const LIVE_WHY = 'canlı checkout (kapının ve ofisin kodu)';
+
 /**
  * Why writing at `path` is held (§3.1), or null; `recursive`: also when it holds a protected folder (rm -r, mv);
  * `mcpJson` false: a .mcp.json there counts for nothing (one moved or linked away loads nothing; hardening round 2).
@@ -125,7 +134,7 @@ export function protectedWhy(path: string, ctx: GateContext, recursive = false, 
   const mcp = mcpConfigWhy(p, home, mcpJson) ?? mcpConfigWhy(path, home, mcpJson);
   if (mcp) return mcp;
   if (under(p, `${home}/.claude`)) return under(p, `${home}/.claude/projects/${projectKey(ctx.deskDir)}`) ? null : 'sahibinin Claude ayarları';
-  if (under(p, ctx.repoRoot)) return 'canlı checkout (kapının ve ofisin kodu)';
+  if (under(p, ctx.repoRoot)) return LIVE_WHY;
   if (under(p, ctx.deskDir)) return under(p, `${ctx.deskDir}/.claude`) ? 'masanın Claude ayarları (.claude)' : null;
   if (under(p, `${ctx.dataDir}/desks`)) return p === `${ctx.dataDir}/desks` ? 'masalar' : 'başkasının masası';
   if (under(p, ctx.dataDir)) return 'ofisin veri dizini (veritabanı, şirket hafızası)';
@@ -634,36 +643,38 @@ function protectedLiterals(code: string, st: ShellState, ctx: GateContext): Arra
 
 const CMD_WORDS = '(?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh|claude|codex)';
 
-/** The commands a program starts, as far as its text shows them: one string, perl/ruby quoting, or a list of strings. */
-function spawnedCommands(code: string): string[] {
-  const out: string[] = [];
-  for (const m of code.matchAll(new RegExp(`(['"\`])(${CMD_WORDS}\\s[^'"\`]*)\\1`, 'g'))) out.push(m[2]!);
-  for (const m of code.matchAll(new RegExp(`(?:q[qw]?|%[qQwW])\\s*[{(\\[<]\\s*(${CMD_WORDS}\\b[^})\\]>]*)[})\\]>]`, 'g'))) out.push(m[1]!);
+/**
+ * The commands a program starts, as far as its text shows them: one string, perl/ruby quoting, or a list of strings;
+ * `at`: where the command's name stands in the code (its opening quote), `list` when it was read from a list or a
+ * call's arguments.
+ */
+function spawnedCommands(code: string): Array<{ line: string; at: number; list: boolean }> {
+  const out: Array<{ line: string; at: number; list: boolean }> = [];
+  for (const m of code.matchAll(new RegExp(`(['"\`])(${CMD_WORDS}\\s[^'"\`]*)\\1`, 'g'))) out.push({ line: m[2]!, at: m.index!, list: false });
+  for (const m of code.matchAll(new RegExp(`(?:q[qw]?|%[qQwW])\\s*[{(\\[<]\\s*(${CMD_WORDS}\\b[^})\\]>]*)[})\\]>]`, 'g'))) out.push({ line: m[1]!, at: m.index!, list: false });
   const items = (list: string) => [...list.matchAll(/(['"])([^'"]*)\1/g)].map((x) => x[2]!);
   for (const m of code.matchAll(/[[(]\s*((?:(['"])[^'"]*\2\s*,\s*)+(['"])[^'"]*\3)\s*,?\s*[\])]/g)) {
     const list = items(m[1]!);
-    if (new RegExp(`^${CMD_WORDS}$`).test(list[0] ?? '')) out.push(list.join(' '));
+    if (new RegExp(`^${CMD_WORDS}$`).test(list[0] ?? '')) out.push({ line: list.join(' '), at: m.index! + m[0].search(/['"]/), list: true });
   }
-  for (const m of code.matchAll(new RegExp(`(['"])(${CMD_WORDS})\\1\\s*,\\s*\\[([^\\]]*)\\]`, 'g'))) out.push([m[2]!, ...items(m[3]!)].join(' '));
+  for (const m of code.matchAll(new RegExp(`(['"])(${CMD_WORDS})\\1\\s*,\\s*\\[([^\\]]*)\\]`, 'g'))) out.push({ line: [m[2]!, ...items(m[3]!)].join(' '), at: m.index!, list: true });
   return out;
 }
 
-/** Either package's name, quoted, as npx and the like run it: @anthropic-ai/claude-code, @openai/codex@latest. */
-const AGENT_PACKAGE = /(['"`])@(?:anthropic-ai\/claude-code|openai\/codex)(?:@[\w.-]+)?\1/;
-
 /**
- * From `from` to the list's or the call's close: its quoted words when it holds nothing else (commas, spaces, lists)
- * and nothing is added to it after the close (`] + args`); else null.
+ * The words of a start after its name (hardening round 4): from `from` to the list's or the call's close, its quoted
+ * words up to the first that is not one (commas, spaces and nested lists between them); `whole` when it holds nothing
+ * else and nothing is added to it after the close (`] + args`).
  */
-function literalItems(code: string, from: number, close: string): string[] | null {
-  const items: string[] = [];
+function startWords(code: string, from: number, close: string): { words: string[]; whole: boolean } {
+  const words: string[] = [];
   let depth = 0;
   for (let i = from; i < code.length && i < from + 400; i += 1) {
     const c = code[i]!;
     if (c === '"' || c === "'" || c === '`') {
       const end = code.indexOf(c, i + 1);
-      if (end === -1) return null;
-      items.push(code.slice(i + 1, end));
+      if (end === -1) return { words, whole: false };
+      words.push(code.slice(i + 1, end));
       i = end;
     } else if (c === '[') depth += 1;
     else if (c === ']' || c === ')') {
@@ -671,33 +682,64 @@ function literalItems(code: string, from: number, close: string): string[] | nul
         depth -= 1;
         continue;
       }
-      if (c !== close) return null;
+      if (c !== close) return { words, whole: false };
       const after = /\S/.exec(code.slice(i + 1, i + 40))?.[0];
-      return after === undefined || [')', ',', ';', ']'].includes(after) ? items : null;
-    } else if (c !== ',' && !/\s/.test(c)) return null;
+      return { words, whole: after === undefined || [')', ',', ';', ']'].includes(after) };
+    } else if (c !== ',' && !/\s/.test(c)) return { words, whole: false };
   }
-  return null;
+  return { words, whole: false };
 }
 
 /**
- * Claude Code or Codex started from code whose arguments are known only when it runs (hardening round 3): a quoted
- * name (claude, codex, a versioned one, a path ending in one) as a list's first item or a call's first argument —
- * subprocess.run(["claude", "-p", prompt]), spawn('codex', args), execFileSync('claude', args) — or either package's
- * name anywhere (['npx', '@anthropic-ai/claude-code', …]). Only a start known in full that asks its version or its
- * help alone is free, as on the shell. Scanned with indexOf, linearly.
+ * Claude Code's or Codex's name as a program writes it to start one (hardening round 4): exactly claude or codex, a
+ * path ending in one, claude-<version>, or Claude Code's versions folder. Case counts — CLAUDE.md, CLAUDE_CONFIG_DIR and
+ * CODEX_HOME are other names.
  */
-function spawnedAgent(code: string): 'claude' | 'codex' | null {
-  for (const m of code.matchAll(/[[(][ \t]*(['"`])/g)) {
-    const start = m.index! + m[0].length;
-    const end = code.indexOf(m[1]!, start);
-    if (end === -1 || end - start > 200) continue;
-    const agent = agentCli(code.slice(start, end));
-    if (!agent) continue;
-    const items = literalItems(code, end + 1, m[0][0] === '[' ? ']' : ')');
-    if (!(items?.length === 1 && ['--version', '-v', '--help', '-h'].includes(items[0]!))) return agent;
+const AGENT_NAME = /^(?:[^\s'"`]*\/)?(claude|codex)(?:-\d[\w.]*)?$/;
+const agentName = (name: string): 'claude' | 'codex' | null =>
+  (AGENT_NAME.exec(name)?.[1] as 'claude' | 'codex' | undefined) ?? (/\/claude\/versions\/[^/\s]+$/.test(name) ? 'claude' : null);
+
+/**
+ * Where a start's name stands (hardening round 4): a spawn call's first argument — Python's subprocess, os, pty,
+ * pexpect and asyncio, Node's child_process and execa, Ruby's and Perl's system and exec — or a literal list's first
+ * item, the list after `(`, `=`, `,` or at a line's start (`cmd = ["claude", …]`, `run(\n  [\n  "claude"`), never one
+ * read from (`rows['claude']`). Space between, new lines too.
+ */
+const SPAWN_CALL = /(?<![\w$])(?:run|call|check_call|check_output|Popen|spawn\w*|exec\w*|system|popen|create_subprocess_exec|execa|posix_spawn\w*)\s*\(\s*(['"`])/g;
+const START_LIST = /(?:[(=,]\s*|^[ \t]*)\[\s*(['"`])/gm;
+/** Either package's name, as npx and the like run it: @anthropic-ai/claude-code, @openai/codex@latest. */
+const AGENT_PACKAGES = [['@anthropic-ai/claude-code', 'claude'], ['@openai/codex', 'codex']] as const;
+const PACKAGE_RUNNERS = new Set(['npx', 'dlx', 'bunx']);
+
+type AgentStart = { agent: 'claude' | 'codex'; at: number; words: string[]; whole: boolean; free: boolean };
+
+/**
+ * Claude Code or Codex started from code (hardening rounds 3–4), each start with its own words: its name at a start
+ * (above), or either package's name right after npx, dlx or bunx (flags between). `free`: known in full, asking its
+ * version or its help alone, as on the shell. `at`: where the name stands. Scanned linearly.
+ */
+function agentStarts(code: string): AgentStart[] {
+  const out: AgentStart[] = [];
+  for (const [re, close] of [[SPAWN_CALL, ')'], [START_LIST, ']']] as const) {
+    for (const m of code.matchAll(re)) {
+      const start = m.index! + m[0].length;
+      const end = code.indexOf(m[1]!, start);
+      if (end === -1 || end - start > 200) continue;
+      const agent = agentName(code.slice(start, end));
+      if (!agent) continue;
+      const { words, whole } = startWords(code, end + 1, close);
+      out.push({ agent, at: start - 1, words, whole, free: whole && words.length === 1 && ['--version', '-v', '--help', '-h'].includes(words[0]!) });
+    }
   }
-  const pkg = AGENT_PACKAGE.exec(code);
-  return pkg ? (pkg[0].includes('codex') ? 'codex' : 'claude') : null;
+  for (const [pkg, agent] of AGENT_PACKAGES) {
+    for (let i = code.indexOf(pkg); i !== -1; i = code.indexOf(pkg, i + 1)) {
+      if (/[\w/-]/.test(code[i + pkg.length] ?? '')) continue;
+      // The word before it, flags passed over: npx -y @openai/codex, ['pnpm', 'dlx', '@anthropic-ai/claude-code'].
+      const before = code.slice(Math.max(0, i - 120), i).split(/[\s'"`,[\]()+]+/).filter((w) => w && !w.startsWith('-'));
+      if (PACKAGE_RUNNERS.has(posix.basename(before.at(-1) ?? ''))) out.push({ agent, at: i, words: [], whole: false, free: false });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
 }
 
 /** A file the command writes: held when its resolved target is protected, or when it cannot be known (`mcpJson`: protectedWhy's). */
@@ -1033,7 +1075,7 @@ function shellIndirect(name: string, words: ShellWord[], redirects: Array<{ op: 
  * script writes into a test — is only text).
  */
 const DB_ACCESS: Record<string, RegExp> = {
-  python: /^\s*(import|from)\s+sqlite3\b|sqlite3\.connect\(/m,
+  python: /^[ \t]*(import|from)\s+sqlite3\b|sqlite3\.connect\(/m,
   node: /node:sqlite|DatabaseSync\(|better-sqlite3|openDb\(|\/db\.ts['"]/,
   other: /sqlite|DBI->connect|\.connect\(/i,
 };
@@ -1041,8 +1083,9 @@ const dbAccess = (name: string, code: string) => (DB_ACCESS[name.startsWith('pyt
 /** Code that starts commands: only then do its string literals run as commands. */
 /** Code that starts commands, in its own language (an edit script's strings that only mention one are text). */
 const SPAWNS: Record<string, RegExp> = {
-  python: /\bsubprocess\b|\bos\.(system|popen|exec\w*|spawn\w*)\(|\bPopen\(|\bpty\.spawn\(/,
-  node: /child_process|(?<![.\w])(exec|execFile|spawn)(Sync)?\(|Deno\.(run|Command)\b|Bun\.spawn|(^|[\s=(;,])\$`/m,
+  // `subprocess` anywhere: asyncio's create_subprocess_exec too (hardening round 4), as pexpect, posix_spawn and execa.
+  python: /subprocess|\bos\.(system|popen|exec\w*|spawn\w*|posix_spawn\w*)\(|\bPopen\(|\bpty\.spawn\(|\bpexpect\b|\bexeca\b/,
+  node: /child_process|\bexeca\b|(?<![.\w])(exec|execFile|spawn)(Sync)?\(|Deno\.(run|Command)\b|Bun\.spawn|(^|[\s=(;,])\$`/m,
   other: /\bsystem\s*[(\s'"q%]|\bexec\s*[(\s]|`[^`]*`|\bqx\s*[{(\[<]|%x\s*[{(\[<]|IO\.popen|Open3/,
 };
 const spawns = (name: string, code: string) => SPAWNS[name.startsWith('python') ? 'python' : ['node', 'deno', 'bun', 'tsx', 'ts-node'].includes(name) ? 'node' : 'other']!.test(code);
@@ -1111,11 +1154,24 @@ function interpreter(name: string, words: ShellWord[], redirects: Array<{ op: st
     }
     const filter = (name === 'perl' || name === 'ruby') && t.slice(1).some((a) => /^-\w*[pni]/.test(a));
     if (filter ? !FILTER_SPAWNS.test(code) : !spawns(name, code)) continue;
-    const before = run.parts.length;
-    for (const line of spawnedCommands(code)) shellLine(line, copyState(st), { ...run, depth: run.depth + 1 });
-    // One part for one start: a nested session spawnedCommands read in full already holds the call.
-    const agent = run.parts.slice(before).some((p) => p.why === NESTED_WHY) ? null : spawnedAgent(code);
-    if (agent) add(run, { kind: 'self', target: `${agent} (${name} kodundan)`, why: NESTED_WHY });
+    // One part for one start (hardening rounds 3–4): a nested session a command read here holds that start; every
+    // other start keeps its own part, its words to the first known only at run time in its target. A list naming
+    // either that is no start is only a mention (`if name in ['claude', 'codex']`).
+    const starts = agentStarts(code);
+    const at = new Set(starts.map((x) => x.at));
+    const read = new Set<number>();
+    for (const c of spawnedCommands(code)) {
+      if (c.list && /^(claude|codex) /.test(`${c.line} `) && !at.has(c.at)) continue;
+      const sub: Run = { ...run, parts: [], depth: run.depth + 1 };
+      shellLine(c.line, copyState(st), sub);
+      if (sub.parts.some((p) => p.why === NESTED_WHY)) read.add(c.at);
+      for (const p of sub.parts) add(run, p);
+    }
+    for (const start of starts) {
+      if (start.free || read.has(start.at)) continue;
+      const words = [...start.words, ...(start.whole ? [] : ['…'])].join(' ');
+      add(run, { kind: 'self', target: `${`${start.agent} ${shown(words)}`.trim().slice(0, 60)} (${name} kodundan)`, why: NESTED_WHY });
+    }
   }
 }
 
@@ -1197,19 +1253,14 @@ function git(words: ShellWord[], env: Map<string, string | null>, st: ShellState
     }
     return;
   }
-  if (GIT_REWRITE.has(sub) && !(sub === 'stash' && ['list', 'show'].includes(restT[0] ?? ''))) {
-    // The whole tree is the question here: its paths add no second part (round 3: one approval).
-    if (top === ctx.repoRoot) return add(run, { kind: 'self', target: `git ${sub} ${ctx.repoRoot}`, why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' });
-    if (top === UNKNOWN) return add(run, { kind: 'self', target: `git ${sub} (dizin belirsiz)`, why: 'hangi depoda çalışacağı belli değil (temkinli: kapıda)' });
-  }
   // The paths a checkout or a restore writes (hardening rounds 2–3): `git checkout -- .mcp.json` brings one back as any
   // write would. Its operands after `--`, else every word after its options — a branch is a path that holds nothing
   // protected (`git checkout origin/evil .mcp.json`). A restore of the index alone (--staged without --worktree) writes
   // no file.
   const indexOnly = sub === 'restore' && restT.some((a) => a === '--staged' || a === '-S') && !restT.some((a) => a === '--worktree' || a === '-W');
+  const paths: ShellWord[] = [];
   if ((sub === 'checkout' || sub === 'restore') && !indexOnly) {
     const dash = restT.indexOf('--');
-    const paths: ShellWord[] = [];
     if (dash !== -1) paths.push(...rest.slice(dash + 1));
     else {
       for (let k = 0; k < restT.length; k += 1) {
@@ -1217,8 +1268,22 @@ function git(words: ShellWord[], env: Map<string, string | null>, st: ShellState
         else if (!flag(restT[k]!)) paths.push(rest[k]!);
       }
     }
-    for (const w of paths) writeTarget(run, `git ${sub}`, w, { ...st, cwd: repo ?? null });
   }
+  const written = (into: Run) => {
+    for (const w of paths) writeTarget(into, `git ${sub}`, w, { ...st, cwd: repo ?? null });
+  };
+  if (GIT_REWRITE.has(sub) && !(sub === 'stash' && ['list', 'show'].includes(restT[0] ?? ''))) {
+    // The whole tree is the question here: its paths add no second part (round 3: one approval), but a path protected
+    // for its own sake keeps its reason in that part (round 4) — the live checkout's own is the part's already.
+    if (top === ctx.repoRoot) {
+      const scratch: Run = { ...run, parts: [] };
+      written(scratch);
+      const own = [...new Set(scratch.parts.map((p) => p.why).filter((why) => why !== `korunan yola yazar: ${LIVE_WHY}`))];
+      return add(run, { kind: 'self', target: `git ${sub} ${ctx.repoRoot}`, why: ['canlı checkout’un çalışma ağacını ya da dalını yeniden yazar', ...own].join('; ') });
+    }
+    if (top === UNKNOWN) return add(run, { kind: 'self', target: `git ${sub} (dizin belirsiz)`, why: 'hangi depoda çalışacağı belli değil (temkinli: kapıda)' });
+  }
+  written(run);
 }
 
 function gh(args: string[], run: Run): void {
@@ -1578,7 +1643,7 @@ export function classifyCall(tool: string, input: unknown, cwd: string | undefin
   const server = cut === -1 ? tool.slice(5) : tool.slice(5, cut);
   const short = cut === -1 ? tool : tool.slice(cut + 2);
   if (server === 'office') return done([]);
-  if (server.includes('playwright') && short.startsWith('browser_')) {
+  if (BROWSER_SERVERS.has(server) && short.startsWith('browser_')) {
     const office = browserOffice(short, input, ctx);
     if (office !== null) return done([{ kind: 'self', target: `${short} ${office}`, why: 'tarayıcıyla ofisin kendi sayfasına ya da API’sine gider (sahibi onayı yalnız sahibinin sayfasından sayılır)' }]);
     return done(BROWSER_READ.has(short) ? [] : [{ kind: 'browser', target: short, why: KIND_WHY.browser }]);

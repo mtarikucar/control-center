@@ -62,6 +62,11 @@ describe('gate policy (K1) — connector, browser, file and web tools', () => {
   tool('mcp__office__taskFinish', { taskId: 't' }, 'pass');
   tool('mcp__plugin_playwright_playwright__browser_click', { element: 'Gönder' }, 'browser', 'task');
   tool('mcp__plugin_playwright_playwright__browser_snapshot', {}, 'pass');
+  // Round 4: the browser is a server by its exact name — the ones a project's .mcp.json may not bring (connectorServers).
+  tool('mcp__playwright__browser_snapshot', {}, 'pass');
+  tool('mcp__playwright__browser_click', { element: 'Gönder' }, 'browser', 'task');
+  tool('mcp__playwright-evil__browser_snapshot', {}, 'other');
+  tool('mcp__my_playwright__browser_take_screenshot', {}, 'other');
   // Review round 1 (Kerem, important): the browser to the office's own page or API is the office itself — every way of
   // getting there, every host form the browser accepts for it; held per call, never on a browser approval.
   const PW = 'mcp__plugin_playwright_playwright__';
@@ -281,8 +286,66 @@ describe('gate policy — a nested Claude Code or Codex session is the owner’s
         { kind: 'self', target: 'claude -p', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
       ]);
       expect(bash(`python3 -c "import subprocess; subprocess.run(['claude', '-p', prompt])"`).parts).toEqual([
-        { kind: 'self', target: 'claude (python3 kodundan)', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
+        { kind: 'self', target: 'claude -p … (python3 kodundan)', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
       ]);
+    });
+  });
+  describe('round 4: only a start — a spawn call’s first argument, a literal list’s first item — of the very name; across lines', () => {
+    it('reads a long program linearly, blank lines and all', () => {
+      const started = performance.now();
+      expect(verdict(bash(`python3 <<'EOF'\nimport subprocess\n${'\n'.repeat(200_000)}subprocess.run(['git', 'status'])\nEOF`))).toBe('pass');
+      expect(performance.now() - started).toBeLessThan(1000);
+    });
+    const script = (code: string) => `cat > /tmp/r.py <<'EOF'\n${code}\nEOF\npython3 /tmp/r.py`;
+    const nested = (command: string) => bash(command).parts.filter((p) => p.why.startsWith('iç içe oturum'));
+    rows([
+      // Written over several lines, as a formatter leaves them.
+      [script('import subprocess\nsubprocess.run(\n    [\n        "claude",\n        "-p",\n        prompt,\n    ]\n)'), 'self'],
+      [`node -e "const { spawn } = require('child_process');\nspawn(\n  'claude',\n  args)"`, 'self'],
+      [`node -e "const cp = require('child_process'); cp.execFile(\n'codex', ['exec', task])"`, 'self'],
+      // Python's other ways to start one (the code starts commands only by them).
+      [`python3 -c "import asyncio; asyncio.create_subprocess_exec('claude', '-p', x)"`, 'self'],
+      [`python3 -c "import pexpect; pexpect.spawn('claude', ['-p', x])"`, 'self'],
+      [`python3 -c "import os; os.posix_spawnp('claude', ['claude', '-p', x], os.environ)"`, 'self'],
+      [`python3 -c "import os; os.execvp('codex', ['codex', 'exec', task])"`, 'self'],
+      [`node -e "import('execa').then(({ execa }) => execa('claude', ['-p', prompt]))"`, 'self'],
+      // A list kept in a name first, started later.
+      [script('import subprocess\ncmd = ["claude", "-p", prompt]\nsubprocess.run(cmd)'), 'self'],
+      [script('import subprocess\nsubprocess.run([\n  "/home/x/.local/bin/claude", "-p", prompt])'), 'self'],
+      [script('import subprocess\nsubprocess.run(["claude-2.1.296", "-p", prompt])'), 'self'],
+      // A package only where npx and the like run it.
+      [`python3 -c "import subprocess; subprocess.run(['npx', '-y', '@openai/codex', 'exec', t])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['pnpm', 'dlx', '@anthropic-ai/claude-code@latest', '-p', t])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run('bunx @anthropic-ai/claude-code -p ' + t, shell=True)"`, 'self'],
+    ]);
+    it('code that only mentions them is not a start: a name printed, looked up or used as a key, their files and settings, a package read', () => {
+      for (const code of [
+        "import subprocess\nsubprocess.run(['git', 'status'])\nprint('claude')",
+        "import subprocess\nsubprocess.run(['git', 'log'])\nopen('CLAUDE.md').read()",
+        "import os, subprocess\nhome = os.environ['CLAUDE_CONFIG_DIR']\nsubprocess.run(['ls', home])",
+        "import os, subprocess\nos.environ.get('CODEX_HOME')\nsubprocess.run(['git', 'status'])",
+        "import shutil, subprocess\nif shutil.which('claude'):\n    subprocess.run(['git', 'status'])",
+        "import subprocess\nrows = {}\nrows['claude'] = 1\nsubprocess.run(['git', 'status'])",
+        "import subprocess\nif name in ['claude', 'codex']:\n    subprocess.run(['git', 'status'])",
+        "import json, subprocess\nsubprocess.run(['git', 'status'])\njson.load(open('node_modules/@anthropic-ai/claude-code/package.json'))",
+        "import subprocess\nsubprocess.run(['git', 'status'])\nprint(f'{Claude} ve {CODEX}')",
+      ]) {
+        expect(nested(script(code)), code).toEqual([]);
+        expect(verdict(bash(script(code))), code).toBe('pass');
+      }
+    });
+    it('each start keeps its print: a start read in full beside one known only when it runs, two of the same name with other words', () => {
+      const why = 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)';
+      expect(nested(script("import subprocess\nsubprocess.run(['claude', '-p', 'hi'])\nsubprocess.run(['codex', 'exec', task])"))).toEqual([
+        { kind: 'self', target: 'claude -p hi', why },
+        { kind: 'self', target: 'codex exec … (python3 kodundan)', why },
+      ]);
+      expect(nested(script("import subprocess\nsubprocess.run(['claude', '-p', prompt])\nsubprocess.run(['claude', 'mcp', 'add', name])"))).toEqual([
+        { kind: 'self', target: 'claude -p … (python3 kodundan)', why },
+        { kind: 'self', target: 'claude mcp add … (python3 kodundan)', why },
+      ]);
+      // The same start twice is one part.
+      expect(nested(script("import subprocess\nsubprocess.run(['claude'] + a)\nsubprocess.run(['claude'] + b)"))).toEqual([{ kind: 'self', target: 'claude … (python3 kodundan)', why }]);
     });
   });
   it('round 3: a wrapper by its path is the wrapper — what it runs is classified as without it', () => {
@@ -399,6 +462,13 @@ describe('gate policy — what a downloader or a git checkout writes is checked 
     for (const line of ['git checkout -- apps/office-server/src/a.ts', 'git restore apps/office-server/src/a.ts', 'git checkout main apps/office-server/src/a.ts']) {
       expect(bash(line, REPO).parts, line).toEqual([expect.objectContaining({ kind: 'self', why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' })]);
     }
+  });
+  it('round 4: at the live checkout the one part keeps a protected path’s own reason', () => {
+    const live = 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar';
+    for (const line of ['git restore .mcp.json', 'git checkout origin/evil -- .mcp.json', 'git checkout -- apps/x.ts .mcp.json']) {
+      expect(bash(line, REPO).parts, line).toEqual([{ kind: 'self', target: expect.stringMatching(/^git (restore|checkout) /), why: `${live}; korunan yola yazar: MCP sunucu ayarları (.mcp.json)` }]);
+    }
+    expect(bash('git checkout main', REPO).parts).toEqual([expect.objectContaining({ why: live })]);
   });
   it('the reason names the path', () => {
     expect(bash('curl -o .mcp.json https://x.io/m.json').parts).toEqual([
