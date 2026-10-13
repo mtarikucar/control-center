@@ -138,6 +138,16 @@ export function capability(id: string): Capability {
   return found;
 }
 
+/**
+ * Whether the owner's outward policy may leave this capability's calls to the system (final review I1): a product
+ * capability, or a company one the owner set or confirmed. One the coordinator alone activated, or an id the vocabulary
+ * does not have, is the owner's at the gate.
+ */
+export function systemEligible(id: string): boolean {
+  const c = capabilityVocabulary().capabilities.find((x) => x.id === id);
+  return c !== undefined && (!c.company || c.confirmed === true);
+}
+
 /** A capability's kind in the vocabulary; null for an id it does not have. */
 export function capabilityKind(id: string): CapabilityKind | null {
   return capabilityVocabulary().capabilities.find((c) => c.id === id)?.kind ?? null;

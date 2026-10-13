@@ -31,9 +31,9 @@ export interface CustomCapabilitiesDeps {
   now?: () => number;
 }
 
-/** A company capability as the vocabulary carries it. */
+/** A company capability as the vocabulary carries it; `confirmed` when the owner decided it last (final review I1). */
 export function asCapability(c: CustomCapability): Capability {
-  return { id: c.id, title: c.title, summary: c.summary, kind: c.kind, outward: c.kind !== 'read', builtin: [], tools: c.tools, company: true };
+  return { id: c.id, title: c.title, summary: c.summary, kind: c.kind, outward: c.kind !== 'read', builtin: [], tools: c.tools, company: true, ...(c.decidedBy === OWNER ? { confirmed: true as const } : {}) };
 }
 
 /**
@@ -167,6 +167,20 @@ export class CustomCapabilities {
     this.#changed(null, 'retired', retired);
     this.#tellCoordinator(`Sahibi ${id} yeteneğini geri aldı${why ? ` (${why})` : ''}: araçları yeniden sınıflandırılmamış sayılır — kapı tutar, oturumlar kapatır; rollerdeki ${id} artık hiçbir aracı açmaz.`);
     return retired;
+  }
+
+  /**
+   * The owner takes over an active one the coordinator activated, its kind as it is (final review I1): until then the
+   * gate asks the owner for its calls whatever the outward policy says — the coordinator alone never hands a tool to
+   * the system. One the owner decided already stays as it is.
+   */
+  confirm(id: string): CustomCapability {
+    const current = this.#d.store.get(id);
+    if (current.status !== 'active') throw new ConflictError(`${id} etkin değil (${CUSTOM_CAPABILITY_STATUS_LABELS[current.status]}).`);
+    if (current.decidedBy === OWNER) return current;
+    const confirmed = this.#d.store.update(id, { decidedBy: OWNER, decidedAt: this.#now() });
+    this.#changed(null, 'confirmed', confirmed);
+    return confirmed;
   }
 
   /** The owner changes a proposed or active one's kind, any way (the coordinator gives a kind with decide). */

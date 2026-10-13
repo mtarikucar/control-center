@@ -90,7 +90,7 @@ const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
 const APPROVAL_ROUTE = /^\/api\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|deny)$/;
-const CUSTOM_CAPABILITY_ROUTE = /^\/api\/custom-capabilities\/([a-z]+\.[a-z]+)\/(accept|reject|retire|kind)$/;
+const CUSTOM_CAPABILITY_ROUTE = /^\/api\/custom-capabilities\/([a-z]+\.[a-z]+)\/(accept|reject|retire|kind|confirm)$/;
 const DEPARTMENT_ROUTE = /^\/api\/departments\/([^/]+)(?:\/(close))?$/;
 const STREAM_NOTES_ROUTE = /^\/api\/plans\/([^/]+)\/stream-notes$/;
 const EMPLOYEE_ROUTE =
@@ -356,14 +356,16 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
         if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new ValidationError('Geçersiz istek gövdesi.');
         return sendJson(res, 201, custom.ownerAdd(body as Record<string, unknown>));
       }
-      const route = CUSTOM_CAPABILITY_ROUTE.exec(url.pathname);
-      if (method === 'POST' && route) {
-        const id = route[1] ?? '';
+      const action = CUSTOM_CAPABILITY_ROUTE.exec(url.pathname);
+      if (method === 'POST' && action) {
+        const id = action[1] ?? '';
         const body = ((await readJson(req)) ?? {}) as { kind?: unknown; note?: unknown };
-        if (route[2] === 'retire') return sendJson(res, 200, custom.retire(id, body.note));
-        if (route[2] === 'kind') return sendJson(res, 200, custom.setKind(id, body.kind));
+        if (action[2] === 'retire') return sendJson(res, 200, custom.retire(id, body.note));
+        if (action[2] === 'kind') return sendJson(res, 200, custom.setKind(id, body.kind));
+        // Final review I1: what the coordinator activated goes to the system only once the owner confirms it here.
+        if (action[2] === 'confirm') return sendJson(res, 200, custom.confirm(id));
         // A rejection needs a note (decide refuses one without): the page sends "Sahibi reddetti." when the owner writes none.
-        return sendJson(res, 200, custom.decide(OWNER, id, { accept: route[2] === 'accept', kind: body.kind, note: body.note }));
+        return sendJson(res, 200, custom.decide(OWNER, id, { accept: action[2] === 'accept', kind: body.kind, note: body.note }));
       }
     }
     if (method === 'GET' && url.pathname === '/api/performance' && d.company.performance) {

@@ -31,6 +31,11 @@ export interface Capability {
   tools: string[];
   /** Added by the company (custom_capabilities, spec capabilities §4), not shipped with the product. */
   company?: true;
+  /**
+   * A company one whose kind the owner set — added it, accepted it, changed its kind — or confirmed after the coordinator
+   * activated it (final review I1): only then may the owner's outward policy leave its calls to the system.
+   */
+  confirmed?: true;
 }
 
 /**
@@ -135,4 +140,5 @@ export interface NewCustomCapability {
   tools: string[];
 }
 
-export type CapabilityChange = 'proposed' | 'activated' | 'rejected' | 'retired' | 'kind';
+/** `confirmed`: the owner took over an active one the coordinator activated (final review I1), its kind unchanged. */
+export type CapabilityChange = 'proposed' | 'activated' | 'rejected' | 'retired' | 'kind' | 'confirmed';

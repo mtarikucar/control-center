@@ -85,6 +85,15 @@ describe('the owner’s capability API (spec capabilities §4.2, §9)', () => {
     expect((await call(t.port, 'POST', '/api/custom-capabilities', ['sms.send'])).status).toBe(400);
     expect((await call(t.port, 'POST', '/api/custom-capabilities/sms.send/accept', {})).body).toMatchObject({ status: 'active', kind: 'send', decidedBy: OWNER });
     expect((await call(t.port, 'POST', '/api/custom-capabilities/sms.send/accept', {})).status).toBe(409);
+    // Final review I1: what the coordinator activated, the owner hands to the system with one click; the page's way only.
+    t.capabilities.propose(ada.id, { id: 'wa.send', title: 'WhatsApp', summary: 'Mesaj.', kind: 'send', tools: ['mcp__wa__send'] });
+    const coordinator = t.company.coordinator()!;
+    t.capabilities.decide(coordinator.id, 'wa.send', { accept: true });
+    expect((await call(t.port, 'POST', '/api/custom-capabilities/wa.send/confirm', {}, { page: false })).status).toBe(403);
+    expect(t.capabilities.get('wa.send').decidedBy).toBe(coordinator.id);
+    expect((await call(t.port, 'POST', '/api/custom-capabilities/wa.send/confirm', {})).body).toMatchObject({ id: 'wa.send', status: 'active', decidedBy: OWNER });
+    expect((await call(t.port, 'GET', '/api/capabilities')).body.capabilities.find((x: { id: string }) => x.id === 'wa.send')).toMatchObject({ company: true, confirmed: true });
+    expect((await call(t.port, 'POST', '/api/custom-capabilities/no.such/confirm', {})).status).toBe(404);
     // The owner's note on a retirement is kept.
     expect((await call(t.port, 'POST', '/api/custom-capabilities/sms.send/retire', { note: 'Artık gerekmiyor.' })).body).toMatchObject({ status: 'retired', note: 'Artık gerekmiyor.' });
   });

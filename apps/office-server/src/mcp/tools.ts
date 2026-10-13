@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS, OUTBOX_VIA_LABELS, fold, type OutboxEntry } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS, OUTBOX_VIA_LABELS, fold, isOutwardPolicyKind, type OutboxEntry } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
@@ -509,7 +509,7 @@ export function officeTools(o: {
     },
     {
       name: 'capabilityDecide',
-      description: 'Decide a capability someone proposed (coordinator; your own proposal is the owner’s). accept keeps its kind or makes it stricter — read → an outward kind, any kind → pay or delete; pay and delete never move, and loosening is the owner’s — and it is in the vocabulary at once; then put it on the roles that need it with editRoleCard. reject needs a note.',
+      description: 'Decide a capability someone proposed (coordinator; your own proposal is the owner’s). accept keeps its kind or makes it stricter — read → an outward kind, any kind → pay or delete; pay and delete never move, and loosening is the owner’s; a read proposal you accept only with an outward kind (accepting it as read is the owner’s) — and it is in the vocabulary at once; then put it on the roles that need it with editRoleCard. While the gate is on, the calls of one you activate go to the owner until the owner confirms it. reject needs a note.',
       inputSchema: object(
         {
           id: s('The proposed capability’s id.'),
@@ -525,9 +525,10 @@ export function officeTools(o: {
         const decision = str(args, 'decision');
         if (decision !== 'accept' && decision !== 'reject') throw new ValidationError('decision accept ya da reject olmalı.');
         const c = o.capabilities.decide(employee.id, str(args, 'id').trim(), { accept: decision === 'accept', kind: optStr(args, 'kind'), note: optStr(args, 'note') });
-        return c.status === 'active'
-          ? `${c.id} etkin (${CAPABILITY_KIND_LABELS[c.kind]}); sahibi Yetenekler sekmesinde görür. Gereken rollere editRoleCard capabilities ile ekle.`
-          : `${c.id} reddedildi.`;
+        if (c.status !== 'active') return `${c.id} reddedildi.`;
+        // Final review I1: the coordinator's activation classifies the tool; only the owner hands its calls to the system.
+        const held = isOutwardPolicyKind(c.kind) ? ' Kapı açıkken çağrıları, sahibi Yetenekler sekmesinden sisteme açana dek sahibine sorulur.' : '';
+        return `${c.id} etkin (${CAPABILITY_KIND_LABELS[c.kind]}); sahibi Yetenekler sekmesinde görür. Gereken rollere editRoleCard capabilities ile ekle.${held}`;
       },
     },
     {

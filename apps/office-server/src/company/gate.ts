@@ -8,6 +8,7 @@ import { deskDir } from '../desk.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Approvals } from './approvals.ts';
+import { systemEligible } from './capabilities.ts';
 import { classifyCall, type GateContext, type GatePart } from './gate-policy.ts';
 import type { OutboxStore } from './outbox-store.ts';
 import { outwardRule } from './outward-rules.ts';
@@ -105,7 +106,7 @@ export class Gate {
     const part = matched.missing;
     this.#held.set(employeeId, { tool, kind: part.kind, target: part.target, scope: verdict.scope });
     this.#d.events.append(employeeId, { type: 'gate.checked', tool, kind: part.kind, target: part.target, decision: 'deny', approvalId: null });
-    const rule = system === null ? '' : ' Sistem bu çağrıyı kuralı yüzünden kendi geçirmedi.';
+    const rule = system?.rule ? ' Sistem bu çağrıyı kuralı yüzünden kendi geçirmedi.' : '';
     const more = verdict.parts.length > 1 ? ` Bu çağrıda onay isteyen ${verdict.parts.length} parça var; her biri için ayrı onay gerekir.` : '';
     const scope = verdict.scope === 'task' ? ' Görev boyunca bu tür tarayıcı işleri için scope: task iste.' : '';
     return {
@@ -113,7 +114,7 @@ export class Gate {
       kind: part.kind,
       target: part.target,
       reason:
-        `OFİS KAPISI: ${APPROVAL_KIND_LABELS[part.kind]} — “${part.target}” onaysız yapılamaz (${system ?? part.why}).${rule}${more} ` +
+        `OFİS KAPISI: ${APPROVAL_KIND_LABELS[part.kind]} — “${part.target}” onaysız yapılamaz (${system?.why ?? part.why}).${rule}${more} ` +
         `approvalRequest aracıyla sahibinden onay iste: summary'ye neden gerektiğini yaz (tool, kind ve target boş kalırsa bu çağrı alınır).${scope} ` +
         'Sahibi onaylayınca aynı çağrıyı tekrarla; beklerken görevi taskPark ile park et.',
     };
@@ -123,10 +124,11 @@ export class Gate {
    * Spec capabilities §5: a call is the system's when every part comes from a connector's classified tool, of a kind
    * the owner's policy leaves to the system — the shell's and the built-in tools' sends and publishes never are, and
    * never make the gate read the constitution (Task 8 review M4). Then true — it passes, and its outbox line is
-   * written — or the rule of §6 that holds it. null: the owner's, as before; also when the system cannot decide or
-   * write the call (M4: held, never a 500).
+   * written — or why it stays the owner's: a rule of §6 (`rule`), or the owner's own say over it (a capability the
+   * coordinator alone activated, final review I1). null: the owner's, as before; also when the system cannot decide
+   * or write the call (M4: held, never a 500).
    */
-  #system(employee: Employee, tool: string, input: unknown, parts: GatePart[]): true | string | null {
+  #system(employee: Employee, tool: string, input: unknown, parts: GatePart[]): true | { why: string; rule: boolean } | null {
     const a = this.#d.autonomy;
     if (!a || parts.some((p) => p.capability === undefined)) return null;
     try {
@@ -136,12 +138,14 @@ export class Gate {
         if (!isOutwardPolicyKind(p.kind) || c.outwardPolicy[p.kind] !== 'system') return null;
         kinds.push(p.kind);
       }
+      // The coordinator classifies a tool for the sessions; handing its calls to the system is the owner's (final review I1).
+      if (parts.some((p) => !systemEligible(p.capability!))) return { why: 'koordinatörün açtığı yetenek: sahibi sisteme açana dek sahibine sorulur', rule: false };
       const departmentId = employee.departmentId ?? null;
       const rule = outwardRule({
         input, kinds, rules: c, now: (a.now ?? Date.now)(),
         count: (k, since) => a.outbox.countSystem({ departmentId, employeeId: employee.id, kinds: k, since }),
       });
-      if (rule) return rule;
+      if (rule) return { why: rule, rule: true };
       // Counted and written with no await between (Task 8 review M5): two calls at once never both take the last place.
       // The line and its event are one write (M1).
       this.#together(() => {

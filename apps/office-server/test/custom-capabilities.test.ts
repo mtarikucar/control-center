@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { OWNER, type Employee } from '@cc/shared';
-import { capabilityIds, toolClass, useCompanyCapabilities } from '../src/company/capabilities.ts';
+import { capabilityIds, capabilityVocabulary, systemEligible, toolClass, useCompanyCapabilities } from '../src/company/capabilities.ts';
 import { asCapability, coordinatorMayChange, CustomCapabilities } from '../src/company/custom-capabilities.ts';
 import { CustomCapabilityStore } from '../src/company/custom-capability-store.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
@@ -197,6 +197,40 @@ describe('company capabilities — proposing and deciding (spec capabilities §4
     t.caps.retire('sms.send');
     expect(() => t.caps.setKind('sms.send', 'send')).toThrow(/geri alındı; türü değiştirilemez/);
   });
+
+  it('final review I1: the owner confirms what the coordinator activated — from then on the owner’s decision, and the system’s at the gate; what the owner set is confirmed already', () => {
+    const t = make();
+    const confirmed = (id: string) => capabilityVocabulary().capabilities.find((c) => c.id === id)?.confirmed;
+    t.caps.propose(t.ada.id, proposal());
+    t.tick(500);
+    t.caps.decide(t.coordinator.id, 'sms.send', { accept: true });
+    expect([confirmed('sms.send'), systemEligible('sms.send')]).toEqual([undefined, false]);
+    expect(() => t.caps.confirm('sms.nope')).toThrow(/Şirket yeteneği bulunamadı: sms\.nope/);
+    t.tick(500);
+    expect(t.caps.confirm('sms.send')).toMatchObject({ status: 'active', kind: 'send', proposedBy: t.ada.id, decidedBy: OWNER, decidedAt: 2_000 });
+    expect([confirmed('sms.send'), systemEligible('sms.send')]).toEqual([true, true]);
+    expect(t.changes()).toEqual(['proposed', 'activated', 'confirmed']);
+    // Once is enough: again, nothing changes and nothing is announced.
+    t.tick(500);
+    expect(t.caps.confirm('sms.send')).toMatchObject({ decidedBy: OWNER, decidedAt: 2_000 });
+    expect(t.changes()).toEqual(['proposed', 'activated', 'confirmed']);
+    // Only an active one: a proposal waits for a decision, a retired one is gone.
+    t.caps.propose(t.ada.id, proposal({ id: 'wa.send', tools: ['mcp__wa__send'] }));
+    expect(() => t.caps.confirm('wa.send')).toThrow(/wa\.send etkin değil \(karar bekliyor\)/);
+    // The owner's own: added, accepted, a kind set on one the coordinator activated.
+    t.caps.decide(OWNER, 'wa.send', { accept: true });
+    t.caps.ownerAdd(proposal({ id: 'tg.send', tools: ['mcp__tg__send'] }));
+    t.caps.propose(t.ada.id, proposal({ id: 'tg.post', kind: 'send', tools: ['mcp__tg__post'] }));
+    t.caps.decide(t.coordinator.id, 'tg.post', { accept: true });
+    expect(systemEligible('tg.post')).toBe(false);
+    t.caps.setKind('tg.post', 'publish');
+    expect(['wa.send', 'tg.send', 'tg.post'].map(systemEligible)).toEqual([true, true, true]);
+    // The product's are; an id the vocabulary does not have is not.
+    expect([systemEligible('email.send'), systemEligible('no.such')]).toEqual([true, false]);
+    t.caps.retire('sms.send');
+    expect(systemEligible('sms.send')).toBe(false);
+    expect(() => t.caps.confirm('sms.send')).toThrow(/etkin değil \(geri alındı\)/);
+  });
 });
 
 /** The office tools as an MCP session sees them: `as(who, name, args)` runs one, refusing a tool outside the caller's kind. */
@@ -226,6 +260,12 @@ describe('company capabilities — the tools (spec capabilities §4.2)', () => {
     expect(await call(t.coordinator, 'capabilityDecide', { id: 'sms.send', decision: 'accept', kind: 'pay' })).toBe(
       'sms.send etkin (ödeme/harcama); sahibi Yetenekler sekmesinde görür. Gereken rollere editRoleCard capabilities ile ekle.',
     );
+    // Final review I1: one of the policy's kinds, accepted by the coordinator, is the owner's at the gate until confirmed.
+    await call(t.ada, 'capabilityPropose', proposal({ id: 'tg.send', tools: ['mcp__tg__send'] }));
+    expect(await call(t.coordinator, 'capabilityDecide', { id: 'tg.send', decision: 'accept' })).toBe(
+      'tg.send etkin (gönderim); sahibi Yetenekler sekmesinde görür. Gereken rollere editRoleCard capabilities ile ekle. Kapı açıkken çağrıları, sahibi Yetenekler sekmesinden sisteme açana dek sahibine sorulur.',
+    );
+    t.caps.retire('tg.send');
     const after = await call(t.ada, 'capabilitiesRead');
     expect(after).toContain('# Yetenek sözlüğü (25 yetenek, sürüm 3; 1 şirketin) — ofisteki karşılığı; salt okunur, hiçbir bağlayıcı çağrılmadı.');
     expect(after).toContain('• sms.send — SMS gönderme (şirketin) (dışa dönük) [yok] sağlayan bağlantı yok');

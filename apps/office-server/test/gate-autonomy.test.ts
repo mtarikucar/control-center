@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OWNER, type Approval, type Employee, type OutboxEntry } from '@cc/shared';
 import { ApprovalStore } from '../src/company/approval-store.ts';
 import { Approvals } from '../src/company/approvals.ts';
+import { useCompanyCapabilities } from '../src/company/capabilities.ts';
+import { asCapability, CustomCapabilities } from '../src/company/custom-capabilities.ts';
+import { CustomCapabilityStore } from '../src/company/custom-capability-store.ts';
 import { Gate, type GateDeps } from '../src/company/gate.ts';
 import { OutboxStore } from '../src/company/outbox-store.ts';
 import { officeTools } from '../src/mcp/tools.ts';
@@ -16,6 +19,7 @@ const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const c of cleanups.splice(0)) await c();
+  useCompanyCapabilities(null);
 });
 
 const HOUR = 3_600_000;
@@ -175,6 +179,28 @@ describe('the gate lets the system send (spec capabilities §5–§7)', () => {
     expect(t.outbox.list()).toEqual([]);
     expect(await t.ask(ada, 'mcp__claude_ai_Gmail__reply', { messageId: 'm1', body: 'Teşekkürler.' })).toMatchObject({ decision: 'allow', reason: 'sistemce (otonomi politikası)' });
     expect(t.outbox.list()).toEqual([expect.objectContaining({ tool: 'mcp__claude_ai_Gmail__reply', via: 'system', recipients: [] })]);
+  });
+
+  it('final review I1: a capability the coordinator activated stays the owner’s at the gate until the owner confirms it; what the owner added, and the product’s, are the system’s', async () => {
+    const t = make();
+    const caps = new CustomCapabilities({ store: new CustomCapabilityStore(t.db), roster: t.roster, events: t.events, notices: t.notices, coordinator: () => t.company.coordinator() });
+    useCompanyCapabilities(() => caps.active().map(asCapability));
+    const ada = t.hire('Ada');
+    const SMS = 'mcp__netgsm__send_sms';
+    caps.propose(ada.id, { id: 'sms.send', title: 'SMS', summary: 'Netgsm ile SMS.', kind: 'send', tools: [SMS] });
+    // Review focus 3's case: the coordinator accepts it with the kind proposed.
+    caps.decide(t.coordinator.id, 'sms.send', { accept: true });
+    const sms = () => t.ask(ada, SMS, { phone: '+905320000000', text: 'Kargonuz yolda.' });
+    const held = await sms();
+    expect(held).toMatchObject({ decision: 'deny', kind: 'send' });
+    expect(held.reason).toMatch(/onaysız yapılamaz \(koordinatörün açtığı yetenek: sahibi sisteme açana dek sahibine sorulur\)\. approvalRequest/);
+    expect(t.outbox.list()).toEqual([]);
+    caps.confirm('sms.send');
+    expect(await sms()).toMatchObject({ decision: 'allow', reason: 'sistemce (otonomi politikası)', kind: 'send' });
+    caps.ownerAdd({ id: 'wa.send', title: 'WhatsApp', summary: 'Mesaj.', kind: 'send', tools: ['mcp__wa__send_message'] });
+    expect(await t.ask(ada, 'mcp__wa__send_message', { to: '+905320000001', text: 'Merhaba' })).toMatchObject({ decision: 'allow', reason: 'sistemce (otonomi politikası)' });
+    expect(await t.mail(ada)).toMatchObject({ decision: 'allow', reason: 'sistemce (otonomi politikası)' });
+    expect(t.outbox.list().map((e) => e.tool)).toEqual([GMAIL, 'mcp__wa__send_message', SMS]);
   });
 
   it('an outward call the owner approved is an outbox line whatever its tool (a git push is a publish); a payment is not', async () => {
