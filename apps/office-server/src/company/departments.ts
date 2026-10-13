@@ -227,6 +227,11 @@ export class Departments {
     return this.create(by, { name: team, mission: `${team.trim()} ekibi; misyonunu departmentUpdate ile yaz.` });
   }
 
+  /** Throws what making this person a head would throw (nobody, let go, the coordinator), changing nothing: callers that also write other fields check the head first. */
+  assertCanHead(employeeId: string): void {
+    this.#candidate(employeeId);
+  }
+
   /** A person may not take a department's name (taskPass and a stream's owner must mean one thing). */
   assertFreeName(name: string): void {
     const clash = this.find(name);

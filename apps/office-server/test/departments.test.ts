@@ -79,6 +79,21 @@ describe('Departments — opening, heads and members (spec §3, §5.1)', () => {
     expect(() => t.departments.setHead(t.coordinator.id, dep.id, t.coordinator.id)).toThrow(/Koordinatörün departmanı olmaz/);
   });
 
+  it('assertCanHead refuses what setHead would (nobody, someone let go, the coordinator) and changes nothing', () => {
+    const t = make();
+    const [ada, gone] = [t.hire('Ada'), t.hire('Gül')];
+    t.roster.update(gone.id, { lifecycle: 'archived' });
+    const dep = t.departments.create(OWNER, { name: 'X', mission: 'm' });
+    const events = t.departmentEvents().length;
+    expect(() => t.departments.assertCanHead('00000000-0000-4000-8000-000000000000')).toThrow(/Çalışan bulunamadı/);
+    expect(() => t.departments.assertCanHead(gone.id)).toThrow(/Gül işten çıkarıldı/);
+    expect(() => t.departments.assertCanHead(t.coordinator.id)).toThrow(/Koordinatörün departmanı olmaz/);
+    expect(() => t.departments.assertCanHead(ada.id)).not.toThrow();
+    expect(t.roster.get(ada.id)).not.toHaveProperty('departmentId');
+    expect(t.departments.get(dep.id).headId).toBeNull();
+    expect(t.departmentEvents()).toHaveLength(events);
+  });
+
   it('a new head: the former one stays as a member; heading a second department leaves the first headless', () => {
     const t = make();
     const [a, b] = [t.hire('Ada'), t.hire('Bora')];

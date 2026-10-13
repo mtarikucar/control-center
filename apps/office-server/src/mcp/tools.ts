@@ -1211,6 +1211,8 @@ export function officeTools(o: {
           const head = optStr(args, 'head');
           // The head is found before anything changes: a name that is nobody's leaves the department as it was.
           const headId = head === undefined ? undefined : head.trim() ? findPerson(head).id : null;
+          // And whole: the coordinator or someone let go would be refused by setHead only after the fields were written.
+          if (typeof headId === 'string') deps.assertCanHead(headId);
           const fields = patch.name !== undefined || patch.mission !== undefined || patch.scope !== undefined;
           if (!fields && headId === undefined) return `Değişiklik yok: ${d.name}.`;
           let next = fields ? deps.update(employee.id, d.id, patch) : d;

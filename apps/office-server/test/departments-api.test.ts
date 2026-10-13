@@ -26,7 +26,7 @@ async function start() {
   await new Promise<void>((resolve) => api.server.listen(0, '127.0.0.1', resolve));
   const port = (api.server.address() as AddressInfo).port;
   cleanups.push(() => api.close(), f.cleanup, s.cleanup);
-  return { port, ...c, departments: c.departments! };
+  return { port, roster: s.roster, ...c, departments: c.departments! };
 }
 
 /** As the office page sends it (pageHeaders), unless `page: false` (a request from outside the page). */
@@ -81,5 +81,56 @@ describe('departments API (spec §7)', () => {
     expect(bad.status).toBe(404);
     expect(t.departments.get(dep.id).mission).toBe(dep.mission);
     expect((await call(t.port, 'POST', '/api/departments/yok-boyle-bir-sey', { mission: 'x' })).status).toBe(404);
+  });
+
+  it('a head who cannot be one (the coordinator, someone let go, not an id) is refused whole: nothing of the change is written', async () => {
+    const t = await start();
+    const coordinator = t.company.hireCoordinator('sonnet');
+    const gone = t.company.hire(OWNER, { name: 'Gül', role: 'r' });
+    t.roster.update(gone.id, { lifecycle: 'archived' });
+    const created = (await call(t.port, 'POST', '/api/departments', { template: 'pazarlama' })).body as { id: string; name: string; mission: string; scope: string };
+    const change = { name: 'Yeni Ad', mission: 'Yeni misyon', scope: 'Yeni sınır' };
+    const unchanged = () => expect(t.departments.get(created.id)).toMatchObject({ name: created.name, mission: created.mission, scope: created.scope, headId: null });
+    expect((await call(t.port, 'POST', `/api/departments/${created.id}`, { ...change, headId: coordinator.id })).status).toBe(409);
+    unchanged();
+    expect((await call(t.port, 'POST', `/api/departments/${created.id}`, { ...change, headId: gone.id })).status).toBe(409);
+    unchanged();
+    const numeric = await call(t.port, 'POST', `/api/departments/${created.id}`, { ...change, headId: 7 });
+    expect(numeric).toMatchObject({ status: 400, body: { error: 'headId bir çalışan kimliği ya da null olmalı.' } });
+    unchanged();
+    // A head who can be one still goes together with the fields.
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    expect((await call(t.port, 'POST', `/api/departments/${created.id}`, { ...change, headId: ada.id })).body).toMatchObject({ ...change, headId: ada.id });
+  });
+
+  it('a field of the wrong type is a 400 that names the field, never a 500', async () => {
+    const t = await start();
+    t.company.hireCoordinator('sonnet');
+    const created = (await call(t.port, 'POST', '/api/departments', { template: 'pazarlama' })).body as { id: string };
+    for (const field of ['template', 'name', 'mission', 'scope']) {
+      expect(await call(t.port, 'POST', '/api/departments', { [field]: 5 }), field).toMatchObject({ status: 400, body: { error: `${field} metin olmalı.` } });
+    }
+    for (const field of ['name', 'mission', 'scope']) {
+      expect(await call(t.port, 'POST', `/api/departments/${created.id}`, { [field]: ['x'] }), field).toMatchObject({ status: 400, body: { error: `${field} metin olmalı.` } });
+    }
+    expect(await call(t.port, 'POST', `/api/departments/${created.id}/close`, { reason: { a: 1 } })).toMatchObject({ status: 400, body: { error: 'reason metin olmalı.' } });
+    expect((await call(t.port, 'POST', '/api/departments', [] as unknown)).status).toBe(400);
+    expect(t.departments.list()).toMatchObject([{ id: created.id, status: 'open' }]);
+  });
+
+  it('moving someone needs departmentId in the body: without the key nobody is sent to the centre; null is the centre', async () => {
+    const t = await start();
+    t.company.hireCoordinator('sonnet');
+    const ada = t.company.hire(OWNER, { name: 'Ada', role: 'r' });
+    const dep = (await call(t.port, 'POST', '/api/departments', { template: 'pazarlama' })).body as { id: string };
+    expect((await call(t.port, 'POST', `/api/employees/${ada.id}/department`, { departmentId: dep.id })).body).toMatchObject({ departmentId: dep.id });
+    for (const body of [{}, { department: dep.id }, { departmentId: 5 }, [] as unknown]) {
+      expect(await call(t.port, 'POST', `/api/employees/${ada.id}/department`, body), JSON.stringify(body)).toMatchObject({ status: 400, body: { error: 'departmentId gerekli (merkez için null).' } });
+      expect(t.roster.get(ada.id)).toMatchObject({ departmentId: dep.id });
+    }
+    const centre = await call(t.port, 'POST', `/api/employees/${ada.id}/department`, { departmentId: null });
+    expect(centre.status).toBe(200);
+    expect(centre.body).not.toHaveProperty('departmentId');
+    expect(t.roster.get(ada.id)).not.toHaveProperty('departmentId');
   });
 });

@@ -245,4 +245,18 @@ describe('Department tools (spec §5)', () => {
     expect(await t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama', mission: 'Yeni misyon.' })).toBe('Pazarlama departmanı güncellendi; başkanı artık Pelin.');
     expect(await t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama', head: '' })).toBe('Pazarlama departmanı güncellendi; başkansız.');
   });
+
+  it('departmentUpdate checks the head whole before it changes anything: the coordinator is refused and so is someone let go; the fields stay', async () => {
+    const t = make();
+    const a = t.departments.create(OWNER, { name: 'Pazarlama', mission: 'Eski misyon.' });
+    const pelin = t.company.hire(OWNER, { name: 'Pelin', role: 'r', departmentId: a.id, head: true });
+    const gone = t.company.hire(OWNER, { name: 'Gül', role: 'r' });
+    t.roster.update(gone.id, { lifecycle: 'archived' });
+    const kept = () => expect(t.departments.get(a.id)).toMatchObject({ name: 'Pazarlama', mission: 'Eski misyon.', headId: pelin.id });
+    await expect(t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama', mission: 'Yeni misyon.', head: t.coordinator.name })).rejects.toThrow(/Koordinatörün departmanı olmaz/);
+    kept();
+    // Someone let go is not found by the roster's lookup at all (its list is the people at work), also by id.
+    await expect(t.call(t.coordinator, 'departmentUpdate', { department: 'Pazarlama', name: 'Yeni Ad', mission: 'Yeni misyon.', head: gone.id })).rejects.toThrow(/Çalışan bulunamadı/);
+    kept();
+  });
 });

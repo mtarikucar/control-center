@@ -128,6 +128,19 @@ function portOf(server: Server): number {
   return (server.address() as AddressInfo).port;
 }
 
+type DepartmentBody = { template?: string; name?: string; mission?: string; scope?: string; headId?: string | null; reason?: string };
+
+/** A department route's body: an object whose text fields are text and whose headId is an employee id or null (else 400, naming the field). */
+function departmentBody(raw: unknown): DepartmentBody {
+  if (raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) throw new ValidationError('Geçersiz istek gövdesi.');
+  const body = (raw ?? {}) as Record<string, unknown>;
+  for (const field of ['template', 'name', 'mission', 'scope', 'reason']) {
+    if (body[field] !== undefined && typeof body[field] !== 'string') throw new ValidationError(`${field} metin olmalı.`);
+  }
+  if (body.headId !== undefined && body.headId !== null && typeof body.headId !== 'string') throw new ValidationError('headId bir çalışan kimliği ya da null olmalı.');
+  return body as DepartmentBody;
+}
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -298,17 +311,16 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       if (method === 'GET' && url.pathname === '/api/departments') return sendJson(res, 200, departments.list());
       if (method === 'GET' && url.pathname === '/api/department-templates') return sendJson(res, 200, listDepartmentTemplates());
       if (method === 'POST' && url.pathname === '/api/departments') {
-        const body = (await readJson(req)) as { template?: string; name?: string; mission?: string; scope?: string; headId?: string | null } | null;
-        return sendJson(res, 201, departments.create(OWNER, body ?? {}));
+        return sendJson(res, 201, departments.create(OWNER, departmentBody(await readJson(req))));
       }
       const dep = DEPARTMENT_ROUTE.exec(url.pathname);
       if (method === 'POST' && dep) {
         const id = dep[1] ?? '';
-        const body = ((await readJson(req)) ?? {}) as { name?: string; mission?: string; scope?: string; headId?: string | null; reason?: string };
+        const body = departmentBody(await readJson(req));
         if (dep[2] === 'close') return sendJson(res, 200, departments.close(OWNER, id, body.reason ?? ''));
-        // The head is found before anything changes: a head that is nobody's leaves the department as it was.
+        // The department and the head are checked whole before anything changes: a head who cannot be one (nobody, let go, the coordinator) leaves the department as it was.
         departments.get(id);
-        if (typeof body.headId === 'string') d.roster.get(body.headId);
+        if (typeof body.headId === 'string') departments.assertCanHead(body.headId);
         let next = body.name !== undefined || body.mission !== undefined || body.scope !== undefined ? departments.update(OWNER, id, { name: body.name, mission: body.mission, scope: body.scope }) : departments.get(id);
         if (body.headId !== undefined) next = departments.setHead(OWNER, id, body.headId);
         return sendJson(res, 200, next);
@@ -383,8 +395,11 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     }
     if (method === 'GET' && action === 'file' && d.company) return sendJson(res, 200, d.company.memory.employeeFile(id));
     if (method === 'POST' && action === 'department' && d.company?.departments) {
-      const body = ((await readJson(req)) ?? {}) as { departmentId?: string | null };
-      return sendJson(res, 200, d.company.departments.move(OWNER, id, body.departmentId ?? null));
+      // The key is required: a body without it must not send the person to the centre by accident.
+      const body = await readJson(req);
+      const to = typeof body === 'object' && body !== null && !Array.isArray(body) && 'departmentId' in body ? (body as { departmentId: unknown }).departmentId : undefined;
+      if (typeof to !== 'string' && to !== null) throw new ValidationError('departmentId gerekli (merkez için null).');
+      return sendJson(res, 200, d.company.departments.move(OWNER, id, to));
     }
     if (method === 'POST' && action === 'messages') {
       const text = textOf(await readJson(req));
