@@ -22,10 +22,21 @@ describe('frameOf (spec office rooms §6)', () => {
   });
 
   it('every wall of the plan that bounds a room looks into it', () => {
+    const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+    const looked = new Set<number>();
     for (const w of LAYOUT.walls.filter((x) => x.faces)) {
+      const label = `${w.x1},${w.z1} → ${w.x2},${w.z2}`;
+      // `faces` must be a room's own centre (a typo'd point would still be "inward" for the check below), and the wall one of that room's edges.
+      const room = LAYOUT.rooms.find(({ rect: r }) => near(w.faces!.x, (r.x1 + r.x2) / 2) && near(w.faces!.z, (r.z1 + r.z2) / 2));
+      expect(room, `${label}: faces is no room's centre`).toBeDefined();
+      const r = room!.rect;
+      const along = near(w.z1, w.z2) ? [r.z1, r.z2].some((z) => near(w.z1, z)) && w.x1 >= r.x1 - 1e-9 && w.x2 <= r.x2 + 1e-9 : [r.x1, r.x2].some((x) => near(w.x1, x)) && w.z1 >= r.z1 - 1e-9 && w.z2 <= r.z2 + 1e-9;
+      expect(along, `${label}: not on room ${room!.index}'s edge`).toBe(true);
+      looked.add(room!.index);
       const f = frameOf(w, CENTRE);
       const n = inward(w);
-      expect(n.x * (w.faces!.x - f.cx) + n.z * (w.faces!.z - f.cz), `${w.x1},${w.z1} → ${w.x2},${w.z2}`).toBeGreaterThan(0);
+      expect(n.x * (w.faces!.x - f.cx) + n.z * (w.faces!.z - f.cz), label).toBeGreaterThan(0);
     }
+    expect([...looked].sort()).toEqual(LAYOUT.rooms.map((x) => x.index));
   });
 });

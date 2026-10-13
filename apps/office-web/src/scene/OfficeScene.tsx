@@ -10,6 +10,7 @@ import { Effects } from './Effects.tsx';
 import { FurnitureLayer } from './FurnitureLayer.tsx';
 import { Backdrop, Lighting } from './Lighting.tsx';
 import { Room } from './Room.tsx';
+import { RoomsLayer } from './RoomsLayer.tsx';
 
 export function OfficeScene() {
   const select = useOffice((s) => s.select);
@@ -29,6 +30,7 @@ export function OfficeScene() {
           camera so its far corner clears the top bar. */}
       <group position={[-LAYOUT.width / 2 + 1.1, 0, -LAYOUT.depth / 2 + 1.1]}>
         <Room />
+        <RoomsLayer />
         <FurnitureLayer />
         <ArtFrames />
         <DeskDressing />
