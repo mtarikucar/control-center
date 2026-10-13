@@ -59,6 +59,9 @@ describe('the special contacts on the senders’ desks (final review I4.2)', () 
     expect(ada).toMatch(/^## Özel kişiler\n/);
     expect(ada).toContain('approvalRequest');
     expect(ada).toContain('kapı açık da olsa kapalı da');
+    // What the gate sees is said as it is (final review C1): the call's own input, the ids the owner lists, the held draft and reply to everyone.
+    expect(ada).toContain('Kapı listedekileri (adres, telefon, ad, kişinin aday ya da konuşma kimliği) yalnız çağrının kendi girdisinde arar.');
+    expect(ada).toContain('Olağan bir yanıtın alıcılarını girdiye yaz: kapı açıkken bir taslağı kimliğiyle göndermek ya da herkese yanıtlamak tutulur ("alıcılar girdide yok").');
     // A code span: Claude Code takes `@…` outside one for a file to import.
     expect(ada).toContain('- `ali@firma.com`\n- `@AliVeli`\n- `Ahmet Yılmaz`\n- `ld_ali`\n');
     expect(t.card(t.ada).match(/@special-contacts\.md/g)).toHaveLength(1);

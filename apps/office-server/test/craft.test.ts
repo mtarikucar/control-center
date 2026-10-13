@@ -87,6 +87,34 @@ describe('the coordination craft (ships with the office)', () => {
     for (const text of [flat(methodText('customer')), flat(methodText('content'))]) expect(text).toContain('`approvalRequest`');
   });
 
+  it('final review I4/C1: bulk sends and the special contacts are on the critical list of the shared texts, gate on or off; the list is matched against the call’s own input, and a routine reply names its recipients in the call', () => {
+    const critical = 'toplu gönderim (eşiği aşan alıcı)';
+    const special = 'özel kişilere giden ya da onları anan';
+    for (const [name, text] of [['working', workingText()], ['coordination', coordinationText()], ['customer', methodText('customer')], ['content', methodText('content')]] as const) {
+      const t = flat(text);
+      expect(t, name).toContain(critical);
+      expect(t, name).toContain(special);
+      expect(t, name).toContain('kapı açıkken de kapalıyken de');
+    }
+    // The ordinary going by the policy and into the outbox is a gate-on sentence, and says so.
+    for (const text of [flat(methodText('customer')), flat(methodText('content')), flat(coordinationText())]) expect(text).toMatch(/giden kutusuna yazılır \(kapı açıkken\)/);
+    const w = flat(workingText());
+    // Where a sender sees the list, and what the gate can see of it (final review C1, I4.2).
+    expect(w).toContain('gönderiyorsan listeyi masandaki "Özel kişiler" bölümünde görürsün');
+    expect(w).toContain('Kapı onları yalnız çağrının girdisinde arar (adres, telefon, ad, aday ya da konuşma kimliği)');
+    expect(w).toContain('Olağan yanıtın alıcılarını çağrıya yaz: taslak ya da herkese yanıtla kapıda tutulur ("alıcılar girdide yok")');
+    // A call the employee asked about waits; only the identical repeat uses an approval (final review I3).
+    expect(w).toContain('Sorup cevap beklediğin ya da sahibinin bir gün içinde reddettiği çağrıyı da sistem geçirmez');
+    expect(w).toContain('onay gelince aynı çağrıyı aynen tekrarla (başka alıcı başka çağrıdır)');
+    const c = flat(coordinationText());
+    expect(c).toContain('Özel kişilerin listesini sahibi Anayasa\'da tutar; gönderim, yayın, arama ya da davet yeteneği olanların masasında "Özel kişiler" bölümü olarak görünür');
+    expect(c).toContain('olağan bir yanıtın alıcıları çağrıda yazılı olsun (taslak ve "herkese yanıtla" kapıda tutulur)');
+    expect(flat(methodText('customer'))).toContain('Olağan yanıtın alıcıları çağrıda yazılı olsun: taslağı kimliğiyle göndermek ya da herkese yanıtlamak kapıda tutulur');
+    // The outbox is written only with the gate on.
+    expect(flat(methodText('customer'))).toContain('(kapı açıkken olağan olan giden kutusunda da görünür)');
+    expect(flat(methodText('customer'))).toContain('olağan olan için (kapı açıkken) giden kutusundaki satır');
+  });
+
   it('without a type lists every type; an unknown type is refused in Turkish', () => {
     const list = methodText();
     for (const type of WORK_TYPES) expect(list).toContain(type);

@@ -8,9 +8,10 @@
   edileni saatinde geri getirir. Claude'un kendi zamanlayıcısı (`CronCreate`, `/loop`, `/schedule`) bu ofiste kapalıdır:
   zamana bağlı her iş ofisin saatinden geçer.
 - **Kapıya takılırsan** ("OFİS KAPISI: …"): sistemin kendi geçirmediği yayın, gönderim, arama, takvim daveti, ödeme,
-  silme, tarayıcı işi ya da ofisin kendisine dokunan bir çağrı sahibinin onayını bekler. `approvalRequest` ile iste
-  (summary: neden gerektiği); onay gelince aynı çağrıyı
-  tekrarla; beklerken başka işin yoksa görevi `taskPark` ile park et. Kapıyı dolanmaya çalışma: kapı kazara ve sıradan
+  silme, tarayıcı işi ya da ofisin kendisine dokunan bir çağrı sahibinin onayını bekler. Sorup cevap beklediğin ya da
+  sahibinin bir gün içinde reddettiği çağrıyı da sistem geçirmez. `approvalRequest` ile iste (summary: neden gerektiği);
+  onay gelince aynı çağrıyı aynen tekrarla (başka alıcı başka çağrıdır); beklerken başka işin yoksa görevi `taskPark`
+  ile park et. Kapıyı dolanmaya çalışma: kapı kazara ve sıradan
   yolları kapatır, aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz; sahibi onayı yalnız ofis sayfasından sayılır.
 - **Boşta sessizce bekleme.** Teslimden sonra sıranda iş kalmadıysa (`myTasks`) hangi işi alabileceğini `propose` ile
   (`kind: idea`) liderine ya da koordinatöre öner: ne, neden ve ne zaman biter; kararı onlar verir.
@@ -26,9 +27,13 @@
 ## Sistemin senin adına gönderdiği
 
 - Kapı açıkken bağlayıcıdan yapılan olağan gönderim, yayın ve arama sahibine sorulmadan geçebilir (Anayasa'nın
-  otonomi politikası ve kuralları: saatlik sınır, toplu gönderim, özel kişiler, arama saatleri). Geçen her çağrı giden
-  kutusuna yazılır; başkanın onu her gün okur.
-- Şunlarda göndermeden önce `approvalRequest` ile sahibine sor (`tool` ve göndereceğin `input`): para sözü (fiyat,
-  indirim, iade, ödeme tarihi); hukuki konu (avukat, tüketici hakem heyeti, KVKK talebi, sözleşme); kriz (basın,
-  olumsuz yayılan paylaşım, tehdit, ağır şikâyet); bilgi tabanında cevabı olmayan soru; ticari ileti izni (İYS)
-  olmayan kişiye ilk tanıtım mesajı ya da araması. Kapı içeriği okumaz; bunları sen ayırırsın.
+  politikası ve kuralları: saatlik sınır, arama saatleri). Geçen her çağrı giden kutusuna yazılır; başkan ondan örnek
+  okur.
+- Şunlarda göndermeden önce `approvalRequest` ile sahibine sor (`tool` ve göndereceğin `input`), kapı açıkken de
+  kapalıyken de: para sözü (fiyat, indirim, iade, ödeme tarihi); hukuki konu (avukat, tüketici hakem heyeti, KVKK
+  talebi, sözleşme); kriz (basın, olumsuz yayılan paylaşım, tehdit, ağır şikâyet); bilgi tabanında cevabı olmayan soru;
+  ticari ileti izni (İYS) olmayan kişiye ilk tanıtım mesajı ya da araması; toplu gönderim (eşiği aşan alıcı); özel
+  kişilere giden ya da onları anan her şey. Kapı içeriği okumaz; bunları sen ayırırsın.
+- Özel kişileri sahibi tutar; gönderiyorsan listeyi masandaki "Özel kişiler" bölümünde görürsün. Kapı onları yalnız
+  çağrının girdisinde arar (adres, telefon, ad, aday ya da konuşma kimliği). Olağan yanıtın alıcılarını çağrıya yaz:
+  taslak ya da herkese yanıtla kapıda tutulur ("alıcılar girdide yok"); kimlikle yanıtlarken kime gittiğine sen bak.

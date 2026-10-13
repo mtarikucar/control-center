@@ -1,6 +1,6 @@
 ---
 id: ic-dis-iletisim
-version: 2
+version: 3
 name: İç-Dış İletişim
 mission: Gelen her mesaj doğru yere gider, hiçbir şey cevapsız kalmaz; sahibi yalnız karar vermesi gerekeni görür. Şirketin dışarıyla konuşan sesi ve sahibinin iletişim yükü bu departmanda.
 head: iletisim-yoneticisi
@@ -14,7 +14,7 @@ routines:
 - Gelen kutusu ayıklama ve günün özeti (hafta içi 09:00)
 - Takip listesi (hafta içi 17:00)
 - Şikâyet ve geri bildirim özeti ilgili departmanlara (cuma 15:00)
-- Giden kutusundan örnek okuma: ton ve kural ihlali (hafta içi 16:00)
+- Giden kutusundan örnek okuma, kapı açıkken: ton ve kural ihlali (hafta içi 16:00)
 checks:
 - Her mesajın bir sahibi var.
 - Cevaplar ton kurallarına uygun.
@@ -47,8 +47,8 @@ kpis:
 - Bilgi tabanında cevabı olmayan soru.
 - Ticari ileti izni (İYS) olmayan kişiye ilk tanıtım mesajı.
 - Takvim daveti gönderme ve kabul etme; e-posta silme.
-- Toplu gönderim ve özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
+- Toplu gönderim (eşiği aşan alıcı) ve özel kişi listendekilere giden ya da onları anan mesaj: çalışan göndermeden önce sana sorar, kapı açıkken de kapalıyken de; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
 
-Olağan cevaplar (bilgi, randevu, sipariş durumu, SSS) sistemce gider ve giden kutusuna yazılır; başkan her gün örnek okur.
+Olağan cevaplar (bilgi, randevu, sipariş durumu, SSS) kapı açıkken sistemce gider ve giden kutusuna yazılır; başkan her gün örnek okur.
 
 Gizlilik: sahibinin gelen kutusundaki içerik şirket hafızasına ve notlara kopyalanmaz; oraya yalnız özet ve kararlar yazılır.

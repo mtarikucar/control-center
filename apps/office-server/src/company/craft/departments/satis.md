@@ -1,6 +1,6 @@
 ---
 id: satis
-version: 2
+version: 3
 name: Satış
 mission: Talebi gelire çevirir; müşteri adayını bulur, nitelendirir, teklif hazırlar, takip eder ve kapanışı sahibine hazırlar.
 head: satis-muduru
@@ -13,7 +13,7 @@ methods:
 routines:
 - Takip listesi (hafta içi 10:00)
 - Haftalık huni raporu (cuma 16:00)
-- Giden kutusundan örnek okuma: temasların tonu ve İYS kuralı (hafta içi 17:00)
+- Giden kutusundan örnek okuma, kapı açıkken: temasların tonu ve İYS kuralı (hafta içi 17:00)
 checks:
 - Her adayın kaynağı yazılı.
 - Teklifin hesabı doğru ve fiyat kurallarına uygun.
@@ -48,8 +48,8 @@ kpis:
 - Sözleşme.
 - Toplantı daveti.
 - Ticari ileti izni (İYS) olmayan kişiye ilk tanıtım mesajı ya da araması.
-- Toplu gönderim ve özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
+- Toplu gönderim (eşiği aşan alıcı) ve özel kişi listendekilere giden ya da onları anan mesaj: çalışan göndermeden önce sana sorar, kapı açıkken de kapalıyken de; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
 
-Olağan temaslar (izni olan adaya takip, toplantı hatırlatması) sistemce gider ve giden kutusuna yazılır; başkan her gün örnek okur.
+Olağan temaslar (izni olan adaya takip, toplantı hatırlatması) kapı açıkken sistemce gider ve giden kutusuna yazılır; başkan her gün örnek okur.
 
 Kişisel veri: aday verisi KVKK kapsamında; ne toplanabileceği el kitabında kural olarak yazılır.

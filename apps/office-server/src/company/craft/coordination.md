@@ -19,12 +19,16 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
    darboğaz (bir kişinin sırası uzarken iş bölünebiliyorsa aynı rolden ikinci birini al). İş bölünemiyorsa nedenini plan
    kartına yaz.
 7. **Kritik olan sahibinden geçer.** Kritik olan sahibine; olağan olan otonomi politikasıyla sistemce gider ve giden
-   kutusuna yazılır. Kritik olan: para sözü, hukuki konu, kriz, bilgi tabanında cevabı olmayan soru, ticari ileti izni
-   (İYS) olmayan kişiye ilk mesaj; ödeme, canlıya alma, silme. Kapı kodda: anayasada açıkken sistemin kendi geçirmediği
-   çağrılar kapıya takılır, çalışan `approvalRequest` ile ister (kritik olanı göndermeden önce, çağrının `input`'uyla),
-   sahibi ofis sayfasından onaylar (`approvalsRead` hepsini gösterir). Kapı içeriği okumaz; kritik olanı ayırmak ekibin
-   işidir. Kapı kazara ve sıradan yolları kapatır; aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz; sahibi onayı yalnız
-   ofis sayfasından sayılır.
+   kutusuna yazılır (kapı açıkken). Kritik olan: para sözü, hukuki konu, kriz, bilgi tabanında cevabı olmayan soru,
+   ticari ileti izni (İYS) olmayan kişiye ilk mesaj, toplu gönderim (eşiği aşan alıcı), özel kişilere giden ya da
+   onları anan her şey; ödeme, canlıya alma, silme. Çalışan bunları göndermeden önce `approvalRequest` ile sorar
+   (çağrının `input`'uyla), kapı açıkken de kapalıyken de. Kapı kodda: anayasada açıkken sistemin kendi geçirmediği
+   çağrılar kapıya takılır; çalışan onu `approvalRequest` ile ister, sahibi ofis sayfasından onaylar (`approvalsRead`
+   hepsini gösterir). Kapı içeriği okumaz, özel kişileri de yalnız çağrının girdisinde arar: kritik olanı ayırmak
+   ekibin işidir, olağan bir yanıtın alıcıları çağrıda yazılı olsun (taslak ve "herkese yanıtla" kapıda tutulur). Özel
+   kişilerin listesini sahibi Anayasa'da tutar; gönderim, yayın, arama ya da davet yeteneği olanların masasında "Özel
+   kişiler" bölümü olarak görünür. Kapı kazara ve sıradan yolları kapatır; aynı kullanıcıdaki kararlı bir atlatmayı
+   durdurmaz; sahibi onayı yalnız ofis sayfasından sayılır.
 8. **Değerlendirme.** Plan bitince `planRetro`: ne iyi gitti, ne takıldı, bir dahaki sefere ne değişecek. Şirkete özgü
    dersi `playbookUpdate` ile el kitabına yaz; her şirkete yarayacak bir yöntem önerin varsa `methodSuggestion` olarak ekle.
 9. **Raporlama.** Kısa, sayılarla, doğrulanmış; belirsizliği ve riski gizleme.

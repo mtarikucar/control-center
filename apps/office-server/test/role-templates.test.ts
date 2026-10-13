@@ -157,11 +157,11 @@ describe('Role templates — the catalog (ships with the office)', () => {
   it('the department heads and their suggested roles are on the office’s models (spec departments §4.3)', () => {
     const heads = { 'teknik-lider': 'opus', 'pazarlama-muduru': 'sonnet', 'iletisim-yoneticisi': 'sonnet', 'satis-muduru': 'sonnet', 'operasyon-finans-yoneticisi': 'sonnet' };
     for (const [id, model] of Object.entries(heads)) expect(roleTemplate(id).model, id).toBe(model);
-    expect(roleTemplate('sosyal-medya')).toMatchObject({ version: 3, title: 'Sosyal Medya ve Reklam Uzmanı', team: 'Pazarlama' });
+    expect(roleTemplate('sosyal-medya')).toMatchObject({ version: 4, title: 'Sosyal Medya ve Reklam Uzmanı', team: 'Pazarlama' });
     expect(roleTemplate('sosyal-medya').capabilities).toContain('ads.manage');
-    expect(roleTemplate('icerik-yazari')).toMatchObject({ version: 3, team: 'Pazarlama' });
+    expect(roleTemplate('icerik-yazari')).toMatchObject({ version: 4, team: 'Pazarlama' });
     expect(roleTemplate('icerik-yazari').capabilities).toContain('media.generate');
-    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 3, team: 'İç-Dış İletişim' });
+    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 4, team: 'İç-Dış İletişim' });
     expect(roleTemplate('satis-asistani')).toMatchObject({ version: 3, team: 'Satış' });
     expect(roleTemplate('operasyon-asistani')).toMatchObject({ version: 2, team: 'Operasyon ve Finans' });
     // The assistant of the owner keeps the owner's mail out of the company memory.
@@ -170,14 +170,17 @@ describe('Role templates — the catalog (ships with the office)', () => {
   });
 
   it('spec capabilities §9: the new versions — messages read and sent, consent (İYS) for a first message, the heads’ outbox sample, ad money the owner’s', () => {
-    expect(roleTemplate('iletisim-yoneticisi')).toMatchObject({ version: 2 });
+    // Final review wave: the critical class grew by bulk sends and special contacts, the heads’ sample says “kapı açıkken” — new versions (new hires only).
+    expect(roleTemplate('iletisim-yoneticisi')).toMatchObject({ version: 3 });
     expect(roleTemplate('iletisim-yoneticisi').capabilities).toEqual(expect.arrayContaining(['messages.read', 'messages.send']));
-    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 3, capabilities: ['email.read', 'email.send', 'crm.read', 'messages.read', 'messages.send'] });
-    expect(roleTemplate('sosyal-medya').version).toBe(3);
-    for (const id of ['satis-muduru', 'aday-arastirmaci', 'pazarlama-muduru']) expect(roleTemplate(id).version, id).toBe(2);
-    expect(roleTemplate('icerik-yazari').version).toBe(3);
+    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 4, capabilities: ['email.read', 'email.send', 'crm.read', 'messages.read', 'messages.send'] });
+    expect(roleTemplate('sosyal-medya').version).toBe(4);
+    for (const id of ['satis-muduru', 'aday-arastirmaci', 'pazarlama-muduru']) expect(roleTemplate(id).version, id).toBe(3);
+    expect(roleTemplate('icerik-yazari').version).toBe(4);
+    expect(roleTemplate('yonetici-asistani').version).toBe(2);
     for (const id of ['satis-muduru', 'aday-arastirmaci', 'iletisim-yoneticisi']) expect(roleTemplate(id).body, id).toMatch(/İYS/);
-    for (const id of ['iletisim-yoneticisi', 'satis-muduru', 'pazarlama-muduru']) expect(roleTemplate(id).body, id).toMatch(/`outboxRead`/);
+    // With the gate off nothing is written to the outbox: the heads’ sample is read “kapı açıkken” (final review I4.3).
+    for (const id of ['iletisim-yoneticisi', 'satis-muduru', 'pazarlama-muduru']) expect(roleTemplate(id).body, id).toMatch(/- Kapı açıkken her gün odanın giden kutusundan \(`outboxRead`\) örnek okur/);
     expect(roleTemplate('sosyal-medya').body).toMatch(/Reklam harcaması .*her zaman sahibinin onayından geçer/);
   });
 
@@ -207,21 +210,41 @@ describe('Role templates — the catalog (ships with the office)', () => {
   it('spec capabilities §9: what the gate holds mechanically is still an instruction to ask, not a promise that it goes to the owner by itself (the gate may be off)', () => {
     for (const id of AUTONOMOUS) expect(roleTemplate(id).body, id).not.toMatch(/zaten sahibine gider/);
     const marketing = roleTemplate('pazarlama-muduru').body;
-    expect(marketing).toMatch(/toplu gönderimi ve özel kişilere gideni göndermeden önce `approvalRequest` ile sahibine sorarsın/);
     expect(marketing).toMatch(/olağan yayınını kendin yaparsın; sistemce çıkar/);
+    // No Pazarlama role sends e-mail: the newsletter and the bulk mail are prepared, their sending asked of the owner.
+    expect(marketing).toMatch(/Bülteni ve toplu e-postayı hazırlarsın; gönderimi sahibine sorulur/);
+    for (const id of ['pazarlama-muduru', 'sosyal-medya', 'icerik-yazari']) expect(roleTemplate(id).capabilities.filter((c) => c.startsWith('email.')), id).toEqual([]);
     // Bulk sends and anything to or about a special contact are asked of the owner first by whoever sends, gate on or off (the gate passing the ordinary by its rules stays said beside it).
-    for (const id of ['pazarlama-muduru', 'musteri-temsilcisi', 'iletisim-yoneticisi']) expect(roleTemplate(id).body, id).toMatch(/[Tt]oplu gönderimi ve özel kişilere gideni.* göndermeden önce `approvalRequest` ile sahibine sorarsın/);
+    const ASK = (verb: string, thing: string) =>
+      new RegExp(`- Toplu gönderimi \\(eşiği aşan alıcı\\) yapmadan önce ve özel kişilere giden ya da onları anan bir ${thing} ${verb} önce \`approvalRequest\` ile sahibine sorarsın; kapı açıkken de kapalıyken de\\. Özel kişilerin listesi masandaki “Özel kişiler” bölümündedir`);
+    for (const id of ['musteri-temsilcisi', 'iletisim-yoneticisi', 'satis-muduru', 'aday-arastirmaci']) {
+      expect(roleTemplate(id).body, id).toMatch(ASK('göndermeden', 'mesajı'));
+      // What the gate sees is said as it is: the call’s own input, a held draft and reply to everyone.
+      expect(roleTemplate(id).body, id).toMatch(/kapı onları yalnız çağrının girdisinde arar \(adres, telefon, ad, aday ya da konuşma kimliği\), o yüzden olağan bir yanıtın alıcılarını çağrıya yaz: kapı açıkken taslağı kimliğiyle göndermek ya da herkese yanıtlamak tutulur \(“alıcılar girdide yok”\)\./);
+    }
+    for (const id of ['pazarlama-muduru', 'sosyal-medya']) expect(roleTemplate(id).body, id).toMatch(ASK('yayınlamadan', 'gönderiyi'));
     for (const id of ['musteri-temsilcisi', 'iletisim-yoneticisi']) {
-      expect(roleTemplate(id).body, id).toMatch(/\(ya da onları konu alanı\) göndermeden önce `approvalRequest` ile sahibine sorarsın; kapı kapalıyken de\./);
       expect(roleTemplate(id).body, id).toMatch(/kapı Anayasa'nın .*geçirir ve giden kutusuna yazar, tutarsa `approvalRequest` ile istersin/);
     }
+    // The old phrasing (the participle problem, the “konu alanı” aside, “kapı kapalıyken de” alone) is gone from every role.
+    for (const t of listRoleTemplates()) expect(t.body, t.id).not.toMatch(/\(ya da onları konu alanı\)|kapı kapalıyken de\./);
+    // Satış carries the same ask-first bullet beside its İYS rule (its department list already says the head asks).
+    expect(roleTemplate('satis-muduru').body).toMatch(/İYS\) olmayan kişiye ilk tanıtım mesajı ya da araması göndermezsin; önce sahibine sorarsın\. İzin bilinmiyorsa yok say\.\n- Toplu gönderimi \(eşiği aşan alıcı\)/);
+    expect(roleTemplate('aday-arastirmaci').body).toMatch(/sahibinin cevabı gelmeden göndermezsin\.\n- Toplu gönderimi \(eşiği aşan alıcı\)/);
+    // The outbox is written only with the gate on: what says a box line exists says so (final review I4.3).
+    expect(roleTemplate('satis-muduru').body).toMatch(/her temas CRM'de \(kapı açıkken giden kutusunda da\) kayıtlı/);
+    for (const id of ['pazarlama-muduru', 'sosyal-medya']) expect(roleTemplate(id).checks.join('\n'), id).toMatch(/Her yayın \(kapı açıkken\) giden kutusunda/);
     expect(roleTemplate('aday-arastirmaci').body).toMatch(/sahibinin cevabı gelmeden göndermezsin/);
     expect(roleTemplate('sosyal-medya').body).toMatch(/içeren gönderi ve yayın silme önce `approvalRequest`/);
     // The writer: ordinary publishing is the system’s, the critical class (a money promise, legal, a crisis, deleting a post) goes to the owner.
     const writer = /### Nasıl çalışırsın\n([\s\S]*?)\n### /.exec(roleTemplate('icerik-yazari').body)?.[1] ?? '';
     expect(writer).toMatch(/olağan metnin yayını incelemeden sonra sistemce çıkar/);
-    expect(writer).toMatch(/Para sözü .*hukuki konu, kriz ya da bir yayını silmek.*`approvalRequest`/);
+    expect(writer).toMatch(/Para sözü \(kampanya, fiyat, indirim, çekiliş\) içeren, hukuki konuya ya da krize değen, bir yayının silinmesini gerektiren, toplu gönderilecek \(bülten gibi\) ya da özel kişilere giden ya da onları anan metni teslimde işaretle; yayını yapan onu önce `approvalRequest` ile sahibine sorar\./);
     expect(writer).not.toMatch(/her yayın sahibinin onayıyla/);
+    // The assistant drafts and does not send: its own rule wins over the customer method that lets the ordinary go (final review minor 5).
+    const assistant = /### Nasıl çalışırsın\n([\s\S]*?)\n### /.exec(roleTemplate('yonetici-asistani').body)?.[1] ?? '';
+    expect(assistant).toMatch(/Müşteri yöntemi \(`customer`\) olağan gönderimin sistemce gittiğini söyler; sende bu geçerli değil, rolündeki kural yönteme üstündür: taslak hazırlarsın, göndermezsin\./);
+    expect(roleTemplate('yonetici-asistani').capabilities.filter((c) => ['send', 'publish', 'call'].includes(capabilityKind(c) ?? ''))).toEqual([]);
   });
 });
 

@@ -27,7 +27,9 @@ export function specialContactsBlock(contacts: readonly string[]): string {
   return [
     '## Özel kişiler',
     '',
-    'Sahibi bu kişileri özel tuttu: onlara giden ya da onları anan bir gönderimi, yayını, aramayı ya da daveti yapmadan önce approvalRequest ile sahibine sor — kapı açık da olsa kapalı da. Kapı yalnız çağrının girdisinde yazanı tanır; bir taslağı, bir yanıtı ya da bir kaydı kimliğiyle gönderirken kime gittiğine sen bak.',
+    'Sahibi bu kişileri özel tuttu: onlara giden ya da onları anan bir gönderimi, yayını, aramayı ya da daveti yapmadan önce approvalRequest ile sahibine sor (aracın adı ve yapacağın çağrının girdisi) — kapı açık da olsa kapalı da.',
+    '',
+    'Kapı listedekileri (adres, telefon, ad, kişinin aday ya da konuşma kimliği) yalnız çağrının kendi girdisinde arar. Olağan bir yanıtın alıcılarını girdiye yaz: kapı açıkken bir taslağı kimliğiyle göndermek ya da herkese yanıtlamak tutulur ("alıcılar girdide yok"). Kimlikle yanıtlarken kime gittiğine kendin bak.',
     '',
     ...shown,
     '',

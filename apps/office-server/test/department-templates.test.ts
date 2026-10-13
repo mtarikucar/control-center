@@ -92,25 +92,33 @@ describe('Department templates — the catalog', () => {
     expect(() => departmentTemplate('yok')).toThrow(/Bilinmeyen departman şablonu: yok\. Şablonlar: ic-dis-iletisim, operasyon-finans/);
   });
 
-  it('spec capabilities §9: İç-Dış İletişim, Pazarlama and Satış v2 — only the critical goes to the owner, the rest is in the outbox; a daily outbox sample is suggested', () => {
+  it('spec capabilities §9: İç-Dış İletişim, Pazarlama and Satış (v3 after the final review) — only the critical goes to the owner, the rest is in the outbox; a daily outbox sample is suggested, read with the gate on', () => {
     for (const id of ['ic-dis-iletisim', 'pazarlama', 'satis']) {
       const t = departmentTemplate(id);
-      expect(t.version, id).toBe(2);
+      expect(t.version, id).toBe(3);
       const owner = scopeSection(templateScope(t), 'Sana gelir');
       expect(owner, id).not.toMatch(/^- Her (gönderim|yayın)/m);
       expect(owner, id).toMatch(/giden kutusuna yazılır/);
-      expect(t.routines.some((r) => r.startsWith('Giden kutusundan örnek okuma')), id).toBe(true);
+      // The outbox is written only with the gate on, so the head has nothing to sample before (final review I4.3).
+      expect(t.routines.some((r) => /^Giden kutusundan örnek okuma, kapı açıkken: /.test(r)), id).toBe(true);
+      expect(owner, id).toMatch(/kapı açıkken sistemce (gider|çıkar) ve giden kutusuna yazılır; başkan her gün örnek okur\./);
     }
     expect(scopeSection(templateScope(departmentTemplate('satis')), 'Sana gelir')).toMatch(/İYS/);
     // The first promotion without consent comes to the owner from İç-Dış İletişim too; a post is deleted only with the owner’s word.
     expect(scopeSection(templateScope(departmentTemplate('ic-dis-iletisim')), 'Sana gelir')).toMatch(/İYS/);
     expect(scopeSection(templateScope(departmentTemplate('pazarlama')), 'Sana gelir')).toMatch(/^- Bir yayını silmek\.$/m);
     // Bulk and special-contact sends are asked of the owner by the one who sends, whether or not the gate is on: no list says the gate takes them.
-    for (const id of ['ic-dis-iletisim', 'pazarlama', 'satis']) {
+    for (const id of ['ic-dis-iletisim', 'satis']) {
       const owner = scopeSection(templateScope(departmentTemplate(id)), 'Sana gelir');
-      expect(owner, id).toMatch(/özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar/);
+      expect(owner, id).toMatch(/^- Toplu gönderim \(eşiği aşan alıcı\) ve özel kişi listendekilere giden ya da onları anan mesaj: çalışan göndermeden önce sana sorar, kapı açıkken de kapalıyken de; kapı açıkken saatlik sınırı aşan gönderim de sana düşer\.$/m);
       expect(owner, id).not.toMatch(/Kapının kuralına takılan/);
     }
+    // Pazarlama sends no e-mail (no role of it declares email.send): it prepares the newsletter and the bulk mail, the owner is asked for their sending; a post to or about a special contact is asked first too.
+    const marketing = scopeSection(templateScope(departmentTemplate('pazarlama')), 'Sana gelir');
+    expect(marketing).toMatch(/^- Bülten ve toplu e-posta gönderimi \(eşiği aşan alıcı\): Pazarlama bülteni ve toplu e-postayı hazırlar; gönderimi sana sorulur \(bu departmanda e-posta gönderen rol yok\)\.$/m);
+    expect(marketing).toMatch(/^- Özel kişi listendekilere giden ya da onları anan yayın veya mesaj: çalışan yayınlamadan ya da göndermeden önce sana sorar, kapı açıkken de kapalıyken de; kapı açıkken saatlik sınırı aşan yayın ya da gönderim de sana düşer\.$/m);
+    for (const id of ['pazarlama-muduru', 'icerik-yazari', 'sosyal-medya']) expect(roleTemplate(id).capabilities.filter((c) => c.startsWith('email.')), id).toEqual([]);
+    for (const id of ['ic-dis-iletisim', 'pazarlama', 'satis']) expect(departmentTemplate(id).checks.join('\n') + templateScope(departmentTemplate(id)), id).not.toMatch(/özel kişi listendekilere giden mesaj:/);
     expect(departmentTemplate('yazilim-otomasyon').version).toBe(1);
   });
 });

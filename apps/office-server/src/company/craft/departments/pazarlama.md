@@ -1,6 +1,6 @@
 ---
 id: pazarlama
-version: 2
+version: 3
 name: Pazarlama
 mission: Şirketi doğru kitleye duyurur ve talep yaratır; strateji, içerik üretimi, yayın ve ölçüm bu departmanda.
 head: pazarlama-muduru
@@ -15,11 +15,11 @@ routines:
 - Haftalık içerik takvimi (pazartesi 09:00)
 - Haftalık performans özeti (cuma 16:00)
 - Aylık pazarlama raporu (ayın son günü)
-- Giden kutusundan örnek okuma: yayınların tonu ve iddiaları (hafta içi 16:00)
+- Giden kutusundan örnek okuma, kapı açıkken: yayınların tonu ve iddiaları (hafta içi 16:00)
 checks:
 - Marka diline uygun (el kitabı).
 - Her iddianın kaynağı var.
-- Her yayın giden kutusunda; kritik olanın onay kaydı var.
+- Her yayın (kapı açıkken) giden kutusunda; kritik olanın onay kaydı var.
 - Görsellerin lisansı temiz.
 - Sayıların yanında kaynak ve tarih yazılı.
 kpis:
@@ -52,6 +52,7 @@ kpis:
 - Kampanya vaadi (fiyat, indirim, çekiliş) içeren yayın.
 - Kriz ya da hukuki konuya değen yayın.
 - Bir yayını silmek.
-- Toplu e-posta ve bülten gönderimi ile özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
+- Bülten ve toplu e-posta gönderimi (eşiği aşan alıcı): Pazarlama bülteni ve toplu e-postayı hazırlar; gönderimi sana sorulur (bu departmanda e-posta gönderen rol yok).
+- Özel kişi listendekilere giden ya da onları anan yayın veya mesaj: çalışan yayınlamadan ya da göndermeden önce sana sorar, kapı açıkken de kapalıyken de; kapı açıkken saatlik sınırı aşan yayın ya da gönderim de sana düşer.
 
-Olağan yayınlar sistemce çıkar ve giden kutusuna yazılır; başkan her gün örnek okur.
+Olağan yayınlar kapı açıkken sistemce çıkar ve giden kutusuna yazılır; başkan her gün örnek okur.
