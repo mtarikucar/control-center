@@ -20,13 +20,13 @@ const T0 = new Date(2026, 9, 8, 9, 0).getTime();
 const HEADINGS = ['## 1. Ne değişti (son turdan beri)', '## 2. Hedefler ve planlar', '## 3. İnsanlar', '## 4. Zincirler ve kritik yol', '## 5. Riskler', '## 6. Kaynak', '## 7. Açık kararlar'];
 
 /** An office on a simulated clock; people straight on the roster (no sessions), ready for work. */
-function make(desks = 8) {
+function make(desks = 8, o: { departments?: boolean } = {}) {
   let clock = T0;
   const now = () => clock;
   const s = setup(desks, now);
   const f = fakeEngine(s);
   cleanups.push(f.cleanup, s.cleanup);
-  const c = companyFor(s, f, undefined, now);
+  const c = companyFor(s, f, undefined, now, undefined, o);
   c.budget.setConstitution({ autonomy: 'free' });
   const quota = new QuotaTracker(s.db, s.events, now);
   const agenda = new Agenda({ roster: s.roster, tasks: c.tasks, schedules: c.schedules, company: c.company, budget: c.budget, now });
@@ -35,7 +35,7 @@ function make(desks = 8) {
     return s.roster.update(e.id, { lifecycle: 'idle' });
   };
   const coordinator = person('Koordinatör', { kind: 'coordinator', title: 'Koordinatör' });
-  const deps = { db: s.db, events: s.events, roster: s.roster, company: c.company, tasks: c.tasks, plans: c.plans, state: c.state, agenda, budget: c.budget, proposals: c.proposals, quota, kpis: c.kpis };
+  const deps = { db: s.db, events: s.events, roster: s.roster, company: c.company, tasks: c.tasks, plans: c.plans, state: c.state, agenda, budget: c.budget, proposals: c.proposals, quota, kpis: c.kpis, departments: c.departments ?? undefined };
   const board = (o: { since?: number; unclosedWarning?: boolean } = {}) => buildBoard(deps, { since: o.since ?? T0, now: clock, unclosedWarning: o.unclosedWarning });
   /** One section of the board, heading included. */
   const section = (text: string, n: number) => text.split('\n\n').find((b) => b.startsWith(`## ${n}.`)) ?? '';
@@ -1265,5 +1265,80 @@ describe('board — what the pulse used to say (management cycle §3.6)', () => 
     const t = make();
     t.plan('Bakım');
     expect(t.section(t.board().text, 2).split('\n')[1]).toMatch(/^- Aktif hedef yok: /);
+  });
+});
+
+describe('board — Departmanlar (spec departments §6.3)', () => {
+  it('is absent without departments: the seven headings stay', () => {
+    const t = make();
+    t.person('Ada');
+    const text = t.board().text;
+    expect(text).not.toMatch(/Departmanlar/);
+    // “İnsanlar” carries the head count when there is a team.
+    const headings = text.split('\n').filter((l) => l.startsWith('## '));
+    expect(headings).toHaveLength(HEADINGS.length);
+    expect(headings.map((h, i) => h.startsWith(HEADINGS[i]!))).toEqual(HEADINGS.map(() => true));
+  });
+
+  it('a line per open department after İnsanlar; warnings for a headless one with open streams and a finished stream without a report', () => {
+    const t = make(8, { departments: true });
+    const d = t.departments!;
+    const yaz = d.create(OWNER, { name: 'Yazılım', mission: 'Kod.' });
+    const pzr = d.create(OWNER, { name: 'Pazarlama', mission: 'Duyuru.' });
+    const [selin, mert, deniz] = [t.person('Selin'), t.person('Mert'), t.person('Deniz')];
+    d.setHead(OWNER, yaz.id, selin.id);
+    d.move(OWNER, mert.id, yaz.id);
+    d.move(OWNER, deniz.id, pzr.id);
+    const plan = t.plan('Site', { streams: [{ id: 'api', title: 'API', owner: 'Yazılım' }, { id: 'doc', title: 'Belgeler', owner: 'Yazılım' }, { id: 'tanitim', title: 'Tanıtım', owner: 'Pazarlama' }] });
+    const api = t.task(mert.id, 'Uç noktalar', { planId: plan.id, streamId: 'api' });
+    t.company.start(api.id);
+    const doc = t.task(selin.id, 'Belgeler', { planId: plan.id, streamId: 'doc' });
+    t.company.start(doc.id);
+    t.finish(selin.id, doc.id);
+    const text = t.board().text;
+    expect(text).toMatch(/tanitim: sahibi Pazarlama departmanı, başkanı yok — sen yönet ya da başkan ata/);
+    expect(text).not.toMatch(/sahibi bulunamadı/);
+    expect(text).toMatch(/Yazılım departmanı/);
+    expect(text).toMatch(/## 4\. Departmanlar\n- Yazılım — başkan Selin · 2 kişi \(\d işte, \d boşta\) · akışlar: api \(sürüyor\), doc \(bitti\)/);
+    expect(text).toMatch(/- Pazarlama — başkan YOK · 1 kişi \(\d işte, \d boşta\) · akışlar: tanitim \(planlı\)/);
+    expect(text).toMatch(/- UYARI: Pazarlama başkansız ve açık akışı var \(tanitim\); departmentUpdate ile başkan ata ya da akışı kendin yönet\./);
+    expect(text).toMatch(/- Yazılım: “Site” planının “doc” akışı bitti, raporu yok\./);
+    expect(text).toMatch(/## 5\. Zincirler ve kritik yol/);
+    t.company.streamReport(selin.id, plan.id, 'doc', { summary: 'Belgeler hazır.' });
+    const next = t.board().text;
+    expect(next).toMatch(/son rapor: “Belgeler hazır\.”/);
+    expect(next).not.toMatch(/raporu yok/);
+  });
+});
+
+describe('board — Departmanlar under the budget (spec departments §6.3)', () => {
+  const NAMES = ['Yazılım Geliştirme ve Mimari Departmanı', 'Pazarlama ve Duyuru Çalışmaları Birimi', 'Müşteri Destek ve Memnuniyet Odası', 'Finans ve Bütçe Denetimi Departmanı', 'Araştırma ve Ürün Keşfi Departmanı', 'İnsan Kaynakları ve Kültür Departmanı'];
+
+  it('with room, every department and every warning is shown', () => {
+    const t = make(8, { departments: true });
+    const deps = NAMES.map((name) => t.departments!.create(OWNER, { name, mission: 'Görev.' }));
+    t.plan('Site', { streams: deps.slice(0, 4).map((dep, i) => ({ id: `s${i}`, title: `Akış ${i}`, owner: dep.name })) });
+    const body = t.section(t.board().text, 4).split('\n');
+    expect(body.filter((l) => /— başkan YOK/.test(l))).toHaveLength(6);
+    expect(body.filter((l) => l.startsWith('- UYARI:'))).toHaveLength(4);
+    expect(body.join('\n')).not.toMatch(/departman daha|uyarı daha/);
+  });
+
+  it('a board over the budget is drawn again with fewer of each: the tightest limits keep a few departments and warnings and count the rest', () => {
+    const t = make(8, { departments: true });
+    const deps = NAMES.map((name) => t.departments!.create(OWNER, { name, mission: 'Görev.' }));
+    // Every department headless with open streams: a line and a warning each, and plans long enough to need the tightest limits.
+    for (let n = 1; n <= 5; n++) {
+      t.plan(`Çok uzun adlı plan numara ${n}`, { streams: deps.flatMap((dep, i) => [`a${n}`, `b${n}`].map((s) => ({ id: `${s}-${i}`, title: `Uzun bir akış başlığı ${s} ${i}`, owner: dep.name }))) });
+    }
+    const text = t.board().text;
+    expect(text.length).toBeLessThanOrEqual(3900);
+    const body = t.section(text, 4).split('\n');
+    expect(body.filter((l) => /— başkan YOK/.test(l))).toHaveLength(3);
+    expect(body).toContain('- … ve 3 departman daha');
+    expect(body.filter((l) => l.startsWith('- UYARI:'))).toHaveLength(2);
+    expect(body).toContain('- … ve 4 uyarı daha');
+    // The heading stays where it was: the section is shortened, not dropped.
+    expect(text.split('\n').filter((l) => l.startsWith('## ')).map((h) => h.replace(/ \(.*/, ''))).toContain('## 4. Departmanlar');
   });
 });

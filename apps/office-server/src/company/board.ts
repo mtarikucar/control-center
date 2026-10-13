@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { OWNER, normalizeConstitution, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEvent, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
+import { OWNER, normalizeConstitution, ownerDepartment, STREAM_TO_HIRE, STUCK_REASONS, reviewTally, type Employee, type GoalChange, type Lifecycle, type OfficeEvent, type OfficeEventType, type OnboardingRound, type Plan, type PlanChange, type PlanStreamView, type Proposal, type StoredEvent, type StreamStatus, type Task, type TaskStatus } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
 import type { QuotaTracker } from '../quota.ts';
 import type { KpiReadings } from './kpi-readings.ts';
@@ -9,6 +9,7 @@ import type { Agenda } from './agenda.ts';
 import { UNAVAILABLE } from './availability.ts';
 import { constitutionChanges, type Budget } from './budget.ts';
 import { PROPOSAL_TR, type Company } from './company.ts';
+import type { Departments } from './departments.ts';
 import type { CompanyStateStore } from './goal-store.ts';
 import { officeMetrics } from './office-metrics.ts';
 import type { ProposalStore } from './proposal-store.ts';
@@ -39,6 +40,8 @@ export interface BoardDeps {
   quota?: Pick<QuotaTracker, 'officeSince'>;
   /** The goals' KPI readings (absent in offices without them: no KPI line). */
   kpis?: Pick<KpiReadings, 'boardLine'>;
+  /** The departments (absent, or none open: no Departmanlar section — the board is exactly as before them). */
+  departments?: Pick<Departments, 'list' | 'members'>;
 }
 
 export interface BoardOptions {
@@ -283,6 +286,12 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
   /** The board drawn with these limits. */
   const render = (L: Limits): string => {
     const title = (x: { title: string }) => `“${clip(x.title, L.titleChars)}”`;
+    const allDepartments = d.departments?.list() ?? [];
+    /** The department a stream's owner names (spec departments §6.1); null for a person or a role to hire. */
+    const departmentOf = (owner: string) => {
+      const id = ownerDepartment(owner);
+      return id ? (allDepartments.find((x) => x.id === id) ?? null) : null;
+    };
 
     // ── 1. what changed since the last cycle ──────────────────────────────────
 
@@ -430,17 +439,22 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       };
       for (const x of streams) {
         if (x.status === 'done') continue;
-        const owner = toHire(x.owner) ? undefined : byId.get(x.owner);
+        const dep = departmentOf(x.owner);
+        const owner = toHire(x.owner) ? undefined : dep ? (dep.status === 'open' && dep.headId ? byId.get(dep.headId) : undefined) : byId.get(x.owner);
         // Why no one can carry it: as a flag, and short for inside a line.
         const lacking: [string, string] | null = toHire(x.owner)
           ? [`sahibi yok (${x.owner})`, `sahibi yok, ${x.owner}`]
-          : !owner
-            ? [`sahibi bulunamadı (${x.owner})`, 'sahibi bulunamadı']
-            : owner.lifecycle === 'archived'
-              ? [`sahibi ${owner.name} işten ayrıldı`, `sahibi ${owner.name} ayrıldı`]
-              : UNAVAILABLE.includes(owner.lifecycle)
-                ? [`sahibi ${owner.name} iş alamıyor (${UNAVAILABLE_TR[owner.lifecycle] ?? owner.lifecycle})`, `sahibi ${owner.name} iş alamıyor`]
-                : null;
+          : dep && dep.status !== 'open'
+            ? [`sahibi ${dep.name} departmanı kapandı`, `${dep.name} kapandı`]
+            : dep && !dep.headId
+              ? [`sahibi ${dep.name} departmanı, başkanı yok — sen yönet ya da başkan ata`, `${dep.name} başkansız`]
+              : !owner
+                ? [`sahibi bulunamadı (${x.owner})`, 'sahibi bulunamadı']
+                : owner.lifecycle === 'archived'
+                  ? [`sahibi ${owner.name} işten ayrıldı`, `sahibi ${owner.name} ayrıldı`]
+                  : UNAVAILABLE.includes(owner.lifecycle)
+                    ? [`sahibi ${owner.name} iş alamıyor (${UNAVAILABLE_TR[owner.lifecycle] ?? owner.lifecycle})`, `sahibi ${owner.name} iş alamıyor`]
+                    : null;
         const idle = owner && !lacking && idleSince.has(owner.id) ? lasted(idleSince.get(owner.id)!) : null;
         const ready = p.status === 'approved' && x.status === 'planned' && x.dependsOn.every((dep) => status.get(dep) === 'done');
         const rank = lacking ? 0 : idle ? 1 : 2;
@@ -481,7 +495,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       const done = work(tasks);
       const lines = [`- ${lead} ${title(p)} (${planState(p)}; ${done}${done === 'görevi yok' ? '' : ' bitti'})`];
       if (!detail) return lines;
-      const owner = (who: string) => (toHire(who) ? who : nameOf(who));
+      const owner = (who: string) => (toHire(who) ? who : departmentOf(who) ? `${departmentOf(who)!.name} departmanı` : nameOf(who));
       const streamLines = streams.map((x) => `${x.id} (${owner(x.owner)}): ${STREAM_TR[x.status]}, ${work(tasks.filter((t) => t.streamId === x.id))}${x.dependsOn.length ? `, önce ${x.dependsOn.join(', ')}` : ''}`);
       lines.push(...cap(streamLines, L.streams, 'akış').map((l) => `  · ${l}`));
       lines.push(...cap(comparisons(p, streams, tasks), L.flags, 'uyarı').map((l) => `  ! ${l}`));
@@ -569,6 +583,34 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
         ...group('Elinde iş, başında değil', b.holding.map((p) => holding(p.id, p.why)), L.details),
         ...group('İşte', b.atWork.map((p) => atWork(p.id)), L.details),
       ];
+    };
+
+    // ── departments (spec departments §6.3) ────────────────────────────────────
+
+    const openDepartments = d.departments?.list({ status: 'open' }) ?? [];
+    const departmentsSection = (): string[] => {
+      const b = metrics.busy;
+      const atWork = new Set(b.atWork.map((p) => p.id));
+      const idle = new Set(b.idle.map((p) => p.id));
+      const streams = live.filter((p) => p.status === 'approved').flatMap((plan) => (d.company.streamsOf([plan]).get(plan.id) ?? []).map((stream) => ({ plan, stream })));
+      const lines: string[] = [];
+      const warnings: string[] = [];
+      for (const dep of openDepartments) {
+        const people = d.departments!.members(dep.id);
+        const mine = streams.filter((x) => ownerDepartment(x.stream.owner) === dep.id);
+        const reviewing = open.filter((t) => t.status === 'review' && people.some((p) => p.id === t.assignee)).length;
+        const notes = mine.map((x) => ({ x, n: d.company.streamNotes(x.plan.id).find((s) => s.streamId === x.stream.id) }));
+        const last = notes.map((y) => y.n?.report).filter((r): r is NonNullable<typeof r> => !!r).sort((a, b2) => b2.at - a.at)[0];
+        const head = dep.headId ? nameOf(dep.headId) : 'YOK';
+        const counts = `${people.length} kişi (${people.filter((p) => atWork.has(p.id)).length} işte, ${people.filter((p) => idle.has(p.id)).length} boşta)`;
+        const streamText = mine.length ? mine.map((x) => `${x.stream.id} (${STREAM_TR[x.stream.status]})`).join(', ') : 'yok';
+        lines.push(`${dep.name} — başkan ${head} · ${counts} · akışlar: ${streamText}${reviewing ? ` · incelemede ${reviewing}` : ''}${last ? ` · son rapor: “${clip(last.text, L.noteChars)}” (${ago(last.at)})` : ''}`);
+        const running = mine.filter((x) => x.stream.status !== 'done');
+        if (!dep.headId && running.length) warnings.push(`UYARI: ${dep.name} başkansız ve açık akışı var (${running.map((x) => x.stream.id).join(', ')}); departmentUpdate ile başkan ata ya da akışı kendin yönet.`);
+        for (const y of notes) if (y.x.stream.status === 'done' && !y.n?.report) warnings.push(`${dep.name}: “${y.x.plan.title}” planının “${y.x.stream.id}” akışı bitti, raporu yok.`);
+      }
+      // Capped like the other lists: a board over the budget is drawn again with fewer of each.
+      return [...cap(lines, L.lines, 'departman'), ...cap(warnings, L.details, 'uyarı')].map((l) => `- ${l}`);
     };
 
     // ── 4. chains and the critical path ───────────────────────────────────────
@@ -698,6 +740,7 @@ export function buildBoard(d: BoardDeps, o: BoardOptions): Board {
       ['Ne değişti (son turdan beri)', changed()],
       ['Hedefler ve planlar', goalsAndPlans()],
       [staffTitle(), staff()],
+      ...(openDepartments.length > 0 ? ([['Departmanlar', departmentsSection()]] as Array<[string, string[]]>) : []),
       ['Zincirler ve kritik yol', chains()],
       ['Riskler', risks()],
       ['Kaynak', resources()],
