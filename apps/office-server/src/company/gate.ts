@@ -3,12 +3,15 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { APPROVAL_KIND_LABELS, type ApprovalKind, type ApprovalScope, type Employee, type GateDecision } from '@cc/shared';
+import { APPROVAL_KIND_LABELS, isOutwardPolicyKind, type ApprovalKind, type ApprovalScope, type Constitution, type Employee, type GateDecision, type OutboxVia, type OutwardPolicyKind } from '@cc/shared';
 import { deskDir } from '../desk.ts';
 import type { EventStore } from '../event-store.ts';
 import type { Roster } from '../roster.ts';
 import type { Approvals } from './approvals.ts';
-import { classifyCall, type GateContext } from './gate-policy.ts';
+import { classifyCall, type GateContext, type GatePart } from './gate-policy.ts';
+import type { OutboxStore } from './outbox-store.ts';
+import { outwardRule } from './outward-rules.ts';
+import { callSummary, recipientsOf } from './recipients.ts';
 
 export interface GateDeps {
   approvals: Approvals;
@@ -20,6 +23,12 @@ export interface GateDeps {
   context: (employee: Pick<Employee, 'slug'>) => GateContext;
   /** git's answers, asked asynchronously when the context lacked them (liveContext's own; absent in tests that fake it). */
   git?: { missing(): boolean; refresh(): Promise<void> };
+  /**
+   * Spec capabilities §5–§7: the constitution's outward policy and its rules, and the outbox every outward call the gate
+   * lets out is written to. Absent (an office before them, the approvals' own tests): every held call waits for the
+   * owner and nothing is written, as before.
+   */
+  autonomy?: { constitution: () => Constitution; outbox: OutboxStore; now?: () => number };
 }
 
 export interface HeldCall {
@@ -33,8 +42,9 @@ const MAX_SCRIPT_BYTES = 256 * 1024;
 
 /**
  * The gate (B9a): the hook asks it before a tool call runs. It classifies the call (gate-policy), and lets a held call
- * through only on the owner's approval; a held call, let through or not, leaves a gate.checked event — a free one
- * leaves nothing.
+ * through on the owner's approval — or, for a connector's outward call the owner's policy leaves to the system, on the
+ * policy's rules (spec capabilities §5). A held call, let through or not, leaves a gate.checked event; every outward
+ * call let out goes to the outbox; a free one leaves nothing.
  */
 export class Gate {
   readonly #d: GateDeps;
@@ -70,11 +80,18 @@ export class Gate {
     const first = verdict.parts[0]!;
     if (passed.ok) {
       this.#d.events.append(employeeId, { type: 'gate.checked', tool, kind: first.kind, target: first.target, decision: 'allow', approvalId: passed.ids[0] ?? null });
+      this.#record(employee, tool, hook.tool_input, verdict.parts, 'owner', passed.ids[0] ?? null);
       return { decision: 'allow', reason: 'sahibinin onayıyla', kind: first.kind, target: first.target, approvalId: passed.ids[0] };
+    }
+    const system = this.#system(employee, hook.tool_input, verdict.parts);
+    if (system === true) {
+      this.#record(employee, tool, hook.tool_input, verdict.parts, 'system', null);
+      return { decision: 'allow', reason: 'sistemce (otonomi politikası)', kind: first.kind, target: first.target };
     }
     const part = passed.missing;
     this.#held.set(employeeId, { tool, kind: part.kind, target: part.target, scope: verdict.scope });
     this.#d.events.append(employeeId, { type: 'gate.checked', tool, kind: part.kind, target: part.target, decision: 'deny', approvalId: null });
+    const rule = system === null ? '' : ' Sistem bu çağrıyı kuralı yüzünden kendi geçirmedi.';
     const more = verdict.parts.length > 1 ? ` Bu çağrıda onay isteyen ${verdict.parts.length} parça var; her biri için ayrı onay gerekir.` : '';
     const scope = verdict.scope === 'task' ? ' Görev boyunca bu tür tarayıcı işleri için scope: task iste.' : '';
     return {
@@ -82,10 +99,44 @@ export class Gate {
       kind: part.kind,
       target: part.target,
       reason:
-        `OFİS KAPISI: ${APPROVAL_KIND_LABELS[part.kind]} — “${part.target}” onaysız yapılamaz (${part.why}).${more} ` +
+        `OFİS KAPISI: ${APPROVAL_KIND_LABELS[part.kind]} — “${part.target}” onaysız yapılamaz (${system ?? part.why}).${rule}${more} ` +
         `approvalRequest aracıyla sahibinden onay iste: summary'ye neden gerektiğini yaz (tool, kind ve target boş kalırsa bu çağrı alınır).${scope} ` +
         'Sahibi onaylayınca aynı çağrıyı tekrarla; beklerken görevi taskPark ile park et.',
     };
+  }
+
+  /**
+   * Spec capabilities §5: a call is the system's when every part comes from a connector's classified tool, of a kind
+   * the owner's policy leaves to the system — the shell's and the built-in tools' sends and publishes never are. Then
+   * true (it passes), or the rule of §6 that holds it. null: the owner's, as before.
+   */
+  #system(employee: Employee, input: unknown, parts: GatePart[]): true | string | null {
+    const a = this.#d.autonomy;
+    if (!a) return null;
+    const c = a.constitution();
+    const kinds: OutwardPolicyKind[] = [];
+    for (const p of parts) {
+      if (p.capability === undefined || !isOutwardPolicyKind(p.kind) || c.outwardPolicy[p.kind] !== 'system') return null;
+      kinds.push(p.kind);
+    }
+    const departmentId = employee.departmentId ?? null;
+    const rule = outwardRule({
+      input, kinds, rules: c, now: (a.now ?? Date.now)(),
+      count: (k, since) => a.outbox.countSystem({ departmentId, employeeId: employee.id, kinds: k, since }),
+    });
+    return rule ?? true;
+  }
+
+  /** The outbox's line for a call let out (spec §7): its first part of an outward kind; other calls write nothing. */
+  #record(employee: Employee, tool: string, input: unknown, parts: GatePart[], via: OutboxVia, approvalId: string | null): void {
+    const outbox = this.#d.autonomy?.outbox;
+    const part = parts.find((p) => isOutwardPolicyKind(p.kind));
+    if (!outbox || !part) return;
+    const entry = outbox.add({
+      employeeId: employee.id, departmentId: employee.departmentId ?? null, tool, kind: part.kind as OutwardPolicyKind, target: part.target,
+      recipients: recipientsOf(input), summary: callSummary(input), via, approvalId,
+    });
+    this.#d.events.append(employee.id, { type: 'outbox.sent', entry });
   }
 }
 
