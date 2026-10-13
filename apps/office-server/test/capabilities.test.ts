@@ -301,8 +301,8 @@ describe('Capabilities — what an employee declares', () => {
     const t = make();
     const c = t.coordinator.id;
     const ece = t.company.hire(c, { name: 'Ece', template: 'musteri-temsilcisi' } as never);
-    expect(ece.capabilities).toEqual(['email.read', 'email.send', 'crm.read']);
-    expect(t.roster.get(ece.id).capabilities).toEqual(['email.read', 'email.send', 'crm.read']);
+    expect(ece.capabilities).toEqual(['email.read', 'email.send', 'crm.read', 'messages.read', 'messages.send']);
+    expect(t.roster.get(ece.id).capabilities).toEqual(['email.read', 'email.send', 'crm.read', 'messages.read', 'messages.send']);
     const efe = t.company.hire(c, { name: 'Efe', template: 'musteri-temsilcisi', capabilities: ['email.read', 'email.draft'] } as never);
     expect(t.roster.get(efe.id).capabilities).toEqual(['email.read', 'email.draft']);
     const ozan = t.company.hire(c, { name: 'Ozan', template: 'sosyal-medya', capabilities: [] } as never);
@@ -514,7 +514,7 @@ describe('Capabilities — reading them, and the tools that take them', () => {
   it('hire, editRoleCard, taskCreate, taskPass and taskAssign take them and say what each desk has; the work happens anyway', async () => {
     const t = office();
     const hired = await t.call(t.coordinator, 'hire', { name: 'Nil', template: 'musteri-temsilcisi', role: 'Kanal: e-posta.' });
-    expect(hired).toMatch(/^İşe alındı: Nil \(.+\), koltuk \d+, model sonnet, şablon musteri-temsilcisi \(sürüm \d+\)\.\nYetenekler: email\.read \[bu masada görülmedi\], email\.send \[bu masada görülmedi\], crm\.read \[bu masada görülmedi\]\. Ayrıntı: capabilitiesRead\.$/);
+    expect(hired).toMatch(/^İşe alındı: Nil \(.+\), koltuk \d+, model sonnet, şablon musteri-temsilcisi \(sürüm \d+\)\.\nYetenekler: email\.read \[bu masada görülmedi\], email\.send \[bu masada görülmedi\], crm\.read \[bu masada görülmedi\], messages\.read \[bu masada görülmedi\], messages\.send \[bu masada görülmedi\]\. Ayrıntı: capabilitiesRead\.$/);
     expect(await t.call(t.coordinator, 'hire', { name: 'Ali', role: 'r', model: 'haiku', capabilities: ['payments.charge'] })).toContain('\nYetenekler: payments.charge [yok]. Açık olmayanlar için sahibinden yetki iste (propose). Ayrıntı: capabilitiesRead.');
     expect(t.roster.list().find((e) => e.name === 'Ali')!.capabilities).toEqual(['payments.charge']);
     expect(await t.call(t.coordinator, 'editRoleCard', { employee: 'Can', capabilities: ['crm.read', 'email.read'] })).toBe('Can adlı çalışanın rol kartı güncellendi.\nYetenekler: crm.read [açık], email.read [kapalı]. Açık olmayanlar için sahibinden yetki iste (propose). Ayrıntı: capabilitiesRead.');

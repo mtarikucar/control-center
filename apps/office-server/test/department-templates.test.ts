@@ -91,4 +91,17 @@ describe('Department templates — the catalog', () => {
     expect(departmentTemplate('ic-dis-iletisim').body).toMatch(/DM/);
     expect(() => departmentTemplate('yok')).toThrow(/Bilinmeyen departman şablonu: yok\. Şablonlar: ic-dis-iletisim, operasyon-finans/);
   });
+
+  it('spec capabilities §9: İç-Dış İletişim, Pazarlama and Satış v2 — only the critical goes to the owner, the rest is in the outbox; a daily outbox sample is suggested', () => {
+    for (const id of ['ic-dis-iletisim', 'pazarlama', 'satis']) {
+      const t = departmentTemplate(id);
+      expect(t.version, id).toBe(2);
+      const owner = scopeSection(templateScope(t), 'Sana gelir');
+      expect(owner, id).not.toMatch(/^- Her (gönderim|yayın)/m);
+      expect(owner, id).toMatch(/giden kutusuna yazılır/);
+      expect(t.routines.some((r) => r.startsWith('Giden kutusundan örnek okuma')), id).toBe(true);
+    }
+    expect(scopeSection(templateScope(departmentTemplate('satis')), 'Sana gelir')).toMatch(/İYS/);
+    expect(departmentTemplate('yazilim-otomasyon').version).toBe(1);
+  });
 });

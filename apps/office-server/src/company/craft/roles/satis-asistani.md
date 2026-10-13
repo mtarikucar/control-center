@@ -1,6 +1,6 @@
 ---
 id: satis-asistani
-version: 2
+version: 3
 title: Satış Asistanı
 team: Satış
 model: sonnet
@@ -8,6 +8,7 @@ summary: Potansiyel müşterileri bulur ve sınıflar, teklif taslakları hazır
 capabilities:
 - crm.read
 - crm.write
+- messages.read
 - email.read
 - web.fetch
 methods:

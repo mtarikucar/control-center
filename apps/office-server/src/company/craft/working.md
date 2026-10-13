@@ -7,8 +7,9 @@
   park et: dönüş saati (`+6h`, `+1d`, `2026-10-08T14:55`) ve gerekçe. Sıran boşalır, ofis sıradaki işini verir ve park
   edileni saatinde geri getirir. Claude'un kendi zamanlayıcısı (`CronCreate`, `/loop`, `/schedule`) bu ofiste kapalıdır:
   zamana bağlı her iş ofisin saatinden geçer.
-- **Kapıya takılırsan** ("OFİS KAPISI: …"): yayın, gönderim, ödeme, silme, tarayıcı işi ya da ofisin kendisine dokunan
-  bir çağrı sahibinin onayını bekler. `approvalRequest` ile iste (summary: neden gerektiği); onay gelince aynı çağrıyı
+- **Kapıya takılırsan** ("OFİS KAPISI: …"): sistemin kendi geçirmediği yayın, gönderim, arama, takvim daveti, ödeme,
+  silme, tarayıcı işi ya da ofisin kendisine dokunan bir çağrı sahibinin onayını bekler. `approvalRequest` ile iste
+  (summary: neden gerektiği); onay gelince aynı çağrıyı
   tekrarla; beklerken başka işin yoksa görevi `taskPark` ile park et. Kapıyı dolanmaya çalışma: kapı kazara ve sıradan
   yolları kapatır, aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz; sahibi onayı yalnız ofis sayfasından sayılır.
 - **Boşta sessizce bekleme.** Teslimden sonra sıranda iş kalmadıysa (`myTasks`) hangi işi alabileceğini `propose` ile
@@ -21,3 +22,13 @@
     `minor` (iyileştirme). Her bulguda somut bir senaryo olsun: hangi durumda ne yanlış çıkıyor.
   - Kritik ya da önemli bulgu varsa `changes`, yoksa `approve` (küçükler kayda geçer).
   - Düzeltmeyi kendin yapma, yapana bırak. Kendi işini inceleyemezsin.
+
+## Sistemin senin adına gönderdiği
+
+- Kapı açıkken bağlayıcıdan yapılan olağan gönderim, yayın ve arama sahibine sorulmadan geçebilir (Anayasa'nın
+  otonomi politikası ve kuralları: saatlik sınır, toplu gönderim, özel kişiler, arama saatleri). Geçen her çağrı giden
+  kutusuna yazılır; başkanın onu her gün okur.
+- Şunlarda göndermeden önce `approvalRequest` ile sahibine sor (`tool` ve göndereceğin `input`): para sözü (fiyat,
+  indirim, iade, ödeme tarihi); hukuki konu (avukat, tüketici hakem heyeti, KVKK talebi, sözleşme); kriz (basın,
+  olumsuz yayılan paylaşım, tehdit, ağır şikâyet); bilgi tabanında cevabı olmayan soru; ticari ileti izni (İYS)
+  olmayan kişiye ilk tanıtım mesajı ya da araması. Kapı içeriği okumaz; bunları sen ayırırsın.

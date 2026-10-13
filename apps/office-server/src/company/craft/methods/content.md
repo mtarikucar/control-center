@@ -10,14 +10,16 @@ Metin, görsel, video, sosyal medya gönderisi, kampanya, e-posta, sunum.
 4. Editör ve marka incelemesi: yazandan başka biri; marka dili, ton, açıklık, iddiaların doğruluğu.
 5. Üretim: son metin, görsel ya da kurgu.
 6. Son kontrol: biçim, yazım, bağlantılar, telif ve izinler.
-7. Sahibinin yayın onayı: yayın ve dışarıya gönderim geri alınamaz.
+7. Yayın kararı: kritik olan sahibine; olağan olan otonomi politikasıyla sistemce gider ve giden kutusuna yazılır.
+   Kritik olan (kampanya vaadi, kriz ya da hukuki konuya değen içerik, yayını silmek, reklam harcaması) yayından önce
+   `approvalRequest` ile sahibine sorulur.
 8. Ölçüm: yayından sonra başarı ölçüsüne bakılır, ders el kitabına yazılır.
 
 ## Roller
 
 - Yazar ya da üretici: taslağı ve üretimi yapar.
 - Editör (reviewer): yazardan başka biri; brief'e ve marka diline göre inceler.
-- Koordinatör: brief'i yazar, yayın onayını sahibine götürür.
+- Koordinatör: brief'i yazar; kritik olanın onayını sahibine götürür.
 
 ## Kalite kontrolleri
 
@@ -37,7 +39,7 @@ Metin, görsel, video, sosyal medya gönderisi, kampanya, e-posta, sunum.
 
 - Brief'siz yazmaya başlamak; bir metinde üç mesaj vermek.
 - Kaynaksız iddia ve uydurma sayı.
-- Yayını ya da gönderimi sahibine sormadan yapmak.
+- Kritik olanı (kampanya vaadi, kriz, hukuki konu) sahibine sormadan yayınlamak ya da göndermek.
 - Ölçmeden "başarılı" demek.
 
 ## Model önerisi

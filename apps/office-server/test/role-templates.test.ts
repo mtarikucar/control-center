@@ -82,6 +82,9 @@ Teslim edildiğinde.
 // says the owner approves.
 const OUTWARD = ['sosyal-medya', 'musteri-temsilcisi', 'satis-asistani', 'operasyon-asistani', 'icerik-yazari', 'iletisim-yoneticisi', 'yonetici-asistani', 'satis-muduru', 'aday-arastirmaci', 'operasyon-finans-yoneticisi', 'satin-alma-uzmani', 'pazarlama-muduru', 'teknik-lider'];
 
+// Spec capabilities §9: the roles that talk to customers and the public — the critical to the owner, the rest the system's.
+const AUTONOMOUS = ['iletisim-yoneticisi', 'musteri-temsilcisi', 'sosyal-medya', 'satis-muduru', 'aday-arastirmaci', 'pazarlama-muduru'];
+
 describe('Role templates — the format', () => {
   it('parses the front matter (scalars and lists) and the body', () => {
     expect(parseRoleTemplate('ornek', SAMPLE)).toEqual({
@@ -134,7 +137,7 @@ describe('Role templates — the catalog (ships with the office)', () => {
     // Roles that reach outside carry the company's rule where they are told how to work: posts, sends and payments
     // go through the owner.
     const howTo = (id: string) => /### Nasıl çalışırsın\n([\s\S]*?)\n### /.exec(roleTemplate(id).body)?.[1] ?? '';
-    for (const id of OUTWARD) expect(howTo(id), id).toMatch(/sahibinin onayı/);
+    for (const id of OUTWARD) expect(howTo(id), id).toMatch(AUTONOMOUS.includes(id) ? /Kritik olan sahibine, geri kalanı sistemce/ : /sahibinin onayı/);
     expect(roleTemplate('operasyon-asistani').capabilities).not.toContain('payments.charge');
     expect(() => roleTemplate('yok')).toThrow(/Bilinmeyen rol şablonu: yok\. Şablonlar: aday-arastirmaci, arastirmaci, editor/);
   });
@@ -142,16 +145,40 @@ describe('Role templates — the catalog (ships with the office)', () => {
   it('the department heads and their suggested roles are on the office’s models (spec departments §4.3)', () => {
     const heads = { 'teknik-lider': 'opus', 'pazarlama-muduru': 'sonnet', 'iletisim-yoneticisi': 'sonnet', 'satis-muduru': 'sonnet', 'operasyon-finans-yoneticisi': 'sonnet' };
     for (const [id, model] of Object.entries(heads)) expect(roleTemplate(id).model, id).toBe(model);
-    expect(roleTemplate('sosyal-medya')).toMatchObject({ version: 2, title: 'Sosyal Medya ve Reklam Uzmanı', team: 'Pazarlama' });
+    expect(roleTemplate('sosyal-medya')).toMatchObject({ version: 3, title: 'Sosyal Medya ve Reklam Uzmanı', team: 'Pazarlama' });
     expect(roleTemplate('sosyal-medya').capabilities).toContain('ads.manage');
     expect(roleTemplate('icerik-yazari')).toMatchObject({ version: 2, team: 'Pazarlama' });
     expect(roleTemplate('icerik-yazari').capabilities).toContain('media.generate');
-    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 2, team: 'İç-Dış İletişim' });
-    expect(roleTemplate('satis-asistani')).toMatchObject({ version: 2, team: 'Satış' });
+    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 3, team: 'İç-Dış İletişim' });
+    expect(roleTemplate('satis-asistani')).toMatchObject({ version: 3, team: 'Satış' });
     expect(roleTemplate('operasyon-asistani')).toMatchObject({ version: 2, team: 'Operasyon ve Finans' });
     // The assistant of the owner keeps the owner's mail out of the company memory.
     expect(roleTemplate('yonetici-asistani').body).toMatch(/şirket hafızasına/);
     expect(roleTemplate('iletisim-yoneticisi').body).toMatch(/DM/);
+  });
+
+  it('spec capabilities §9: the new versions — messages read and sent, consent (İYS) for a first message, the heads’ outbox sample, ad money the owner’s', () => {
+    expect(roleTemplate('iletisim-yoneticisi')).toMatchObject({ version: 2 });
+    expect(roleTemplate('iletisim-yoneticisi').capabilities).toEqual(expect.arrayContaining(['messages.read', 'messages.send']));
+    expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 3, capabilities: ['email.read', 'email.send', 'crm.read', 'messages.read', 'messages.send'] });
+    expect(roleTemplate('sosyal-medya').version).toBe(3);
+    for (const id of ['satis-muduru', 'aday-arastirmaci', 'pazarlama-muduru']) expect(roleTemplate(id).version, id).toBe(2);
+    for (const id of ['satis-muduru', 'aday-arastirmaci', 'iletisim-yoneticisi']) expect(roleTemplate(id).body, id).toMatch(/İYS/);
+    for (const id of ['iletisim-yoneticisi', 'satis-muduru', 'pazarlama-muduru']) expect(roleTemplate(id).body, id).toMatch(/`outboxRead`/);
+    expect(roleTemplate('sosyal-medya').body).toMatch(/Reklam harcaması .*her zaman sahibinin onayından geçer/);
+  });
+
+  it('spec capabilities §9: Satış sends follow-ups and first contact under the system’s rules, so it declares the sends; conversations are read with messages.read', () => {
+    for (const id of ['satis-muduru', 'aday-arastirmaci']) expect(roleTemplate(id).capabilities, id).toEqual(expect.arrayContaining(['email.send', 'messages.send']));
+    // The conversation tools moved from crm.read to messages.read: a template that reads customers’ conversations declares both.
+    for (const t of listRoleTemplates()) if (t.capabilities.includes('crm.read')) expect(t.capabilities, t.id).toContain('messages.read');
+    for (const id of ['sosyal-medya', 'satis-asistani']) expect(roleTemplate(id).capabilities, id).toContain('messages.read');
+    // Only the templates that talk to customers send: the others keep to drafts.
+    for (const id of ['satis-asistani', 'pazarlama-muduru', 'yonetici-asistani']) expect(roleTemplate(id).capabilities, id).not.toContain('messages.send');
+    // The e-mail line follows the department’s “Sana gelir” list: only what that list sends to the owner goes to the owner.
+    const how = /### Nasıl çalışırsın\n([\s\S]*?)\n### /.exec(roleTemplate('iletisim-yoneticisi').body)?.[1] ?? '';
+    expect(how).not.toMatch(/E-posta gönderimi, takvim daveti ve e-posta silme sahibinin onayından geçer/);
+    expect(how).toMatch(/Takvim daveti gönderme ve kabul etme ile e-posta silme sahibinin onayından geçer/);
   });
 });
 

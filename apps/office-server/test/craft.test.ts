@@ -56,11 +56,35 @@ describe('the coordination craft (ships with the office)', () => {
   it('keeps the always-loaded parts short, and the core says its version', () => {
     expect(coordinationText()).toContain(`Koordinatörlük ${CRAFT_VERSION}`);
     expect(coordinationText().length).toBeLessThan(6000);
-    expect(workingText().length).toBeLessThan(3000);
+    // The judgment layer (spec capabilities §8) is everyone's, so the always-loaded rules grew by it.
+    expect(workingText().length).toBeLessThan(3600);
     expect(coordinationText()).toContain('methodRead');
     expect(coordinationText()).toContain('planRetro');
     expect(workingText()).toContain('reviewDecide');
     expect(workingText()).toContain('evidence');
+  });
+
+  it('spec capabilities §8: everyone’s guide says what the system sends for them, and what they bring to the owner first, from the call’s own input', () => {
+    const w = flat(workingText());
+    expect(w).toContain('## Sistemin senin adına gönderdiği');
+    for (const part of ['para sözü (fiyat, indirim, iade, ödeme tarihi)', 'hukuki konu (avukat, tüketici hakem heyeti, KVKK talebi, sözleşme)', 'kriz (basın, olumsuz yayılan paylaşım, tehdit, ağır şikâyet)', 'bilgi tabanında cevabı olmayan soru', 'ticari ileti izni (İYS)', '`approvalRequest`', '`input`', 'giden kutusuna yazılır']) {
+      expect(w).toContain(part);
+    }
+    // The gate bullet no longer says every send or post waits for the owner: what the system lets through does not.
+    expect(w).toContain('sistemin kendi geçirmediği yayın, gönderim, arama, takvim daveti, ödeme, silme');
+    expect(w).not.toContain('yayın, gönderim, ödeme, silme, tarayıcı işi ya da ofisin kendisine dokunan bir çağrı sahibinin onayını bekler');
+  });
+
+  it('spec capabilities §8: the customer and content methods and the core’s rule 7 say the critical goes to the owner and the ordinary goes by the policy, into the outbox', () => {
+    const judgment = 'kritik olan sahibine; olağan olan otonomi politikasıyla sistemce gider ve giden kutusuna yazılır';
+    for (const text of [flat(methodText('customer')), flat(methodText('content')), flat(coordinationText())]) expect(text).toMatch(new RegExp(judgment, 'i'));
+    // Neither method asks the owner for every send or post any more; content no longer lists publishing without asking as a mistake.
+    expect(methodText('customer')).not.toContain('Onaysız göndermek');
+    expect(methodText('content')).not.toContain('Yayını ya da gönderimi sahibine sormadan yapmak');
+    expect(methodText('content')).not.toContain('Sahibinin yayın onayı: yayın ve dışarıya gönderim geri alınamaz');
+    expect(flat(coordinationText())).not.toMatch(/7\. \*\*Geri alınamaz işler sahibinden geçer\.\*\* Yayın, dışarıya gönderim, ödeme, canlıya alma, silme: önce sahibinin onayı\./);
+    // What is critical is named the same way everywhere.
+    for (const text of [flat(methodText('customer')), flat(methodText('content'))]) expect(text).toContain('`approvalRequest`');
   });
 
   it('without a type lists every type; an unknown type is refused in Turkish', () => {
