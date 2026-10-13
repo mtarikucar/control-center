@@ -1,4 +1,4 @@
-import { normalizeConstitution, streamStatus, type BudgetSummary, type ClockStatus, type Employee, type EmployeeUsage, type OfficeSnapshot, type Plan, type PlanView, type Proposal, type QuotaState, type Schedule, type StoredEvent, type Task, type Usage, type UsageTotals, type Goal, type Approval } from '@cc/shared';
+import { normalizeConstitution, streamStatus, type BudgetSummary, type ClockStatus, type Department, type Employee, type EmployeeUsage, type OfficeSnapshot, type Plan, type PlanView, type Proposal, type QuotaState, type Schedule, type StoredEvent, type Task, type Usage, type UsageTotals, type Goal, type Approval } from '@cc/shared';
 
 export const MAX_EVENTS = 500;
 
@@ -51,9 +51,13 @@ export interface OfficeData {
   agendaRev: number;
   /** Bumped by a management cycle's start and its record (and a live snapshot), so an open Yönetim tab reads the log again. */
   managementRev: number;
+  /** Every department, open and closed, as the snapshot and the feed last gave it (spec departments §7). */
+  departments: Record<string, Department>;
+  /** Bumped by every stream note, so an open plan's notes are read again. */
+  streamNotesRev: number;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, approvals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false, schedules: {}, clock: null, agendaRev: 0, managementRev: 0 };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, approvals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false, schedules: {}, clock: null, agendaRev: 0, managementRev: 0, departments: {}, streamNotesRev: 0 };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 0, sideAnswers: 0 };
 
@@ -113,6 +117,8 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     agendaRev: current.agendaRev + 1,
     // A live snapshot opens the feed (a reconnect may have missed a cycle); an HTTP one comes while the feed runs.
     managementRev: current.managementRev + (source === 'live' ? 1 : 0),
+    departments: Object.fromEntries((s.departments ?? []).map((x) => [x.id, x])),
+    streamNotesRev: d.streamNotesRev,
   };
 }
 
@@ -177,6 +183,8 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'goal.changed') next.goals = { ...d.goals, [ev.goal.id]: ev.goal };
   if (ev.type === 'company.paused') next.paused = ev.paused;
   if (ev.type === 'schedule.changed') next.schedules = { ...d.schedules, [ev.schedule.id]: ev.schedule };
+  if (ev.type === 'department.changed') next.departments = { ...d.departments, [ev.department.id]: ev.department };
+  if (ev.type === 'stream.noted') next.streamNotesRev = d.streamNotesRev + 1;
   if (AGENDA_EVENTS.has(ev.type)) next.agendaRev = d.agendaRev + 1;
   if (movesManagementLog(d, s)) next.managementRev = d.managementRev + 1;
   if (ev.type === 'task.changed' && ev.change === 'created' && ev.task.requester !== 'owner' && ev.task.requester !== ev.task.assignee) {
@@ -267,7 +275,8 @@ export function needsRefresh(s: StoredEvent, before?: OfficeData): boolean {
     return !was || was.status !== ev.task.status || was.streamId !== ev.task.streamId || was.planId !== ev.task.planId;
   }
   if (t === 'plan.changed') return (ev.plan.streams?.length ?? 0) > 0;
-  return t === 'employee.hired' || t === 'employee.fired' || t === 'lifecycle.changed' || t === 'role.changed';
+  // A department's change moves people with it: their department, kind and team are the snapshot's.
+  return t === 'employee.hired' || t === 'employee.fired' || t === 'lifecycle.changed' || t === 'role.changed' || t === 'department.changed';
 }
 
 export function openToolSince(v: EmployeeView): number | null {

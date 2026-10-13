@@ -1,4 +1,4 @@
-import type { AgendaReport, Approval, BudgetSummary, Constitution, Decision, Employee, EmployeeFile, Goal, HireInput, ManagementLog, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, Task } from '@cc/shared';
+import type { AgendaReport, Approval, BudgetSummary, Constitution, Decision, Department, DepartmentInput, DepartmentTemplate, Employee, EmployeeFile, Goal, HireInput, ManagementLog, Note, OfficeMetrics, OfficeSnapshot, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, StreamNote, Task } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -116,4 +116,11 @@ export const api = {
   releaseTask: (id: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/release`),
   prioritizeTask: (id: string) => request<Task>('POST', `/api/tasks/${encodeURIComponent(id)}/prioritize`, { priority: 1 }),
   scheduleAction: (id: string, action: 'pause' | 'resume' | 'stop') => request<Schedule>('POST', `/api/schedules/${encodeURIComponent(id)}/${action}`),
+  departments: () => request<Department[]>('GET', '/api/departments'),
+  departmentTemplates: () => request<DepartmentTemplate[]>('GET', '/api/department-templates'),
+  createDepartment: (input: DepartmentInput) => request<Department>('POST', '/api/departments', input),
+  updateDepartment: (id: string, patch: { name?: string; mission?: string; scope?: string; headId?: string | null }) => request<Department>('POST', `/api/departments/${encodeURIComponent(id)}`, patch),
+  closeDepartment: (id: string, reason: string) => request<Department>('POST', `/api/departments/${encodeURIComponent(id)}/close`, { reason }),
+  moveEmployee: (id: string, departmentId: string | null) => request<Employee>('POST', `${employee(id)}/department`, { departmentId }),
+  streamNotes: (planId: string) => request<Array<{ streamId: string; plan: StreamNote | null; report: StreamNote | null }>>('GET', `/api/plans/${encodeURIComponent(planId)}/stream-notes`),
 };

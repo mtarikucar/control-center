@@ -9,12 +9,14 @@ import { formatWhenTR } from './format.ts';
 import { GoalsTab } from './GoalsTab.tsx';
 import { ManagementTab } from './ManagementTab.tsx';
 import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
+import { DepartmentsTab } from './DepartmentsTab.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 import { streamOf } from './streams.ts';
 import { ApprovalsTab } from './ApprovalCard.tsx';
 
 const TABS = [
   ['org', 'Örgüt'],
+  ['departments', 'Departmanlar'],
   ['goals', 'Hedefler'],
   ['agenda', 'Ajanda'],
   ['tasks', 'Görevler'],
@@ -179,11 +181,23 @@ export function CompanyView() {
     setCompanyOpen(false);
   };
 
+  const departments = useOffice((s) => s.departments);
+  const openDepartments = Object.values(departments ?? {}).filter((x) => x.status === 'open').sort((a, b) => a.createdAt - b.createdAt);
+  /** The org chart's groups (spec departments §8): departments in opening order, the head first, then the centre; without departments, today's teams. */
   const teams = new Map<string, Employee[]>();
-  for (const e of people) {
-    if (e.kind === 'coordinator') continue;
-    const team = e.team || 'Ekipsiz';
-    teams.set(team, [...(teams.get(team) ?? []), e]);
+  if (openDepartments.length > 0) {
+    for (const dep of openDepartments) {
+      const members = people.filter((e) => e.kind !== 'coordinator' && e.departmentId === dep.id);
+      teams.set(dep.name, [...members.filter((e) => e.id === dep.headId), ...members.filter((e) => e.id !== dep.headId)]);
+    }
+    const centre = people.filter((e) => e.kind !== 'coordinator' && !openDepartments.some((dep) => dep.id === e.departmentId));
+    if (centre.length) teams.set('Merkez', centre);
+  } else {
+    for (const e of people) {
+      if (e.kind === 'coordinator') continue;
+      const team = e.team || 'Ekipsiz';
+      teams.set(team, [...(teams.get(team) ?? []), e]);
+    }
   }
 
   const shown = allTasks.filter((t) => (!person || t.assignee === person) && (!planFilter || (planFilter === 'none' ? t.planId === null : t.planId === planFilter)));
@@ -223,6 +237,8 @@ export function CompanyView() {
               ))}
             </div>
           </div>
+        ) : tab === 'departments' ? (
+          <DepartmentsTab />
         ) : tab === 'goals' ? (
           <GoalsTab />
         ) : tab === 'agenda' ? (

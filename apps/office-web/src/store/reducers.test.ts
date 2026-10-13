@@ -401,3 +401,17 @@ describe('approvals (B9a)', () => {
   });
 });
 
+
+describe('departments', () => {
+  it('keeps the departments from the snapshot and their changes; a department change asks for a fresh snapshot; a stream note bumps its revision', () => {
+    const dep = { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } as const;
+    let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 1, departments: [dep] });
+    expect(d.departments).toEqual({ d1: dep });
+    const ev = { seq: 2, ts: 2, employeeId: null, event: { type: 'department.changed', change: 'updated', department: { ...dep, name: 'Büyüme' } } } as never;
+    d = applyEvent(d, ev);
+    expect(d.departments.d1?.name).toBe('Büyüme');
+    expect(needsRefresh(ev)).toBe(true);
+    d = applyEvent(d, { seq: 3, ts: 3, employeeId: 'e', event: { type: 'stream.noted', note: { id: 1 } } } as never);
+    expect(d.streamNotesRev).toBe(1);
+  });
+});
