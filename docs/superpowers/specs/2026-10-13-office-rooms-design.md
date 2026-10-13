@@ -76,13 +76,17 @@ Koltuk numarası `deskIndex` olarak kalır (sütun ve tipler değişmez), anlam�
 2. Bir departmanın üyesi ve departmanın bir odası var → o odanın ilk boş koltuğu; oda doluysa ilk boş merkez masası
    (departmanda kişi sınırı yok).
 3. Departmansız (merkez) → ilk boş merkez masası.
-4. Hiçbiri yoksa → ilk boş koltuk. Hiç boş koltuk yoksa işe alım bugünkü "Ofis dolu" hatasını verir.
+4. Hiçbiri yoksa → hiçbir açık departmanın tutmadığı odaların koltukları, en yüksek numaralı oda önce (yeni departman
+   en küçük boş odayı alır); sonra öteki departmanların odaları; koordinatörün masası (0) en son. Hiç boş koltuk
+   yoksa işe alım bugünkü "Ofis dolu" hatasını verir.
 
 Bir kişi bulunduğu yerde kalabiliyorsa yerinden kaldırılmaz (oda değişmediyse koltuk değişmez).
 
 **Ne zaman:** işe alımda; departmana girip çıkınca, başkan olunca/bitince, departman kapanınca; koordinatörlük
 değişince; ofis her açıldığında bir kez herkes için (`reseatAll`, idempotent — bugünkü 8 masadan yeni koltuklara geçiş
-budur).
+budur). Bir departman oda alınca, kapanınca, biri departmandan çıkınca, başka departmandan başkan olunca ya da işten
+çıkarılınca da herkes için `reseatAll`: boşalan koltuğu bekleyen oturur, departmanın aldığı odada oturan merkezliler
+çıkar.
 
 ## 4. Odalar
 
@@ -101,6 +105,11 @@ tabloyu zaten kaldırır). `DepartmentStore` yazar ve okur.
 - **Dolu oda:** halı departmanın rengi (6 rengin biri, oda numarasına göre), lambalar yanık, ekranlar açık, kapı
   tabelasında departmanın adı ve başkanın adı.
 - **Boş oda:** halı koyu gri, oda lambaları sönük, masalarda ekran kapalı, tabelada "Boş oda".
+- **Ortak oda:** departmanı yok ama içinde merkezden oturan biri var: halı koyu gri, lambası yanık, oturulan masaların
+  ekranı açık, tabelada "Ortak oda".
+- **Oda etiketi:** tabela varsayılan yakınlıkta okunmaz (≈ 31 × 10 px), bu yüzden departmanın odasının zemininde, dış
+  duvarı yanında piksel boyutlu bir etiket (drei `<Html>`) odanın rengini ve departmanın adını gösterir; tıklama ve
+  sürüklemeyi almaz, çalışanların etiketlerinin altında kalır.
 - **Tabela:** kapının üstünde, merkeze bakan, çift yüzlü düzlem; metin bir `<canvas>`'ta çizilip doku olur (ağdan
   yazı tipi indirmez; ofis yerel çalışır).
 
@@ -151,7 +160,9 @@ Mevcut Bloom efekti (eşik 0,92) hüzmenin parlak kısmını hafifçe parlatır;
 
 - Sütun ve API değişmez (`deskIndex` aynı alan); eski bir istemci yeni koltuk numarasıyla bilinmeyen bir masaya
   düşerse `spotFor`'un mod kuralıyla bir yere oturur (bugünkü davranış).
-- Departmansız bir ofis (alt proje 1 öncesi gibi) merkezde çalışır: herkes merkez masalarında, odalar boş ve karanlık.
+- Departmansız bir ofis (alt proje 1 öncesi gibi) merkezde çalışır: herkes merkez masalarında, odalar boş ve karanlık;
+  merkezin sekiz masası dolunca dokuzuncu ve sonrası hiçbir departmanın tutmadığı en yüksek numaralı odaya (oda 5'ten
+  başlayarak), o da yoksa öteki odalara oturur ve oturdukları oda "Ortak oda" olarak aydınlanır.
 
 ## 8. Doğrulama
 

@@ -21,8 +21,9 @@ export function minZoom(width: number, depth: number): number {
 }
 
 /**
- * Where the floor's corner goes: its middle at the origin (the camera, light and controls all aim there), nudged
- * towards the camera so the far corner clears the top bar (1.1 m for 18 × 14 m, as tuned by hand).
+ * Where the floor's corner (layout (0, 0)) goes: so its middle lands just off the origin, where the camera, light and
+ * controls all aim, at origin + (nudge, 0, nudge) — towards the camera, so the far corner clears the top bar (a nudge
+ * of 1.1 m for 18 × 14 m, as tuned by hand).
  */
 export function sceneOrigin(width: number, depth: number): [number, number, number] {
   const nudge = (width + depth) / 29;

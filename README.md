@@ -233,13 +233,17 @@ Ofis 32 × 24 m'lik tek bir kat: ortada **merkez**, kuzeyinde ve güneyinde üç
   güneybatıda sunucu köşesi, doğuda lounge, koordinatörün iki yanında sekiz merkez masası.
 - **Işık hüzmesi** koordinatörün durumunu gösterir: çalışırken nabız gibi parlar, boştayken sakin, uyurken ya da
   dururken sönük; koordinatör yoksa hüzme de yok.
-- **Odalar:** bir departman açılınca en küçük boş odayı alır, kapanınca oda boşalır. Dolu odanın halısı departmanın
-  renginde, lambası ve ekranları açık; kapısının üstündeki tabelada departmanın ve başkanının adı yazar. Boş oda
-  karanlıktır, tabelasında "Boş oda" yazar.
+- **Odalar:** bir departman açılınca en küçük boş odayı alır, kapanınca oda boşalır. Departmanın odasının halısı
+  odanın renginde (her odanın kendi rengi), lambası ve ekranları açık; kapısının üstündeki tabelada departmanın ve
+  başkanının adı, odanın zemininde de her yakınlıkta okunan bir etikette odanın rengi ve departmanın adı yazar. Boş
+  oda karanlıktır, tabelasında "Boş oda" yazar; departmanı olmayan ama içinde oturan biri olan oda "Ortak oda"dır:
+  lambası ve oturulan masaların ekranları açık.
 - **Koltuklar (45):** koordinatör 0'da, oda r'nin altı masası 1 + 6r … 6 + 6r, merkez masaları 37 … 44. Departman
   üyesi kendi odasına oturur; oda doluysa (departmanda kişi sınırı yok) merkezdeki bir masaya, departmansızlar
-  merkeze. Departmanı ya da koordinatörlüğü değişen kişi yeni yerine yürür; ofis her açılışta herkesi yerine
-  oturtur (sekiz masalı eski ofis de böyle taşınır).
+  merkeze. Merkezin sekiz masası doluysa merkezdekiler hiçbir departmanın tutmadığı en yüksek numaralı odaya oturur
+  (yeni departman en küçük boş odayı aldığından yolunda durmazlar), o da yoksa öteki odalara; bir departman o odayı
+  alınca oradakiler boş bir yere yürür. Departmanı ya da koordinatörlüğü değişen kişi yeni yerine yürür, boşalan bir
+  masayı bekleyen hemen oturur; ofis her açılışta herkesi yerine oturtur (sekiz masalı eski ofis de böyle taşınır).
 - **Çalışan sınırı:** Anayasa'da varsayılan 12, en çok 45 (koltuk sayısı); kayıtlı bir değerin varsa o kalır.
 
 ## office-server
