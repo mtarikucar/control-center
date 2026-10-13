@@ -89,6 +89,8 @@ export type OfficeEvent = { provider?: AgentProvider } & (
   /** The onboarding moved; `round` with change 'round': the questions just asked (KÖ1 counts them). */
   | { type: 'onboarding.changed'; change: OnboardingChange; onboarding: Onboarding; round?: OnboardingRound }
   | { type: 'role.changed'; kind: EmployeeKind; title: string; team: string }
+  /** Someone sat down elsewhere (spec office rooms §3): their department or role changed, or the office reseated everyone at its start; never sent for a hire. */
+  | { type: 'seat.changed'; deskIndex: number }
   | { type: 'department.changed'; change: DepartmentChange; department: Department }
   | { type: 'stream.noted'; note: StreamNote }
   | { type: 'decision.recorded'; decision: Decision }
