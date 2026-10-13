@@ -229,9 +229,10 @@ kişiye verilmiş akışın).
 
 `hire(team)`, `POST /api/employees {team}` ve blueprint rollerindeki `team` çalışmaya devam eder: ad bir açık
 departmana denk gelirse çalışan oraya girer; gelmezse ve sınır izin veriyorsa o adla başkansız bir özel departman
-açılır (koordinatöre bilgi notu); sınır doluysa `ValidationError` var olan departmanları sayar. Rol şablonunun
-varsayılan `team`'i de aynı kuralla çözülür. Başkan `team` veremez; onun işe aldığı her zaman kendi departmanına
-girer.
+açılır (herkese bilgi notu); sınır doluysa `ValidationError` var olan departmanları sayar. Rol şablonunun
+varsayılan `team`'i ise yalnız **açık bir departmana katılır, departman açmaz**: denk gelen yoksa çalışan merkeze
+girer (şablonla yapılan her işe alım bir oda harcamasın diye). Başkan başka bir `team` veremez; onun işe aldığı her
+zaman kendi departmanına girer.
 
 ## 6. Akış devri
 
@@ -287,16 +288,18 @@ gibi kalır; departmana verilmiş işlerin ayrıntıda tek satıra sıkıştır�
 Sahibinin uçları (değiştirenler bugünkü sahip korumasıyla: Origin + sayfa anahtarı):
 
 ```
-GET  /api/departments                       Department[] (kapalılar dahil, ?status=open)
+GET  /api/departments                       Department[] (kapalılar dahil)
 GET  /api/department-templates              DepartmentTemplate[]
 POST /api/departments                       { template? | name, mission, scope?, headId? }
-PATCH /api/departments/:id                  { name?, mission?, scope?, headId? }
+POST /api/departments/:id                   { name?, mission?, scope?, headId? }   (API'nin geri kalanı gibi POST)
 POST /api/departments/:id/close             { reason }
 POST /api/employees/:id/department          { departmentId | null }
 POST /api/employees                         { …, departmentId?, head? }   işe alma formu
+GET  /api/plans/:id/stream-notes            her akışın son planı ve raporu
 ```
 
-- Olay: `department.changed { change: 'created' | 'updated' | 'head' | 'moved' | 'closed', department }`.
+- Olaylar: `department.changed { change: 'created' | 'updated' | 'head' | 'moved' | 'closed', department }` ve
+  `stream.noted { note }` (açık plan kartları notları yeniden okur).
 - `/api/office` anlık görüntüsüne `departments` eklenir.
 - Sahibinin işlemleri koordinatöre bilgi notu bırakır (bugünkü düğmeler gibi).
 
