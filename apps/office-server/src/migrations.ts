@@ -614,4 +614,26 @@ export const MIGRATIONS: Migration[] = [
     down: `UPDATE employees SET session_started = CASE WHEN provider = 'claude' THEN session_started ELSE COALESCE(json_extract(provider_sessions, '$.claude'), 0) END;
       DROP TABLE quota_by_provider; ALTER TABLE employees DROP COLUMN provider_sessions; ALTER TABLE employees DROP COLUMN provider;`,
   },
+  {
+    // 24 on feat/departments; 25 once feat/b10-core's 24 (knowledge base) is on main (plan Task 15).
+    version: 24,
+    name: 'departments: the rooms, their heads, an employee’s department and the notes on plan streams',
+    up: `CREATE TABLE IF NOT EXISTS departments (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, mission TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT '',
+        template TEXT, template_version INTEGER, head_id TEXT,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+        created_at INTEGER NOT NULL, closed_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS stream_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id TEXT NOT NULL, stream_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('plan', 'report')), text TEXT NOT NULL, evidence TEXT NOT NULL DEFAULT '[]',
+        next TEXT, by TEXT NOT NULL, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS stream_notes_lookup ON stream_notes (plan_id, stream_id, kind, at);
+      ALTER TABLE employees ADD COLUMN department_id TEXT;`,
+    down: `DROP INDEX IF EXISTS stream_notes_lookup;
+      DROP TABLE IF EXISTS stream_notes;
+      ALTER TABLE employees DROP COLUMN department_id;
+      DROP TABLE IF EXISTS departments;`,
+  },
 ];

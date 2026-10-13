@@ -28,14 +28,15 @@ const V20_TABLES = [...V19_TABLES, 'kpi_readings'].sort();
 const V21_TABLES = [...V20_TABLES, 'search_fts', 'search_fts_config', 'search_fts_data', 'search_fts_docsize', 'search_fts_idx', 'search_index'].sort();
 const V22_TABLES = [...V21_TABLES, 'approvals'].sort();
 const V23_TABLES = [...V22_TABLES, 'quota_by_provider'].sort();
+const V24_TABLES = [...V23_TABLES, 'departments', 'stream_notes'].sort();
 const columns = (db: Db, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((c) => c.name);
 const upTo = (version: number) => MIGRATIONS.filter((m) => m.version <= version);
 
 describe('migrations', () => {
   it('applies every migration up', () => {
     const db = openDb(':memory:');
-    expect(migrateUp(db)).toBe(23);
-    expect(tables(db)).toEqual(V23_TABLES);
+    expect(migrateUp(db)).toBe(24);
+    expect(tables(db)).toEqual(V24_TABLES);
   });
 
   it('review (Kerem): the applied migrations keep the names the live database has (checkApplied compares them; renaming one stops the office)', () => {
@@ -71,14 +72,14 @@ describe('migrations', () => {
     expect(migrateDown(db, 0)).toBe(0);
     expect(tables(db)).toEqual(['schema_migrations']);
     expect(appliedVersion(db)).toBe(0);
-    expect(migrateUp(db)).toBe(23);
-    expect(tables(db)).toEqual(V23_TABLES);
+    expect(migrateUp(db)).toBe(24);
+    expect(tables(db)).toEqual(V24_TABLES);
   });
 
   it('is a no-op when run twice in either direction', () => {
     const db = openDb(':memory:');
     migrateUp(db);
-    expect(migrateUp(db)).toBe(23);
+    expect(migrateUp(db)).toBe(24);
     migrateDown(db, 0);
     expect(migrateDown(db, 0)).toBe(0);
   });
@@ -502,5 +503,30 @@ describe('migrations', () => {
     expect(db.prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all()).toEqual(before);
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toMatchObject({ n: 1 });
     expect(migrateUp(db, upTo(22))).toBe(22);
+  });
+
+  it('v24 adds the departments, the stream notes and an employee’s department, empty; v24 down restores v23 and keeps the employees', () => {
+    const db = openDb(':memory:');
+    migrateUp(db, upTo(23));
+    db.prepare(
+      `INSERT INTO employees (id, slug, name, role, model, character_id, desk_index, session_id, session_started, lifecycle, created_at, title, team, kind)
+       VALUES ('e1', 'ada', 'Ada', 'r', 'sonnet', 'coder', 0, 's1', 0, 'idle', 1, '', 'Keşif', 'member')`,
+    ).run();
+    const before = columns(db, 'employees');
+    expect(migrateUp(db, upTo(24))).toBe(24);
+    expect(tables(db)).toEqual(V24_TABLES);
+    expect(columns(db, 'departments')).toEqual(['id', 'name', 'mission', 'scope', 'template', 'template_version', 'head_id', 'status', 'created_at', 'closed_at']);
+    expect(columns(db, 'stream_notes')).toEqual(['id', 'plan_id', 'stream_id', 'kind', 'text', 'evidence', 'next', 'by', 'at']);
+    expect(columns(db, 'employees')).toEqual([...before, 'department_id']);
+    // Schema only: the team stays a team until the office adopts it (Departments.adoptTeams).
+    expect(db.prepare('SELECT COUNT(*) AS n FROM departments').get()).toMatchObject({ n: 0 });
+    expect(db.prepare("SELECT department_id FROM employees WHERE id = 'e1'").get()).toMatchObject({ department_id: null });
+    db.prepare("INSERT INTO departments (id, name, created_at) VALUES ('d1', 'Keşif', 1)").run();
+    expect(() => db.prepare("INSERT INTO departments (id, name, status, created_at) VALUES ('d2', 'X', 'gone', 1)").run()).toThrow();
+    expect(migrateDown(db, 23)).toBe(23);
+    expect(tables(db)).toEqual(V23_TABLES);
+    expect(columns(db, 'employees')).toEqual(before);
+    expect(db.prepare("SELECT team FROM employees WHERE id = 'e1'").get()).toMatchObject({ team: 'Keşif' });
+    expect(migrateUp(db, upTo(24))).toBe(24);
   });
 });

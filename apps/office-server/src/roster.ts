@@ -41,6 +41,8 @@ interface Row {
   template_version: number | null;
   /** Absent in a database before v18. */
   capabilities?: string | null;
+  /** Absent in a database before v24. */
+  department_id?: string | null;
 }
 
 function fromRow(r: Row): Employee {
@@ -65,6 +67,8 @@ function fromRow(r: Row): Employee {
     createdAt: r.created_at,
     template: r.template ? { id: r.template, version: r.template_version ?? 1 } : null,
     capabilities: r.capabilities ? (JSON.parse(r.capabilities) as string[]) : [],
+    // Only when set: an office without departments sends the same employee JSON as before them.
+    ...(r.department_id ? { departmentId: r.department_id } : {}),
   };
 }
 
@@ -76,7 +80,7 @@ function fromRow(r: Row): Employee {
 export type NewEmployee = HireInput & { templateRef?: TemplateRef | null; capabilityIds?: string[]; deskDeny?: string[] };
 
 export type EmployeePatch = Partial<
-  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities'>
+  Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities' | 'departmentId'>
 >;
 
 export class Roster {
@@ -142,6 +146,7 @@ export class Roster {
       createdAt: this.#now(),
       template: input.templateRef ?? null,
       capabilities: input.capabilityIds ?? [],
+      ...(input.departmentId ? { departmentId: input.departmentId } : {}),
     };
     // A free-text hire with no capabilities writes the row exactly as before templates (v17) and capabilities (v18);
     // the template columns only for a template hire, the capabilities only when some are declared.
@@ -158,6 +163,10 @@ export class Roster {
     if (employee.capabilities!.length > 0) {
       columns.push('capabilities');
       values.push(JSON.stringify(employee.capabilities));
+    }
+    if (employee.departmentId) {
+      columns.push('department_id');
+      values.push(employee.departmentId);
     }
     this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
     return this.get(employee.id);
@@ -210,7 +219,12 @@ export class Roster {
     if (patch.capabilities !== undefined) {
       this.#db.prepare('UPDATE employees SET capabilities = ? WHERE id = ?').run(patch.capabilities.length ? JSON.stringify(patch.capabilities) : null, id);
     }
-    return next;
+    // Only when given, like the capabilities: works on a database before v24.
+    if (patch.departmentId !== undefined) {
+      this.#db.prepare('UPDATE employees SET department_id = ? WHERE id = ?').run(patch.departmentId, id);
+    }
+    // The re-read keeps the rule that an employee without a department has no departmentId key (next would carry null).
+    return patch.departmentId !== undefined ? this.get(id) : next;
   }
 
   /** Save each provider's readiness independently; native transcripts remain in their own session stores. */

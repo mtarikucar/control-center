@@ -132,4 +132,20 @@ describe('Roster — company fields', () => {
     expect(s.roster.get(e.id).model).toBe('opus');
     s.cleanup();
   });
+
+  it('keeps an employee’s department: written only when given, absent for the centre (spec departments §3)', () => {
+    const { roster, db } = setup();
+    const ada = roster.create({ name: 'Ada', role: 'r' });
+    expect(ada).not.toHaveProperty('departmentId');
+    const can = roster.create({ name: 'Can', role: 'r', team: 'Satış', departmentId: 'd1' });
+    expect(can).toMatchObject({ team: 'Satış', departmentId: 'd1' });
+    expect(roster.update(ada.id, { departmentId: 'd2', team: 'Pazarlama' })).toMatchObject({ departmentId: 'd2', team: 'Pazarlama' });
+    expect(roster.get(ada.id).departmentId).toBe('d2');
+    // A change that does not name the department leaves it alone.
+    roster.update(ada.id, { title: 'Yazar' });
+    expect(roster.get(ada.id).departmentId).toBe('d2');
+    roster.update(ada.id, { departmentId: null, team: '' });
+    expect(roster.get(ada.id)).not.toHaveProperty('departmentId');
+    expect(db.prepare('SELECT department_id FROM employees WHERE id = ?').get(ada.id)).toMatchObject({ department_id: null });
+  });
 });
