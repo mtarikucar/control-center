@@ -705,10 +705,12 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
       while (i < t.length && flag(t[i]!)) i += /^-[ncioe]$/.test(t[i]!) ? 2 : 1;
       words = words.slice(i);
     } else if (['nohup', 'command', 'builtin', 'exec', 'setsid', 'time', 'chronic', 'unbuffer'].includes(head)) {
-      // command -v/-V only says what a name is; exec -a names the process (its value is no command).
-      if (head === 'command' && t.slice(1).some((a) => a === '-v' || a === '-V')) return;
+      // command's own -v/-V (before the name it runs) only says what a name is; exec -a names the process (its value is
+      // no command). A -v after the name is that command's.
       let i = 1;
-      while (i < t.length && flag(t[i]!)) i += head === 'exec' && t[i] === '-a' ? 2 : 1;
+      for (; i < t.length && flag(t[i]!); i += head === 'exec' && t[i] === '-a' ? 2 : 1) {
+        if (head === 'command' && /^-[a-zA-Z]*[vV]/.test(t[i]!)) return;
+      }
       words = words.slice(i);
     } else if (head === 'xargs') {
       let i = 1;

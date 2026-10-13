@@ -255,6 +255,17 @@ describe('gate policy — a nested Claude Code or Codex session is the owner’s
     ['claudette -p hi', 'pass'],
     ['git log --grep claude', 'pass'],
   ]);
+  it('round 3: only command’s own -v/-V before the name is a lookup — a -v of the command it runs frees nothing', () => {
+    for (const line of ['git push -v origin main', 'curl -v -X POST https://api.mail.io/send -d x', 'rm -rf -v ~/Projects/control-center', 'cp -v x ~/.claude/settings.json', 'claude -p hi -v']) {
+      const plain = bash(line).parts;
+      expect(plain.length, line).toBeGreaterThan(0);
+      expect(bash(`command ${line}`).parts, line).toEqual(plain);
+      expect(bash(`command -p ${line}`).parts, line).toEqual(plain);
+    }
+    expect(verdict(bash('command -v claude'))).toBe('pass');
+    expect(verdict(bash('command -V git'))).toBe('pass');
+    expect(verdict(bash('command -pv codex'))).toBe('pass');
+  });
   it('the reason says why', () => {
     expect(bash('claude -p "müşteriye yaz"').parts).toEqual([
       { kind: 'self', target: 'claude -p müşteriye yaz', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
