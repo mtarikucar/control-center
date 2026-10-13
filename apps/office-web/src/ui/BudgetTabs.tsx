@@ -255,8 +255,9 @@ export function ConstitutionTab() {
       if (f.span) {
         const text = draft[f.key] ?? '';
         const hours = text.split(/[\s,;–-]+/).filter(Boolean).map(Number);
-        // A dash between the two hours separates them; before the first it is a minus sign, which no hour has.
-        if (/^\s*[–-]/.test(text) || hours.length !== 2 || hours.some((h) => !Number.isInteger(h))) {
+        // A dash between the two hours separates them ("8-17", "8 – 17"); right before a number and not right after one
+        // ("-9, 19", "9, -19") it is a minus sign, which no hour has.
+        if (/(?<!\d)[–-](?=\d)/.test(text) || hours.length !== 2 || hours.some((h) => !Number.isInteger(h))) {
           setError(`${f.label}: iki tam saat girin (ör. 9, 19).`);
           setBusy(false);
           return;

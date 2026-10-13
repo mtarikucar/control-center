@@ -200,8 +200,9 @@ describe('ConstitutionTab', () => {
 
   it('call hours: three hours, a fraction or a word are refused too; a dash or a space between the two reads', async () => {
     render(<ConstitutionTab />);
-    // A leading dash is a minus sign, not a separator: “-9, 19” is not the window 9–19.
-    for (const bad of ['9, 12, 19', '9, 19.5', '9, akşam', '', '-9, 19', ' –9 19', '-9-19']) {
+    // A dash right before a number and not right after one is a minus sign, not a separator: “-9, 19” and “9, -19”
+    // are not the window 9–19 (final re-review: anywhere, not only leading).
+    for (const bad of ['9, 12, 19', '9, 19.5', '9, akşam', '', '-9, 19', ' –9 19', '-9-19', '9, -19', '9,-19', '9 –19']) {
       fireEvent.change(screen.getByLabelText('Arama saatleri'), { target: { value: bad } });
       await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Kaydet' })));
       expect(screen.getByRole('alert').textContent).toMatch(/Arama saatleri: iki tam saat girin/);
