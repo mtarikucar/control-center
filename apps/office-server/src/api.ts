@@ -3,7 +3,7 @@ import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { isOutwardPolicyKind, OUTWARD_POLICY_KINDS, OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type OutwardPolicyKind, type PlanView, type ServerMessage } from '@cc/shared';
+import { isOutwardPolicyKind, OUTBOX_READ_MAX, OUTWARD_POLICY_KINDS, OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type OutwardPolicyKind, type PlanView, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { coordinatorHint } from './model-policy.ts';
 import type { AgentProvider } from '@cc/shared';
@@ -396,12 +396,12 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
       const body = (await readJson(req)) as { note?: unknown } | null;
       return sendJson(res, 200, d.company.approvals.decide(approval[1] ?? '', approval[2] === 'approve', { via: 'page', note: typeof body?.note === 'string' ? body.note : undefined }));
     }
-    // The outbox (spec capabilities §7): reading only, the newest 200 at most; the page filters what it shows.
+    // The outbox (spec capabilities §7): reading only, the newest OUTBOX_READ_MAX at most; the page filters what it shows.
     if (method === 'GET' && url.pathname === '/api/outbox' && d.company.outbox) {
       const p = url.searchParams;
       const raw = p.get('limit');
-      const limit = raw === null ? 200 : Number(raw);
-      if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new ValidationError('limit 1 ile 200 arasında bir tam sayı olmalı.');
+      const limit = raw === null ? OUTBOX_READ_MAX : Number(raw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > OUTBOX_READ_MAX) throw new ValidationError(`limit 1 ile ${OUTBOX_READ_MAX} arasında bir tam sayı olmalı.`);
       const kind = p.get('kind');
       if (kind !== null && !isOutwardPolicyKind(kind)) throw new ValidationError(`kind ${OUTWARD_POLICY_KINDS.join(', ')} olmalı.`);
       const department = p.get('department');

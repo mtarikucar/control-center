@@ -1,4 +1,4 @@
-import { OUTBOX_MAX_RECIPIENTS, OUTBOX_SUMMARY_CHARS, type OutboxEntry, type OutboxVia, type OutwardPolicyKind } from '@cc/shared';
+import { OUTBOX_MAX_RECIPIENTS, OUTBOX_READ_MAX, OUTBOX_SUMMARY_CHARS, type OutboxEntry, type OutboxVia, type OutwardPolicyKind } from '@cc/shared';
 import type { Db } from '../db.ts';
 
 interface Row {
@@ -83,7 +83,7 @@ export class OutboxStore {
     }
     const rows = this.#db
       .prepare(`SELECT * FROM outbox ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY at DESC, id DESC LIMIT ?`)
-      .all(...params, o.limit ?? 200) as unknown as Row[];
+      .all(...params, o.limit ?? OUTBOX_READ_MAX) as unknown as Row[];
     return rows.map(fromRow);
   }
 

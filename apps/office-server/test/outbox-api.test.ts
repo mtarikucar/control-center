@@ -54,5 +54,8 @@ describe('the owner’s outbox (spec capabilities §7)', () => {
     expect(await ids('?limit=1')).toEqual([c.id]);
     expect((await get(t.port, '/api/outbox?limit=0')).status).toBe(400);
     expect((await get(t.port, '/api/outbox?kind=pay')).status).toBe(400);
+    // Task 9 minor: the edges — 200 is the most, a fraction or a word is no count.
+    expect(await ids('?limit=200')).toEqual([c.id, b.id, a.id]);
+    for (const bad of ['201', '1.5', 'abc']) expect((await get(t.port, `/api/outbox?limit=${bad}`)).body, bad).toEqual({ error: 'limit 1 ile 200 arasında bir tam sayı olmalı.' });
   });
 });

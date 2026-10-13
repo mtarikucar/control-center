@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS, OUTBOX_GATE_OFF_TEXT, OUTBOX_VIA_LABELS, fold, isOutwardPolicyKind, type OutboxEntry } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS, OUTBOX_GATE_OFF_TEXT, OUTBOX_READ_MAX, OUTBOX_VIA_LABELS, fold, isOutwardPolicyKind, type OutboxEntry } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
@@ -769,11 +769,11 @@ export function officeTools(o: {
     {
       name: 'outboxRead',
       description:
-        `Read the outbox: every outward call the gate let out — sent, published, called, invited — by the system on the owner’s policy or with the owner’s approval (an "allowed" record, not a "delivered" one; nothing is written while the gate is off), newest first. The coordinator reads everyone’s (department narrows it; "merkez": people without one)${deps ? '; a department’s head reads their own department’s' : ''}. For the daily sample: read the recent ones, look for tone and rule breaks, write what you find into the playbook.`,
+        `Read the outbox: every outward call the gate let out — sent, published, called, invited — by the system on the owner’s policy or with the owner’s approval (an "allowed" record, not a "delivered" one; nothing is written while the gate is off), newest first. The coordinator reads everyone’s (department narrows it; "merkez": people without one, unless a department is named so)${headSuffix}. For the daily sample: read the recent ones, look for tone and rule breaks, write what you find into the playbook.`,
       inputSchema: object({
         since: s('How far back: days (1d, 7d) or a local date (2026-10-13); none: all.'),
         department: s('Department name or id, or "merkez" (the coordinator only).'),
-        limit: integer('How many, newest first (default 30).', 1, 200),
+        limit: integer('How many, newest first (default 30).', 1, OUTBOX_READ_MAX),
       }),
       kinds: headKinds,
       run: ({ employee }, args) => {
@@ -781,14 +781,16 @@ export function officeTools(o: {
         const sinceText = optStr(args, 'since');
         const since = sinceText ? parseSince(sinceText, Date.now()) : undefined;
         const limit = num(args, 'limit') ?? 30;
-        if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new ValidationError('limit 1 ile 200 arasında bir tam sayı olmalı.');
+        if (!Number.isInteger(limit) || limit < 1 || limit > OUTBOX_READ_MAX) throw new ValidationError(`limit 1 ile ${OUTBOX_READ_MAX} arasında bir tam sayı olmalı.`);
         const asked = optStr(args, 'department')?.trim();
         // undefined: everyone's; null: the centre's (people without a department).
         let departmentId: string | null | undefined;
         let label: string;
         if (employee.kind === 'coordinator') {
-          const centre = asked !== undefined && asked !== '' && fold(asked) === 'merkez';
-          const d = !asked || centre ? null : findDepartment(asked);
+          // An open department of that name first (Task 9 minor): “merkez” is the centre only when none is so named.
+          const named = asked ? (deps?.find(asked) ?? null) : null;
+          const centre = !named && asked !== undefined && asked !== '' && fold(asked) === 'merkez';
+          const d = named ?? (!asked || centre ? null : findDepartment(asked));
           departmentId = d ? d.id : centre ? null : undefined;
           label = d ? d.name : centre ? 'merkez (departmansız)' : 'herkes';
         } else {

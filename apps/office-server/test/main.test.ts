@@ -403,7 +403,12 @@ describe('main.ts wiring: the office process', () => {
         const req = httpRequest({ host: '127.0.0.1', port, method: 'POST', path: '/mcp', headers: { 'content-type': 'application/json', authorization: token } }, (res) => {
           let data = '';
           res.on('data', (c) => (data += c));
-          res.on('end', () => resolve((JSON.parse(data) as { result: { content: Array<{ text: string }> } }).result.content[0]!.text));
+          res.on('end', () => {
+            // A refusal comes as an error with no content: say what came, not a TypeError (Task 9 minor).
+            const text = (JSON.parse(data) as { result?: { content?: Array<{ text?: string }> } }).result?.content?.[0]?.text;
+            if (text === undefined) reject(new Error(`${name}: no text in ${data}`));
+            else resolve(text);
+          });
         });
         req.on('error', reject);
         req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }));

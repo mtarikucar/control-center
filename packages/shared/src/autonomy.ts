@@ -26,6 +26,9 @@ export const OUTBOX_VIA_LABELS: Record<OutboxVia, string> = { system: 'sistem', 
  */
 export const OUTBOX_GATE_OFF_TEXT = 'Kapı kapalı: giden kutusuna yazılmıyor (sistem adına geçen çağrılar kaydedilmez).';
 
+/** The most outbox lines one read gives: outboxRead's, the owner's page's and the store's own default. */
+export const OUTBOX_READ_MAX = 200;
+
 export const OUTBOX_MAX_RECIPIENTS = 20;
 export const OUTBOX_SUMMARY_CHARS = 300;
 

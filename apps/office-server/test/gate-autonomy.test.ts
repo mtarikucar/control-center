@@ -408,14 +408,33 @@ describe('outboxRead and asking before a call (spec capabilities §7, §8)', () 
     const all = await call(t.coordinator, 'outboxRead');
     expect(all).toMatch(/^Giden kutusu \(herkes\) — son 3, yeniden eskiye/);
     expect(all).toMatch(/Sena — gönderim “send_message to=a@x\.co” \(sistem\) → a@x\.co/);
-    expect(await call(t.coordinator, 'outboxRead', { department: 'pazarlama' })).not.toMatch(/Sena|Ada/);
+    const marketing = await call(t.coordinator, 'outboxRead', { department: 'pazarlama' });
+    expect(marketing).toMatch(/^Giden kutusu \(Pazarlama\) — son 1,[\s\S]*Pelin — gönderim “send_message to=b@x\.co”/);
+    expect(marketing).not.toMatch(/Sena|Ada/);
     expect(await call(t.coordinator, 'outboxRead', { department: 'merkez' })).toMatch(/^Giden kutusu \(merkez \(departmansız\)\) — son 1[\s\S]*Ada/);
     const own = await call(head, 'outboxRead', { limit: 10 });
     expect(own).toMatch(/^Giden kutusu \(Satış\) — son 1/);
     expect(own).not.toMatch(/Pelin/);
     await expect(call(head, 'outboxRead', { department: 'Pazarlama' })).rejects.toThrow(/yalnız kendi departmanının giden kutusunu okur \(Satış\)/);
     await expect(call(t.coordinator, 'outboxRead', { limit: 0 })).rejects.toThrow(/limit 1 ile 200/);
+    // Task 9 minor: the edges — 200 is the most, a fraction or a word is no count.
+    expect(await call(t.coordinator, 'outboxRead', { limit: 200 })).toMatch(/^Giden kutusu \(herkes\) — son 3,/);
+    for (const limit of [201, 1.5]) await expect(call(t.coordinator, 'outboxRead', { limit }), String(limit)).rejects.toThrow('limit 1 ile 200 arasında bir tam sayı olmalı.');
+    await expect(call(t.coordinator, 'outboxRead', { limit: 'abc' })).rejects.toThrow('limit sayı olmalı.');
     await expect(call(sena, 'outboxRead')).rejects.toThrow(/not offered/);
+  });
+
+  it('Task 9 minor: an open department named “Merkez” is that department, not the centre', async () => {
+    const t = make();
+    const call = withTools(t);
+    const merkez = t.departments!.create(OWNER, { name: 'Merkez', mission: 'm' });
+    const nil = t.hire('Nil', merkez.id);
+    const ada = t.hire('Ada');
+    await t.mail(nil, 'nil@x.co');
+    await t.mail(ada, 'ada@x.co');
+    const read = await call(t.coordinator, 'outboxRead', { department: 'merkez' });
+    expect(read).toMatch(/^Giden kutusu \(Merkez\) — son 1,[\s\S]*nil@x\.co/);
+    expect(read).not.toContain('ada@x.co');
   });
 
   it('outboxRead: since narrows it; an empty box says so; a lead who heads no department is refused', async () => {
@@ -467,5 +486,9 @@ describe('outboxRead and asking before a call (spec capabilities §7, §8)', () 
     await expect(call(ada, 'approvalRequest', { tool: 'mcp__claude_ai_Gmail__get_message', input: { id: 'm' }, summary: 's' })).rejects.toThrow(/kapıya takılmaz/);
     await expect(call(ada, 'approvalRequest', { input: args, summary: 's' })).rejects.toThrow(/input ile birlikte tool/);
     await expect(call(ada, 'approvalRequest', { tool: GMAIL, input: 'to=a', summary: 's' })).rejects.toThrow(/bir nesne/);
+    // Task 9 minor: with input, a kind and a target given beside it count for nothing — the gate's own are the print.
+    const other = { to: 'diger@x.co', subject: 'Teklif', body: 'x' };
+    expect(await call(ada, 'approvalRequest', { tool: GMAIL, input: other, kind: 'pay', target: 'herhangi', summary: 'Teklif.' })).toMatch(/^Onay istendi \(no \S+\): gönderim — “send_message to=diger@x\.co”/);
+    expect(t.approvals.list(ada.id)[0]).toMatchObject({ kind: 'send', target: 'send_message to=diger@x.co', tool: GMAIL });
   });
 });
