@@ -22,6 +22,7 @@ import { BlueprintStore } from './company/blueprint-store.ts';
 import { IntegrationRegistry } from './company/integrations.ts';
 import { useCompanyCapabilities } from './company/capabilities.ts';
 import { asCapability, CustomCapabilities } from './company/custom-capabilities.ts';
+import { SpecialContactsDesks } from './company/special-contacts.ts';
 import { CustomCapabilityStore } from './company/custom-capability-store.ts';
 import { OutboxStore } from './company/outbox-store.ts';
 import { CapabilityPrecheck } from './company/precheck.ts';
@@ -144,6 +145,9 @@ const integrations = new IntegrationRegistry({ db, roster, events });
 // classification (sessions, the gate, coverage) reads it, so it is wired before the first session starts.
 const customCapabilities = new CustomCapabilities({ store: new CustomCapabilityStore(db), roster, events, notices, coordinator: () => company.coordinator() });
 useCompanyCapabilities(() => customCapabilities.active().map(asCapability));
+// The owner's special contacts on the desks of those who send, publish, call or invite (final review I4.2): written
+// now and after every change to the list, a role card or a company capability; nothing while the list is empty.
+new SpecialContactsDesks({ dataDir: config.dataDir, roster, events, contacts: () => budget.constitution().specialContacts }).refresh();
 // What the gate let out (spec capabilities §7): the system's on the owner's policy, and the owner's approvals.
 const outbox = new OutboxStore(db);
 // B8: holds a task whose required capability its desk lacks; the constitution's switch, off by default, turns it on.

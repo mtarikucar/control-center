@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Employee } from '@cc/shared';
 import { BRIEF_FILE } from '../company/brief.ts';
-import { DEPARTMENT_FILE, GUIDE_FILE, prepareDesk } from '../desk.ts';
+import { DEPARTMENT_FILE, GUIDE_FILE, prepareDesk, SPECIAL_CONTACTS_FILE } from '../desk.ts';
 
 /** Codex does not interpret Claude's @file imports: put the role, guide and brief into a native AGENTS.md. */
 export function prepareCodexDesk(dataDir: string, e: Employee): string {
@@ -12,7 +12,9 @@ export function prepareCodexDesk(dataDir: string, e: Employee): string {
     .replaceAll(`@${BRIEF_FILE}`, readFileSync(join(cwd, BRIEF_FILE), 'utf8'))
     .replaceAll('@provider-handoff.md', existsSync(join(cwd, 'provider-handoff.md')) ? readFileSync(join(cwd, 'provider-handoff.md'), 'utf8') : '')
     // The department block (spec departments §5.4); a function, since a mission may hold “$&”. A card whose file is gone loses the line.
-    .replaceAll(`@${DEPARTMENT_FILE}`, () => (existsSync(join(cwd, DEPARTMENT_FILE)) ? readFileSync(join(cwd, DEPARTMENT_FILE), 'utf8') : ''));
+    .replaceAll(`@${DEPARTMENT_FILE}`, () => (existsSync(join(cwd, DEPARTMENT_FILE)) ? readFileSync(join(cwd, DEPARTMENT_FILE), 'utf8') : ''))
+    // The owner's special contacts (final review I4.2), the same way: the owner's text, read as it is.
+    .replaceAll(`@${SPECIAL_CONTACTS_FILE}`, () => (existsSync(join(cwd, SPECIAL_CONTACTS_FILE)) ? readFileSync(join(cwd, SPECIAL_CONTACTS_FILE), 'utf8') : ''));
   writeFileSync(join(cwd, 'AGENTS.md'), `${role}\n\nBu ofis Codex ile çalışır. Model adları yerine çalışma düzeyleri kullanılır: haiku=düşük, sonnet=dengeli, opus=yüksek, fable=en yüksek (modelin desteklediği düzeylerde). Ofis araçları mcp__office__ önekiyle sunulur.\n`);
   writeFileSync(join(cwd, 'AGENTS.md'), `\nGörsel istendiğinde mevcut yerleşik image_gen/imagegen aracını kullan; yalnız prompt yazmayı görsel teslimi sayma. Üretilen dosyanın gerçek mutlak yolunu taskFinish outputs listesine ekle; ofis arşivi dosyayı kendisi kopyalar, teslim için masaya ayrıca Copy-Item yapmak gerekmez. Araç kullanılamazsa gerçek hatayı bildir; API anahtarı arama veya sessizce ücretli bir servise geçme. Normal Codex ayarlarındaki beceriler, etkin eklentiler ve bağlantılar kullanılabilir. Metin dosyalarını native apply_patch ile düzenleyebilirsin; dosya ve shell izinleri yerel Codex ayarlarından gelir.\n`, { flag: 'a' });
   return cwd;

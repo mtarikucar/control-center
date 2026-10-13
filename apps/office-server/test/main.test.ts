@@ -348,6 +348,19 @@ describe('main.ts wiring: the office process', () => {
     await stop(office);
   }, 30_000);
 
+  it('final review I4.2: the owner’s special contacts are on a sender’s desk from the start and follow the owner’s change (`SpecialContactsDesks` wired and refreshed at the start)', async () => {
+    const { dir, db, ada } = prepared({ capabilities: ['email.send'] });
+    new ConstitutionStore(db).set({ specialContacts: ['ali@firma.com'] });
+    db.close();
+    const block = join(dir, 'desks', ada.slug, 'special-contacts.md');
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    expect(readFileSync(block, 'utf8')).toContain('- `ali@firma.com`');
+    await call(port, 'POST', '/api/constitution', { specialContacts: ['veli@firma.com'] });
+    expect(readFileSync(block, 'utf8')).toContain('- `veli@firma.com`');
+    await stop(office);
+  }, 30_000);
+
   it('spec capabilities §4, §7, §8: the office tools a session calls carry the outbox, the gate’s preview and the company’s capabilities (`outbox`, `gate` and `capabilities` given to officeTools)', async () => {
     const { dir, db, ada } = prepared();
     new ConstitutionStore(db).set({ gateEnabled: true });
