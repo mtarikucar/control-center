@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Department, Employee } from '@cc/shared';
 import { LAYOUT } from '../office/layout.ts';
-import { EMPTY_CARPET, darkDesks, darkRooms, heldRooms, roomStates, sceneSeat, signText } from './rooms.ts';
+import { EMPTY_CARPET, darkDesks, darkRooms, heldRooms, roomStates, roomTags, sceneSeat, signText } from './rooms.ts';
 
 const dep = (id: string, name: string, room: number | null, o: Partial<Department> = {}): Department => ({
   id, name, mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null, room, ...o,
@@ -69,5 +69,24 @@ describe('rooms where the centre’s overflow sits (final review I1)', () => {
   it('seats as the scene wraps them: a seat past this page’s 45 is the one spotFor draws', () => {
     expect([0, 31, 44, 45, 76].map(sceneSeat)).toEqual([0, 31, 44, 0, 31]);
     expect(roomStates(LAYOUT.rooms, {}, [person('n', 'Nur', 76)])[5]!.occupied).toBe(true);
+  });
+});
+
+describe('roomTags (final review I2)', () => {
+  it('one for each room a department holds — its name, the room’s colour — by the room’s outer wall, away from the hub, at its middle, just above the floor', () => {
+    const tags = roomTags(LAYOUT.rooms, new Map([[0, 'Pazarlama'], [4, 'Çok uzun bir departman adı kırk karakter!']]), LAYOUT.depth / 2);
+    expect(tags.map((t) => [t.room, t.name, t.colour])).toEqual([[0, 'Pazarlama', LAYOUT.rooms[0]!.carpet.color], [4, 'Çok uzun bir departman adı kırk karakter!', LAYOUT.rooms[4]!.carpet.color]]);
+    const [north, south] = tags;
+    const r0 = LAYOUT.rooms[0]!.rect;
+    const r4 = LAYOUT.rooms[4]!.rect;
+    expect(north!.position[0]).toBeCloseTo((r0.x1 + r0.x2) / 2);
+    expect(south!.position[0]).toBeCloseTo((r4.x1 + r4.x2) / 2);
+    // North rooms by z ≈ 0.6, south rooms by z ≈ 23.4: beyond the carpet, on the side away from the hub.
+    expect(north!.position[2]).toBeCloseTo(0.6);
+    expect(south!.position[2]).toBeCloseTo(LAYOUT.depth - 0.6);
+    expect(north!.position[2]).toBeLessThan(LAYOUT.rooms[0]!.carpet.z1);
+    expect(south!.position[2]).toBeGreaterThan(LAYOUT.rooms[4]!.carpet.z2);
+    expect(tags.every((t) => t.position[1] > 0 && t.position[1] < 0.3)).toBe(true);
+    expect(roomTags(LAYOUT.rooms, new Map(), LAYOUT.depth / 2)).toEqual([]);
   });
 });

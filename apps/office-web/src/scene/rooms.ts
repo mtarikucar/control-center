@@ -108,3 +108,40 @@ export function useDarkDesks(): ReadonlySet<number> {
   const seated = useSeated();
   return useMemo(() => darkDesks(LAYOUT.desks, heldRooms(departments ?? {}), seated), [departments, seated]);
 }
+
+/** A room's floor tag (RoomsLayer): the department holding it, in the room's colour, where it stands. */
+export interface RoomTag {
+  room: number;
+  name: string;
+  colour: string;
+  position: [number, number, number];
+}
+
+/** How far in from the room's outer wall its tag stands, and how high: just above the floor. */
+const TAG_INSET = 0.6;
+const TAG_Y = 0.1;
+
+/** A tag for each room an open department holds, at the room's middle by its outer wall, the side away from the hub (pure). */
+export function roomTags(rooms: readonly RoomGeometry[], names: ReadonlyMap<number, string>, hubZ: number): RoomTag[] {
+  return rooms.flatMap((r) => {
+    const name = names.get(r.index);
+    if (name === undefined) return [];
+    const { x1, z1, x2, z2 } = r.rect;
+    const z = (z1 + z2) / 2 < hubZ ? z1 + TAG_INSET : z2 - TAG_INSET;
+    return [{ room: r.index, name, colour: r.carpet.color, position: [(x1 + x2) / 2, TAG_Y, z] }];
+  });
+}
+
+/** The held rooms and their departments' names, flat (room, name, …): the only things a tag shows. */
+const roomNamesFlat = (s: OfficeStore): Array<number | string> =>
+  Object.values(s.departments ?? {}).flatMap((d) => (d.status === 'open' && typeof d.room === 'number' ? [d.room, d.name] : []));
+
+/** The rooms' tags, re-made only when a department opens, closes, moves room or is renamed. */
+export function useRoomTags(): RoomTag[] {
+  const flat = useOffice(useShallow(roomNamesFlat));
+  return useMemo(() => {
+    const names = new Map<number, string>();
+    for (let i = 0; i < flat.length; i += 2) names.set(flat[i] as number, flat[i + 1] as string);
+    return roomTags(LAYOUT.rooms, names, LAYOUT.depth / 2);
+  }, [flat]);
+}

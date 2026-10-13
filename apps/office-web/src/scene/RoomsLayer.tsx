@@ -1,11 +1,12 @@
-import { useEffect, useMemo } from 'react';
+import { Html } from '@react-three/drei';
+import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { CanvasTexture, SRGBColorSpace } from 'three';
-import { useRoomStates, type RoomState, type SignText } from './rooms.ts';
+import { useRoomStates, useRoomTags, type RoomState, type SignText } from './rooms.ts';
 
 const SIGN_W = 1.3;
 const SIGN_H = 0.4;
 
-/** A sign's text drawn on a canvas here (no font is downloaded: the office runs offline); dim for an empty room. */
+/** A sign's text drawn on a canvas here (no font is downloaded: the office runs offline); dim for a dark room. */
 function signTexture(text: SignText, lit: boolean): CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 520;
@@ -59,11 +60,42 @@ function DoorSign({ state }: { state: RoomState }) {
   );
 }
 
-/** The six rooms' carpets (the department's colour, dark grey when empty) and door signs (spec office rooms §4.2). */
+/** Below the people's tags (theirs is [20, 0]): a person's tag wins any overlap. */
+const ROOM_TAG_Z: [number, number] = [10, 0];
+/** drei applies its pointerEvents prop only to a transformed tag; this one is not, so the style says it too. */
+const NO_POINTER: CSSProperties = { pointerEvents: 'none' };
+
+/**
+ * A screen-sized tag on the floor of each room an open department holds (final review I2): the door sign is about
+ * 31 × 10 px at the start zoom, too small to read. Only the room's colour and the department's name: the ★ on a
+ * person's own tag says who heads it. It never takes a click or a drag from the view or the characters.
+ */
+export const RoomTags = memo(function RoomTags() {
+  const tags = useRoomTags();
+  // drei's <Html> renders nothing if it mounts before the canvas is attached to the page (as Character's tag): one render later.
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  if (!ready) return null;
+  return (
+    <>
+      {tags.map((t) => (
+        <Html key={t.room} name={`room-tag-${t.room}`} position={t.position} center zIndexRange={ROOM_TAG_Z} pointerEvents="none" style={NO_POINTER}>
+          <div className="room-tag">
+            <span className="room-tag-swatch" style={{ background: t.colour }} />
+            <span className="room-tag-name">{t.name}</span>
+          </div>
+        </Html>
+      ))}
+    </>
+  );
+});
+
+/** The six rooms' carpets (the department's colour, dark grey otherwise), door signs (spec office rooms §4.2) and floor tags. */
 export function RoomsLayer() {
   const states = useRoomStates();
   return (
     <group>
+      <RoomTags />
       {states.map((s) => {
         const c = s.room.carpet;
         return (

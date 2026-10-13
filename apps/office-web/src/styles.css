@@ -75,6 +75,14 @@ button.icon { border: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
 .tag.faded, .tag.terminal { opacity: 0.6; }
 .tag.alert { border-color: var(--bad); }
 .tag-usage { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* A room's tag on its floor (RoomsLayer): quieter than a person's — capitals, a swatch of the room's colour — and never in the way of a click or a drag. */
+.room-tag {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 200px; padding: 2px 8px 2px 5px; white-space: nowrap;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.3; color: var(--muted);
+  background: rgba(255, 255, 255, 0.78); border: 1px solid var(--line); border-radius: 5px; pointer-events: none; user-select: none;
+}
+.room-tag-swatch { flex: none; width: 9px; height: 9px; border-radius: 2px; }
+.room-tag-name { overflow: hidden; text-overflow: ellipsis; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .dot.working { background: var(--ok); }
 .dot.idle, .dot.starting { background: var(--info); }
