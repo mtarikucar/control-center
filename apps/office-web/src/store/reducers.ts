@@ -118,7 +118,8 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     // A live snapshot opens the feed (a reconnect may have missed a cycle); an HTTP one comes while the feed runs.
     managementRev: current.managementRev + (source === 'live' ? 1 : 0),
     departments: Object.fromEntries((s.departments ?? []).map((x) => [x.id, x])),
-    streamNotesRev: d.streamNotesRev,
+    // As agendaRev, from `current`: a restarted log must not take it back to a number an open plan already read at, and a snapshot is where a missed note shows (the feed replays only after it).
+    streamNotesRev: current.streamNotesRev + 1,
   };
 }
 

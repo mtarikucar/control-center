@@ -132,6 +132,18 @@ describe('CompanyView', () => {
     expect(within(screen.getByRole('region', { name: 'Merkez' })).getByRole('button').textContent).not.toContain('★');
   });
 
+  it('the head’s ★ is decoration for a screen reader (the card names the role) and a tooltip for the eye', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('selin', { kind: 'lead', title: 'Departman başkanı', departmentId: 'd1' })]);
+    useOffice.setState({
+      departments: { d1: { id: 'd1', name: 'Yazılım', mission: 'm', scope: '', template: null, headId: 'selin', status: 'open', createdAt: 1, closedAt: null } },
+    } as never);
+    const { container } = render(<CompanyView />);
+    const star = container.querySelector('.org-head')!;
+    expect(star.getAttribute('title')).toBe('Departman başkanı');
+    expect(star.getAttribute('aria-hidden')).toBe('true');
+    expect(star.hasAttribute('aria-label')).toBe(false);
+  });
+
   it('does not repeat a word the name, title and role badge share', () => {
     office([person('koor', { name: 'Koordinatör', kind: 'coordinator', title: 'Koordinatör' }), person('ada', { name: 'Ada', kind: 'lead', title: 'Departman başkanı' })]);
     render(<CompanyView />);

@@ -92,7 +92,7 @@ function PersonCard({ e, current, head = false, onOpen }: { e: Employee; current
     <button type="button" className="org-card" onClick={onOpen}>
       <strong>{e.name}</strong>
       {head && (
-        <span className="org-head" title="Departman başkanı" aria-label="departman başkanı">
+        <span className="org-head" title="Departman başkanı" aria-hidden="true">
           ★
         </span>
       )}

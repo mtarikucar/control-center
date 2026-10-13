@@ -4,7 +4,7 @@ import type { Plan, PlanView } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { PlanCard } from './PlanCard.tsx';
 
-vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})) } }));
+vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})), streamNotes: vi.fn(async () => []) } }));
 const { api } = await import('../net/api.ts');
 
 const plan = (over: Partial<PlanView> = {}): PlanView => ({
@@ -12,7 +12,7 @@ const plan = (over: Partial<PlanView> = {}): PlanView => ({
   quotaPct: 10, usd: 25, days: 3, risks: 'kota', status: 'draft', version: 1, proposedBy: 'c', createdAt: 1, updatedAt: 1, approvedAt: null, ...over,
 });
 
-beforeEach(() => useOffice.setState({ plans: { p1: plan() }, tasks: {}, views: {} }));
+beforeEach(() => useOffice.setState({ plans: { p1: plan() }, tasks: {}, views: {}, departments: {}, streamNotesRev: 0 }));
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -116,5 +116,39 @@ describe('PlanCard', () => {
     expect(screen.getByText('Koordinatör başlattı')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Durdur' }));
     await waitFor(() => expect(api.stopPlan).toHaveBeenCalledWith('p1'));
+  });
+
+  it('a department’s stream: its name, and its latest plan and report', async () => {
+    vi.mocked(api.streamNotes).mockResolvedValueOnce([
+      {
+        streamId: 'tanitim',
+        plan: { id: 1, planId: 'p1', streamId: 'tanitim', kind: 'plan', text: 'Önce metin.', evidence: [], next: null, by: 'h', at: 1 },
+        report: { id: 2, planId: 'p1', streamId: 'tanitim', kind: 'report', text: 'Hazır.', evidence: ['dosya'], next: null, by: 'h', at: 2 },
+      },
+    ]);
+    const p = plan({ status: 'approved', streams: [{ id: 'tanitim', title: 'Tanıtım', owner: 'departman:d1', dependsOn: [], status: 'active' }] });
+    useOffice.setState({ plans: { p1: p }, departments: { d1: { id: 'd1', name: 'Pazarlama', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } } } as never);
+    render(<PlanCard plan={p} />);
+    expect(screen.getByText(/Pazarlama departmanı/)).toBeTruthy();
+    expect(await screen.findByText(/Akış planı: Önce metin\./)).toBeTruthy();
+    expect(screen.getByText(/Rapor: Hazır\./)).toBeTruthy();
+    expect(api.streamNotes).toHaveBeenCalledWith('p1');
+  });
+
+  it('a plan without department streams asks for no notes', () => {
+    render(<PlanCard plan={plan()} />);
+    expect(api.streamNotes).not.toHaveBeenCalled();
+  });
+
+  it('reads a department’s notes again when a stream note arrives', async () => {
+    const p = plan({ status: 'approved', streams: [{ id: 'tanitim', title: 'Tanıtım', owner: 'departman:d1', dependsOn: [], status: 'active' }] });
+    useOffice.setState({ plans: { p1: p } } as never);
+    render(<PlanCard plan={p} />);
+    await waitFor(() => expect(api.streamNotes).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/Departman departmanı/)).toBeTruthy();
+    vi.mocked(api.streamNotes).mockResolvedValueOnce([{ streamId: 'tanitim', plan: { id: 3, planId: 'p1', streamId: 'tanitim', kind: 'plan', text: 'Yeni plan.', evidence: [], next: null, by: 'h', at: 3 }, report: null }]);
+    act(() => useOffice.setState({ streamNotesRev: 1 }));
+    expect(await screen.findByText(/Akış planı: Yeni plan\./)).toBeTruthy();
+    expect(api.streamNotes).toHaveBeenCalledTimes(2);
   });
 });

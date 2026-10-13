@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { MODEL_ALIASES, type ModelAlias } from '@cc/shared';
 import { VOXEL_CHARACTER, characterAssets } from '../assets/manifest.ts';
 import { api } from '../net/api.ts';
@@ -13,10 +13,16 @@ export function HireDialog() {
   const select = useOffice((s) => s.select);
   const admit = useOffice((s) => s.admit);
   const characters = characterAssets(manifest);
+  // Only an office with a department shows the field: without one the dialog and its call stay as they were. The record
+  // is selected whole and filtered here: a selector returning a fresh array every time would never settle (zustand 5).
+  const allDepartments = useOffice((s) => s.departments);
+  const departments = useMemo(() => Object.values(allDepartments ?? {}).filter((x) => x.status === 'open').sort((a, b) => a.createdAt - b.createdAt), [allDepartments]);
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [model, setModel] = useState<ModelAlias>('sonnet');
   const [character, setCharacter] = useState(characters[0]?.id ?? VOXEL_CHARACTER);
+  const [departmentId, setDepartmentId] = useState('');
+  const [head, setHead] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -25,7 +31,7 @@ export function HireDialog() {
     setError(null);
     setBusy(true);
     try {
-      const hired = await api.hire({ name, role, model, provider, characterId: character });
+      const hired = await api.hire({ name, role, model, provider, characterId: character, ...(departmentId ? { departmentId, ...(head ? { head: true } : {}) } : {}) });
       setHireOpen(false);
       admit(hired);
       select(hired.id);
@@ -77,6 +83,34 @@ export function HireDialog() {
             </select>
           </div>
         </div>
+        {departments.length > 0 && (
+          <div className="row">
+            <div className="field">
+              <label htmlFor="hire-department">Departman</label>
+              <select
+                id="hire-department"
+                value={departmentId}
+                onChange={(e) => {
+                  setDepartmentId(e.target.value);
+                  if (!e.target.value) setHead(false);
+                }}
+              >
+                <option value="">Merkez</option>
+                {departments.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label className="switch">
+                <input type="checkbox" checked={head} disabled={!departmentId} onChange={(e) => setHead(e.target.checked)} />
+                Başkan olarak
+              </label>
+            </div>
+          </div>
+        )}
         {error && (
           <p className="error" role="alert">
             {error}

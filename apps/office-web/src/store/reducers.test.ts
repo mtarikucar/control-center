@@ -411,7 +411,19 @@ describe('departments', () => {
     d = applyEvent(d, ev);
     expect(d.departments.d1?.name).toBe('Büyüme');
     expect(needsRefresh(ev)).toBe(true);
+    const rev = d.streamNotesRev;
     d = applyEvent(d, { seq: 3, ts: 3, employeeId: 'e', event: { type: 'stream.noted', note: { id: 1 } } } as never);
-    expect(d.streamNotesRev).toBe(1);
+    expect(d.streamNotesRev).toBe(rev + 1);
+  });
+
+  it('a snapshot moves streamNotesRev on and never back to 0 — even one that starts the office over — so an open plan reads its notes again', () => {
+    let d = applySnapshot(EMPTY_DATA, { employees: [], quota: null, usage: {}, lastSeq: 900 });
+    d = applyEvent(d, { seq: 901, ts: 3, employeeId: 'e', event: { type: 'stream.noted', note: { id: 1 } } } as never);
+    d = applyEvent(d, { seq: 902, ts: 4, employeeId: 'e', event: { type: 'stream.noted', note: { id: 2 } } } as never);
+    const before = d.streamNotesRev;
+    expect(before).toBeGreaterThan(1);
+    const fresh = applySnapshot(d, { employees: [], quota: null, usage: {}, lastSeq: 3 }, 'live');
+    expect(fresh.streamNotesRev).toBe(before + 1);
+    expect(applySnapshot(fresh, { employees: [], quota: null, usage: {}, lastSeq: 3 }, 'http').streamNotesRev).toBe(before + 2);
   });
 });
