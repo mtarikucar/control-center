@@ -98,3 +98,77 @@ describe('the rules the system keeps (spec capabilities §6)', () => {
     expect(check({ attendees: ['a@x.co'] }, ['calendar'], { counts: { 'send+publish': 99, call: 99 } })).toEqual({ rule: null, asked: [] });
   });
 });
+
+describe('reading a call’s input: linear, complete, never a throw (Task 7 review C1, I2–I5)', () => {
+  const rule = (input: unknown, kinds: OutwardPolicyKind[] = ['send']) =>
+    outwardRule({ input, kinds, rules: DEFAULT_CONSTITUTION, now: new Date(2026, 9, 13, 11).getTime(), count: () => 0 });
+  const nest = (depth: number, leaf: unknown, wrap: (v: unknown) => unknown) => {
+    let v = leaf;
+    for (let i = 0; i < depth; i += 1) v = wrap(v);
+    return v;
+  };
+
+  it('C1: the work is linear in the input — inputs that made the old patterns backtrack finish at once', () => {
+    const contacts = ['Ali@Firma.com', '+90 (532) 111 22 33', '111 22 33', '@AliVeli', 'Ahmet Yılmaz'];
+    for (const text of ['a@'.repeat(5000), 'A'.repeat(200_000), 'QUJD'.repeat(50_000), '1 '.repeat(100_000), 'a.'.repeat(100_000)]) {
+      const started = performance.now();
+      expect(specialContact({ body: text, to: text }, contacts)).toBeNull();
+      expect(recipientsOf({ to: text })).toHaveLength(1);
+      // Each takes a few milliseconds (well under 200); a second leaves room for a slow machine, not for backtracking.
+      expect(performance.now() - started, text.slice(0, 8)).toBeLessThan(1000);
+    }
+  });
+
+  it('I2: an e-mail is found beside any punctuation, in a link or a query, with its own apostrophe; not inside a longer address', () => {
+    const contacts = ['Ali@Firma.com', "o'brien@x.com"];
+    const found = ['ali@firma.com!', 'ali@firma.com?', '[ali@firma.com]', '**ali@firma.com**', '“ali@firma.com”', 'ali@firma.com/', 'mailto:ali@firma.com?subject=x', '?to=ali@firma.com&subject=x', 'Yazın: ALI@firma.com.'];
+    for (const text of found) expect(specialContact({ text }, contacts), text).toBe('Ali@Firma.com');
+    expect(specialContact({ to: "O'Brien@X.com" }, contacts)).toBe("o'brien@x.com");
+    for (const text of ['xali@firma.com', 'ali@firma.company', 'ali@firma.com.tr', 'veli.ali@firma.com', 'ali@firma.com2']) expect(specialContact({ text }, contacts), text).toBeNull();
+  });
+
+  it('I3: a phone is read line by line, as its own spaced groups — never merged with the next line’s number or with text after it', () => {
+    const contacts = ['+90 (532) 111 22 33'];
+    const found = ['0532 111 22 33\n0533 000 00 00', '0533 000 00 00\r\n0532-111-22-33', 'Ara: 0532 111 22 33 2 kez', '… 0532 111 22 33 14:30', 'Numaralar: 0533 000 00 00 ve 0532.111.22.33', '00905321112233', '532 111 22 33'];
+    for (const text of found) expect(specialContact({ text }, contacts), text).toBe('+90 (532) 111 22 33');
+    expect(specialContact({ phone: 905321112233 }, contacts)).toBe('+90 (532) 111 22 33');
+    for (const text of ['0532 111 22 34', '0532 111 22\n33', '0532 111 22 no 33']) expect(specialContact({ text }, contacts), text).toBeNull();
+    // A local number without its area code is a whole group sequence of its own.
+    expect(specialContact({ text: 'Santral: 111 22 33.' }, ['111 22 33'])).toBe('111 22 33');
+    expect(specialContact({ text: 'Dahili 111 22 33 44' }, ['111 22 33 44'])).toBe('111 22 33 44');
+    expect(specialContact({ text: '1112234' }, ['111 22 33'])).toBeNull();
+  });
+
+  it('I4: recipients under a recipient field that is an object are read from it: its lists, an address deeper down, the first who-field that is filled', () => {
+    const six = ['a@x.co', 'b@x.co', 'c@x.co', 'd@x.co', 'e@x.co', 'f@x.co'];
+    expect(recipientsOf({ recipients: { to: six.slice(0, 3), cc: six.slice(3) } })).toEqual(six);
+    expect(rule({ message: { recipients: { to: six.slice(0, 3), cc: six.slice(3) } } })).toBe('toplu gönderim: 6 alıcı > 5');
+    expect(recipientsOf({ message: { to: [{ emailAddress: { name: 'Ali', address: 'a@x.co' } }] } })).toEqual(['a@x.co']);
+    expect(recipientsOf({ contacts: [{ email: '', phone: '0532 111 22 33', name: 'Ali' }, { email: ' ', id: 7 }] })).toEqual(['0532 111 22 33', '7']);
+  });
+
+  it('I5: an input too deep or too big is not read but held for the owner — never a RangeError; the outbox’s summary of it does not throw', () => {
+    const reason = 'okunamayan girdi: çok derin ya da çok büyük';
+    const deep = [nest(5000, 'a@x.co', (v) => [v]), nest(10_000, 'a@x.co', (v) => ({ x: v })), { to: nest(5000, 'a@x.co', (v) => [v]) }];
+    for (const input of deep) {
+      expect(rule(input)).toBe(reason);
+      expect(rule(input, ['call'])).toBe(reason);
+      expect(() => recipientsOf(input)).not.toThrow();
+      expect(() => specialContact(input, ['a@x.co'])).not.toThrow();
+      expect(callSummary(input).length).toBeLessThanOrEqual(300);
+    }
+    // At most 64 levels below the input and 10 000 values in all: the root, the list and 9 998 addresses are read.
+    expect(rule({ to: nest(63, 'a@x.co', (v) => [v]) })).toBeNull();
+    expect(rule({ to: nest(64, 'a@x.co', (v) => [v]) })).toBe(reason);
+    const many = (n: number) => ({ to: Array.from({ length: n }, (_, i) => `k${i}@x.co`) });
+    expect(rule(many(9_998))).toBe('toplu gönderim: 9998 alıcı > 5');
+    expect(rule(many(9_999))).toBe(reason);
+  });
+
+  it('minor 8: a user name is found beside quotes, emphasis, brackets, a link’s slash, a suffix after an apostrophe or a dash; not inside a longer name or an address', () => {
+    const contacts = ['@AliVeli', 'İpek'];
+    for (const text of ['“@aliveli”', '**@aliveli**', '[@aliveli]', '@AliVeli: merhaba', 'x.com/aliveli', 'aliveli.']) expect(specialContact({ text }, contacts), text).toBe('@AliVeli');
+    for (const text of ['İpek’e', "ipek'e", 'ipek—ali', '(IPEK)']) expect(specialContact({ text }, contacts), text).toBe('İpek');
+    for (const text of ['aliveli2', 'aliveli_bot', 'aliveli@x.com', 'veli.aliveli', 'aliveli.tr', 'ipekyolu', 'ipek-ali']) expect(specialContact({ text }, contacts), text).toBeNull();
+  });
+});

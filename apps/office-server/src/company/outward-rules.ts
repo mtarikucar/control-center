@@ -1,5 +1,5 @@
 import type { Constitution, OutwardPolicyKind } from '@cc/shared';
-import { recipientsOf, specialContact } from './recipients.ts';
+import { readable, recipientsOf, specialContact } from './recipients.ts';
 
 const HOUR = 60 * 60_000;
 const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -16,9 +16,11 @@ export interface OutwardCall {
 
 /**
  * The rule a call the system would let out breaks, in Turkish — the held call's reason —, or null (spec capabilities
- * §6). Cheapest first: the counters are read only for a call that could still pass. A limit is reached at `>=`.
+ * §6). Cheapest first: the counters are read only for a call that could still pass. A limit is reached at `>=`. An
+ * input too deep or too big to read to its end may hide a contact or a recipient: it is the owner's (review I5).
  */
 export function outwardRule(c: OutwardCall): string | null {
+  if (!readable(c.input)) return 'okunamayan girdi: çok derin ya da çok büyük';
   const special = specialContact(c.input, c.rules.specialContacts);
   if (special) return `özel kişi: ${special}`;
   const recipients = recipientsOf(c.input).length;
