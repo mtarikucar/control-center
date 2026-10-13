@@ -4,6 +4,7 @@
   talimatıyla açık kalanlar burada karara bağlandı (§10).
 - Dal `feat/departments` (alt proje 1 ve 2'nin üstünde). **Göç v25** (dalda; birleştirmede bilgi tabanının v24'ü ve
   departmanların v24'ü öne geçince yeniden numaralanır).
+- Son inceleme düzeltmelerinden sonra kodla hizalandı (§4.2, §5, §6, §7, §8, §9, §11).
 - Dayandığı: yetenek modeli (B7, `capabilities.ts`, `craft/capabilities.json`), onay kapısı (B9a, `gate-policy.ts`,
   `gate.ts`, `approvals.ts`, `hooks/gate.mjs`), oturum kapatma (B9b, `session-deny.ts`), Anayasa (`budget.ts`).
 
@@ -30,8 +31,9 @@
 6. **Giden kutusu:** gönderim, yayın, arama ya da takvim parçası olan, kapının sistem adına geçirdiği ya da sahibinin
    onayladığı her çağrının kaydı; onaylanan ödeme, silme, tarayıcı, ofis ve diğer işler onaylarda ve `gate.checked`
    olaylarında kalır. Koordinatör ve başkanlar okur (`outboxRead`), sahibi Şirket görünümünde görür.
-7. **Muhakeme katmanı:** kritik durumlar (para sözü, hukuki, kriz, cevabı bilinmeyen, ticari ileti izni) rol ve
-   yöntem metinlerinde; çalışan bunlarda göndermez, `approvalRequest` ile sahibine getirir.
+7. **Muhakeme katmanı:** kritik durumlar (para sözü, hukuki, kriz, cevabı bilinmeyen, ticari ileti izni, toplu
+   gönderim, özel kişiler) rol ve yöntem metinlerinde; çalışan bunlarda göndermez, `approvalRequest` ile sahibine
+   getirir.
 8. **Şablonlar:** İletişim, Müşteri Temsilcisi, Pazarlama, Satış ve ilgili departman şablonları yeni sürüm.
 
 **Kapsam dışı:** kapının mesaj içeriğini anlaması (içerik sınıflandırması); İYS kaydının dış sistemden okunması;
@@ -98,6 +100,17 @@ araç sınıfı tablosu bir sürüm sayacıyla yenilenir: şirket yeteneği değ
 sahibi). Kapı için güvenli yön tek: koordinatör türü yalnız aynı bırakabilir ya da daha sıkıya (`read` → herhangi bir
 dışa dönük tür) çekebilir; dışa dönük bir türü `read`'e indirmek de yalnız sahibinindir.
 
+**Okuma kuralı:** okuma araçları her oturumda açıktır ve kapıdan geçer (kapı kapalıyken de); bir aracı okuma olarak
+sınıflandırmak, okuma önerisini okuma olarak kabul etmek dahil, yalnız sahibinindir. Koordinatör bir okuma önerisini
+ancak dışa dönük bir türe sıkılaştırarak kabul eder; reddedebilir ya da sahibine bırakabilir.
+
+**Sahibinin onayı (`confirm`):** koordinatörün tek başına etkinleştirdiği bir yetenek, sahibi onu Yetenekler
+sekmesinden sisteme açana dek (`POST /api/custom-capabilities/:id/confirm`; yalnız sahibi) kapıda sahibine sorulur —
+politika "sistem" dese de. Sahibinin eklediği, kabul ettiği ya da türünü değiştirdiği yetenek ile ürünle gelenler
+baştan sisteme açıktır. Onay `decidedBy`'ı sahibi yapar ve `capability.changed` olayını `confirmed` değişimiyle
+yayımlar; bir kez onaylanmış olana tekrar onay etkisizdir. Kapı açılmadan önce koordinatörün etkinleştirdikleri de
+sahibinin onayını bekler.
+
 **Bildirim:** her etkinleştirme ve geri alma bir olay (`capability.changed`); koordinatörün onayladıkları Yetenekler
 sekmesinde "yeni" işaretiyle görünür (sahibine bilgi). Geri alınan yeteneğin araçları yeniden sınıflandırılmamış
 sayılır (kapı tutar, oturum kapatır).
@@ -123,6 +136,14 @@ aracından gelen ve türü politikada `system` olan her parça **sistem parças�
 §6'nın kuralları geçerse çağrı onaysız geçer ve giden kutusuna yazılır; bir parça bile sahibinin onayını istiyorsa
 bugünkü akış (onay iste, sonra geçer). Bash ve yerleşik araçların gönderim/yayın türleri her zaman sahibine.
 
+Sistem yolu, politika `system` dese de şu durumlarda çağrıyı sahibine bırakır:
+- **Sahibine sorulmuş çağrı:** çalışanın aynı çağrı için (aynı araç, tür ve hedef) `approvalRequest` isteği bekliyorsa
+  ("sahibine soruldu, cevap bekleniyor") ya da sahibi onu bir onay süresi (24 saat) içinde reddettiyse ("sahibi bu
+  çağrıyı reddetti"). Onay yalnız aynı çağrının tekrarını açar; başka alıcı ya da hedefteki başka sözcükler başka
+  çağrıdır.
+- **Sisteme açılmamış yetenek:** koordinatörün tek başına etkinleştirdiği şirket yeteneği (§4.2): "koordinatörün açtığı
+  yetenek: sahibi sisteme açana dek sahibine sorulur".
+
 ## 6. Kapının kuralları (sistem parçaları için)
 
 Anayasa alanları (varsayılanlarla):
@@ -131,13 +152,23 @@ Anayasa alanları (varsayılanlarla):
 |---|---|---|
 | `sendsPerHour` | 30 | Departman (departmansız çalışan için kişi) başına son bir saatte sistemce geçen gönderim + yayın sayısı bu sınıra gelince sahibine |
 | `bulkRecipients` | 5 | Bir çağrının alıcı sayısı (to, cc, bcc, recipients… alanları; dizi ya da virgüllü metin) bunu aşarsa sahibine |
-| `specialContacts` | [] | Çağrının girdisinde bu kişilerden biri geçerse (e-posta küçük harfle, telefon yalnız rakamlarıyla, kullanıcı adı küçük harfle karşılaştırılır) sahibine |
+| `specialContacts` | [] | Çağrının girdisinde bu kişilerden biri geçerse sahibine. Liste e-posta, telefon, kullanıcı adı, kişinin ya da firmanın adı (bütün bir ifade olarak aranır) ya da kişinin aday ve konuşma kimliğidir; e-posta küçük harfle, telefon rakamlarıyla, ad ve kullanıcı adı küçük harfle (Türkçe katlama) karşılaştırılır ve girdinin her metninde aranır |
 | `callHours` | [9, 19] | Arama bu saatler dışındaysa (yerel saat) sahibine |
 | `callsPerDay` | 20 | Departman başına bugünkü sistem araması bu sınıra gelince sahibine |
 
 - Kuralı aşan çağrı tutulur ve gerekçesi kuralı söyler ("saatlik gönderim sınırı (30) doldu", "toplu gönderim: 12
   alıcı > 5", "özel kişi: ali@…", "mesai dışı arama (21:40)"). Çalışan bugünkü gibi `approvalRequest` ile ister.
 - Sahibinin onayladığı çağrılar da giden kutusuna yazılır ama sayaçlara girmez.
+- **Sıra:** okunamayan girdi, özel kişi, alıcıları görünmeyen gönderim, toplu gönderim, arama saati ve günlük sınır,
+  saatlik sınır; ilk tutan kuralın gerekçesi söylenir.
+- **Okunamayan girdi:** 64 düzeyden derin ya da 10 000'den çok değer taşıyan girdi sonuna kadar okunamaz; içinde bir
+  kişi ya da alıcı gizli olabileceğinden çağrı sahibine gider ("okunamayan girdi: çok derin ya da çok büyük").
+- **Özel kişi yalnız girdide aranır.** Kimlikle adreslenen çağrılarda (aday ya da konuşma kimliğiyle e-posta, mesaj ya
+  da arama) kapı kişiyi görmez; sahibi kimlikleri de listeye yazar, kimlik girdide geçerse eşleşir.
+- **Alıcıları görünmeyen gönderim:** gönderim türündeki bir çağrıda `draftId` alanı (her derinlikte, büyük-küçük harf
+  ve `_` ile `-` fark etmez) ya da doğru bir `replyAll` varsa alıcılar ne sayılabilir ne özel kişiyle eşlenebilir;
+  çağrı sahibine gider ("alıcılar girdide yok (taslak / hepsini yanıtla)"). Yayın ve öteki türler etkilenmez. Kimlikle
+  yapılan tek kişilik bir yanıt (`reply {messageId}`) tutulmaz.
 
 ## 7. Giden kutusu
 
@@ -147,6 +178,9 @@ Anayasa alanları (varsayılanlarla):
 - Tablo `outbox` (göç v25): kimlik, çalışan, departman, araç, tür, hedef (kapının bugünkü kısa hedefi), alıcılar
   (en çok 20), özet (girdinin ilk 300 karakteri, gizli anahtar alanları çıkarılmış), `via` ('system' | 'owner'),
   onay kimliği, zaman.
+- Kapı kapalıyken giden kutusuna yazılmaz. `outboxRead` bu durumda "Kapı kapalı: giden kutusuna yazılmıyor (sistem adına
+  geçen çağrılar kaydedilmez)." diye yanıtlar; kapı açıkken yazılmış satırlar varsa önce bu cümle, sonra başlık ve
+  satırlar gelir.
 - Olay `outbox.sent` (web canlı günceller).
 - Araç `outboxRead(since?, department?, limit?)`: koordinatör hepsini, başkan kendi departmanınınkini okur (günlük
   örnek inceleme için).
@@ -158,8 +192,15 @@ Anayasa alanları (varsayılanlarla):
 geçirebilir; ama şu durumlarda göndermeden önce `approvalRequest` ile sahibine sor: para sözü (fiyat, indirim, iade,
 ödeme tarihi), hukuki konu (avukat, tüketici hakem heyeti, KVKK talebi, sözleşme), kriz (basın, olumsuz yayılan
 paylaşım, tehdit, ağır şikâyet), bilgi tabanında cevabı olmayan soru, ticari ileti izni olmayan kişiye ilk tanıtım
-mesajı ya da araması (İYS). Başkanlar için: her gün odalarının giden kutusundan örnek okuyup ton ve kural ihlali
-arar (rutin önerisi; şablonlara eklenir).
+mesajı ya da araması (İYS), toplu gönderim (eşiği aşan alıcı), özel kişilere giden ya da onları anan her şey. Hepsi
+kapı kapalıyken de geçerli bir talimattır; kapı açıkken mekanik tutmanın kapsamı çağrının girdisiyle sınırlıdır (§6),
+bu yüzden çalışana olağan bir yanıtın alıcılarını çağrıya yazması da söylenir. Başkanlar için: kapı açıkken her gün
+odalarının giden kutusundan örnek okuyup ton ve kural ihlali arar (rutin önerisi; şablonlara eklenir).
+
+**Özel kişilerin çalışana görünmesi:** gönderim, yayın, arama ya da takvim yeteneği olan çalışanın masasında listenin
+kendisi `special-contacts.md` olarak durur (rol kartı onu içe aktarır; Codex'in `AGENTS.md`'sine satır içi yazılır).
+Dosya anayasa, rol kartı ya da bir şirket yeteneğinin türü değişince yenilenir; yalnız bloğu değişen masa yazılır; liste
+boşken hiçbir yere yazılmaz. Çalışan değişikliği bir sonraki oturumunda görür.
 
 ## 9. Şablonlar ve arayüz
 
@@ -169,6 +210,12 @@ arar (rutin önerisi; şablonlara eklenir).
   kuralı "kritik olan sahibine; geri kalan sistemce" olur (rol şablonu testinin dışa dönük kuralı buna göre).
 - Departman şablonları: `ic-dis-iletisim`, `pazarlama`, `satis` v2 ("Sana gelir" yalnız kritikler; giden kutusu
   rutin önerisi).
+- Son inceleme sürümleri: `musteri-temsilcisi` ve `sosyal-medya` v4, `iletisim-yoneticisi`, `satis-muduru`,
+  `aday-arastirmaci`, `pazarlama-muduru` v3, `icerik-yazari` v4, `yonetici-asistani` v2; `ic-dis-iletisim`, `pazarlama`,
+  `satis` v3. Satış başkanı, aday araştırmacı ve sosyal medya uzmanı da toplu gönderim ve özel kişiler için önce
+  sorar; Pazarlama bülteni ve toplu e-postayı hazırlar, gönderimini sahibine sorar (Pazarlama'da e-posta gönderen rol
+  yok); başkanların giden kutusu örneği "kapı açıkken"dir; Yönetici Asistanı'nın kendi kuralı (taslak hazırlar,
+  göndermez) müşteri yönteminden üstündür.
 - Web: **Yetenekler** sekmesi (ürünle gelenler salt okunur; şirketinkiler: ekle, onayla/reddet, geri al, türü
   değiştir); **Anayasa**'ya otonomi politikası (dört seçim), özel kişiler listesi, beş sayısal kural; **Giden
   kutusu** sekmesi.
@@ -181,3 +228,22 @@ arar (rutin önerisi; şablonlara eklenir).
 - **Koordinatörün kendi önerdiği yetenek** sahibine gider (yapan ≠ denetleyen).
 - **İYS** dışarıdan okunmaz; kural muhakeme katmanındadır.
 - **Giden kutusu** "teslim edildi" değil "izin verildi" kaydıdır.
+
+## 11. Kapının dışındaki korumalar ve sınırlar
+
+- **İç içe oturum:** kabuktan açılan bir Claude Code ya da Codex oturumu (`claude`, `codex` ya da `npx`, `pnpm dlx`,
+  `bunx` ile `@anthropic-ai/claude-code` ve `@openai/codex`; yalnız tek başına `--version`/`--help` serbest) ofisin
+  kancasını taşımaz, sahibinin bağlantılarına kapıdan geçmeden ulaşır. Kapı açıkken `self` türüyle sahibine kalır.
+  Yorumlayıcı kodundan başlatılan oturum da (bir komut çağrısının ya da listesinin ilk öğesi olarak yazılmışsa) aynı
+  şekilde tutulur.
+- **MCP ayarları:** `.mcp.json`, sahibinin `~/.claude.json` dosyası ve `.codex/config.toml` ile sahibinin `~/.claude`
+  klasörüne (masanın proje belleği hariç) ve masanın `.claude` klasörüne yazma sahibine kalır; bir bağlayıcının adıyla
+  yazılan sunucu o bağlayıcı sanılır ve gönderimleri sistemce geçerdi.
+- **Yükleme zamanı yedeği:** ofisin Claude oturumları `disabledMcpjsonServers` ile sözlükteki her bağlayıcı sunucusunun ve
+  `office`'in adını taşıyan `.mcp.json` sunucusunu yüklemez; ofisin kendi sunucusu `--mcp-config` ile gelir ve yüklenir.
+  Ayar kancanın yedeğidir ve kancası takılı her ofis oturumunda geçerlidir (kapı açık olsun olmasın); kancasız oturum
+  (yan soru) onu almaz.
+- **Codex sınırı:** Codex çalışanlarının bağlayıcı çağrıları kapıdan geçmez; ofis Codex'e, Claude'daki gibi her araç
+  çağrısını gören bir kanca bağlamıyor (Codex'in kabuk komutu ve dosya değişikliği onay istekleri kapıya sorulur).
+  Politika, kurallar ve giden kutusu Claude çalışanlarının bağlayıcı çağrılarına işler; oturumda bilinmeyen araçları
+  kapatma da (B9b) yalnız Claude'da.

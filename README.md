@@ -251,41 +251,65 @@ Ofis 32 × 24 m'lik tek bir kat: ortada **merkez**, kuzeyinde ve güneyinde üç
 - **Yetenek türleri:** sözlükteki her yetenek bir tür taşır — okuma, gönderim, takvim, arama, yayın, ödeme, silme
   (sözlük sürüm 3); kapının onay türü buradan gelir (takvim daveti ve arama artık ayrı türler). `messages.read` gelen
   SMS, WhatsApp ve sosyal medya mesajlarını ve yorumları okur.
-- **Şirketin eklediği yetenekler:** sözlükte olmayan bir bağlayıcı aracı dışa dönük sayılır, oturumda kapanır, kapıda
-  tutulur. Çalışan `capabilityPropose` ile yetenek önerir; koordinatör `capabilityDecide` ile karar verir — türü yalnız
-  sıkılaştırabilir, ödeme ve silme türünü yalnız siz değiştirirsiniz; koordinatörün kendi önerisi size gelir. Bir aracı
-  **okuma** olarak sınıflandırmak yalnız sizin kararınızdır (okuma araçları her oturumda açıktır ve kapıdan geçer):
-  koordinatör bir okuma önerisini ancak dışa dönük bir türe sıkılaştırarak kabul eder. Şirket görünümünün
-  **Yetenekler** sekmesinde ürünle gelenleri görür, yenisini eklersiniz (hemen etkin), bekleyenleri onaylar ya da
-  reddeder, etkin olanın türünü değiştirir ya da geri alırsınız (araçları yeniden sınıflandırılmamış olur). Yeni bir
-  yetenek, rolüne eklenen kişinin bir sonraki oturumunda açılır.
+- **Şirketin eklediği yetenekler:** sözlükte olmayan bir bağlayıcı aracı dışa dönük sayılır, oturumda kapanır (oturumda
+  kapatma yalnız Claude çalışanlarında işler), kapıda tutulur. Çalışan `capabilityPropose` ile yetenek önerir;
+  koordinatör `capabilityDecide` ile karar verir — türü yalnız sıkılaştırabilir, ödeme ve silme türünü yalnız siz
+  değiştirirsiniz; koordinatörün kendi önerisi size gelir. Bir aracı **okuma** olarak sınıflandırmak yalnız sizin
+  kararınızdır (okuma araçları her oturumda açıktır ve kapıdan geçer): koordinatör bir okuma önerisini ancak dışa dönük
+  bir türe sıkılaştırarak kabul eder. Koordinatörün etkinleştirdiği dışa dönük bir yetenek, siz Yetenekler sekmesinden
+  sisteme açana dek kapıda sizindir: politika "Sistem halletsin" dese de çağrıları size gelir; kapıyı açtığınızda daha
+  önce koordinatörün etkinleştirdikleri de sizin sisteme açmanızı bekler. Sizin eklediğiniz, onayladığınız ya da
+  türünü değiştirdiğiniz yetenek ile ürünle gelenler sisteme açıktır. Şirket görünümünün **Yetenekler** sekmesinde
+  ürünle gelenleri görür, yenisini eklersiniz (hemen etkin), bekleyenleri onaylar ya da reddeder, etkin olanın türünü
+  değiştirir ya da geri alırsınız (araçları yeniden sınıflandırılmamış olur). Yeni bir yetenek, rolüne eklenen kişinin
+  bir sonraki oturumunda açılır.
 - **Otonomi politikası (Anayasa):** kapı açıkken bağlayıcıdan yapılan gönderim, yayın, arama ve takvim için "Sahibine
-  sor" ya da "Sistem halletsin". Varsayılan: gönderim, yayın, arama sistem; takvim size. Ödeme, silme, tarayıcı,
-  ofisin kendisi ve sınıflandırılmamış araçlar her zaman size gelir; komut satırından (Bash) gönderim, kabuktan
-  açılan iç içe bir Claude Code ya da Codex oturumu (yalnız `--version`/`--help` serbest) ve MCP ayarlarına
-  (`.mcp.json`, `~/.claude.json`, `.codex/config.toml`) ya da `.claude/` klasörüne yazma da öyle. Claude oturumları,
-  bir bağlayıcının ya da ofisin adını taşıyan `.mcp.json` sunucusunu da yüklemez. **Kapı varsayılan kapalı ve bu iş
-  onu açmaz:** politika ve kurallar yalnız kapıyı siz açınca (Anayasa → Geri alınamaz iş kapısı) işler.
-  **Bilinen sınır:** Codex çalışanlarının bağlayıcı çağrıları kapıdan geçmez (Codex'te böyle bir kanca yok); politika
-  ve kurallar Claude çalışanlarının bağlayıcı çağrılarına işler.
+  sor" ya da "Sistem halletsin". Varsayılan: gönderim, yayın, arama sistem; takvim size. Her zaman size gelenler:
+  - ödeme, silme, tarayıcı, ofisin kendisi ve sınıflandırılmamış araçlar;
+  - komut satırından (Bash) gönderim;
+  - kabuktan açılan iç içe bir Claude Code ya da Codex oturumu (yalnız `--version`/`--help` serbest);
+  - MCP ayarlarına (`.mcp.json`, `~/.claude.json`, `.codex/config.toml`), sahibinin `~/.claude` klasörüne ve masanın
+    `.claude` klasörüne yazma.
+
+  Politika "Sistem halletsin" dese de iki çağrı daha size kalır: çalışanın size sorduğu ve cevabınız gelmeyen ya da
+  bir günden az önce reddettiğiniz çağrı (onay yalnız aynı çağrının tekrarını açar; başka alıcı başka çağrıdır) ve
+  sisteme açmadığınız bir yeteneğin çağrısı (yukarıda).
+
+  Claude oturumları, bir bağlayıcının ya da ofisin adını taşıyan `.mcp.json` sunucusunu da yüklemez; kancası takılı her
+  ofis oturumunda, kapı açık olsun olmasın. **Kapı varsayılan kapalı ve bu iş onu açmaz:** politika ve kurallar yalnız
+  kapıyı siz açınca (Anayasa → Geri alınamaz iş kapısı) işler. **Bilinen sınır:** Codex çalışanlarının bağlayıcı
+  çağrıları kapıdan geçmez (ofis Codex'e, Claude'daki gibi her araç çağrısını gören bir kanca bağlamıyor); politika ve
+  kurallar Claude çalışanlarının bağlayıcı çağrılarına işler.
 - **Kurallar:** departman başına saatlik gönderim + yayın sınırı (`sendsPerHour`, 30; departmansız çalışan kendi
   başına sayılır), toplu gönderim eşiği (`bulkRecipients`, 5'ten çok alıcı), özel kişiler (`specialContacts`: e-posta,
-  telefon, kullanıcı adı ya da kişinin ya da firmanın adı; ad bütün bir ifade olarak aranır, büyük-küçük harf ve
-  telefonun yazılışı fark etmez), arama saatleri (`callHours`, 9–19) ve departman başına günlük arama sınırı
-  (`callsPerDay`, 20). Özel kişi çağrının girdisinde her yerde aranır: onlara giden ya da onlar hakkındaki çağrı size
-  gelir. Çok derin ya da çok büyük girdi sonuna kadar okunamaz ve tutulur ("okunamayan girdi"). Kuralı aşan çağrı
-  size gelir; gerekçesi kuralı söyler.
+  telefon, kullanıcı adı, kişinin ya da firmanın adı ya da kişinin aday ve konuşma kimliği; ad bütün bir ifade olarak
+  aranır, büyük-küçük harf ve telefonun yazılışı fark etmez), arama saatleri (`callHours`, 9–19) ve departman başına
+  günlük arama sınırı (`callsPerDay`, 20). Kuralı aşan çağrı size gelir; gerekçesi kuralı söyler. Kuralların sınırları:
+  - Özel kişi çağrının girdisinde her yerde aranır: onlara giden ya da onlar hakkındaki çağrı size gelir, ama yalnız
+    girdide yazılıysa. Kimlikle adreslenen bir çağrıda (aday ya da konuşma kimliğiyle e-posta, mesaj ya da arama) kapı
+    kişiyi göremez; listeye kişinin kimliklerini de yazın.
+  - Alıcıları girdide görünmeyen bir gönderim size gelir ("alıcılar girdide yok"): taslağı kimliğiyle göndermek ve
+    herkese yanıtlamak. Çalışanlara olağan bir yanıtın alıcılarını çağrıya yazmaları söylenir. Kimlikle yapılan tek
+    kişilik bir yanıt (Gmail `reply` gibi) tutulmaz; kişinin kimliği listede yoksa sistemce çıkabilir.
+  - Çok derin ya da çok büyük girdi sonuna kadar okunamaz ve tutulur ("okunamayan girdi").
+  - Gönderim, yayın, arama ya da davet yeteneği olan çalışanların masasında liste "Özel kişiler" bölümü olarak durur
+    (liste boşken hiçbir masaya yazılmaz; çalışan değişikliği bir sonraki oturumunda görür); yani o masalarda düz
+    metindir. Kapı kapalıyken bu kurallar mekanik değildir, rol metinlerindeki "göndermeden önce `approvalRequest` ile
+    sor" talimatına dayanır.
 - **Giden kutusu:** gönderim, yayın, arama ya da takvim parçası olan ve kapının sistem adına geçirdiği ya da sizin
-  onayladığınız her çağrı kaydedilir — "izin verildi" kaydıdır, teslim değil; onaylanan ödeme, silme, tarayıcı, ofis
-  ve diğer işler Onaylar'da ve `gate.checked` olaylarında kalır. **Giden kutusu** sekmesi son 200'ü departmana ve
-  türe göre süzer; koordinatör hepsini, başkanlar kendi departmanınınkini `outboxRead` ile okur (her gün örnek okuma
-  önerilir).
+  onayladığınız her çağrı kaydedilir (kapı kapalıyken yazılmaz; `outboxRead` o zaman "Kapı kapalı: giden kutusuna
+  yazılmıyor" diye yanıtlar) — "izin verildi" kaydıdır, teslim değil; onaylanan ödeme, silme, tarayıcı, ofis ve diğer
+  işler Onaylar'da ve `gate.checked` olaylarında kalır. **Giden kutusu** sekmesi son 200'ü departmana ve türe göre
+  süzer; koordinatör hepsini, başkanlar kendi departmanınınkini `outboxRead` ile okur (kapı açıkken her gün örnek
+  okuma önerilir).
 - **Muhakeme:** herkesin rehberinde "Sistemin senin adına gönderdiği" bölümü var: para sözü, hukuki konu, kriz, bilgi
-  tabanında cevabı olmayan soru ve ticari ileti izni (İYS) olmayan kişiye ilk tanıtım çalışan göndermeden önce
-  `approvalRequest` (aracın adı ve göndereceği girdi) ile size gelir. Kapı içeriği okumaz. İletişim, Pazarlama ve
-  Satış başkanları ile müşteri temsilcisi olağan gönderim ve yayını politikayla kendileri yapar; toplu gönderimi ve
-  özel kişiye gideni İletişim ve Pazarlama başkanları ile müşteri temsilcisi göndermeden önce `approvalRequest` ile
-  size sorar (kapı açıkken de kapalıyken de).
+  tabanında cevabı olmayan soru, ticari ileti izni (İYS) olmayan kişiye ilk tanıtım, toplu gönderim ve özel kişiye giden
+  ya da onu anan her şey çalışan göndermeden önce `approvalRequest` (aracın adı ve göndereceği girdi) ile size gelir;
+  kapı açıkken de kapalıyken de. Kapı içeriği okumaz. İletişim, Pazarlama ve Satış başkanları, müşteri temsilcisi, aday
+  araştırmacı ve sosyal medya uzmanı olağan gönderim ve yayını politikayla kendileri yapar; hepsi toplu gönderimi ve
+  özel kişiye giden ya da onu anan şeyi göndermeden önce size sorar. Pazarlama bülteni ve toplu e-postayı hazırlar,
+  gönderimi size sorar (Pazarlama'da e-posta gönderen rol yok); İçerik Yazarı metni teslim eder ve bu sınıfa girenleri
+  teslimde işaretler.
 
 ## office-server
 
