@@ -255,6 +255,36 @@ describe('gate policy — a nested Claude Code or Codex session is the owner’s
     ['claudette -p hi', 'pass'],
     ['git log --grep claude', 'pass'],
   ]);
+  describe('round 3: a program that starts one with arguments known only when it runs', () => {
+    rows([
+      [`python3 -c "import subprocess; subprocess.run(['claude', '-p', prompt])"`, 'self'],
+      [`python3 -c 'import subprocess as sp; sp.check_output(["codex", "exec", task])'`, 'self'],
+      [`node -e "require('child_process').spawn('claude', args)"`, 'self'],
+      [`node -e "const { execFileSync } = require('child_process'); execFileSync('claude', args, { stdio: 'inherit' })"`, 'self'],
+      [`node -e "require('child_process').spawn('codex', ['exec', task])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['/home/x/.local/bin/claude', '-p', p])"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['npx', '@anthropic-ai/claude-code', '-p', p])"`, 'self'],
+      [`ruby -e 'system("claude", prompt)'`, 'self'],
+      // Known in full but no question: a session on its input, or a list added to.
+      [`python3 -c "import subprocess; subprocess.run(['claude'], input=task)"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['claude'] + args)"`, 'self'],
+      [`python3 -c "import subprocess; subprocess.run(['claude', '--version'] + args)"`, 'self'],
+      ['cat > /tmp/r.py <<\'EOF\'\nimport subprocess\nsubprocess.run(["codex", "exec", task])\nEOF\npython3 /tmp/r.py', 'self'],
+      // Known in full, as before: its version is free; a program that only mentions one starts nothing.
+      [`node -e "require('child_process').spawn('claude', ['--version'])"`, 'pass'],
+      [`python3 -c "import subprocess; subprocess.run(['claude', '--help'])"`, 'pass'],
+      [`python3 -c "print(['claude', 'codex'])"`, 'pass'],
+      [`python3 -c "import subprocess; subprocess.run(['git', 'status', path])"`, 'pass'],
+    ]);
+    it('one part for one start, whichever way it was read', () => {
+      expect(bash(`node -e "require('child_process').spawn('claude', ['-p', prompt])"`).parts).toEqual([
+        { kind: 'self', target: 'claude -p', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
+      ]);
+      expect(bash(`python3 -c "import subprocess; subprocess.run(['claude', '-p', prompt])"`).parts).toEqual([
+        { kind: 'self', target: 'claude (python3 kodundan)', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
+      ]);
+    });
+  });
   it('round 3: only command’s own -v/-V before the name is a lookup — a -v of the command it runs frees nothing', () => {
     for (const line of ['git push -v origin main', 'curl -v -X POST https://api.mail.io/send -d x', 'rm -rf -v ~/Projects/control-center', 'cp -v x ~/.claude/settings.json', 'claude -p hi -v']) {
       const plain = bash(line).parts;

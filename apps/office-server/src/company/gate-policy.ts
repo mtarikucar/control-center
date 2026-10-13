@@ -647,6 +647,58 @@ function spawnedCommands(code: string): string[] {
   return out;
 }
 
+/** Either package's name, quoted, as npx and the like run it: @anthropic-ai/claude-code, @openai/codex@latest. */
+const AGENT_PACKAGE = /(['"`])@(?:anthropic-ai\/claude-code|openai\/codex)(?:@[\w.-]+)?\1/;
+
+/**
+ * From `from` to the list's or the call's close: its quoted words when it holds nothing else (commas, spaces, lists)
+ * and nothing is added to it after the close (`] + args`); else null.
+ */
+function literalItems(code: string, from: number, close: string): string[] | null {
+  const items: string[] = [];
+  let depth = 0;
+  for (let i = from; i < code.length && i < from + 400; i += 1) {
+    const c = code[i]!;
+    if (c === '"' || c === "'" || c === '`') {
+      const end = code.indexOf(c, i + 1);
+      if (end === -1) return null;
+      items.push(code.slice(i + 1, end));
+      i = end;
+    } else if (c === '[') depth += 1;
+    else if (c === ']' || c === ')') {
+      if (depth > 0) {
+        depth -= 1;
+        continue;
+      }
+      if (c !== close) return null;
+      const after = /\S/.exec(code.slice(i + 1, i + 40))?.[0];
+      return after === undefined || [')', ',', ';', ']'].includes(after) ? items : null;
+    } else if (c !== ',' && !/\s/.test(c)) return null;
+  }
+  return null;
+}
+
+/**
+ * Claude Code or Codex started from code whose arguments are known only when it runs (hardening round 3): a quoted
+ * name (claude, codex, a versioned one, a path ending in one) as a list's first item or a call's first argument —
+ * subprocess.run(["claude", "-p", prompt]), spawn('codex', args), execFileSync('claude', args) — or either package's
+ * name anywhere (['npx', '@anthropic-ai/claude-code', …]). Only a start known in full that asks its version or its
+ * help alone is free, as on the shell. Scanned with indexOf, linearly.
+ */
+function spawnedAgent(code: string): 'claude' | 'codex' | null {
+  for (const m of code.matchAll(/[[(][ \t]*(['"`])/g)) {
+    const start = m.index! + m[0].length;
+    const end = code.indexOf(m[1]!, start);
+    if (end === -1 || end - start > 200) continue;
+    const agent = agentCli(code.slice(start, end));
+    if (!agent) continue;
+    const items = literalItems(code, end + 1, m[0][0] === '[' ? ']' : ')');
+    if (!(items?.length === 1 && ['--version', '-v', '--help', '-h'].includes(items[0]!))) return agent;
+  }
+  const pkg = AGENT_PACKAGE.exec(code);
+  return pkg ? (pkg[0].includes('codex') ? 'codex' : 'claude') : null;
+}
+
 /** A file the command writes: held when its resolved target is protected, or when it cannot be known (`mcpJson`: protectedWhy's). */
 function writeTarget(run: Run, verb: string, w: ShellWord, st: ShellState, recursive = false, mcpJson = true): void {
   const at = pathOf(w, st, run.ctx);
@@ -684,6 +736,7 @@ function deleteTarget(run: Run, verb: string, w: ShellWord, st: ShellState): voi
  * and the like (@anthropic-ai/claude-code, @openai/codex@latest), or Claude Code's versions folder (…/claude/versions/2.1.296).
  */
 const AGENT_CLI = /^(claude|codex)([-_.@][\w.@-]*)?$/i;
+const NESTED_WHY = 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)';
 function agentCli(cmd: string): 'claude' | 'codex' | null {
   const name = posix.basename(cmd);
   if (AGENT_CLI.test(name)) return name.toLowerCase().startsWith('codex') ? 'codex' : 'claude';
@@ -769,7 +822,7 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
   const agent = agentCli(cmd);
   if (agent) {
     if (args.length === 1 && ['--version', '-v', '--help', '-h'].includes(args[0]!)) return;
-    return add(run, { kind: 'self', target: `${agent} ${shown(args.join(' '))}`.trim().slice(0, 80), why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' });
+    return add(run, { kind: 'self', target: `${agent} ${shown(args.join(' '))}`.trim().slice(0, 80), why: NESTED_WHY });
   }
 
   // The shell's own state.
@@ -1056,7 +1109,11 @@ function interpreter(name: string, words: ShellWord[], redirects: Array<{ op: st
     }
     const filter = (name === 'perl' || name === 'ruby') && t.slice(1).some((a) => /^-\w*[pni]/.test(a));
     if (filter ? !FILTER_SPAWNS.test(code) : !spawns(name, code)) continue;
+    const before = run.parts.length;
     for (const line of spawnedCommands(code)) shellLine(line, copyState(st), { ...run, depth: run.depth + 1 });
+    // One part for one start: a nested session spawnedCommands read in full already holds the call.
+    const agent = run.parts.slice(before).some((p) => p.why === NESTED_WHY) ? null : spawnedAgent(code);
+    if (agent) add(run, { kind: 'self', target: `${agent} (${name} kodundan)`, why: NESTED_WHY });
   }
 }
 
