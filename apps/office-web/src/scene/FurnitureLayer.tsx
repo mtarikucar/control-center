@@ -58,7 +58,7 @@ function Sway({ seed, children }: { seed: number; children: ReactNode }) {
 const BULB = new Color(PALETTE.bulb).multiplyScalar(5);
 const BULB_OFF = new Color('#3a3328');
 
-/** A lamp's bulb glows (and blooms) and, unless it is a desk lamp in a room, lights its corner; an empty room's lamps are off. */
+/** A lamp's bulb glows (and blooms) and, unless it is a desk lamp in a room, lights its corner; a room's lamps are off while no department holds it and nobody sits there. */
 function Glow({ p, off }: { p: Placement; off: boolean }) {
   const y = p.h * (p.glowAt ?? 0.5);
   return (

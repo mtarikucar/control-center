@@ -2,7 +2,7 @@ import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { CanvasTexture, Color, Object3D, RepeatWrapping, SRGBColorSpace, type InstancedMesh } from 'three';
 import { LAYOUT, type Desk } from '../office/layout.ts';
-import { useDarkRooms } from './rooms.ts';
+import { useDarkDesks } from './rooms.ts';
 
 const SURFACE = 0.75;
 const CODE_COLORS = ['#7ec8ff', '#ffd27a', '#ff8fa3', '#9be28f', '#c8a8ff', '#e8edf5'];
@@ -52,7 +52,7 @@ function Monitor({ x, screen }: { x: number; screen: CanvasTexture | null }) {
         <boxGeometry args={[0.56, 0.34, 0.035]} />
         <meshStandardMaterial color="#1b1e23" roughness={0.45} />
       </mesh>
-      {/* The screen faces the person (local −z); dark glass in an empty room. */}
+      {/* The screen faces the person (local −z); dark glass at an empty desk in a room no department holds. */}
       <mesh name="screen" position={[0, 0.34, -0.019]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[0.52, 0.3]} />
         {screen ? <meshBasicMaterial map={screen} color={[1.7, 1.7, 1.7]} toneMapped={false} /> : <meshStandardMaterial color="#0d0f12" roughness={0.3} />}
@@ -100,11 +100,12 @@ export function DeskDressing() {
       s.offset.y -= dt * (0.035 + i * 0.012);
     });
   });
-  const dark = useDarkRooms();
+  // A department's room has its screens on; elsewhere in a room, only a desk someone sits at (the centre's overflow).
+  const dark = useDarkDesks();
   return (
     <group>
       {LAYOUT.desks.map((desk, i) => (
-        <DeskThings key={i} desk={desk} index={i} screens={screens} off={desk.room !== undefined && dark.has(desk.room)} />
+        <DeskThings key={i} desk={desk} index={i} screens={screens} off={dark.has(i)} />
       ))}
     </group>
   );
