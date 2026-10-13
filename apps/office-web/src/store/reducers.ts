@@ -51,13 +51,17 @@ export interface OfficeData {
   agendaRev: number;
   /** Bumped by a management cycle's start and its record (and a live snapshot), so an open Yönetim tab reads the log again. */
   managementRev: number;
+  /** Bumped by every company capability change (and a live snapshot), so an open Yetenekler tab reads again. */
+  capabilitiesRev: number;
+  /** Bumped by every outbox line (and a live snapshot), so an open Giden kutusu tab reads again. */
+  outboxRev: number;
   /** Every department, open and closed, as the snapshot and the feed last gave it (spec departments §7). */
   departments: Record<string, Department>;
   /** Bumped by every stream note, so an open plan's notes are read again. */
   streamNotesRev: number;
 }
 
-export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, approvals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false, schedules: {}, clock: null, agendaRev: 0, managementRev: 0, departments: {}, streamNotesRev: 0 };
+export const EMPTY_DATA: OfficeData = { lastSeq: 0, usageSeq: 0, quota: null, usage: {}, views: {}, synced: false, tasks: {}, plans: {}, memoryRev: 0, budget: null, proposals: {}, approvals: {}, pings: {}, unseenReports: {}, goals: {}, paused: false, schedules: {}, clock: null, agendaRev: 0, managementRev: 0, capabilitiesRev: 0, outboxRev: 0, departments: {}, streamNotesRev: 0 };
 
 const ZERO: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0, turns: 0, sideAnswers: 0 };
 
@@ -117,6 +121,8 @@ export function applySnapshot(current: OfficeData, s: OfficeSnapshot, source: 'l
     agendaRev: current.agendaRev + 1,
     // A live snapshot opens the feed (a reconnect may have missed a cycle); an HTTP one comes while the feed runs.
     managementRev: current.managementRev + (source === 'live' ? 1 : 0),
+    capabilitiesRev: current.capabilitiesRev + (source === 'live' ? 1 : 0),
+    outboxRev: current.outboxRev + (source === 'live' ? 1 : 0),
     departments: Object.fromEntries((s.departments ?? []).map((x) => [x.id, x])),
     // From `current`, as managementRev: a restarted log must not take it back to a number an open plan already read at. A live snapshot opens the feed, which replays only after it, so a note missed on a reconnect shows here; an HTTP one comes while the feed runs.
     streamNotesRev: current.streamNotesRev + (source === 'live' ? 1 : 0),
@@ -184,6 +190,8 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
   if (ev.type === 'goal.changed') next.goals = { ...d.goals, [ev.goal.id]: ev.goal };
   if (ev.type === 'company.paused') next.paused = ev.paused;
   if (ev.type === 'schedule.changed') next.schedules = { ...d.schedules, [ev.schedule.id]: ev.schedule };
+  if (ev.type === 'capability.changed') next.capabilitiesRev = d.capabilitiesRev + 1;
+  if (ev.type === 'outbox.sent') next.outboxRev = d.outboxRev + 1;
   if (ev.type === 'department.changed') next.departments = { ...d.departments, [ev.department.id]: ev.department };
   if (ev.type === 'stream.noted') next.streamNotesRev = d.streamNotesRev + 1;
   if (AGENDA_EVENTS.has(ev.type)) next.agendaRev = d.agendaRev + 1;

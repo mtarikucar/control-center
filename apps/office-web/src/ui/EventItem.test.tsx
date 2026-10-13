@@ -23,6 +23,15 @@ describe('EventItem', () => {
     expect(container.textContent).toBe('');
   });
 
+  it('spec capabilities §7: an outward call let out reads as its outbox line, saying who let it out', () => {
+    const entry = { id: 1, employeeId: 'e1', departmentId: null, tool: 'mcp__claude_ai_Gmail__send_message', kind: 'send' as const, target: 'send_message to=a@x.co', recipients: ['a@x.co'], summary: '{}', via: 'system' as const, approvalId: null, at: 0 };
+    render(<EventItem stored={{ seq: 1, employeeId: 'e1', ts: 0, event: { type: 'outbox.sent', entry } }} />);
+    expect(screen.getByText('Giden: gönderim — send_message to=a@x.co (sistem geçirdi)')).toBeTruthy();
+    cleanup();
+    render(<EventItem stored={{ seq: 2, employeeId: 'e1', ts: 0, event: { type: 'outbox.sent', entry: { ...entry, kind: 'call', target: 'jeeta_click_to_dial', via: 'owner', approvalId: 'a1' } } }} />);
+    expect(screen.getByText('Giden: arama — jeeta_click_to_dial (sahibinin onayıyla)')).toBeTruthy();
+  });
+
   it('says a plan was reopened when a finished plan gets a new task', () => {
     const plan = {
       id: 'p1', title: 'Lansman', goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '',

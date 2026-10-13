@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { MODEL_ALIASES, SEAT_COUNT, type BudgetSummary, type Constitution } from '@cc/shared';
+import { MODEL_ALIASES, SEAT_COUNT, type AgentProvider, type BudgetSummary, type Constitution } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { PLAN_STATUS_LABELS, modelLabels } from './labels.ts';
@@ -125,6 +125,12 @@ interface Field {
   models?: readonly string[];
   /** A model map with one select per key: [key, label]. */
   selects?: ReadonlyArray<readonly [string, string]>;
+  /** The options of each `selects` select, [value, label]; none: the models. */
+  options?: ReadonlyArray<readonly [string, string]>;
+  /** A list of text, one entry per line. */
+  list?: boolean;
+  /** Two whole hours: from, to. */
+  span?: boolean;
   toggle?: boolean;
   choice?: readonly [string, string];
 }
@@ -149,7 +155,21 @@ const FIELDS: Field[] = [
   { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır; koordinatörün tur modelleri yine uygulanır.', toggle: true },
   { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },
   { key: 'capabilityPrecheckEnabled', label: 'Yetenek ön-kontrolü açık', hint: 'Açıkken istediği yetenek masada açık olmayan görev dağıtılmaz, bloklanır ve sana yetki önerisi gelir. Kapalıyken görev eskisi gibi dağıtılır.', toggle: true },
-  { key: 'gateEnabled', label: 'Geri alınamaz iş kapısı açık', hint: 'Açıkken yayın, gönderim, ödeme, silme, tarayıcı işi ve ofisin kendisine dokunan araç çağrıları senin onayını bekler (Onaylar sekmesi). Kapıyı kazara ve sıradan yollar için kapatır; aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz.', toggle: true },
+  { key: 'gateEnabled', label: 'Geri alınamaz iş kapısı açık', hint: 'Açıkken dışa dönük işler Otonomi politikasına göre: sistemce ya da sana (Onaylar sekmesi). Ödeme, silme, tarayıcı işi ve ofisin kendisine dokunan araç çağrıları her zaman senin onayını bekler. Kapıyı kazara ve sıradan yollar için kapatır; aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz.', toggle: true },
+  {
+    key: 'outwardPolicy', label: 'Otonomi politikası',
+    hint: 'Kapı açıkken bağlayıcıdan yapılan dışa dönük çağrıyı kim geçirir: Sahibine sor (Onaylar sekmesi) ya da Sistem halletsin (aşağıdaki kurallarla; geçen her çağrı Giden kutusuna yazılır). Ödeme, silme, tarayıcı, ofisin kendisi, sınıflandırılmamış araçlar ve komut satırından gönderim her zaman sana gelir.',
+    selects: [['send', 'Gönderim'], ['publish', 'Yayın'], ['call', 'Arama'], ['calendar', 'Takvim']],
+    options: [['owner', 'Sahibine sor'], ['system', 'Sistem halletsin']],
+  },
+  {
+    key: 'specialContacts', label: 'Özel kişiler', list: true,
+    hint: 'Satır başına bir girdi: e-posta, telefon numarası, kullanıcı adı ya da kişinin ya da firmanın adı (adlar bütün bir ifade olarak aranır; büyük-küçük harf ve telefonun yazılışı fark etmez). Girdisinde bunlardan biri geçen çağrı, politika ne olursa olsun her zaman sana gelir; mesajın sana ulaşması gereken kişi buraya yazılır.',
+  },
+  { key: 'sendsPerHour', label: 'Saatlik gönderim sınırı', hint: 'Bir departmanın (departmansız çalışanın kendi) son bir saatte sistemce geçen gönderim + yayın sayısı buna gelince sıradaki sana gelir; 0 = sistem hiç göndermez.' },
+  { key: 'bulkRecipients', label: 'Toplu gönderim eşiği (alıcı)', hint: 'Bundan çok alıcılı (to, cc, bcc…) çağrı sana gelir.' },
+  { key: 'callHours', label: 'Arama saatleri', hint: 'Sistem yalnız bu yerel saatler arasında arar (ör. 9, 19 = 09:00–19:00).', span: true },
+  { key: 'callsPerDay', label: 'Günlük arama sınırı', hint: 'Bir departmanın (departmansız çalışanın kendi) bugünkü sistem araması buna gelince sıradaki sana gelir.' },
   { key: 'autonomy', label: 'Tam serbest', hint: 'Açıkken koordinatör hedef koyar ve planlarını sormadan başlatır; kapalıyken her plan senin onayını bekler.', toggle: true, choice: ['free', 'plans'] },
   { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
   { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre bu aralıkla yönetim turu açılır (dinlenirken açılmaz, dinlenme bitince bir tur açılır); 0 = hiç.' },
@@ -163,12 +183,17 @@ const FIELDS: Field[] = [
 const shown = (v: Constitution[keyof Constitution]): string =>
   v === null ? '' : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? Object.values(v).join(' / ') : String(v);
 
+/** A select's options: the field's own, else the models (by Codex's names under Codex). */
+const optionsOf = (f: Field, provider: AgentProvider | undefined): ReadonlyArray<readonly [string, string]> =>
+  f.options ?? MODEL_ALIASES.map((m) => [m, provider === 'codex' ? modelLabels(provider)[m] : m] as const);
+
 /** The form's text for a field: one entry, or one per select (`key.sub`). */
 function draftOf(f: Field, c: Constitution): Array<[string, string]> {
   if (f.selects) {
     const map = c[f.key] as Record<string, string>;
     return f.selects.map(([k]) => [`${f.key}.${k}`, map[k] ?? '']);
   }
+  if (f.list) return [[f.key, (c[f.key] as string[]).join('\n')]];
   // A choice toggle is on when the setting holds its first value (autonomy: 'free').
   return [[f.key, f.choice ? String(c[f.key] === f.choice[0]) : shown(c[f.key])]];
 }
@@ -223,6 +248,20 @@ export function ConstitutionTab() {
         patch[f.key] = hours;
         continue;
       }
+      if (f.list) {
+        patch[f.key] = (draft[f.key] ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+        continue;
+      }
+      if (f.span) {
+        const hours = (draft[f.key] ?? '').split(/[\s,;–-]+/).filter(Boolean).map(Number);
+        if (hours.length !== 2 || hours.some((h) => !Number.isInteger(h))) {
+          setError(`${f.label}: iki tam saat girin (ör. 9, 19).`);
+          setBusy(false);
+          return;
+        }
+        patch[f.key] = hours;
+        continue;
+      }
       const raw = (draft[f.key] ?? '').trim().replace(',', '.');
       if (raw === '' && f.nullable) {
         patch[f.key] = null;
@@ -260,9 +299,9 @@ export function ConstitutionTab() {
                     dirty.current = true;
                     setDraft({ ...draft, [`${f.key}.${k}`]: e.target.value });
                   }}>
-                  {MODEL_ALIASES.map((m) => (
-                    <option key={m} value={m}>
-                      {provider === 'codex' ? modelLabels(provider)[m] : m}
+                  {optionsOf(f, provider).map(([value, text]) => (
+                    <option key={value} value={value}>
+                      {text}
                     </option>
                   ))}
                 </select>
@@ -277,6 +316,11 @@ export function ConstitutionTab() {
               <input type="checkbox" aria-label={f.label} checked={draft[f.key] === 'true'} onChange={(e) => {
                   dirty.current = true;
                   setDraft({ ...draft, [f.key]: String(e.target.checked) });
+                }} />
+            ) : f.list ? (
+              <textarea aria-label={f.label} rows={3} value={draft[f.key] ?? ''} onChange={(e) => {
+                  dirty.current = true;
+                  setDraft({ ...draft, [f.key]: e.target.value });
                 }} />
             ) : (
               <input aria-label={f.label} inputMode="decimal" value={draft[f.key] ?? ''} onChange={(e) => {

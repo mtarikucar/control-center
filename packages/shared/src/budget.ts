@@ -55,9 +55,10 @@ export interface Constitution {
   capabilityPrecheckEnabled: boolean;
   /**
    * The gate for work that cannot be taken back (B9a), OFF by default (and in a database that has no such key): on,
-   * a tool call that publishes, sends, pays, deletes, acts in a browser or touches the office itself waits for the
-   * owner's approval on the office page. The hook is in every session either way; off, it lets every call through
-   * and nothing is written, so turning it on needs no restart.
+   * a tool call that publishes, sends, calls, invites, pays, deletes, acts in a browser or touches the office itself
+   * is held; who lets it out follows `outwardPolicy` — the system on its rules, or the owner's approval on the
+   * office page (pay, delete, the browser and the office itself are always the owner's). The hook is in every session
+   * either way; off, it lets every call through and nothing is written, so turning it on needs no restart.
    */
   gateEnabled: boolean;
   /** 'free': the coordinator sets goals and starts its plans without waiting (spec §6.2); 'plans': each plan waits for the owner. */

@@ -1,4 +1,4 @@
-import { APPROVAL_KIND_LABELS, APPROVAL_STATUS_LABELS, PROFILE_SPEC, reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
+import { APPROVAL_KIND_LABELS, APPROVAL_STATUS_LABELS, OUTBOX_VIA_LABELS, PROFILE_SPEC, reviewTally, type PlanChange, type ScheduleChange, type StoredEvent } from '@cc/shared';
 import { formatClock, formatCost, formatTokens, formatWhenTR, summarizeToolInput } from './format.ts';
 import { lifecycleLabel, modelName } from './labels.ts';
 import { PlanCard } from './PlanCard.tsx';
@@ -195,6 +195,8 @@ export function EventItem({ stored }: { stored: StoredEvent }) {
       return <div className="note">{`Model geçişi olmadı (${e.to}): ${e.from} ile sürüyor. ${e.reason}`}</div>;
     case 'gate.checked':
       return <div className="note">{`Kapı: ${APPROVAL_KIND_LABELS[e.kind]} — ${e.target} (${e.tool}) ${e.decision === 'allow' ? 'sahibinin onayıyla geçti' : 'onay bekliyor'}`}</div>;
+    case 'outbox.sent':
+      return <div className="note">{`Giden: ${APPROVAL_KIND_LABELS[e.entry.kind]} — ${e.entry.target} (${e.entry.via === 'system' ? 'sistem geçirdi' : OUTBOX_VIA_LABELS.owner})`}</div>;
     case 'approval.changed':
       return e.change === 'requested' ? <ApprovalCard approval={e.approval} /> : <div className="note">{`Onay “${e.approval.target}”: ${APPROVAL_STATUS_LABELS[e.approval.status]}`}</div>;
     case 'proposal.changed':

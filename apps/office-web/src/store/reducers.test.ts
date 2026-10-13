@@ -340,6 +340,21 @@ describe('proposals, passes and reports', () => {
   });
 });
 
+describe('capabilities and the outbox', () => {
+  it('spec capabilities §4, §7: a capability change and an outbox line move their revisions (the open tabs read again); a live snapshot too, an HTTP one not', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot(), 'live');
+    const [caps, out] = [d.capabilitiesRev, d.outboxRev];
+    d = applyEvent(d, stored({ type: 'capability.changed', change: 'activated', capability: { id: 'sms.send' } } as never, null));
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 1, out]);
+    d = applyEvent(d, stored({ type: 'outbox.sent', entry: { id: 1 } } as never));
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 1, out + 1]);
+    d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 1 }), 'http');
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 1, out + 1]);
+    d = applySnapshot(d, snapshot({ lastSeq: d.lastSeq + 2 }), 'live');
+    expect([d.capabilitiesRev, d.outboxRev]).toEqual([caps + 2, out + 2]);
+  });
+});
+
 describe('the scheduler', () => {
   it('keeps routines and the clock from the snapshot and events, and bumps agendaRev on what changes the agenda', () => {
     const schedule = { id: 's1', title: 'Günlük', description: '', done: [], assignee: 'e1', reviewer: null, planId: null, priority: 3, difficulty: null, cron: '0 9 * * *', until: null, status: 'active' as const, nextRunAt: 5, lastRunAt: null, lastTaskId: null, skipCount: 0, failCount: 0, createdBy: 'c', createdAt: 1, note: null };
