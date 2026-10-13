@@ -43,6 +43,8 @@ describe('claude args', () => {
     // The connectors known by name only (“claude.ai Slack”) by the name their tools carry, as Claude Code compares them.
     expect(disabled).toEqual(expect.arrayContaining(['office', 'claude_ai_Gmail', 'claude_ai_Google_Calendar', 'claude_ai_jeeta', 'plugin_playwright_playwright', 'claude_ai_Slack', 'claude_ai_Google_Drive']));
     expect(new Set(disabled).size).toBe(disabled.length);
+    // The usual name of the Playwright MCP server: a project's own would be taken for the browser.
+    expect(disabled).toContain('playwright');
     // A company capability's connector too, from the session that starts after it.
     const sms: Capability = { id: 'sms.send', title: 'SMS gönderme', summary: 'Netgsm ile SMS gönderir.', kind: 'send', outward: true, builtin: [], tools: ['mcp__netgsm__send_sms'], company: true };
     useCompanyCapabilities(() => [sms]);

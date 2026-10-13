@@ -50,11 +50,21 @@ export class EventStore {
     let out: T;
     try {
       out = work();
-    } finally {
+    } catch (err) {
       this.#held = outer;
+      throw err;
     }
-    if (outer) outer.push(...held);
-    else for (const e of held) this.#emit(e);
+    if (outer) {
+      this.#held = outer;
+      outer.push(...held);
+      return out;
+    }
+    // While they are heard, what a listener appends joins the queue (round 3): every listener hears all in seq order.
+    try {
+      for (let i = 0; i < held.length; i += 1) this.#emit(held[i]!);
+    } finally {
+      this.#held = null;
+    }
     return out;
   }
 

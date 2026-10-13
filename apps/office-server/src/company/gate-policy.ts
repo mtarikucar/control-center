@@ -436,7 +436,8 @@ function downloads(name: 'curl' | 'wget', words: ShellWord[], st: ShellState, ru
   const at = (file: string) => composed(dir !== null && !file.startsWith('/') ? `${dir}/${file}` : file);
   for (const w of outputs) {
     const file = textOf(w, st, run.ctx);
-    if (file !== '-') writeTarget(run, `${name} -o`, file.startsWith('/') || dir === null ? w : at(file), st);
+    // curl's --output-dir takes its -o along; wget's -P is only for the names wget gives the files itself.
+    if (file !== '-') writeTarget(run, `${name} -o`, file.startsWith('/') || dir === null || name === 'wget' ? w : at(file), st);
   }
   if (!remote) return;
   // A name known only at run time is the folder's question; the URL's own name stays one (curl -J falls back to it).
@@ -1196,25 +1197,27 @@ function git(words: ShellWord[], env: Map<string, string | null>, st: ShellState
     }
     return;
   }
-  // The paths a checkout or a restore writes (hardening round 2): `git checkout -- .mcp.json` brings one back as any
-  // write would. A restore's operands are all paths; a checkout's only after `--` (before it, a branch is no path). A
-  // restore of the index alone (--staged without --worktree) writes no file.
+  if (GIT_REWRITE.has(sub) && !(sub === 'stash' && ['list', 'show'].includes(restT[0] ?? ''))) {
+    // The whole tree is the question here: its paths add no second part (round 3: one approval).
+    if (top === ctx.repoRoot) return add(run, { kind: 'self', target: `git ${sub} ${ctx.repoRoot}`, why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' });
+    if (top === UNKNOWN) return add(run, { kind: 'self', target: `git ${sub} (dizin belirsiz)`, why: 'hangi depoda çalışacağı belli değil (temkinli: kapıda)' });
+  }
+  // The paths a checkout or a restore writes (hardening rounds 2–3): `git checkout -- .mcp.json` brings one back as any
+  // write would. Its operands after `--`, else every word after its options — a branch is a path that holds nothing
+  // protected (`git checkout origin/evil .mcp.json`). A restore of the index alone (--staged without --worktree) writes
+  // no file.
   const indexOnly = sub === 'restore' && restT.some((a) => a === '--staged' || a === '-S') && !restT.some((a) => a === '--worktree' || a === '-W');
   if ((sub === 'checkout' || sub === 'restore') && !indexOnly) {
     const dash = restT.indexOf('--');
     const paths: ShellWord[] = [];
     if (dash !== -1) paths.push(...rest.slice(dash + 1));
-    else if (sub === 'restore') {
+    else {
       for (let k = 0; k < restT.length; k += 1) {
-        if (['-s', '--source', '--pathspec-from-file'].includes(restT[k]!)) k += 1;
+        if (['-s', '--source', '--pathspec-from-file', '-b', '-B', '--orphan'].includes(restT[k]!)) k += 1;
         else if (!flag(restT[k]!)) paths.push(rest[k]!);
       }
     }
     for (const w of paths) writeTarget(run, `git ${sub}`, w, { ...st, cwd: repo ?? null });
-  }
-  if (GIT_REWRITE.has(sub) && !(sub === 'stash' && ['list', 'show'].includes(restT[0] ?? ''))) {
-    if (top === ctx.repoRoot) add(run, { kind: 'self', target: `git ${sub} ${ctx.repoRoot}`, why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' });
-    else if (top === UNKNOWN) add(run, { kind: 'self', target: `git ${sub} (dizin belirsiz)`, why: 'hangi depoda çalışacağı belli değil (temkinli: kapıda)' });
   }
 }
 

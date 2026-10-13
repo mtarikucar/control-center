@@ -269,12 +269,13 @@ export function unclassifiedTools(integrations: Integration[]): UnclassifiedTool
 
 /**
  * The MCP server names the vocabulary's connectors go by — each classified tool's (mcp__<server>__…), each connector
- * known by name only, as its tools carry it — and the office's own: a project's .mcp.json may define none of them
+ * known by name only, as its tools carry it —, the browser's and the office's own: a project's .mcp.json may define none of them
  * (hardening round 2: the sessions' disabledMcpjsonServers), or its server would be taken for the connector.
  */
 export function connectorServers(): string[] {
   const v = capabilityVocabulary();
-  const servers = new Set(['office']);
+  // And `playwright`, the Playwright MCP server's usual name: the gate takes a server so named for the browser.
+  const servers = new Set(['office', 'playwright']);
   for (const tool of v.capabilities.flatMap((c) => c.tools)) {
     const cut = tool.indexOf('__', 5);
     if (tool.startsWith('mcp__') && cut > 5) servers.add(tool.slice(5, cut));

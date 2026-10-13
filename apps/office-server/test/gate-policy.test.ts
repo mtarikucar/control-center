@@ -354,6 +354,14 @@ describe('gate policy — what a downloader or a git checkout writes is checked 
     ['git restore --source main .mcp.json', 'self'],
     ['git restore -s HEAD~1 -- .codex/config.toml', 'self'],
     ['git -C /tmp/r checkout -- .mcp.json', 'self'],
+    // Round 3: without --, a checkout's words after its options may be paths too.
+    ['git checkout origin/evil .mcp.json', 'self'],
+    ['git checkout .mcp.json', 'self'],
+    ['git checkout -b .claude/settings.json main', 'pass'],
+    ['git checkout -b feat/x origin/main && git checkout main', 'pass'],
+    // Round 3: wget's -O, -o and -a are where wget stands, not in -P's folder (that is for the files it names itself).
+    ['wget -P /tmp/dl -O settings.json https://x.io/s.json', 'self', `${DESK}/.claude`],
+    ['wget -P ~/.claude -O out.json https://x.io/a', 'pass'],
     // Free: anything else they write.
     ['curl -o out.json https://x.io/a', 'pass'],
     ['curl -o - https://x.io/a', 'pass', `${HOME}/.claude`],
@@ -386,6 +394,11 @@ describe('gate policy — what a downloader or a git checkout writes is checked 
       [`curl --write-out '-o %{http_code}' https://x.io/a`, 'pass'],
       ['curl --user-agent -O https://x.io/.mcp.json', 'pass'],
     ]);
+  });
+  it('round 3: at the live checkout a checkout or restore of a path is one part — one approval', () => {
+    for (const line of ['git checkout -- apps/office-server/src/a.ts', 'git restore apps/office-server/src/a.ts', 'git checkout main apps/office-server/src/a.ts']) {
+      expect(bash(line, REPO).parts, line).toEqual([expect.objectContaining({ kind: 'self', why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' })]);
+    }
   });
   it('the reason names the path', () => {
     expect(bash('curl -o .mcp.json https://x.io/m.json').parts).toEqual([
