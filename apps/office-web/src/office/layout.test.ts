@@ -116,11 +116,18 @@ describe('office layout (spec office rooms §2)', () => {
     }
   });
 
-  it('lights the office with lamps that glow; a dozen cast light — one pendant per room, the rooms’ desk lamps only glow', () => {
+  it('lights the office with lamps that glow; a dozen lights cast — eleven lamps (one pendant per room, the rooms’ and the coordinator’s desk lamps only glow) and the beam’s spot light', () => {
+    const BEAM_SPOT_LIGHTS = 1;
     const lamps = LAYOUT.furniture.filter((p) => (p.glow ?? 0) > 0);
+    const casting = lamps.filter((p) => !p.bulbOnly);
     expect(lamps.length).toBeGreaterThanOrEqual(30);
-    expect(lamps.filter((p) => !p.bulbOnly).length).toBeLessThanOrEqual(12);
+    expect(casting).toHaveLength(11);
+    expect(casting.length + BEAM_SPOT_LIGHTS).toBeLessThanOrEqual(12);
     for (const r of LAYOUT.rooms) expect(lamps.filter((p) => p.room === r.index && !p.bulbOnly), `room ${r.index}`).toHaveLength(1);
+    // The coordinator's desk lamp stands under the beam: the beam's spot light is its light, the bulb only glows.
+    const underBeam = lamps.filter((p) => Math.hypot(p.x - LAYOUT.beam.x, p.z - LAYOUT.beam.z) < 1.5 && p.assetId === 'desk_lamp');
+    expect(underBeam).toHaveLength(1);
+    expect(underBeam[0]!.bulbOnly).toBe(true);
   });
 
   it('gives every room its own carpet colour', () => {

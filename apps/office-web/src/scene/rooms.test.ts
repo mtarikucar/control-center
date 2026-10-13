@@ -20,7 +20,7 @@ describe('roomStates', () => {
   it('review focus 5: a room with an open department is lit in its colour with its sign; the rest are dark — a closed department leaves its room', () => {
     const states = roomStates(
       LAYOUT.rooms,
-      { a: dep('a', 'Pazarlama', 2, { headId: 'p' }), b: dep('b', 'Satış', 0), c: dep('c', 'Eski', null, { status: 'closed', closedAt: 5 }) },
+      { a: dep('a', 'Pazarlama', 2, { headId: 'p' }), b: dep('b', 'Satış', 0), c: dep('c', 'Eski', 3, { status: 'closed', closedAt: 5 }) },
       [person('p', 'Pelin')],
     );
     expect(states.map((s) => s.lit)).toEqual([true, false, true, false, false, false]);

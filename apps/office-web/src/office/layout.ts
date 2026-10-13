@@ -29,7 +29,7 @@ export interface Placement {
   /** A lamp: the strength of its warm light, which sits at `glowAt` of its height (0 = bottom, 1 = top). */
   glow?: number;
   glowAt?: number;
-  /** The bulb glows but casts no light: the rooms' many desk lamps (every point light costs every pixel). */
+  /** The bulb glows but casts no light: the rooms' many desk lamps and the coordinator's, whose light is the beam's (every point light costs every pixel). */
   bulbOnly?: boolean;
   /** Leaves that move a little in the air. */
   sway?: boolean;
@@ -213,7 +213,8 @@ for (let r = 0; r < ROOM_COUNT; r += 1) {
 furniture.push(
   item('work_desk', 16, 12, 0, 1.4, 0.75, 0.75, '#d9b07a'),
   item('ergonomic_chair', 16, 11.15, 0, 0.6, 0.6, 1.0, '#3a3f47', { blocks: false }),
-  decor('desk_lamp', 16.56, 0.75, 12.2, PI, 0.2, 0.2, 0.4, '#2d3138', { glow: 0.9, glowAt: 0.85 }),
+  // Its bulb only glows: the beam's spot light (scene/Beam) is the light over this desk, and the dozen that may cast are spent.
+  decor('desk_lamp', 16.56, 0.75, 12.2, PI, 0.2, 0.2, 0.4, '#2d3138', { glow: 0.9, glowAt: 0.85, bulbOnly: true }),
 );
 desks[COORDINATOR_SEAT] = { x: 16, z: 12, rotY: 0, monitors: 2 };
 seats[COORDINATOR_SEAT] = { x: 16, z: 11.15, rotY: 0 };
