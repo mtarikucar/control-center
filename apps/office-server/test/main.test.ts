@@ -225,6 +225,24 @@ describe('main.ts wiring: the office process', () => {
     expect([seat(coordinator.id), seat(bora.id), seat(ada.id)]).toEqual([0, 1, 37]);
     expect(snapshot.departments.map((d) => [d.name, d.room])).toEqual([['Keşif', 0]]);
     await stop(office);
+    // The seats are reached once: a second start on the same data folder moves nobody (no seat.changed, the same desks).
+    const seats = () => {
+      const check = new DatabaseSync(join(dir, 'office.db'), { readOnly: true });
+      try {
+        return {
+          moves: (check.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'seat.changed'").get() as { n: number }).n,
+          desks: check.prepare('SELECT id, desk_index FROM employees ORDER BY id').all(),
+        };
+      } finally {
+        check.close();
+      }
+    };
+    const first = seats();
+    expect(first.moves).toBeGreaterThan(0);
+    const again = startOffice(dir);
+    await portOf(again);
+    await stop(again);
+    expect(seats()).toEqual(first);
   }, 30_000);
 
   it('B8: with the precheck on, a task needing a capability its desk lacks is held, not handed out (`precheck` given to the dispatcher)', async () => {

@@ -210,9 +210,11 @@ describe('Role templates — tools', () => {
     const t = make();
     const reply = await t.call(t.coordinator, 'hire', { name: 'Ece', template: 'icerik-yazari', role: 'Kanallar: Instagram.' });
     // B7: a template hire also says the capabilities it declares (no registry here: only the list).
-    expect(reply).toMatch(/^İşe alındı: Ece \(.+\), masa \d+, model sonnet, şablon icerik-yazari \(sürüm \d+\)\.\nYetenekler: docs\.write, web\.fetch, media\.generate\.$/);
+    expect(reply).toMatch(/^İşe alındı: Ece \(.+\), koltuk \d+, model sonnet, şablon icerik-yazari \(sürüm \d+\)\.\nYetenekler: docs\.write, web\.fetch, media\.generate\.$/);
+    // The seat is an id (0 … 44), not a count from one: the reply names the roster's desk as it is.
+    expect(reply).toContain(`koltuk ${t.roster.list().find((e) => e.name === 'Ece')!.deskIndex},`);
     expect(t.roster.list().find((e) => e.name === 'Ece')!.role).toContain('### Bu şirkette\n\nKanallar: Instagram.');
-    expect(await t.call(t.coordinator, 'hire', { name: 'Ada', role: 'r', model: 'haiku' })).toMatch(/^İşe alındı: Ada \(.+\), masa \d+, model haiku\.$/);
+    expect(await t.call(t.coordinator, 'hire', { name: 'Ada', role: 'r', model: 'haiku' })).toMatch(/^İşe alındı: Ada \(.+\), koltuk \d+, model haiku\.$/);
     await expect(t.call(t.coordinator, 'hire', { name: 'Can', model: 'haiku' })).rejects.toThrow(/role gerekli/);
     await expect(t.call(t.coordinator, 'hire', { name: 'Can', role: 'r' })).rejects.toThrow(/model gerekli/);
   });

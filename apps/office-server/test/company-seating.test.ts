@@ -122,6 +122,20 @@ describe('Seats in the company — what the office decides and what it refuses',
     expect(t.moves()).toEqual([]);
   });
 
+  it('a stray deskIndex does not refuse a hire into a new free-text team either: the roster pre-check ignores it, the hire sits where seatFor puts it', () => {
+    const t = make();
+    t.company.hireCoordinator('sonnet');
+    // 0 is the coordinator's (taken), 99 and -1 are no seat: none of them may refuse or place the hire.
+    const people = [
+      t.company.hire(OWNER, { name: 'Ada', role: 'r', team: 'Yeni', deskIndex: 0 } as never),
+      t.company.hire(OWNER, { name: 'Bora', role: 'r', team: 'Başka', deskIndex: 99 } as never),
+      t.company.hire(OWNER, { name: 'Cem', role: 'r', team: 'Üçüncü', deskIndex: -1 } as never),
+    ];
+    expect(people.map((e) => t.seat(e.id))).toEqual([roomSeats(0)[0], roomSeats(1)[0], roomSeats(2)[0]]);
+    expect(t.departments.list({ status: 'open' }).map((d) => d.name)).toEqual(['Yeni', 'Başka', 'Üçüncü']);
+    expect(t.moves()).toEqual([]);
+  });
+
   it('an office without departments is not chosen for either: a stray deskIndex does not reach the roster', () => {
     const t = make({});
     const coordinator = t.company.hireCoordinator('sonnet');

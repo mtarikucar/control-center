@@ -1048,7 +1048,7 @@ export function officeTools(o: {
         const from = hired.template ? `, şablon ${hired.template.id} (sürüm ${hired.template.version})` : '';
         const placed = roster.get(hired.id);
         const where = hired.departmentId ? ` → ${placed.team} departmanı${placed.kind === 'lead' ? ' (başkan)' : ''}` : '';
-        return `İşe alındı: ${hired.name} (${hired.id}), masa ${hired.deskIndex + 1}, model ${hired.model}${from}${where}.${hired.provider === 'codex' ? ' Sağlayıcı: Codex.' : ''}${deskBrief(hired.capabilities, hired.id, 'Yetenekler')}`;
+        return `İşe alındı: ${hired.name} (${hired.id}), koltuk ${hired.deskIndex}, model ${hired.model}${from}${where}.${hired.provider === 'codex' ? ' Sağlayıcı: Codex.' : ''}${deskBrief(hired.capabilities, hired.id, 'Yetenekler')}`;
       },
     },
     {

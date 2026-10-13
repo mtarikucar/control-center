@@ -320,7 +320,7 @@ describe('Capabilities — what an employee declares', () => {
     expect(ada.capabilities).toEqual([]);
     expect(t.db.prepare('SELECT capabilities FROM employees WHERE id = ?').get(ada.id)).toMatchObject({ capabilities: null });
     expect(t.roster.get(c).capabilities).toEqual([]);
-    expect(await t.call(t.coordinator, 'hire', { name: 'Can', role: 'r', model: 'haiku' })).toMatch(/^İşe alındı: Can \(.+\), masa \d+, model haiku\.$/);
+    expect(await t.call(t.coordinator, 'hire', { name: 'Can', role: 'r', model: 'haiku' })).toMatch(/^İşe alındı: Can \(.+\), koltuk \d+, model haiku\.$/);
     // A database before v18 (the economy report reads old ones): a hire with no capabilities still writes.
     const db = openDb(':memory:');
     migrateUp(db, MIGRATIONS.filter((m) => m.version <= 17));
@@ -492,7 +492,7 @@ describe('Capabilities — reading them, and the tools that take them', () => {
   it('hire, editRoleCard, taskCreate, taskPass and taskAssign take them and say what each desk has; the work happens anyway', async () => {
     const t = office();
     const hired = await t.call(t.coordinator, 'hire', { name: 'Nil', template: 'musteri-temsilcisi', role: 'Kanal: e-posta.' });
-    expect(hired).toMatch(/^İşe alındı: Nil \(.+\), masa \d+, model sonnet, şablon musteri-temsilcisi \(sürüm \d+\)\.\nYetenekler: email\.read \[bu masada görülmedi\], email\.send \[bu masada görülmedi\], crm\.read \[bu masada görülmedi\]\. Ayrıntı: capabilitiesRead\.$/);
+    expect(hired).toMatch(/^İşe alındı: Nil \(.+\), koltuk \d+, model sonnet, şablon musteri-temsilcisi \(sürüm \d+\)\.\nYetenekler: email\.read \[bu masada görülmedi\], email\.send \[bu masada görülmedi\], crm\.read \[bu masada görülmedi\]\. Ayrıntı: capabilitiesRead\.$/);
     expect(await t.call(t.coordinator, 'hire', { name: 'Ali', role: 'r', model: 'haiku', capabilities: ['payments.charge'] })).toContain('\nYetenekler: payments.charge [yok]. Açık olmayanlar için sahibinden yetki iste (propose). Ayrıntı: capabilitiesRead.');
     expect(t.roster.list().find((e) => e.name === 'Ali')!.capabilities).toEqual(['payments.charge']);
     expect(await t.call(t.coordinator, 'editRoleCard', { employee: 'Can', capabilities: ['crm.read', 'email.read'] })).toBe('Can adlı çalışanın rol kartı güncellendi.\nYetenekler: crm.read [açık], email.read [kapalı]. Açık olmayanlar için sahibinden yetki iste (propose). Ayrıntı: capabilitiesRead.');

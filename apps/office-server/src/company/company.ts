@@ -284,7 +284,8 @@ export class Company {
     // The room is checked before a department is resolved: a free-text team may open one, and a refused hire writes nothing.
     this.#assertRoom();
     // What the roster would refuse is refused before a department is opened for the hire (nothing may fail after that).
-    const department = deps ? this.#hireDepartment(by, heads, input, template?.team, () => this.#d.roster.validate({ ...resolved, kind: 'member', characterId })) : null;
+    // Without a seat: a deskIndex in the body is not the hire's (the office chooses below), so it must not refuse it either.
+    const department = deps ? this.#hireDepartment(by, heads, input, template?.team, () => this.#d.roster.validate({ ...resolved, kind: 'member', characterId, deskIndex: undefined })) : null;
     const lead = !deps && resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
     const placement = deps ? { team: department?.name ?? '', departmentId: department?.id ?? null, reportsTo: department?.headId ?? null } : { reportsTo: lead?.id ?? input.reportsTo ?? null };
     // Their seat (spec office rooms §3): their department's room, else the hub; none free, the roster's "Ofis dolu".
