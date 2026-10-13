@@ -69,6 +69,13 @@ export class DepartmentStore {
     return this.get(id);
   }
 
+  /** Gives a department a room (or takes it back): `update` deliberately leaves the room alone, so only the rooms' rule writes it. */
+  setRoom(id: string, room: number | null): Department {
+    this.get(id);
+    this.#db.prepare('UPDATE departments SET room = ? WHERE id = ?').run(room, id);
+    return this.get(id);
+  }
+
   /** Closed for good: no head, no members (the service moves them first), no room. */
   close(id: string): Department {
     this.#db.prepare("UPDATE departments SET status = 'closed', closed_at = ?, head_id = NULL, room = NULL WHERE id = ?").run(this.#now(), id);

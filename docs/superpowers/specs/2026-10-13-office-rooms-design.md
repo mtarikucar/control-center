@@ -89,7 +89,9 @@ budur).
 ### 4.1 Departmanın odası
 
 `Department.room: number | null` (0–5). Departman açılınca **en küçük boş oda** verilir; kapanınca oda boşalır
-(`null`). Benimseme (`adoptTeams`) de aynı kuralla oda verir. 6 departman sınırı zaten 6 odaya denk.
+(`null`). Benimseme (`adoptTeams`) de aynı kuralla oda verir. 6 departman sınırı zaten 6 odaya denk. Boşalan oda
+(kapanış) ve her açılışta `adoptTeams`'in başında, odası olmayan en önce açılmış açık departmana verilir (en küçük boş
+oda); `department.changed` `updated` gider ve o departmanın kişileri odaya yürür (`DepartmentStore.setRoom`).
 
 Sütun alt proje 1'in yayınlanmamış v24 göçüne eklenir: `departments.room INTEGER` (yeni göç açılmaz; v24'ün down'ı
 tabloyu zaten kaldırır). `DepartmentStore` yazar ve okur.

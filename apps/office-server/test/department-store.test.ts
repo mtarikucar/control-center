@@ -32,6 +32,18 @@ describe('DepartmentStore', () => {
     expect(store.close(a.id).room).toBeNull();
   });
 
+  it('setRoom gives an open department a room (update leaves the room alone); it changes nothing else', () => {
+    const s = setup();
+    const store = new DepartmentStore(s.db);
+    const a = store.create({ name: 'A', mission: 'm', scope: 's', template: null, headId: 'e1' });
+    expect(a.room).toBeNull();
+    expect(store.setRoom(a.id, 3)).toEqual({ ...a, room: 3 });
+    expect(store.get(a.id).room).toBe(3);
+    expect(store.update(a.id, { name: 'A2' })).toMatchObject({ name: 'A2', room: 3 });
+    expect(store.setRoom(a.id, null).room).toBeNull();
+    expect(() => store.setRoom('yok', 1)).toThrow(NotFoundError);
+  });
+
   it('lists departments opened at the same instant in opening order', () => {
     const s = setup();
     const store = new DepartmentStore(s.db, () => 5000);

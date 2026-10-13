@@ -220,6 +220,8 @@ export class Departments {
     const told = people.filter((e) => e.kind !== 'coordinator');
     this.#changed(by, 'closed', closed, told.map((e): [string, string] => [e.id, `${dep.name} departmanı kapandı (${why}); artık merkezdesin, doğrudan koordinatöre bağlısın.`]));
     this.#announce(by, `${dep.name} departmanı kapandı: ${why}`, told.map((e) => e.id));
+    // The room it gave up goes to the earliest-opened department that has none.
+    this.#giveRooms(by);
     return closed;
   }
 
@@ -261,6 +263,8 @@ export class Departments {
    * folded, so “Keşif” and “keşif” are one; a team's first lead heads it, another lead becomes a member, and so does a lead without a team.
    */
   adoptTeams(): void {
+    // A department with no room while one is free (data from before the rule, or a close that never reached it) gets it first.
+    this.#giveRooms(OWNER);
     const touched = new Set<string>();
     const everyone = this.#d.roster.list();
     // A department never takes a person's name (taskPass and a stream's owner must mean one thing): such a team becomes “<team> ekibi”.
@@ -344,6 +348,21 @@ export class Departments {
     const used = new Set(this.list({ status: 'open' }).map((d) => d.room));
     for (let room = 0; room < ROOM_COUNT; room += 1) if (!used.has(room)) return room;
     return null;
+  }
+
+  /**
+   * Every open department with no room takes the lowest free one, the earliest-opened first (spec office rooms §4.1): a
+   * closed department's room is not left empty while another sits at the hub. The page hears it (department.changed
+   * updated) and the department's people walk to the room.
+   */
+  #giveRooms(by: string): void {
+    for (const dep of this.list({ status: 'open' })) {
+      if (dep.room !== null) continue;
+      const room = this.#freeRoom();
+      if (room === null) return;
+      this.#emit(by, 'updated', this.#d.store.setRoom(dep.id, room));
+      for (const m of this.members(dep.id)) this.#d.reseat?.(m.id);
+    }
   }
 
   /** A former head stays in the department as a member (true); a coordinator found heading one goes to the centre (false). */

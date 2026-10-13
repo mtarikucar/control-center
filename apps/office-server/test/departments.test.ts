@@ -469,4 +469,48 @@ describe('Departments — rooms (spec office rooms §4.1)', () => {
     t.departments.adoptTeams();
     expect(t.departments.list().map((d) => [d.name, d.room])).toEqual([['A1', 0], ['B2', 1], ['C3', 2], ['D4', 3], ['E5', 4], ['F6', 5], ['G7', null]]);
   });
+
+  it('review (task 5): a closed department’s room goes to the earliest-opened open department with none — told (department.changed updated) and its members walk (reseat)', () => {
+    const t = make(() => 9000);
+    const teams = ['A1', 'B2', 'C3', 'D4', 'E5', 'F6', 'G7'];
+    const people = teams.map((team, i) => t.hire(`Kişi${i}`, { team }));
+    t.departments.adoptTeams();
+    const open = (name: string) => t.departments.list({ status: 'open' }).find((d) => d.name === name)!;
+    expect(open('G7').room).toBeNull();
+    const walked = t.reseated.length;
+    t.departments.close(OWNER, open('B2').id, 'bitti');
+    expect(t.departments.list({ status: 'open' }).map((d) => [d.name, d.room])).toEqual([['A1', 0], ['C3', 2], ['D4', 3], ['E5', 4], ['F6', 5], ['G7', 1]]);
+    expect(t.departments.roomOf(people[6]!.id)).toBe(1);
+    // B2's person walks to the centre, then G7's to the room.
+    expect(t.reseated.slice(walked)).toEqual([people[1]!.id, people[6]!.id]);
+    const last = t.departmentEvents().slice(-2);
+    expect(last.map((e) => [e.change, e.department.name, e.department.room])).toEqual([['closed', 'B2', null], ['updated', 'G7', 1]]);
+  });
+
+  it('only one department takes a freed room, the earliest-opened without one; the next freed room goes to the next', () => {
+    const t = make(() => 9000);
+    ['A1', 'B2', 'C3', 'D4', 'E5', 'F6', 'G7', 'H8'].forEach((team, i) => t.hire(`Kişi${i}`, { team }));
+    t.departments.adoptTeams();
+    const open = (name: string) => t.departments.list({ status: 'open' }).find((d) => d.name === name)!;
+    t.departments.close(OWNER, open('C3').id, 'bitti');
+    expect([open('G7').room, open('H8').room]).toEqual([2, null]);
+    t.departments.close(OWNER, open('A1').id, 'bitti');
+    expect([open('G7').room, open('H8').room]).toEqual([2, 0]);
+  });
+
+  it('adoption heals a department that has no room while one is free (data written before the rule), once; a second adoption changes nothing', () => {
+    const t = make(() => 9000);
+    const a = t.store.create({ name: 'A', mission: 'm', scope: '', template: null, headId: null, room: 0 });
+    const b = t.store.create({ name: 'B', mission: 'm', scope: '', template: null, headId: null });
+    const ada = t.hire('Ada');
+    t.departments.move(OWNER, ada.id, b.id);
+    const events = t.departmentEvents().length;
+    const walked = t.reseated.length;
+    t.departments.adoptTeams();
+    expect([a, b].map((d) => t.departments.get(d.id).room)).toEqual([0, 1]);
+    expect(t.reseated.slice(walked)).toEqual([ada.id]);
+    expect(t.departmentEvents().slice(events).map((e) => [e.change, e.department.name, e.department.room])).toEqual([['updated', 'B', 1]]);
+    t.departments.adoptTeams();
+    expect(t.departmentEvents()).toHaveLength(events + 1);
+  });
 });
