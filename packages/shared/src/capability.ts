@@ -29,6 +29,8 @@ export interface Capability {
   builtin: string[];
   /** Known connectors' tools that give it, by full name (`mcp__server__tool`); the connector is the name's prefix. */
   tools: string[];
+  /** Added by the company (custom_capabilities, spec capabilities §4), not shipped with the product. */
+  company?: true;
 }
 
 /**

@@ -16,7 +16,8 @@ import { NotFoundError, ValidationError } from '../errors.ts';
 const FILE = new URL('./craft/capabilities.json', import.meta.url);
 const FIELDS = ['id', 'title', 'summary', 'kind', 'outward', 'builtin', 'tools'] as const;
 const ID = /^[a-z]+\.[a-z]+$/;
-const TOOL = /^mcp__[A-Za-z0-9_-]+__\S+$/;
+/** A connector tool's full name (mcp__server__tool), as the vocabulary and a company capability write it. */
+export const TOOL_NAME = /^mcp__[A-Za-z0-9_-]+__\S+$/;
 /** Sessions never report these: the registry knows them only by hand. */
 const BY_HAND = new Set(['adapter', 'cli']);
 
@@ -51,7 +52,7 @@ export function parseCapabilities(text: string): CapabilityVocabulary {
     for (const key of ['builtin', 'tools'] as const) if (!strings(entry[key])) throw fail(`${id}: ${key} metinlerden oluşan bir liste olmalı.`);
     const tools = entry.tools as string[];
     for (const tool of tools) {
-      if (!TOOL.test(tool)) throw fail(`${id}: “${tool}” bir bağlayıcı aracı değil (mcp__sunucu__araç).`);
+      if (!TOOL_NAME.test(tool)) throw fail(`${id}: “${tool}” bir bağlayıcı aracı değil (mcp__sunucu__araç).`);
       const other = owner.get(tool);
       if (other) throw fail(`“${tool}” iki yetenekte geçiyor: ${other}, ${id}.`);
       owner.set(tool, id);
@@ -78,12 +79,53 @@ export function parseCapabilities(text: string): CapabilityVocabulary {
   return { version: doc.version as number, capabilities, knownConnectors };
 }
 
-let cached: CapabilityVocabulary | null = null;
+let product: CapabilityVocabulary | null = null;
+/** The company's active capabilities (spec capabilities §4.1) as main.ts wires them; none until then, and in tests that do not. */
+let companyCapabilities: () => Capability[] = () => [];
+/** Bumped whenever the company's capabilities change: the next read builds the vocabulary and the tool table again. */
+let generation = 0;
+let built: { generation: number; vocabulary: CapabilityVocabulary; byTool: Map<string, Capability> } | null = null;
 
-/** The product's vocabulary, read once. */
+/** The product's vocabulary, read once from the file. */
+export function productVocabulary(): CapabilityVocabulary {
+  product ??= parseCapabilities(readFileSync(FILE, 'utf8'));
+  return product;
+}
+
+/** Where the company's active capabilities come from (main.ts: the CustomCapabilities service); null: none (tests reset it). */
+export function useCompanyCapabilities(source: (() => Capability[]) | null): void {
+  companyCapabilities = source ?? (() => []);
+  invalidateVocabulary();
+}
+
+/** The company's capabilities changed: the vocabulary and the tool table are built again on their next read. */
+export function invalidateVocabulary(): void {
+  generation += 1;
+}
+
+function current(): { vocabulary: CapabilityVocabulary; byTool: Map<string, Capability> } {
+  if (built?.generation === generation) return built;
+  const base = productVocabulary();
+  const company = companyCapabilities();
+  const capabilities = [...base.capabilities, ...company];
+  const classified = (k: KnownConnector) => company.some((c) => c.tools.some((t) => t.startsWith(mcpToolPrefix(k.name))));
+  built = {
+    generation,
+    // A connector the company classified a tool of is known by that tool now, not by its name only.
+    vocabulary: { version: base.version, capabilities, knownConnectors: base.knownConnectors.filter((k) => !classified(k)) },
+    byTool: new Map(capabilities.flatMap((c) => c.tools.map((t) => [t, c] as const))),
+  };
+  return built;
+}
+
+/** The vocabulary: the product's capabilities and, after them, the company's active ones (spec capabilities §4.1). */
 export function capabilityVocabulary(): CapabilityVocabulary {
-  cached ??= parseCapabilities(readFileSync(FILE, 'utf8'));
-  return cached;
+  return current().vocabulary;
+}
+
+/** The product capability that names this tool, or null. */
+export function productToolOwner(tool: string): string | null {
+  return productVocabulary().capabilities.find((c) => c.tools.includes(tool))?.id ?? null;
 }
 
 const ids = () => capabilityVocabulary().capabilities.map((c) => c.id);
@@ -186,19 +228,17 @@ export function coverageBrief(list: CapabilityCoverage[], lead: string, anyway =
 
 /**
  * What a tool is, by its name (spec §2, review round 1). The vocabulary is an allow-list: a connector's tool is
- * classified only if a capability names it; any other is unclassified and counts as outward — no capability of a role
- * opens it, and B9's gate closes it unless the vocabulary or the owner says otherwise. Claude Code's own tools are
- * B9's other layers' business (shell, browser, files); the office's own are not connectors.
+ * classified only if a capability — the product's or the company's active one — names it; any other is unclassified
+ * and counts as outward — no capability of a role opens it, and B9's gate closes it unless the vocabulary or the owner
+ * says otherwise. Claude Code's own tools are B9's other layers' business (shell, browser, files); the office's own are
+ * not connectors.
  */
 export type ToolClass = { kind: 'office' } | { kind: 'builtin' } | { kind: 'classified'; capability: string; outward: boolean } | { kind: 'unclassified'; outward: true };
-
-let byTool: Map<string, Capability> | null = null;
 
 export function toolClass(name: string): ToolClass {
   if (name.startsWith(mcpToolPrefix('office'))) return { kind: 'office' };
   if (!name.startsWith('mcp__')) return { kind: 'builtin' };
-  byTool ??= new Map(capabilityVocabulary().capabilities.flatMap((c) => c.tools.map((t) => [t, c] as const)));
-  const c = byTool.get(name);
+  const c = current().byTool.get(name);
   return c ? { kind: 'classified', capability: c.id, outward: c.outward } : { kind: 'unclassified', outward: true };
 }
 
