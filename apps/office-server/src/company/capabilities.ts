@@ -108,14 +108,19 @@ function current(): { vocabulary: CapabilityVocabulary; byTool: Map<string, Capa
   const base = productVocabulary();
   // Taken before the source is read: an invalidate fired while it is read leaves this build stale, so the next read builds again.
   const gen = generation;
-  const company = companyCapabilities();
+  // The product wins (final review minor 1): proposing and accepting refuse a collision, but a later product may name
+  // an active company capability's id — that one is left out — or one of its tools, which stays the product's.
+  const productIds = new Set(base.capabilities.map((c) => c.id));
+  const company = companyCapabilities().filter((c) => !productIds.has(c.id));
   const capabilities = [...base.capabilities, ...company];
   const classified = (k: KnownConnector) => company.some((c) => c.tools.some((t) => t.startsWith(mcpToolPrefix(k.name))));
+  const byTool = new Map<string, Capability>();
+  for (const c of capabilities) for (const t of c.tools) if (!byTool.has(t)) byTool.set(t, c);
   built = {
     generation: gen,
     // A connector the company classified a tool of is known by that tool now, not by its name only.
     vocabulary: { version: base.version, capabilities, knownConnectors: base.knownConnectors.filter((k) => !classified(k)) },
-    byTool: new Map(capabilities.flatMap((c) => c.tools.map((t) => [t, c] as const))),
+    byTool,
   };
   return built;
 }
@@ -128,6 +133,22 @@ export function capabilityVocabulary(): CapabilityVocabulary {
 /** The product capability that names this tool, or null. */
 export function productToolOwner(tool: string): string | null {
   return productVocabulary().capabilities.find((c) => c.tools.includes(tool))?.id ?? null;
+}
+
+/**
+ * Each active company capability the product overrides — its id, or a tool, now the product's (final review minor 1)
+ * — as the office's start warns of it.
+ */
+export function companyCollisions(): string[] {
+  const product = productVocabulary();
+  return companyCapabilities().flatMap((c) => {
+    const what = product.capabilities.some((p) => p.id === c.id) ? ['kimliği ürünün'] : [];
+    for (const tool of c.tools) {
+      const owner = productToolOwner(tool);
+      if (owner) what.push(`${tool} ürünün ${owner} yeteneğinde`);
+    }
+    return what.length ? [`Uyarı: şirketin ${c.id} yeteneği ürünle gelen sözlükle çakışıyor (${what.join('; ')}); ürünün tanımı geçerli. Yetenekler sekmesinden geri al, gerekirse çakışmadan yeniden ekle.`] : [];
+  });
 }
 
 const ids = () => capabilityVocabulary().capabilities.map((c) => c.id);

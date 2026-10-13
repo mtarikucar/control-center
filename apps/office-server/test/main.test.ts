@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConstitutionStore } from '../src/company/budget-store.ts';
+import { CustomCapabilityStore } from '../src/company/custom-capability-store.ts';
 import { DecisionStore, NoteStore } from '../src/company/memory-store.ts';
 import { TaskStore } from '../src/company/store.ts';
 import { migrateUp, openDb } from '../src/db.ts';
@@ -345,6 +346,21 @@ describe('main.ts wiring: the office process', () => {
     await call(port, 'POST', '/api/custom-capabilities', { id: 'sms.send', title: 'SMS gönderme', summary: 'Netgsm ile SMS.', kind: 'send', tools: ['mcp__netgsm__send_sms'] });
     expect(await ask('mcp__netgsm__send_sms', { to: '05321112233', text: 'x' })).toBe(0);
     expect((await call(port, 'GET', '/api/capabilities')).capabilities.at(-1)).toMatchObject({ id: 'sms.send', company: true });
+    await stop(office);
+  }, 30_000);
+
+  it('final review minor 1: an active company capability the product now overrides is warned of at the start — in the console and on the coordinator’s feed', async () => {
+    const { dir, db, ada } = prepared();
+    new Roster(db, 8).update(ada.id, { kind: 'coordinator' });
+    // Accepted before the product named the tool (a product upgrade): written past the service.
+    new CustomCapabilityStore(db).put({ id: 'ads.cheap', title: 'Ucuz reklam', summary: 's', kind: 'read', tools: ['mcp__claude_ai_jeeta__jeeta_reallocate_budget'], status: 'active', proposedBy: 'owner', decidedBy: 'owner', note: null, createdAt: 1, decidedAt: 1 });
+    db.close();
+    const office = startOffice(dir);
+    const port = await portOf(office);
+    const warning = 'Uyarı: şirketin ads.cheap yeteneği ürünle gelen sözlükle çakışıyor (mcp__claude_ai_jeeta__jeeta_reallocate_budget ürünün ads.manage yeteneğinde)';
+    expect(office.output()).toContain(warning);
+    const events: Array<{ event: { type: string; message?: string } }> = await call(port, 'GET', `/api/employees/${ada.id}/events?after=0`);
+    expect(events.filter((e) => e.event.type === 'error').map((e) => e.event.message)).toEqual([expect.stringContaining(warning)]);
     await stop(office);
   }, 30_000);
 

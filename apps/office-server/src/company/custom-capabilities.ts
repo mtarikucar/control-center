@@ -227,8 +227,8 @@ export class CustomCapabilities {
   }
 
   /**
-   * A tool stands in one capability only: not in the product's (whatever kind is proposed — the tool table lets the
-   * company's entry win, so a pay tool proposed as read would be wide open), not in another active company one.
+   * A tool stands in one capability only: not in the product's (whatever kind is proposed — the product's entry wins
+   * the tool, so the company's would name it for nothing), not in another active company one.
    */
   #assertFree(tools: string[], id: string): void {
     for (const tool of tools) {

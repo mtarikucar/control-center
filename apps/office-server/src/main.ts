@@ -20,7 +20,7 @@ import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { Blueprints } from './company/blueprint.ts';
 import { BlueprintStore } from './company/blueprint-store.ts';
 import { IntegrationRegistry } from './company/integrations.ts';
-import { useCompanyCapabilities } from './company/capabilities.ts';
+import { companyCollisions, useCompanyCapabilities } from './company/capabilities.ts';
 import { asCapability, CustomCapabilities } from './company/custom-capabilities.ts';
 import { SpecialContactsDesks } from './company/special-contacts.ts';
 import { CustomCapabilityStore } from './company/custom-capability-store.ts';
@@ -145,6 +145,12 @@ const integrations = new IntegrationRegistry({ db, roster, events });
 // classification (sessions, the gate, coverage) reads it, so it is wired before the first session starts.
 const customCapabilities = new CustomCapabilities({ store: new CustomCapabilityStore(db), roster, events, notices, coordinator: () => company.coordinator() });
 useCompanyCapabilities(() => customCapabilities.active().map(asCapability));
+// The product wins a tool or an id a later product took from an active company capability (final review minor 1):
+// the operator hears it in the console, the owner on the coordinator's feed.
+for (const warning of companyCollisions()) {
+  console.warn(warning);
+  events.append(company.coordinator()?.id ?? null, { type: 'error', message: warning });
+}
 // The owner's special contacts on the desks of those who send, publish, call or invite (final review I4.2): written
 // now and after every change to the list, a role card or a company capability; nothing while the list is empty.
 new SpecialContactsDesks({ dataDir: config.dataDir, roster, events, contacts: () => budget.constitution().specialContacts }).refresh();

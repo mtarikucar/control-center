@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Capability, Integration, IntegrationDesk } from '@cc/shared';
-import { capabilityIds, capabilityKind, capabilityVocabulary, coverage, invalidateVocabulary, productToolOwner, productVocabulary, toolClass, unclassifiedTools, useCompanyCapabilities } from '../src/company/capabilities.ts';
+import { capabilityIds, capabilityKind, capabilityVocabulary, companyCollisions, coverage, invalidateVocabulary, productToolOwner, productVocabulary, toolClass, unclassifiedTools, useCompanyCapabilities } from '../src/company/capabilities.ts';
 import { classifyCall } from '../src/company/gate-policy.ts';
 import { sessionDeny } from '../src/company/session-deny.ts';
 import { DESK, testContext } from './gate-helpers.ts';
@@ -27,6 +27,23 @@ describe('the vocabulary with the company’s capabilities (spec capabilities §
     expect(productVocabulary().capabilities.some((c) => c.id === 'sms.send')).toBe(false);
     expect(productToolOwner(SMS)).toBeNull();
     expect(productToolOwner('mcp__claude_ai_jeeta__jeeta_reallocate_budget')).toBe('ads.manage');
+  });
+
+  it('final review minor 1: the product wins over an active company capability a later product took a tool or the id of — the tool and the id are the product’s; each collision is named', () => {
+    const PAY = 'mcp__claude_ai_jeeta__jeeta_reallocate_budget';
+    // As a product upgrade would leave them: rows accepted before the product named the tool or the id.
+    useCompanyCapabilities(() => [sms({ id: 'ads.cheap', kind: 'read', outward: false, tools: [SMS, PAY] }), sms({ id: 'email.send', kind: 'read', outward: false, tools: ['mcp__netgsm__mail'] })]);
+    expect(toolClass(PAY)).toEqual({ kind: 'classified', capability: 'ads.manage', outward: true });
+    expect(toolClass(SMS)).toEqual({ kind: 'classified', capability: 'ads.cheap', outward: false });
+    expect(capabilityKind('email.send')).toBe('send');
+    expect(capabilityVocabulary().capabilities.filter((c) => c.id === 'email.send')).toEqual([expect.not.objectContaining({ company: true })]);
+    expect(toolClass('mcp__netgsm__mail')).toEqual({ kind: 'unclassified', outward: true });
+    expect(companyCollisions()).toEqual([
+      `Uyarı: şirketin ads.cheap yeteneği ürünle gelen sözlükle çakışıyor (${PAY} ürünün ads.manage yeteneğinde); ürünün tanımı geçerli. Yetenekler sekmesinden geri al, gerekirse çakışmadan yeniden ekle.`,
+      'Uyarı: şirketin email.send yeteneği ürünle gelen sözlükle çakışıyor (kimliği ürünün); ürünün tanımı geçerli. Yetenekler sekmesinden geri al, gerekirse çakışmadan yeniden ekle.',
+    ]);
+    useCompanyCapabilities(() => [sms()]);
+    expect(companyCollisions()).toEqual([]);
   });
 
   it('kept until told: a change is seen after invalidateVocabulary (the service calls it on every change)', () => {
