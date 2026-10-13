@@ -1,4 +1,4 @@
-import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, TASK_DIFFICULTIES, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
+import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, TASK_DIFFICULTIES, fold, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { AgentProvider } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
@@ -24,7 +24,7 @@ export interface BudgetDeps {
 
 const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri', capabilityPrecheckEnabled: 'Yetenek ön-kontrolü', gateEnabled: 'Geri alınamaz iş kapısı' } as const;
 type SwitchKey = keyof typeof SWITCHES;
-type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | SwitchKey>;
+type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | 'outwardPolicy' | 'specialContacts' | 'callHours' | SwitchKey>;
 
 const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
@@ -42,6 +42,9 @@ const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number
   defaultTaskMinutes: { label: 'Varsayılan görev süresi (dk)', min: 5, max: () => 480, integer: true },
   minScheduleMinutes: { label: 'Rutin aralığı en az (dk)', min: 1, max: () => 1440, integer: true },
   maxSchedules: { label: 'En fazla rutin', min: 0, max: () => 100, integer: true },
+  sendsPerHour: { label: 'Saatlik gönderim sınırı', min: 0, max: () => 1000, integer: true },
+  bulkRecipients: { label: 'Toplu gönderim eşiği (alıcı)', min: 1, max: () => 1000, integer: true },
+  callsPerDay: { label: 'Günlük arama sınırı', min: 0, max: () => 1000, integer: true },
 };
 
 const MODEL_MAPS = {
@@ -69,11 +72,46 @@ function digestHours(value: unknown): number[] {
 
 const AUTONOMY_LABELS: Record<Autonomy, string> = { free: 'tam serbest', plans: 'planlar sahibine' };
 
+const POLICY_LABELS: Record<OutwardPolicyKind, string> = { send: 'gönderim', publish: 'yayın', call: 'arama', calendar: 'takvim' };
+
+/** A change to the outward policy: known kinds, owner or system; the kinds not given stay as they are. */
+function outwardPolicy(value: unknown, current: OutwardPolicy): OutwardPolicy {
+  const ok =
+    typeof value === 'object' && value !== null && !Array.isArray(value) &&
+    Object.entries(value).every(([k, v]) => (OUTWARD_POLICY_KINDS as readonly string[]).includes(k) && (OUTWARD_DECIDERS as readonly unknown[]).includes(v));
+  if (!ok) throw new ValidationError(`Anayasa: Otonomi politikası ${OUTWARD_POLICY_KINDS.join(', ')} için owner (sahibine sor) ya da system (sistem halletsin) olmalı.`);
+  return { ...current, ...(value as Partial<OutwardPolicy>) };
+}
+
+/** Up to 200 people, each an e-mail, a phone or a user name; trimmed, empty ones dropped, each once (folded). */
+function specialContacts(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 200 || value.some((x) => typeof x !== 'string' || x.trim().length > 200)) {
+    throw new ValidationError('Anayasa: Özel kişiler en çok 200 metinden oluşan bir liste olmalı (e-posta, telefon ya da kullanıcı adı; her biri en çok 200 karakter).');
+  }
+  const out: string[] = [];
+  for (const raw of value as string[]) {
+    const x = raw.trim();
+    if (x && !out.some((y) => fold(y) === fold(x))) out.push(x);
+  }
+  return out;
+}
+
+/** Two whole local hours, the first before the second (24: midnight). */
+function callHours(value: unknown): [number, number] {
+  if (!Array.isArray(value) || value.length !== 2 || value.some((h) => typeof h !== 'number' || !Number.isInteger(h) || h < 0 || h > 24) || value[0] >= value[1]) {
+    throw new ValidationError('Anayasa: Arama saatleri 0 ile 24 arasında iki tam saat olmalı, başlangıç bitişten önce (ör. 9, 19).');
+  }
+  return [value[0] as number, value[1] as number];
+}
+
 /** A setting as the coordinator reads it when the owner changes it: its label and value; the owner's share as the office's limit. */
 function described(key: keyof Constitution, c: Constitution): [label: string, value: string] {
   if (key === 'ownerReservePct') return ['Ofisin kota sınırı', `%${100 - c.ownerReservePct}`];
   if (key === 'digestHours') return ['Özet saatleri', c.digestHours.join(', ')];
   if (key === 'autonomy') return ['Serbestlik', AUTONOMY_LABELS[c.autonomy]];
+  if (key === 'outwardPolicy') return ['Otonomi politikası', OUTWARD_POLICY_KINDS.map((k) => `${POLICY_LABELS[k]} ${c.outwardPolicy[k] === 'system' ? 'sistem' : 'sahibine'}`).join(', ')];
+  if (key === 'specialContacts') return ['Özel kişiler', c.specialContacts.length ? c.specialContacts.join(', ') : 'yok'];
+  if (key === 'callHours') return ['Arama saatleri', `${c.callHours[0]}–${c.callHours[1]}`];
   if (key === 'coordinatorModels' || key === 'difficultyModels') {
     const map: Record<string, string> = c[key];
     return [MODEL_MAPS[key].label, MODEL_MAPS[key].keys.map((k) => map[k]).join(' / ')];
@@ -170,6 +208,18 @@ export class Budget {
       if (key === 'autonomy') {
         if (!(AUTONOMY_LEVELS as readonly unknown[]).includes(value)) throw new ValidationError('Anayasa: Serbestlik free (tam serbest) ya da plans (planlar sahibine) olmalı.');
         checked.autonomy = value as Autonomy;
+        continue;
+      }
+      if (key === 'outwardPolicy') {
+        checked.outwardPolicy = outwardPolicy(value, this.constitution().outwardPolicy);
+        continue;
+      }
+      if (key === 'specialContacts') {
+        checked.specialContacts = specialContacts(value);
+        continue;
+      }
+      if (key === 'callHours') {
+        checked.callHours = callHours(value);
         continue;
       }
       if (Object.hasOwn(SWITCHES, key)) {

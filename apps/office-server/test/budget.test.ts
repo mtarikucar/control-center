@@ -152,6 +152,84 @@ describe('Budget — constitution', () => {
       expect(() => t.budget.setConstitution({ weeklyStopPct: bad }), String(bad)).toThrow('Anayasa: Haftalık kota durdurma sınırı (%) 0 ile 100 arasında bir tam sayı olmalı.');
     }
   });
+
+  it('spec capabilities §5–§6: the outward policy and its rules — the owner’s defaults, also in a database before them; the gate stays as it was', () => {
+    const t = make();
+    expect(DEFAULT_CONSTITUTION).toMatchObject({
+      gateEnabled: false, outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' },
+      specialContacts: [], sendsPerHour: 30, bulkRecipients: 5, callHours: [9, 19], callsPerDay: 20,
+    });
+    expect(t.budget.constitution()).toMatchObject({ gateEnabled: false, outwardPolicy: DEFAULT_CONSTITUTION.outwardPolicy, sendsPerHour: 30, callHours: [9, 19] });
+    const next = t.budget.setConstitution({
+      outwardPolicy: { calendar: 'system', send: 'owner' }, specialContacts: [' ali@firma.com ', '', 'ALI@firma.com', '+90 532 111 22 33'],
+      sendsPerHour: 10, bulkRecipients: 3, callHours: [10, 18], callsPerDay: 0,
+    });
+    expect(next).toMatchObject({
+      outwardPolicy: { send: 'owner', publish: 'system', call: 'system', calendar: 'system' }, specialContacts: ['ali@firma.com', '+90 532 111 22 33'],
+      sendsPerHour: 10, bulkRecipients: 3, callHours: [10, 18], callsPerDay: 0, gateEnabled: false,
+    });
+    expect(Object.keys(next.outwardPolicy)).toEqual(['send', 'publish', 'call', 'calendar']);
+  });
+
+  it('a constitution kept before the outward policy has none of its keys: it reads as the defaults, and keeps what it had', () => {
+    const s = setup();
+    cleanups.push(s.cleanup);
+    const store = new ConstitutionStore(s.db);
+    // What the live office holds: a key/value row per setting the owner ever saved, nothing for the new ones.
+    store.set({ maxEmployees: 8, gateEnabled: false, digestHours: [8, 18] });
+    expect(store.get()).toEqual({ ...DEFAULT_CONSTITUTION, maxEmployees: 8, digestHours: [8, 18] });
+    expect(store.get()).toMatchObject({ outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: [], sendsPerHour: 30, bulkRecipients: 5, callHours: [9, 19], callsPerDay: 20 });
+    // One new key written leaves the rest at their defaults, and the stored policy is read in the policy's order.
+    s.db.prepare('INSERT INTO constitution (key, value) VALUES (?, ?)').run('outwardPolicy', JSON.stringify({ calendar: 'system', send: 'owner' }));
+    store.set({ callsPerDay: 5 });
+    expect(store.get()).toMatchObject({ callsPerDay: 5, sendsPerHour: 30, callHours: [9, 19], outwardPolicy: { send: 'owner', publish: 'system', call: 'system', calendar: 'system' } });
+    expect(Object.keys(store.get().outwardPolicy)).toEqual(['send', 'publish', 'call', 'calendar']);
+  });
+
+  it('review focus: refuses a wrong policy, contact list, call hours or rule, changing nothing', () => {
+    const t = make();
+    for (const bad of [
+      { outwardPolicy: { pay: 'system' } }, { outwardPolicy: { send: 'auto' } }, { outwardPolicy: 'system' }, { outwardPolicy: [] }, { outwardPolicy: null },
+      { specialContacts: 'ali@firma.com' }, { specialContacts: [3] }, { specialContacts: Array.from({ length: 201 }, (_, i) => `k${i}`) }, { specialContacts: ['x'.repeat(201)] },
+      { callHours: [19, 9] }, { callHours: [9, 9] }, { callHours: [9] }, { callHours: [9, 25] }, { callHours: [-1, 9] }, { callHours: [9.5, 19] }, { callHours: '9, 19' },
+      { sendsPerHour: -1 }, { sendsPerHour: 1.5 }, { sendsPerHour: 1001 }, { bulkRecipients: 0 }, { bulkRecipients: 1001 }, { callsPerDay: 1001 }, { callsPerDay: '20' },
+    ]) {
+      expect(() => t.budget.setConstitution(bad), JSON.stringify(bad)).toThrow(/Anayasa/);
+    }
+    expect(t.budget.constitution()).toMatchObject({ outwardPolicy: DEFAULT_CONSTITUTION.outwardPolicy, specialContacts: [], callHours: [9, 19], sendsPerHour: 30, bulkRecipients: 5, callsPerDay: 20 });
+  });
+
+  it('the rules’ edges are accepted: 0 and 1000 sends, one recipient, 200 contacts of 200 characters, hours 0–24', () => {
+    const t = make();
+    const edge = t.budget.setConstitution({
+      sendsPerHour: 0, bulkRecipients: 1, callsPerDay: 1000, callHours: [0, 24],
+      specialContacts: Array.from({ length: 200 }, (_, i) => `${i}`.padEnd(200, 'x')),
+    });
+    expect(edge).toMatchObject({ sendsPerHour: 0, bulkRecipients: 1, callsPerDay: 1000, callHours: [0, 24] });
+    expect(edge.specialContacts).toHaveLength(200);
+    expect(t.budget.setConstitution({ sendsPerHour: 1000, bulkRecipients: 1000 })).toMatchObject({ sendsPerHour: 1000, bulkRecipients: 1000 });
+  });
+
+  it('normalizeConstitution: a partial or broken policy keeps what is valid in its order; broken contacts and hours are the defaults', () => {
+    expect(normalizeConstitution({ outwardPolicy: { calendar: 'system', send: 'nobody', pay: 'system' }, specialContacts: 'x', callHours: [9] })).toMatchObject({
+      outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'system' }, specialContacts: [], callHours: [9, 19],
+    });
+    expect(Object.keys(normalizeConstitution({ outwardPolicy: { calendar: 'owner', send: 'owner' } }).outwardPolicy)).toEqual(['send', 'publish', 'call', 'calendar']);
+    expect(Object.keys(normalizeConstitution({})).slice(-6)).toEqual(['outwardPolicy', 'specialContacts', 'sendsPerHour', 'bulkRecipients', 'callHours', 'callsPerDay']);
+    // Hours that cannot be a window (out of the day, backwards, fractional) read as the default window; a list with a non-text is no list.
+    for (const callHours of [[19, 9], [9, 9], [9, 25], [-1, 9], [9.5, 19], [9, 19, 20], '9-19', null]) {
+      expect(normalizeConstitution({ callHours }).callHours, JSON.stringify(callHours)).toEqual([9, 19]);
+    }
+    expect(normalizeConstitution({ callHours: [0, 24] }).callHours).toEqual([0, 24]);
+    expect(normalizeConstitution({ specialContacts: ['a@b.c', 3] }).specialContacts).toEqual([]);
+    expect(normalizeConstitution({ specialContacts: ['a@b.c'] }).specialContacts).toEqual(['a@b.c']);
+    // The defaults handed out are copies: changing one reader’s constitution never changes the defaults.
+    const read = normalizeConstitution({});
+    read.callHours[0] = 1;
+    read.specialContacts.push('x');
+    read.outwardPolicy.send = 'owner';
+    expect(DEFAULT_CONSTITUTION).toMatchObject({ callHours: [9, 19], specialContacts: [], outwardPolicy: { send: 'system' } });
+  });
 });
 
 describe('Budget — the owner’s constitution change reaches the coordinator', () => {
@@ -198,6 +276,34 @@ describe('Budget — the owner’s constitution change reaches the coordinator',
     const after = { ...DEFAULT_CONSTITUTION, ownerReservePct: 40, autonomy: 'plans' as const, coordinatorModels: { ...DEFAULT_CONSTITUTION.coordinatorModels, routine: 'haiku' as const } };
     expect(constitutionChanges(DEFAULT_CONSTITUTION, after)).toEqual(['Ofisin kota sınırı %75 → %60', 'Koordinatör modelleri fable / opus / sonnet → fable / opus / haiku', 'Serbestlik tam serbest → planlar sahibine']);
     expect(constitutionChanges(after, { ...after })).toEqual([]);
+  });
+
+  it('constitutionChanges names the policy, the contacts, the rules and the call hours in the constitution’s order', () => {
+    const after = { ...DEFAULT_CONSTITUTION, outwardPolicy: { ...DEFAULT_CONSTITUTION.outwardPolicy, calendar: 'system' as const }, specialContacts: ['ali@firma.com'], sendsPerHour: 10, callHours: [10, 18] as [number, number] };
+    expect(constitutionChanges(DEFAULT_CONSTITUTION, after)).toEqual([
+      'Otonomi politikası gönderim sistem, yayın sistem, arama sistem, takvim sahibine → gönderim sistem, yayın sistem, arama sistem, takvim sistem',
+      'Özel kişiler yok → ali@firma.com',
+      'Saatlik gönderim sınırı 30 → 10',
+      'Arama saatleri 9–19 → 10–18',
+    ]);
+    expect(constitutionChanges(after, { ...after, specialContacts: ['ali@firma.com', '+90 532 111 22 33'], bulkRecipients: 2, callsPerDay: 0 })).toEqual([
+      'Özel kişiler ali@firma.com → ali@firma.com, +90 532 111 22 33',
+      'Toplu gönderim eşiği (alıcı) 5 → 2',
+      'Günlük arama sınırı 20 → 0',
+    ]);
+  });
+
+  it('the owner’s form sends every field: a changed policy and rules reach the coordinator in one notice, an unchanged form says nothing', () => {
+    const t = make();
+    const c = t.company.hireCoordinator();
+    const form = t.budget.constitution();
+    t.budget.ownerSetConstitution({ ...form, outwardPolicy: { ...form.outwardPolicy, send: 'owner' }, specialContacts: ['ali@firma.com'], callHours: [10, 18], callsPerDay: 5 });
+    expect(changed(t, c.id).map((n) => n.text)).toEqual([
+      'Sahibi anayasayı değiştirdi: Otonomi politikası gönderim sistem, yayın sistem, arama sistem, takvim sahibine → gönderim sahibine, yayın sistem, arama sistem, takvim sahibine; Özel kişiler yok → ali@firma.com; Arama saatleri 9–19 → 10–18; Günlük arama sınırı 20 → 5. Süren planlarını yeni sınırlara göre gözden geçir.',
+    ]);
+    // The same fields again, as the form would resend them: nothing changed.
+    t.budget.ownerSetConstitution({ ...t.budget.constitution() });
+    expect(changed(t, c.id)).toHaveLength(1);
   });
 
   it('W3: no notice when nothing changed (the form sends every field), without a coordinator, for a refused change, or for a change that is not the owner’s', () => {

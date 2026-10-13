@@ -1,3 +1,4 @@
+import { OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, type OutwardPolicy } from './autonomy.ts';
 import type { Autonomy, TaskDifficulty } from './company.ts';
 import { MODEL_ALIASES, type ModelAlias } from './employee.ts';
 
@@ -81,6 +82,22 @@ export interface Constitution {
   minScheduleMinutes: number;
   /** Routines at once, at most (stopped ones do not count). */
   maxSchedules: number;
+  /**
+   * Spec capabilities §5: for each outward kind of a connector's call, whether the owner is asked or the system lets it
+   * out on the rules below — only while the gate is on. Pay, delete, the browser, the office itself and unclassified
+   * tools are always the owner's; so are the sends and publishes of the shell and the built-in tools.
+   */
+  outwardPolicy: OutwardPolicy;
+  /** People whose every call goes to the owner: e-mails, phone numbers, user names (compared folded, a phone by its digits). */
+  specialContacts: string[];
+  /** System sends + publishes per department (someone without one: per person) in the last hour, at most. */
+  sendsPerHour: number;
+  /** A call to more recipients than this goes to the owner. */
+  bulkRecipients: number;
+  /** Local hours [from, to) the system may call in. */
+  callHours: [number, number];
+  /** System calls per department (someone without one: per person) today, at most. */
+  callsPerDay: number;
 }
 
 export const DEFAULT_CONSTITUTION: Constitution = {
@@ -108,6 +125,12 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   defaultTaskMinutes: 45,
   minScheduleMinutes: 60,
   maxSchedules: 20,
+  outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' },
+  specialContacts: [],
+  sendsPerHour: 30,
+  bulkRecipients: 5,
+  callHours: [9, 19],
+  callsPerDay: 20,
 };
 
 const isModel = (v: unknown): v is ModelAlias => (MODEL_ALIASES as readonly unknown[]).includes(v);
@@ -119,11 +142,24 @@ function modelMapOf<T extends Record<string, ModelAlias>>(value: unknown, fallba
   return Object.fromEntries(Object.entries(fallback).map(([k, d]) => [k, Object.hasOwn(given, k) && isModel(given[k]) ? given[k] : d])) as T;
 }
 
+/** The outward policy with every kind, in its order: the given decider where it is one, else the default. */
+function policyOf(value: unknown): OutwardPolicy {
+  const given = isRecord(value) ? value : {};
+  const valid = (v: unknown) => (OUTWARD_DECIDERS as readonly unknown[]).includes(v);
+  return Object.fromEntries(OUTWARD_POLICY_KINDS.map((k) => [k, Object.hasOwn(given, k) && valid(given[k]) ? given[k] : DEFAULT_CONSTITUTION.outwardPolicy[k]])) as OutwardPolicy;
+}
+
+/** Two whole local hours of the day, the first before the second (24: midnight) — the window a call may be made in. */
+const isHourWindow = (v: unknown): v is [number, number] =>
+  Array.isArray(v) && v.length === 2 && v.every((h) => Number.isInteger(h) && h >= 0 && h <= 24) && v[0] < v[1];
+
 /**
  * A constitution as it was kept — the database's rows, or a snapshot in the event log (a budget.changed) written by an
  * older office — read as today's: every key the constitution has, in its order, the default where one is missing, and
- * nothing else. A model map keeps the keys it knows with a known model and takes the default for the rest; the
- * coordinator's models from before the turn types (owner, decision, digest) meant other turns, so they are dropped.
+ * nothing else. A model map keeps the keys it knows with a known model and takes the default for the rest, and so does the
+ * outward policy with its deciders; the coordinator's models from before the turn types (owner, decision, digest) meant
+ * other turns, so they are dropped; special contacts that are not a list of texts and call hours that are not a window
+ * are the defaults.
  * Everything that reads a constitution reads it through this.
  */
 export function normalizeConstitution(raw: unknown): Constitution {
@@ -132,6 +168,9 @@ export function normalizeConstitution(raw: unknown): Constitution {
   for (const key of Object.keys(DEFAULT_CONSTITUTION) as Array<keyof Constitution>) {
     const value = Object.hasOwn(stored, key) ? stored[key] : undefined;
     if (key === 'coordinatorModels' || key === 'difficultyModels') out[key] = modelMapOf(value, DEFAULT_CONSTITUTION[key]);
+    else if (key === 'outwardPolicy') out[key] = policyOf(value);
+    else if (key === 'specialContacts') out[key] = Array.isArray(value) && value.every((x) => typeof x === 'string') ? value : [];
+    else if (key === 'callHours') out[key] = isHourWindow(value) ? value : [...DEFAULT_CONSTITUTION.callHours];
     else out[key] = value === undefined ? DEFAULT_CONSTITUTION[key] : value;
   }
   return out as unknown as Constitution;
