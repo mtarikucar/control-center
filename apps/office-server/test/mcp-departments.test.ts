@@ -37,7 +37,7 @@ describe('Department tools (spec §5)', () => {
     const t = make();
     const names = (kind: 'member' | 'lead' | 'coordinator') => t.tools.filter((x) => x.kinds.includes(kind)).map((x) => x.name);
     expect(names('member')).toContain('departmentsRead');
-    for (const n of ['departmentTemplates', 'streamPlan', 'streamReport', 'hire', 'setModel', 'sleep', 'wake', 'employeeNote']) expect(names('lead'), n).toContain(n);
+    for (const n of ['departmentTemplates', 'streamPlan', 'streamReport', 'hire', 'setModel', 'sleep', 'wake', 'employeeNote', 'outboxRead']) expect(names('lead'), n).toContain(n);
     const hire = t.tools.find((x) => x.name === 'hire')!;
     expect(Object.keys((hire.inputSchema as { properties: object }).properties)).toEqual(expect.arrayContaining(['department', 'head']));
     expect(hire.description).toContain('A department’s head may hire into their own department');
@@ -55,12 +55,12 @@ describe('Department tools (spec §5)', () => {
     expect(plain.map((x) => x.name).filter((n) => /^department|^stream(Plan|Report)$/.test(n))).toEqual([]);
     // The tools a head shares with the coordinator stay the coordinator's, and hire keeps its old schema and words.
     const kindsOf = (n: string) => plain.find((x) => x.name === n)!.kinds;
-    for (const n of ['hire', 'setModel', 'sleep', 'wake', 'employeeNote']) expect(kindsOf(n), n).toEqual(['coordinator']);
+    for (const n of ['hire', 'setModel', 'sleep', 'wake', 'employeeNote', 'outboxRead']) expect(kindsOf(n), n).toEqual(['coordinator']);
     const plainHire = plain.find((x) => x.name === 'hire')!;
     const fields = Object.keys((plainHire.inputSchema as { properties: object }).properties);
     expect(fields).not.toContain('department');
     expect(fields).not.toContain('head');
-    for (const n of ['hire', 'setModel', 'sleep', 'wake', 'employeeNote']) expect(plain.find((x) => x.name === n)!.description, n).not.toMatch(/head|başkan/i);
+    for (const n of ['hire', 'setModel', 'sleep', 'wake', 'employeeNote', 'outboxRead']) expect(plain.find((x) => x.name === n)!.description, n).not.toMatch(/head|başkan/i);
   });
 
   it('the coordinator opens from a template with a head, lists, updates, moves and closes', async () => {

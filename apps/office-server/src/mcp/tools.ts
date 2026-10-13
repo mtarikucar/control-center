@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS, OUTBOX_VIA_LABELS, fold, type OutboxEntry } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
@@ -24,6 +24,7 @@ import type { Roster } from '../roster.ts';
 import type { McpTool } from './protocol.ts';
 import type { Approvals } from '../company/approvals.ts';
 import type { HeldCall } from '../company/gate.ts';
+import type { OutboxStore } from '../company/outbox-store.ts';
 
 const EVERYONE: EmployeeKind[] = ['member', 'lead', 'coordinator'];
 const COORDINATOR: EmployeeKind[] = ['coordinator'];
@@ -152,8 +153,10 @@ export function officeTools(o: {
   kpis?: KpiReadings;
   /** The owner's approvals of calls the gate holds (B9a: approvalRequest, approvalsRead); absent in tests that do not care. */
   approvals?: Approvals;
-  /** The gate: the last call it held for each employee (approvalRequest with no tool and target). */
-  gate?: { lastHeld(employeeId: string): HeldCall | null };
+  /** The gate: the last call it held for each employee, and what it would make of a call (approvalRequest). */
+  gate?: { lastHeld(employeeId: string): HeldCall | null; preview?(employeeId: string, tool: string, input: unknown): HeldCall | null };
+  /** What the gate let out (spec capabilities §7: outboxRead); absent in tests that do not care. */
+  outbox?: OutboxStore;
   /** The departments (spec 2026-10-13-departments); absent (or null, as companyFor gives an office without them): no departments and none of their tools. */
   departments?: Departments | null;
   /** The company's own capabilities (spec capabilities §4: capabilityPropose, capabilityDecide); absent: neither, and capabilitiesRead shows none. */
@@ -707,13 +710,14 @@ export function officeTools(o: {
     {
       name: 'approvalRequest',
       description:
-        `Ask the owner to approve a call the office gate held (publish, send, pay, delete, a browser action, the office itself, or an unknown connector tool). With only summary, it asks for the call the gate just held; or give tool, kind and target as the gate's message named them. scope 'task' asks for every call of the same kind and tool while your current task is open (browser work). The owner decides on the office page; when approved, repeat the same call; while you wait, park the task with taskPark. ${GATE_LIMIT_TEXT}`,
+        `Ask the owner to approve a call the office gate held (publish, send, a calendar invitation, a call, pay, delete, a browser action, the office itself, or an unknown connector tool). With only summary, it asks for the call the gate just held; or give tool, kind and target as the gate's message named them. scope 'task' asks for every call of the same kind and tool while your current task is open (browser work). The owner decides on the office page; when approved, repeat the same call; while you wait, park the task with taskPark. Before a call you must not make without the owner (money, legal, a crisis, an answer you do not know, a first message without consent), give tool and input — the call’s arguments as you will make it: the gate’s kind and target are taken from them, so the approval is that very call’s. ${GATE_LIMIT_TEXT}`,
       inputSchema: object(
         {
           summary: s('Why the work needs it, for the owner.'),
           tool: s('The tool as the gate named it (Bash, mcp__…, Write …). Empty: the call the gate just held.'),
           kind: { type: 'string', enum: [...APPROVAL_KINDS] },
           target: s('The target as the gate named it (e.g. git push origin). Empty: the call the gate just held.'),
+          input: { type: 'object', description: 'The call’s arguments as you will make it (with tool): the gate takes the kind and the target from them.' },
           scope: { type: 'string', enum: ['call', 'task'], description: "'call' (default): this call, once. 'task': every call of this kind and tool while your current task is open." },
           taskId: s('The task it is for (default: the one you are working on).'),
         },
@@ -725,7 +729,16 @@ export function officeTools(o: {
         const tool = optStr(args, 'tool');
         const target = optStr(args, 'target');
         let input = { kind: optStr(args, 'kind') as unknown, tool: tool as unknown, target: target as unknown, scope: optStr(args, 'scope') as unknown };
-        if (!tool || !target) {
+        const call = args.input;
+        if (call !== undefined && call !== null) {
+          // Spec capabilities §8: asked before the call, from its own arguments — the approval's print is that call's.
+          if (!tool) throw new ValidationError('input ile birlikte tool (aracın tam adı) ver.');
+          if (typeof call !== 'object' || Array.isArray(call)) throw new ValidationError('input aracın argümanları olmalı (bir nesne).');
+          if (!o.gate?.preview) throw new ConflictError('Bu ofiste kapı yok: tool, kind ve target ver.');
+          const seen = o.gate.preview(employee.id, tool, call);
+          if (!seen) throw new ValidationError(`Bu çağrı kapıya takılmaz (${tool}); onay gerekmez.`);
+          input = { kind: seen.kind, tool, target: seen.target, scope: input.scope ?? seen.scope };
+        } else if (!tool || !target) {
           const held = o.gate?.lastHeld(employee.id);
           if (!held) throw new ValidationError('Kapıya takılmış bir çağrın yok: tool, kind ve target ver (kapının mesajındaki gibi) ya da önce çağrıyı yap.');
           input = { kind: input.kind ?? held.kind, tool: held.tool, target: held.target, scope: input.scope ?? held.scope };
@@ -750,6 +763,45 @@ export function officeTools(o: {
         const line = (a: Approval) =>
           `• [${APPROVAL_STATUS_LABELS[a.status]}] ${a.id} ${APPROVAL_KIND_LABELS[a.kind]} — “${a.target}” (${a.tool}; ${a.scope === 'task' ? 'görev boyunca' : 'tek çağrı'})${employee.kind === 'coordinator' ? ` — ${company.nameOf(a.employeeId)}` : ''}: ${a.summary}${a.note ? ` — not: ${a.note}` : ''}`;
         return list.map(line).join('\n');
+      },
+    },
+    {
+      name: 'outboxRead',
+      description:
+        `Read the outbox: every outward call the gate let out — sent, published, called, invited — by the system on the owner’s policy or with the owner’s approval (an "allowed" record, not a "delivered" one), newest first. The coordinator reads everyone’s (department narrows it; "merkez": people without one)${deps ? '; a department’s head reads their own department’s' : ''}. For the daily sample: read the recent ones, look for tone and rule breaks, write what you find into the playbook.`,
+      inputSchema: object({
+        since: s('How far back: days (1d, 7d) or a local date (2026-10-13); none: all.'),
+        department: s('Department name or id, or "merkez" (the coordinator only).'),
+        limit: integer('How many, newest first (default 30).', 1, 200),
+      }),
+      kinds: headKinds,
+      run: ({ employee }, args) => {
+        if (!o.outbox) throw new ConflictError('Bu ofiste giden kutusu yok.');
+        const sinceText = optStr(args, 'since');
+        const since = sinceText ? parseSince(sinceText, Date.now()) : undefined;
+        const limit = num(args, 'limit') ?? 30;
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new ValidationError('limit 1 ile 200 arasında bir tam sayı olmalı.');
+        const asked = optStr(args, 'department')?.trim();
+        // undefined: everyone's; null: the centre's (people without a department).
+        let departmentId: string | null | undefined;
+        let label: string;
+        if (employee.kind === 'coordinator') {
+          const centre = asked !== undefined && asked !== '' && fold(asked) === 'merkez';
+          const d = !asked || centre ? null : findDepartment(asked);
+          departmentId = d ? d.id : centre ? null : undefined;
+          label = d ? d.name : centre ? 'merkez (departmansız)' : 'herkes';
+        } else {
+          const own = deps?.headOf(employee.id) ?? null;
+          if (!own) throw new ForbiddenError('Giden kutusunu koordinatör ve departman başkanları okur; başkanı olduğun bir departman yok.');
+          if (asked && findDepartment(asked).id !== own.id) throw new ForbiddenError(`Başkan yalnız kendi departmanının giden kutusunu okur (${own.name}).`);
+          departmentId = own.id;
+          label = own.name;
+        }
+        const list = o.outbox.list({ departmentId, since, limit });
+        if (list.length === 0) return `Giden kutusu (${label}): kayıt yok.`;
+        const line = (e: OutboxEntry) =>
+          `• ${formatWhen(e.at, Date.now())} ${company.nameOf(e.employeeId)} — ${APPROVAL_KIND_LABELS[e.kind]} “${e.target}” (${OUTBOX_VIA_LABELS[e.via]})${e.recipients.length ? ` → ${e.recipients.join(', ')}` : ''}\n  ${e.summary}`;
+        return [`Giden kutusu (${label}) — son ${list.length}, yeniden eskiye; "izin verildi" kaydıdır, teslim değil:`, ...list.map(line)].join('\n');
       },
     },
     {

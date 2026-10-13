@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { OWNER, type Employee, type OutboxEntry } from '@cc/shared';
+import { OWNER, type Approval, type Employee, type OutboxEntry } from '@cc/shared';
 import { ApprovalStore } from '../src/company/approval-store.ts';
 import { Approvals } from '../src/company/approvals.ts';
 import { Gate } from '../src/company/gate.ts';
 import { OutboxStore } from '../src/company/outbox-store.ts';
+import { officeTools } from '../src/mcp/tools.ts';
 import { companyFor } from './company-helpers.ts';
 import { fakeEngine } from './engine-helpers.ts';
 import { DATA, testContext } from './gate-helpers.ts';
@@ -176,5 +177,77 @@ describe('the gate lets the system send (spec capabilities §5–§7)', () => {
     expect((await t.mail(ada)).decision).toBe('allow');
     expect((await t.ask(ada, 'Bash', { command: 'curl -X POST https://api.mail.io/send' })).decision).toBe('allow');
     expect([t.outbox.list(), t.ev('outbox.sent'), t.ev('gate.checked')]).toEqual([[], [], []]);
+  });
+});
+
+/** The office tools over make()'s office, as main.ts builds them (the gate, the approvals, the outbox, the departments). */
+function withTools(t: ReturnType<typeof make>) {
+  const tools = officeTools({
+    company: t.company, roster: t.roster, tasks: t.tasks, characters: () => ['coder'], memory: t.memory, budget: t.budget,
+    engine: { sleep: async () => undefined, wake: () => undefined, sideQuestion: async () => ({ ok: true, answer: '' }) },
+    plans: () => t.plans.list(), agenda: { text: () => '' }, approvals: t.approvals, gate: t.gate, outbox: t.outbox, departments: t.departments,
+  });
+  return async (who: Employee, name: string, args: Record<string, unknown> = {}) => {
+    const tool = tools.find((x) => x.name === name)!;
+    if (!tool.kinds.includes(t.roster.get(who.id).kind)) throw new Error(`${name} not offered to ${who.kind}`);
+    return String(await tool.run({ employee: t.roster.get(who.id) } as never, args));
+  };
+}
+
+describe('outboxRead and asking before a call (spec capabilities §7, §8)', () => {
+  it('the coordinator reads everyone’s (a department or the centre narrows it); a head reads their own department’s only; a member is not offered it', async () => {
+    const t = make();
+    const call = withTools(t);
+    const head = t.company.hire(OWNER, { name: 'Selin', role: 'r', departmentId: t.sales.id, head: true });
+    const sena = t.hire('Sena', t.sales.id);
+    const pelin = t.hire('Pelin', t.marketing.id);
+    const ada = t.hire('Ada');
+    await t.mail(sena, 'a@x.co');
+    await t.mail(pelin, 'b@x.co');
+    await t.mail(ada, 'c@x.co');
+    const all = await call(t.coordinator, 'outboxRead');
+    expect(all).toMatch(/^Giden kutusu \(herkes\) — son 3, yeniden eskiye/);
+    expect(all).toMatch(/Sena — gönderim “send_message to=a@x\.co” \(sistem\) → a@x\.co/);
+    expect(await call(t.coordinator, 'outboxRead', { department: 'pazarlama' })).not.toMatch(/Sena|Ada/);
+    expect(await call(t.coordinator, 'outboxRead', { department: 'merkez' })).toMatch(/^Giden kutusu \(merkez \(departmansız\)\) — son 1[\s\S]*Ada/);
+    const own = await call(head, 'outboxRead', { limit: 10 });
+    expect(own).toMatch(/^Giden kutusu \(Satış\) — son 1/);
+    expect(own).not.toMatch(/Pelin/);
+    await expect(call(head, 'outboxRead', { department: 'Pazarlama' })).rejects.toThrow(/yalnız kendi departmanının giden kutusunu okur \(Satış\)/);
+    await expect(call(t.coordinator, 'outboxRead', { limit: 0 })).rejects.toThrow(/limit 1 ile 200/);
+    await expect(call(sena, 'outboxRead')).rejects.toThrow(/not offered/);
+  });
+
+  it('outboxRead: since narrows it; an empty box says so; a lead who heads no department is refused', async () => {
+    const t = make();
+    const call = withTools(t);
+    const ada = t.hire('Ada');
+    expect(await call(t.coordinator, 'outboxRead')).toBe('Giden kutusu (herkes): kayıt yok.');
+    await t.mail(ada, 'bir@x.co');
+    t.advance(26 * HOUR);
+    await t.mail(ada, 'iki@x.co');
+    // The clock starts on 13 October 11:00, so the second line is of the 14th.
+    const recent = await call(t.coordinator, 'outboxRead', { since: '2026-10-14' });
+    expect(recent).toMatch(/^Giden kutusu \(herkes\) — son 1,/);
+    expect(recent).toContain('iki@x.co');
+    expect(recent).not.toContain('bir@x.co');
+    await expect(call(t.coordinator, 'outboxRead', { since: 'dün' })).rejects.toThrow(/since/);
+    t.roster.update(ada.id, { kind: 'lead' });
+    await expect(call(ada, 'outboxRead')).rejects.toThrow(/başkanı olduğun bir departman yok/);
+  });
+
+  it('asking before a call the system would let out: approvalRequest with the call’s input takes the gate’s own target; the call then passes as the owner’s', async () => {
+    const t = make();
+    const call = withTools(t);
+    const ada = t.hire('Ada');
+    const args = { to: 'musteri@x.co', subject: 'İade', body: 'İadenizi yapacağız.' };
+    expect(await call(ada, 'approvalRequest', { tool: GMAIL, input: args, summary: 'Müşteriye iade sözü veriyorum.' })).toMatch(/^Onay istendi \(no \S+\): gönderim — “send_message to=musteri@x\.co”/);
+    const [a] = t.approvals.list(ada.id) as [Approval];
+    t.approvals.decide(a.id, true, { via: 'page' });
+    expect(await t.ask(ada, GMAIL, args)).toMatchObject({ decision: 'allow', approvalId: a.id });
+    expect(t.outbox.list()).toEqual([expect.objectContaining({ via: 'owner', approvalId: a.id })]);
+    await expect(call(ada, 'approvalRequest', { tool: 'mcp__claude_ai_Gmail__get_message', input: { id: 'm' }, summary: 's' })).rejects.toThrow(/kapıya takılmaz/);
+    await expect(call(ada, 'approvalRequest', { input: args, summary: 's' })).rejects.toThrow(/input ile birlikte tool/);
+    await expect(call(ada, 'approvalRequest', { tool: GMAIL, input: 'to=a', summary: 's' })).rejects.toThrow(/bir nesne/);
   });
 });

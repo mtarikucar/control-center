@@ -59,6 +59,16 @@ export class Gate {
     return this.#held.get(employeeId) ?? null;
   }
 
+  /**
+   * What the gate makes of a call before it is made (approvalRequest with the call's own input, spec capabilities §8):
+   * its first held part, so the approval's print is that very call's; null when the gate would not hold it at all.
+   */
+  preview(employeeId: string, tool: string, input: unknown): HeldCall | null {
+    const verdict = classifyCall(tool, input, undefined, this.#d.context(this.#d.roster.get(employeeId)));
+    const first = verdict.parts[0];
+    return first ? { tool, kind: first.kind, target: first.target, scope: verdict.scope } : null;
+  }
+
   async check(employeeId: string, input: unknown): Promise<GateDecision> {
     const hook = input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
     if (!hook || typeof hook.tool_name !== 'string' || !hook.tool_name) {

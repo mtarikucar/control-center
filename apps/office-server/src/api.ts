@@ -3,13 +3,14 @@ import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type PlanView, type ServerMessage } from '@cc/shared';
+import { isOutwardPolicyKind, OUTWARD_POLICY_KINDS, OWNER, type AgendaReport, type GateDecision, type ClockStatus, type HireInput, type OfficeMetrics, type OfficeSnapshot, type OutwardPolicyKind, type PlanView, type ServerMessage } from '@cc/shared';
 import type { Budget } from './company/budget.ts';
 import { coordinatorHint } from './model-policy.ts';
 import type { AgentProvider } from '@cc/shared';
 import type { Company } from './company/company.ts';
 import { LOG_DEFAULT, LOG_MAX, type ManagementCycle } from './company/cycle.ts';
 import type { Memory } from './company/memory.ts';
+import type { OutboxStore } from './company/outbox-store.ts';
 import type { ProposalStore } from './company/proposal-store.ts';
 import { memoryKinds } from './company/search.ts';
 import type { PlanStore, TaskStore } from './company/store.ts';
@@ -56,6 +57,8 @@ export interface ApiDeps {
     approvals?: Approvals;
     /** The company's own capabilities (spec capabilities §4): the owner adds, decides, re-kinds and retires them. */
     capabilities?: CustomCapabilities;
+    /** What the gate let out (spec capabilities §7): the owner's Giden kutusu tab. */
+    outbox?: OutboxStore;
     /** The departments (spec departments §7; absent: an office without them). */
     departments?: Departments;
   };
@@ -390,6 +393,17 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     if (method === 'POST' && approval && d.company.approvals) {
       const body = (await readJson(req)) as { note?: unknown } | null;
       return sendJson(res, 200, d.company.approvals.decide(approval[1] ?? '', approval[2] === 'approve', { via: 'page', note: typeof body?.note === 'string' ? body.note : undefined }));
+    }
+    // The outbox (spec capabilities §7): reading only, the newest 200 at most; the page filters what it shows.
+    if (method === 'GET' && url.pathname === '/api/outbox' && d.company.outbox) {
+      const p = url.searchParams;
+      const raw = p.get('limit');
+      const limit = raw === null ? 200 : Number(raw);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new ValidationError('limit 1 ile 200 arasında bir tam sayı olmalı.');
+      const kind = p.get('kind');
+      if (kind !== null && !isOutwardPolicyKind(kind)) throw new ValidationError(`kind ${OUTWARD_POLICY_KINDS.join(', ')} olmalı.`);
+      const department = p.get('department');
+      return sendJson(res, 200, d.company.outbox.list({ departmentId: department === null ? undefined : department === 'none' ? null : department, kind: kind === null ? undefined : (kind as OutwardPolicyKind), limit }));
     }
     const decide = PROPOSAL_ROUTE.exec(url.pathname);
     if (method === 'POST' && decide) {

@@ -20,6 +20,10 @@ import { CompanyStateStore, GoalStore } from './company/goal-store.ts';
 import { Blueprints } from './company/blueprint.ts';
 import { BlueprintStore } from './company/blueprint-store.ts';
 import { IntegrationRegistry } from './company/integrations.ts';
+import { useCompanyCapabilities } from './company/capabilities.ts';
+import { asCapability, CustomCapabilities } from './company/custom-capabilities.ts';
+import { CustomCapabilityStore } from './company/custom-capability-store.ts';
+import { OutboxStore } from './company/outbox-store.ts';
 import { CapabilityPrecheck } from './company/precheck.ts';
 import { officeMetrics } from './company/office-metrics.ts';
 import { OnboardingStore } from './company/onboarding-store.ts';
@@ -136,6 +140,12 @@ seating.reseatAll();
 // Which connectors the office has (B3): read from the sessions' reports and the coordinator's records. Before the
 // dispatcher, whose precheck (B8) reads it.
 const integrations = new IntegrationRegistry({ db, roster, events });
+// The company's own capabilities (spec capabilities §4): the vocabulary is the product's and the active ones — every
+// classification (sessions, the gate, coverage) reads it, so it is wired before the first session starts.
+const customCapabilities = new CustomCapabilities({ store: new CustomCapabilityStore(db), roster, events, notices, coordinator: () => company.coordinator() });
+useCompanyCapabilities(() => customCapabilities.active().map(asCapability));
+// What the gate let out (spec capabilities §7): the system's on the owner's policy, and the owner's approvals.
+const outbox = new OutboxStore(db);
 // B8: holds a task whose required capability its desk lacks; the constitution's switch, off by default, turns it on.
 const precheck = new CapabilityPrecheck({ company, tasks, roster, integrations, proposals, events, enabled: () => budget.constitution().capabilityPrecheckEnabled });
 // Who does what when (spec §6.1): reads only, for the sheet, agendaRead and the management board.
@@ -156,7 +166,11 @@ const metrics = { report: () => officeMetrics({ db, roster, tasks, state }, Date
 // The gate for work that cannot be taken back (B9a): the owner's approvals, and the check the sessions' hook asks for.
 const approvals = new Approvals({ store: new ApprovalStore(db), events, notices, roster, tasks, coordinator: () => company.coordinator(), memory });
 const gateContext = liveContext({ repoRoot: REPO_ROOT, dataDir: config.dataDir, home: homedir(), port: () => port, hosts: config.allowedHosts });
-const gate = new Gate({ approvals, events, roster, enabled: () => budget.constitution().gateEnabled, context: gateContext, git: gateContext.git });
+const gate = new Gate({
+  approvals, events, roster, enabled: () => budget.constitution().gateEnabled, context: gateContext, git: gateContext.git,
+  // Spec capabilities §5: the policy acts only while the owner keeps the gate on; this never turns it on.
+  autonomy: { constitution: () => budget.constitution(), outbox },
+});
 // Owner endpoints called not the page's way: the coordinator hears, at most once an hour per kind.
 new OwnerFlags({ events, notices, coordinator: () => company.coordinator() });
 const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, memory, store: new BlueprintStore(db), integrations, constitution: () => budget.constitution() });
@@ -164,8 +178,8 @@ const blueprints = new Blueprints({ company, roster, tasks, plans, schedules, me
 const api = createApi(
   {
     engine, roster, events, quota, gate,
-    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis, approvals, gate, cycle, departments }) },
-    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints, approvals, management: cycle, departments },
+    mcp: { tokens, tools: officeTools({ company, roster, tasks, characters, memory, budget, engine, plans: () => plans.list(), agenda, performance, integrations, blueprints, kpis, approvals, gate, cycle, departments, capabilities: customCapabilities, outbox }) },
+    company: { service: company, tasks, plans, memory, budget, proposals, clock, agenda, performance, metrics, integrations, blueprints, approvals, management: cycle, departments, capabilities: customCapabilities, outbox },
   },
   { allowedOrigins: config.allowedOrigins, allowedHosts: config.allowedHosts, webDir: config.webDir, assetsDir: config.assetsDir },
 );
