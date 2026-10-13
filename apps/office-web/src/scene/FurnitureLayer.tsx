@@ -56,7 +56,7 @@ function Sway({ seed, children }: { seed: number; children: ReactNode }) {
 
 const BULB = new Color(PALETTE.bulb).multiplyScalar(5);
 
-/** A lamp's bulb glows (and blooms) and lights its corner of the room. */
+/** A lamp's bulb glows (and blooms) and, unless it is a desk lamp in a room, lights its corner of the room. */
 function Glow({ p }: { p: Placement }) {
   const y = p.h * (p.glowAt ?? 0.5);
   return (
@@ -65,7 +65,7 @@ function Glow({ p }: { p: Placement }) {
         <sphereGeometry args={[0.07, 12, 8]} />
         <meshBasicMaterial color={BULB} toneMapped={false} />
       </mesh>
-      <pointLight color={PALETTE.lampLight} intensity={p.glow} distance={5} decay={1.6} />
+      {p.bulbOnly ? null : <pointLight color={PALETTE.lampLight} intensity={p.glow} distance={5} decay={1.6} />}
     </group>
   );
 }

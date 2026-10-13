@@ -22,7 +22,7 @@ export interface BehaviorInput {
   idleSince: number;
   ownerTypingAt: number | null;
   now: number;
-  /** Stable per employee (desk index) so the same person keeps wandering to the same place. */
+  /** Stable per employee: their place in the wandering order (wanderOrder), so the same person keeps going to the same place. */
   wanderSeed: number;
   /** The coordinator is discussing a plan with the owner (a draft of theirs waits): it stands at the meeting table. */
   planning?: boolean;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { characterAsset } from '../assets/manifest.ts';
 import { behaviorOf } from '../office/behavior.ts';
-import { LAYOUT, spotFor } from '../office/layout.ts';
+import { LAYOUT, spotFor, wanderOrder } from '../office/layout.ts';
 
 const ESPRESSO = LAYOUT.furniture.find((p) => p.assetId === 'espresso_machine');
 import { useOffice } from '../store/office.ts';
@@ -32,21 +32,23 @@ export function CharactersLayer() {
   const unseenReports = useOffice((s) => s.unseenReports);
   const now = useNow(1000);
 
-  const placed = Object.values(views)
-    .filter((v) => v.employee.lifecycle !== 'archived')
-    .map((v) => {
-      const e = v.employee;
-      const behavior = behaviorOf({
-        lifecycle: e.lifecycle,
-        openToolSince: openToolSince(v),
-        idleSince: v.idleSince ?? e.createdAt,
-        ownerTypingAt: typingAt[e.id] ?? null,
-        now,
-        wanderSeed: e.deskIndex,
-        planning: e.kind === 'coordinator' && Object.values(plans).some((p) => p.status === 'draft' && p.proposedBy === e.id),
-      });
-      return { view: v, behavior, spot: spotFor(LAYOUT, behavior.zone, e.deskIndex) };
+  const working = Object.values(views).filter((v) => v.employee.lifecycle !== 'archived');
+  // By their order among the people at work, so wanderers never share a spot whatever seats they have.
+  const order = wanderOrder(working.map((v) => v.employee));
+  const placed = working.map((v) => {
+    const e = v.employee;
+    const rank = order[e.id] ?? e.deskIndex;
+    const behavior = behaviorOf({
+      lifecycle: e.lifecycle,
+      openToolSince: openToolSince(v),
+      idleSince: v.idleSince ?? e.createdAt,
+      ownerTypingAt: typingAt[e.id] ?? null,
+      now,
+      wanderSeed: rank,
+      planning: e.kind === 'coordinator' && Object.values(plans).some((p) => p.status === 'draft' && p.proposedBy === e.id),
     });
+    return { view: v, behavior, spot: spotFor(LAYOUT, behavior.zone, e.deskIndex, rank) };
+  });
 
   return (
     <group>
