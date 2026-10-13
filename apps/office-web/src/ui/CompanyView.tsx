@@ -84,13 +84,18 @@ function NoCoordinator({ people }: { people: Employee[] }) {
   );
 }
 
-function PersonCard({ e, current, onOpen }: { e: Employee; current: Task | undefined; onOpen: () => void }) {
+function PersonCard({ e, current, head = false, onOpen }: { e: Employee; current: Task | undefined; head?: boolean; onOpen: () => void }) {
   // "Koordinatör — Koordinatör [Koordinatör]" says one thing three times: show each word once.
   const title = e.title && e.title !== e.name ? e.title : '';
   const badge = e.kind !== 'member' && KIND_LABELS[e.kind] !== e.name && KIND_LABELS[e.kind] !== e.title ? KIND_LABELS[e.kind] : '';
   return (
     <button type="button" className="org-card" onClick={onOpen}>
       <strong>{e.name}</strong>
+      {head && (
+        <span className="org-head" title="Departman başkanı" aria-label="departman başkanı">
+          ★
+        </span>
+      )}
       <span className="badge model">{e.provider === 'codex' ? 'Codex' : 'Claude'}</span>
       {title && <span className="muted"> — {title}</span>}
       {badge && <span className="badge">{badge}</span>}
@@ -183,21 +188,26 @@ export function CompanyView() {
 
   const departments = useOffice((s) => s.departments);
   const openDepartments = Object.values(departments ?? {}).filter((x) => x.status === 'open').sort((a, b) => a.createdAt - b.createdAt);
-  /** The org chart's groups (spec departments §8): departments in opening order, the head first, then the centre; without departments, today's teams. */
-  const teams = new Map<string, Employee[]>();
+  /**
+   * The org chart's groups (spec departments §8): departments in opening order, the head first, then the centre;
+   * without departments, today's teams. Keyed by department id: a department may be named like the centre.
+   */
+  const groups: Array<{ key: string; label: string; headId: string | null; members: Employee[] }> = [];
   if (openDepartments.length > 0) {
     for (const dep of openDepartments) {
       const members = people.filter((e) => e.kind !== 'coordinator' && e.departmentId === dep.id);
-      teams.set(dep.name, [...members.filter((e) => e.id === dep.headId), ...members.filter((e) => e.id !== dep.headId)]);
+      groups.push({ key: dep.id, label: dep.name, headId: dep.headId, members: [...members.filter((e) => e.id === dep.headId), ...members.filter((e) => e.id !== dep.headId)] });
     }
     const centre = people.filter((e) => e.kind !== 'coordinator' && !openDepartments.some((dep) => dep.id === e.departmentId));
-    if (centre.length) teams.set('Merkez', centre);
+    if (centre.length) groups.push({ key: '__centre__', label: 'Merkez', headId: null, members: centre });
   } else {
+    const teams = new Map<string, Employee[]>();
     for (const e of people) {
       if (e.kind === 'coordinator') continue;
       const team = e.team || 'Ekipsiz';
       teams.set(team, [...(teams.get(team) ?? []), e]);
     }
+    for (const [team, members] of teams) groups.push({ key: team, label: team, headId: null, members });
   }
 
   const shown = allTasks.filter((t) => (!person || t.assignee === person) && (!planFilter || (planFilter === 'none' ? t.planId === null : t.planId === planFilter)));
@@ -227,11 +237,11 @@ export function CompanyView() {
               </section>
             )}
             <div className="org-teams">
-              {[...teams.entries()].map(([team, members]) => (
-                <section key={team} aria-label={team} className="org-team">
-                  <h3>{team}</h3>
+              {groups.map(({ key, label, headId, members }) => (
+                <section key={key} aria-label={label} className="org-team">
+                  <h3>{label}</h3>
                   {members.map((e) => (
-                    <PersonCard key={e.id} e={e} current={currentOf(e.id)} onOpen={() => open(e.id)} />
+                    <PersonCard key={e.id} e={e} head={e.id === headId} current={currentOf(e.id)} onOpen={() => open(e.id)} />
                   ))}
                 </section>
               ))}

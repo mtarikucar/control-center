@@ -69,6 +69,27 @@ describe('DepartmentsTab', () => {
     expect(screen.getByText(/En fazla 6 departman açık olabilir/)).toBeTruthy();
   });
 
+  it('leaves a closed department out of the list', () => {
+    seed([dep('d1', 'Yazılım', 'e1'), { ...dep('d0', 'Eski'), status: 'closed', closedAt: 5 } as never], [person('e1', 'Selin', 'd1', 'lead')]);
+    render(<DepartmentsTab />);
+    expect(screen.getByRole('region', { name: 'Yazılım' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Eski' })).toBeNull();
+  });
+
+  it('a closed department does not count against the limit: five open and one closed can still open one', () => {
+    seed([...['a', 'b', 'c', 'd', 'e'].map((x) => dep(x, x.toUpperCase())), { ...dep('z', 'Z'), status: 'closed', closedAt: 5 } as never], []);
+    render(<DepartmentsTab />);
+    expect(screen.getByRole('button', { name: 'Departman aç' })).toHaveProperty('disabled', false);
+    expect(screen.queryByText(/En fazla 6 departman açık olabilir/)).toBeNull();
+  });
+
+  it('six open and one closed is still full: only the open ones count', () => {
+    seed([...['a', 'b', 'c', 'd', 'e', 'f'].map((x) => dep(x, x.toUpperCase())), { ...dep('z', 'Z'), status: 'closed', closedAt: 5 } as never], []);
+    render(<DepartmentsTab />);
+    expect(screen.getByRole('button', { name: 'Departman aç' })).toHaveProperty('disabled', true);
+    expect(screen.getAllByRole('region')).toHaveLength(6);
+  });
+
   it('names a head, adds a member, closes with a reason', async () => {
     render(<DepartmentsTab />);
     const card = screen.getByRole('region', { name: 'Yazılım' });

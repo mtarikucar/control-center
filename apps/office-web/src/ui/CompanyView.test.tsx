@@ -91,6 +91,47 @@ describe('CompanyView', () => {
     expect(screen.getByRole('tab', { name: 'Departmanlar' })).toBeTruthy();
   });
 
+  it('a department named like the centre does not swallow it: two sections, each with its own people', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('selin', { departmentId: 'd1' }), person('ada')]);
+    useOffice.setState({
+      departments: { d1: { id: 'd1', name: 'Merkez', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 1, closedAt: null } },
+    } as never);
+    render(<CompanyView />);
+    const sections = screen.getAllByRole('region', { name: 'Merkez' });
+    expect(sections).toHaveLength(2);
+    expect(within(sections[0]!).getByText('selin')).toBeTruthy();
+    expect(within(sections[0]!).queryByText('ada')).toBeNull();
+    expect(within(sections[1]!).getByText('ada')).toBeTruthy();
+    expect(within(sections[1]!).queryByText('selin')).toBeNull();
+  });
+
+  it('a closed department draws no section of its own; its people are in the centre', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('mert', { departmentId: 'd1' }), person('deniz', { departmentId: 'd2' })]);
+    useOffice.setState({
+      departments: {
+        d1: { id: 'd1', name: 'Eski', mission: 'm', scope: '', template: null, headId: null, status: 'closed', createdAt: 1, closedAt: 5 },
+        d2: { id: 'd2', name: 'Yazılım', mission: 'm', scope: '', template: null, headId: null, status: 'open', createdAt: 2, closedAt: null },
+      },
+    } as never);
+    render(<CompanyView />);
+    expect(screen.queryByRole('region', { name: 'Eski' })).toBeNull();
+    expect(within(screen.getByRole('region', { name: 'Merkez' })).getByText('mert')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Yazılım' })).queryByText('mert')).toBeNull();
+  });
+
+  it('marks the department head’s card with ★ and no other', () => {
+    office([person('k', { kind: 'coordinator', name: 'Koordinatör' }), person('mert', { departmentId: 'd1' }), person('selin', { kind: 'lead', departmentId: 'd1' }), person('ada')]);
+    useOffice.setState({
+      departments: { d1: { id: 'd1', name: 'Yazılım', mission: 'm', scope: '', template: null, headId: 'selin', status: 'open', createdAt: 1, closedAt: null } },
+    } as never);
+    render(<CompanyView />);
+    const cards = within(screen.getByRole('region', { name: 'Yazılım' })).getAllByRole('button');
+    expect(cards[0]!.textContent).toMatch(/selin/);
+    expect(cards[0]!.textContent).toContain('★');
+    expect(cards[1]!.textContent).not.toContain('★');
+    expect(within(screen.getByRole('region', { name: 'Merkez' })).getByRole('button').textContent).not.toContain('★');
+  });
+
   it('does not repeat a word the name, title and role badge share', () => {
     office([person('koor', { name: 'Koordinatör', kind: 'coordinator', title: 'Koordinatör' }), person('ada', { name: 'Ada', kind: 'lead', title: 'Departman başkanı' })]);
     render(<CompanyView />);
