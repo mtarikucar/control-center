@@ -4,7 +4,7 @@ import { LAYOUT } from '../office/layout.ts';
 import { useOffice } from '../store/office.ts';
 import { ArtFrames } from './ArtFrames.tsx';
 import { Beam } from './Beam.tsx';
-import { AZIMUTH, CAMERA_POSITION, CAMERA_ZOOM } from './camera.ts';
+import { AZIMUTH, CAMERA_POSITION, MAX_ZOOM, keepInView, minZoom, panLimits, sceneOrigin, startZoom, type Pannable } from './camera.ts';
 import { CharactersLayer } from './CharactersLayer.tsx';
 import { DeskDressing, ServerLights } from './DeskDressing.tsx';
 import { Effects } from './Effects.tsx';
@@ -12,6 +12,10 @@ import { FurnitureLayer } from './FurnitureLayer.tsx';
 import { Backdrop, Lighting } from './Lighting.tsx';
 import { Room } from './Room.tsx';
 import { RoomsLayer } from './RoomsLayer.tsx';
+
+// The view sized from the floor (spec office rooms §6): start zoom, zoom-out limit, where the floor sits, how far it drags.
+const ORIGIN = sceneOrigin(LAYOUT.width, LAYOUT.depth);
+const PAN = panLimits(LAYOUT.width, LAYOUT.depth);
 
 export function OfficeScene() {
   const select = useOffice((s) => s.select);
@@ -22,14 +26,12 @@ export function OfficeScene() {
       shadows="percentage"
       dpr={[1, 2]}
       gl={{ antialias: false, powerPreference: 'high-performance' }}
-      camera={{ position: [...CAMERA_POSITION], zoom: CAMERA_ZOOM, near: -200, far: 400 }}
+      camera={{ position: [...CAMERA_POSITION], zoom: startZoom(LAYOUT.width, LAYOUT.depth), near: -200, far: 400 }}
       onPointerMissed={() => select(null)}
     >
       <Backdrop />
       <Lighting />
-      {/* The office's centre sits at the origin so the camera, light and controls all aim at it, nudged towards the
-          camera so its far corner clears the top bar. */}
-      <group position={[-LAYOUT.width / 2 + 1.1, 0, -LAYOUT.depth / 2 + 1.1]}>
+      <group position={ORIGIN}>
         <Room />
         <RoomsLayer />
         <FurnitureLayer />
@@ -47,8 +49,11 @@ export function OfficeScene() {
         minPolarAngle={Math.PI / 6}
         minAzimuthAngle={AZIMUTH.min}
         maxAzimuthAngle={AZIMUTH.max}
-        minZoom={22}
-        maxZoom={160}
+        minZoom={minZoom(LAYOUT.width, LAYOUT.depth)}
+        maxZoom={MAX_ZOOM}
+        onChange={(e) => {
+          if (e?.target) keepInView(e.target as Pannable, PAN);
+        }}
       />
       <Effects />
     </Canvas>

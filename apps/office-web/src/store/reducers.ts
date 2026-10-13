@@ -213,6 +213,10 @@ export function applyEvent(d: OfficeData, s: StoredEvent): OfficeData {
     case 'model.changed':
       v = { ...v, employee: { ...v.employee, model: ev.model } };
       break;
+    case 'seat.changed':
+      // Their character walks to the new seat now (spec office rooms §3); the next snapshot says the same.
+      v = { ...v, employee: { ...v.employee, deskIndex: ev.deskIndex } };
+      break;
     case 'session.started':
       v = { ...v, employee: { ...v.employee, sessionStarted: true } };
       break;

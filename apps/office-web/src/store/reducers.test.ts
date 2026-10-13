@@ -54,6 +54,14 @@ describe('applyEvent', () => {
     expect(openToolSince(d.views.e1!)).toBe(2000);
   });
 
+  it('walks someone to their new seat at once (seat.changed), without waiting for a snapshot', () => {
+    let d = applySnapshot(EMPTY_DATA, snapshot({ employees: [employee({ deskIndex: 37 })] }));
+    const ev = stored({ type: 'seat.changed', deskIndex: 13 });
+    d = applyEvent(d, ev);
+    expect(d.views.e1?.employee.deskIndex).toBe(13);
+    expect(needsRefresh(ev, d)).toBe(false);
+  });
+
   it('review focus: ignores a replayed event it already has', () => {
     const e = stored({ type: 'message.assistant', text: 'bir kez' });
     const d = applyEvent(applyEvent(base(), e), e);

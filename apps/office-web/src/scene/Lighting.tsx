@@ -2,7 +2,12 @@ import { Environment, Lightformer } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import { useEffect, useMemo } from 'react';
 import { CanvasTexture, SRGBColorSpace } from 'three';
+import { LAYOUT } from '../office/layout.ts';
+import { shadowExtent } from './camera.ts';
 import { PALETTE } from './palette.ts';
+
+// The sun's shadow box covers the whole floor, whatever its size.
+const SHADOW = shadowExtent(LAYOUT.width, LAYOUT.depth);
 
 /** A soft vertical gradient behind the office, like the reference's slate-blue backdrop. */
 export function Backdrop() {
@@ -49,10 +54,10 @@ export function Lighting() {
         castShadow
         shadow-mapSize-width={4096}
         shadow-mapSize-height={4096}
-        shadow-camera-left={-14}
-        shadow-camera-right={14}
-        shadow-camera-top={14}
-        shadow-camera-bottom={-14}
+        shadow-camera-left={-SHADOW}
+        shadow-camera-right={SHADOW}
+        shadow-camera-top={SHADOW}
+        shadow-camera-bottom={-SHADOW}
         shadow-camera-near={1}
         shadow-camera-far={60}
         shadow-radius={3}
