@@ -1,4 +1,4 @@
-import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, TASK_DIFFICULTIES, fold, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
+import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, RULE_RANGES, SPECIAL_CONTACT_LIMITS, TASK_DIFFICULTIES, fold, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { AgentProvider } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
@@ -42,9 +42,10 @@ const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number
   defaultTaskMinutes: { label: 'Varsayılan görev süresi (dk)', min: 5, max: () => 480, integer: true },
   minScheduleMinutes: { label: 'Rutin aralığı en az (dk)', min: 1, max: () => 1440, integer: true },
   maxSchedules: { label: 'En fazla rutin', min: 0, max: () => 100, integer: true },
-  sendsPerHour: { label: 'Saatlik gönderim sınırı', min: 0, max: () => 1000, integer: true },
-  bulkRecipients: { label: 'Toplu gönderim eşiği (alıcı)', min: 1, max: () => 1000, integer: true },
-  callsPerDay: { label: 'Günlük arama sınırı', min: 0, max: () => 1000, integer: true },
+  // The outward rules' ranges are shared: normalizeConstitution reads a stored value by the same ones (review M3).
+  sendsPerHour: { label: 'Saatlik gönderim sınırı', min: RULE_RANGES.sendsPerHour[0], max: () => RULE_RANGES.sendsPerHour[1], integer: true },
+  bulkRecipients: { label: 'Toplu gönderim eşiği (alıcı)', min: RULE_RANGES.bulkRecipients[0], max: () => RULE_RANGES.bulkRecipients[1], integer: true },
+  callsPerDay: { label: 'Günlük arama sınırı', min: RULE_RANGES.callsPerDay[0], max: () => RULE_RANGES.callsPerDay[1], integer: true },
 };
 
 const MODEL_MAPS = {
@@ -85,8 +86,9 @@ function outwardPolicy(value: unknown, current: OutwardPolicy): OutwardPolicy {
 
 /** Up to 200 people, each an e-mail, a phone or a user name; trimmed, empty ones dropped, each once (folded). */
 function specialContacts(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length > 200 || value.some((x) => typeof x !== 'string' || x.trim().length > 200)) {
-    throw new ValidationError('Anayasa: Özel kişiler en çok 200 metinden oluşan bir liste olmalı (e-posta, telefon ya da kullanıcı adı; her biri en çok 200 karakter).');
+  const { count, chars } = SPECIAL_CONTACT_LIMITS;
+  if (!Array.isArray(value) || value.length > count || value.some((x) => typeof x !== 'string' || x.trim().length > chars)) {
+    throw new ValidationError(`Anayasa: Özel kişiler en çok ${count} metinden oluşan bir liste olmalı (e-posta, telefon ya da kullanıcı adı; her biri en çok ${chars} karakter).`);
   }
   const out: string[] = [];
   for (const raw of value as string[]) {

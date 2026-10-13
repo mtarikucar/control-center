@@ -154,19 +154,38 @@ const isHourWindow = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && v.every((h) => Number.isInteger(h) && h >= 0 && h <= 24) && v[0] < v[1];
 
 /**
- * The rules' counts and their ranges, as the owner's form takes them: a stored one out of range is no limit the owner
- * set, and a null, a text or NaN would make `count >= limit` never true — the system would send without end.
+ * The rules' counts and their ranges, [min, max] whole numbers: the owner's form takes these (the server's validator
+ * is built from them), and a stored one out of range is no limit the owner set — a null, a text or NaN would make
+ * `count >= limit` never true, and the system would send without end.
  */
-const RULE_RANGES = { sendsPerHour: [0, 1000], bulkRecipients: [1, 1000], callsPerDay: [0, 1000] } as const;
+export const RULE_RANGES = { sendsPerHour: [0, 1000], bulkRecipients: [1, 1000], callsPerDay: [0, 1000] } as const;
 const inRange = (v: unknown, [min, max]: readonly [number, number]): v is number => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
+
+/** Special contacts as the owner's form takes them: at most 200, each trimmed and 1–200 characters. */
+export const SPECIAL_CONTACT_LIMITS = { count: 200, chars: 200 } as const;
+
+/**
+ * A kept contact list read entry by entry: a bad entry (not a text, empty, too long) is dropped, never the list —
+ * one broken entry must not let every special contact's calls go out without the owner.
+ */
+function contactsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const x of value) {
+    const contact = typeof x === 'string' ? x.trim() : '';
+    if (contact && contact.length <= SPECIAL_CONTACT_LIMITS.chars) out.push(contact);
+    if (out.length === SPECIAL_CONTACT_LIMITS.count) break;
+  }
+  return out;
+}
 
 /**
  * A constitution as it was kept — the database's rows, or a snapshot in the event log (a budget.changed) written by an
  * older office — read as today's: every key the constitution has, in its order, the default where one is missing, and
  * nothing else. A model map keeps the keys it knows with a known model and takes the default for the rest, and so does the
  * outward policy with its deciders; the coordinator's models from before the turn types (owner, decision, digest) meant
- * other turns, so they are dropped; special contacts that are not a list of texts, call hours that are not a window and
- * a rule's count that is not a whole number in its range are the defaults.
+ * other turns, so they are dropped; special contacts keep their good entries (contactsOf); call hours that are not a
+ * window and a rule's count that is not a whole number in its range are the defaults.
  * Everything that reads a constitution reads it through this.
  */
 export function normalizeConstitution(raw: unknown): Constitution {
@@ -176,7 +195,7 @@ export function normalizeConstitution(raw: unknown): Constitution {
     const value = Object.hasOwn(stored, key) ? stored[key] : undefined;
     if (key === 'coordinatorModels' || key === 'difficultyModels') out[key] = modelMapOf(value, DEFAULT_CONSTITUTION[key]);
     else if (key === 'outwardPolicy') out[key] = policyOf(value);
-    else if (key === 'specialContacts') out[key] = Array.isArray(value) && value.every((x) => typeof x === 'string') ? value : [];
+    else if (key === 'specialContacts') out[key] = contactsOf(value);
     else if (key === 'callHours') out[key] = isHourWindow(value) ? value : [...DEFAULT_CONSTITUTION.callHours];
     else if (key === 'sendsPerHour' || key === 'bulkRecipients' || key === 'callsPerDay') out[key] = inRange(value, RULE_RANGES[key]) ? value : DEFAULT_CONSTITUTION[key];
     else out[key] = value === undefined ? DEFAULT_CONSTITUTION[key] : value;

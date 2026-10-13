@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_CONSTITUTION, OWNER, SEAT_COUNT, normalizeConstitution, type QuotaState, type Usage } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, OWNER, RULE_RANGES, SEAT_COUNT, normalizeConstitution, type QuotaState, type Usage } from '@cc/shared';
 import { Budget, constitutionChanges } from '../src/company/budget.ts';
 import { ConstitutionStore, SpendStore } from '../src/company/budget-store.ts';
 import { QuotaTracker } from '../src/quota.ts';
@@ -210,6 +210,27 @@ describe('Budget — constitution', () => {
     expect(t.budget.setConstitution({ sendsPerHour: 1000, bulkRecipients: 1000 })).toMatchObject({ sendsPerHour: 1000, bulkRecipients: 1000 });
   });
 
+  it('review M3: the rules’ ranges are the shared ones — the owner’s form takes their edges and refuses one past them; a stored value is read by the same ranges', () => {
+    const t = make();
+    expect(Object.keys(RULE_RANGES)).toEqual(['sendsPerHour', 'bulkRecipients', 'callsPerDay']);
+    for (const [key, [min, max]] of Object.entries(RULE_RANGES) as Array<[keyof typeof RULE_RANGES, readonly [number, number]]>) {
+      expect(t.budget.setConstitution({ [key]: min })[key], key).toBe(min);
+      expect(t.budget.setConstitution({ [key]: max })[key], key).toBe(max);
+      expect(() => t.budget.setConstitution({ [key]: min - 1 }), key).toThrow(/Anayasa/);
+      expect(() => t.budget.setConstitution({ [key]: max + 1 }), key).toThrow(/Anayasa/);
+      expect(normalizeConstitution({ [key]: min })[key], key).toBe(min);
+      expect(normalizeConstitution({ [key]: max + 1 })[key], key).toBe(DEFAULT_CONSTITUTION[key]);
+    }
+  });
+
+  it('review M6: a kept contact list with a bad entry keeps its good ones — trimmed, none empty or over 200 characters, at most 200; one bad entry never empties it', () => {
+    expect(normalizeConstitution({ specialContacts: ['a@b.c', 3, null, '  ', ' Ali Veli ', 'x'.repeat(201), { to: 'b@c.d' }] }).specialContacts).toEqual(['a@b.c', 'Ali Veli']);
+    const many = Array.from({ length: 205 }, (_, i) => `k${i}@x.co`);
+    expect(normalizeConstitution({ specialContacts: [7, ...many] }).specialContacts).toEqual(many.slice(0, 200));
+    expect(normalizeConstitution({ specialContacts: ['x'.repeat(200)] }).specialContacts).toEqual(['x'.repeat(200)]);
+    expect(normalizeConstitution({ specialContacts: { 0: 'a@b.c' } }).specialContacts).toEqual([]);
+  });
+
   it('normalizeConstitution: a partial or broken policy keeps what is valid in its order; broken contacts and hours are the defaults', () => {
     expect(normalizeConstitution({ outwardPolicy: { calendar: 'system', send: 'nobody', pay: 'system' }, specialContacts: 'x', callHours: [9] })).toMatchObject({
       outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'system' }, specialContacts: [], callHours: [9, 19],
@@ -221,7 +242,6 @@ describe('Budget — constitution', () => {
       expect(normalizeConstitution({ callHours }).callHours, JSON.stringify(callHours)).toEqual([9, 19]);
     }
     expect(normalizeConstitution({ callHours: [0, 24] }).callHours).toEqual([0, 24]);
-    expect(normalizeConstitution({ specialContacts: ['a@b.c', 3] }).specialContacts).toEqual([]);
     expect(normalizeConstitution({ specialContacts: ['a@b.c'] }).specialContacts).toEqual(['a@b.c']);
     // A rule's number kept as something else, or out of its range, reads as the default: `count >= limit` must not
     // quietly never hold (a null, a text or NaN would let the system send without end).
