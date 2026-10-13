@@ -130,6 +130,8 @@ export const api = {
   decideCapability: (id: string, accept: boolean, o: { kind?: CapabilityKind; note?: string } = {}) =>
     request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/${accept ? 'accept' : 'reject'}`, o),
   retireCapability: (id: string, note?: string) => request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/retire`, note ? { note } : {}),
+  /** Final review I1: the owner opens an active capability the coordinator activated to the system, its kind as it is. */
+  confirmCapability: (id: string) => request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/confirm`, {}),
   setCapabilityKind: (id: string, kind: CapabilityKind) => request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/kind`, { kind }),
   /** Spec capabilities §7: what the gate let out, the newest 200 (the tab filters them). */
   outbox: () => request<OutboxEntry[]>('GET', '/api/outbox'),

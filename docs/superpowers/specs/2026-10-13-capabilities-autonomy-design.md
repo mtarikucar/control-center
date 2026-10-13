@@ -216,8 +216,11 @@ boşken hiçbir yere yazılmaz. Çalışan değişikliği bir sonraki oturumunda
   sorar; Pazarlama bülteni ve toplu e-postayı hazırlar, gönderimini sahibine sorar (Pazarlama'da e-posta gönderen rol
   yok); başkanların giden kutusu örneği "kapı açıkken"dir; Yönetici Asistanı'nın kendi kuralı (taslak hazırlar,
   göndermez) müşteri yönteminden üstündür.
-- Web: **Yetenekler** sekmesi (ürünle gelenler salt okunur; şirketinkiler: ekle, onayla/reddet, geri al, türü
-  değiştir); **Anayasa**'ya otonomi politikası (dört seçim), özel kişiler listesi, beş sayısal kural; **Giden
+- Web: **Yetenekler** sekmesi (ürünle gelenler salt okunur; şirketinkiler: ekle — tür seçilmeden eklenmez, varsayılan
+  yok, çünkü `read` en serbest türdür —, onayla/reddet, **Sisteme aç** (§4.2 `confirm`), geri al, türü değiştir; sekme
+  adındaki sayı sahibini bekleyenleri sayar: koordinatörün kendi önerileri, okuma önerileri, sisteme açılmamış
+  etkinleştirmeler); koordinatörün önerisi ve etkinleştirmesi yayında bir satırla görünür (sahibinin kendi işlemleri
+  görünmez); **Anayasa**'ya otonomi politikası (dört seçim), özel kişiler listesi, beş sayısal kural; **Giden
   kutusu** sekmesi.
 
 ## 10. Açık kalanların kararları (sahibi soru istemedi)

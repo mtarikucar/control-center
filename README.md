@@ -260,9 +260,12 @@ Ofis 32 × 24 m'lik tek bir kat: ortada **merkez**, kuzeyinde ve güneyinde üç
   sisteme açana dek kapıda sizindir: politika "Sistem halletsin" dese de çağrıları size gelir; kapıyı açtığınızda daha
   önce koordinatörün etkinleştirdikleri de sizin sisteme açmanızı bekler. Sizin eklediğiniz, onayladığınız ya da
   türünü değiştirdiğiniz yetenek ile ürünle gelenler sisteme açıktır. Şirket görünümünün **Yetenekler** sekmesinde
-  ürünle gelenleri görür, yenisini eklersiniz (hemen etkin), bekleyenleri onaylar ya da reddeder, etkin olanın türünü
-  değiştirir ya da geri alırsınız (araçları yeniden sınıflandırılmamış olur). Yeni bir yetenek, rolüne eklenen kişinin
-  bir sonraki oturumunda açılır.
+  ürünle gelenleri görür, yenisini eklersiniz (hemen etkin; türü kendiniz seçersiniz, varsayılan yoktur, çünkü okuma
+  her oturumda açıktır ve kapıda serbesttir), bekleyenleri onaylar ya da reddeder, etkin olanın türünü değiştirir ya da
+  geri alırsınız (araçları yeniden sınıflandırılmamış olur). Koordinatörün etkinleştirdiğini satırındaki **Sisteme aç**
+  düğmesiyle sisteme açarsınız. Sekmenin adındaki sayı sizi bekleyenleri gösterir (koordinatörün kendi önerileri, okuma
+  önerileri, sisteme açılmamış etkinleştirmeler); koordinatörün önerisi ve etkinleştirmesi çalışanın yayınında da bir
+  satır olarak görünür. Yeni bir yetenek, rolüne eklenen kişinin bir sonraki oturumunda açılır.
 - **Otonomi politikası (Anayasa):** kapı açıkken bağlayıcıdan yapılan gönderim, yayın, arama ve takvim için "Sahibine
   sor" ya da "Sistem halletsin". Varsayılan: gönderim, yayın, arama sistem; takvim size. Her zaman size gelenler:
   - ödeme, silme, tarayıcı, ofisin kendisi ve sınıflandırılmamış araçlar;
