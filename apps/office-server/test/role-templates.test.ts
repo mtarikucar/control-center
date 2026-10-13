@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MODEL_ALIASES, WORK_TYPES, type Employee } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
+import { capabilityKind } from '../src/company/capabilities.ts';
 import { listRoleTemplates, parseRoleTemplate, roleTemplate, templateRole } from '../src/company/role-templates.ts';
 import { deskDir } from '../src/desk.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
@@ -83,7 +84,18 @@ Teslim edildiğinde.
 const OUTWARD = ['sosyal-medya', 'musteri-temsilcisi', 'satis-asistani', 'operasyon-asistani', 'icerik-yazari', 'iletisim-yoneticisi', 'yonetici-asistani', 'satis-muduru', 'aday-arastirmaci', 'operasyon-finans-yoneticisi', 'satin-alma-uzmani', 'pazarlama-muduru', 'teknik-lider'];
 
 // Spec capabilities §9: the roles that talk to customers and the public — the critical to the owner, the rest the system's.
-const AUTONOMOUS = ['iletisim-yoneticisi', 'musteri-temsilcisi', 'sosyal-medya', 'satis-muduru', 'aday-arastirmaci', 'pazarlama-muduru'];
+const AUTONOMOUS = ['iletisim-yoneticisi', 'musteri-temsilcisi', 'sosyal-medya', 'satis-muduru', 'aday-arastirmaci', 'pazarlama-muduru', 'icerik-yazari'];
+// What each of them sends or publishes itself (so its text says "kendin gönderirsin / yayınlarsın"): the capabilities that text relies on, no more.
+const SENDS_ITSELF: Record<string, string[]> = {
+  'iletisim-yoneticisi': ['email.send', 'messages.send'],
+  'musteri-temsilcisi': ['email.send', 'messages.send'],
+  'sosyal-medya': ['social.publish'],
+  'satis-muduru': ['email.send', 'messages.send'],
+  'aday-arastirmaci': ['email.send', 'messages.send'],
+  'pazarlama-muduru': ['social.publish'],
+  // The writer hands a file over; whoever publishes it is someone else.
+  'icerik-yazari': [],
+};
 
 describe('Role templates — the format', () => {
   it('parses the front matter (scalars and lists) and the body', () => {
@@ -147,7 +159,7 @@ describe('Role templates — the catalog (ships with the office)', () => {
     for (const [id, model] of Object.entries(heads)) expect(roleTemplate(id).model, id).toBe(model);
     expect(roleTemplate('sosyal-medya')).toMatchObject({ version: 3, title: 'Sosyal Medya ve Reklam Uzmanı', team: 'Pazarlama' });
     expect(roleTemplate('sosyal-medya').capabilities).toContain('ads.manage');
-    expect(roleTemplate('icerik-yazari')).toMatchObject({ version: 2, team: 'Pazarlama' });
+    expect(roleTemplate('icerik-yazari')).toMatchObject({ version: 3, team: 'Pazarlama' });
     expect(roleTemplate('icerik-yazari').capabilities).toContain('media.generate');
     expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 3, team: 'İç-Dış İletişim' });
     expect(roleTemplate('satis-asistani')).toMatchObject({ version: 3, team: 'Satış' });
@@ -163,6 +175,7 @@ describe('Role templates — the catalog (ships with the office)', () => {
     expect(roleTemplate('musteri-temsilcisi')).toMatchObject({ version: 3, capabilities: ['email.read', 'email.send', 'crm.read', 'messages.read', 'messages.send'] });
     expect(roleTemplate('sosyal-medya').version).toBe(3);
     for (const id of ['satis-muduru', 'aday-arastirmaci', 'pazarlama-muduru']) expect(roleTemplate(id).version, id).toBe(2);
+    expect(roleTemplate('icerik-yazari').version).toBe(3);
     for (const id of ['satis-muduru', 'aday-arastirmaci', 'iletisim-yoneticisi']) expect(roleTemplate(id).body, id).toMatch(/İYS/);
     for (const id of ['iletisim-yoneticisi', 'satis-muduru', 'pazarlama-muduru']) expect(roleTemplate(id).body, id).toMatch(/`outboxRead`/);
     expect(roleTemplate('sosyal-medya').body).toMatch(/Reklam harcaması .*her zaman sahibinin onayından geçer/);
@@ -179,6 +192,30 @@ describe('Role templates — the catalog (ships with the office)', () => {
     const how = /### Nasıl çalışırsın\n([\s\S]*?)\n### /.exec(roleTemplate('iletisim-yoneticisi').body)?.[1] ?? '';
     expect(how).not.toMatch(/E-posta gönderimi, takvim daveti ve e-posta silme sahibinin onayından geçer/);
     expect(how).toMatch(/Takvim daveti gönderme ve kabul etme ile e-posta silme sahibinin onayından geçer/);
+  });
+
+  it('spec capabilities §9: every autonomous role declares exactly the send and publish capabilities its text relies on — the text and the capabilities cannot drift apart', () => {
+    expect(Object.keys(SENDS_ITSELF).sort()).toEqual([...AUTONOMOUS].sort());
+    for (const [id, wanted] of Object.entries(SENDS_ITSELF)) {
+      const declared = roleTemplate(id).capabilities.filter((c) => ['send', 'publish'].includes(capabilityKind(c) ?? ''));
+      expect([...declared].sort(), id).toEqual([...wanted].sort());
+    }
+    // The ones that publish or send say so in their own words ("kendin"), so the capability is not decoration.
+    for (const id of ['iletisim-yoneticisi', 'musteri-temsilcisi', 'sosyal-medya', 'pazarlama-muduru']) expect(roleTemplate(id).body, id).toMatch(/kendin (gönderirsin|yayınlar|yaparsın)/);
+  });
+
+  it('spec capabilities §9: what the gate holds mechanically is still an instruction to ask, not a promise that it goes to the owner by itself (the gate may be off)', () => {
+    for (const id of AUTONOMOUS) expect(roleTemplate(id).body, id).not.toMatch(/zaten sahibine gider/);
+    const marketing = roleTemplate('pazarlama-muduru').body;
+    expect(marketing).toMatch(/toplu gönderimi ve özel kişilere gideni göndermeden önce `approvalRequest` ile sahibine sorarsın/);
+    expect(marketing).toMatch(/olağan yayınını kendin yaparsın; sistemce çıkar/);
+    expect(roleTemplate('aday-arastirmaci').body).toMatch(/sahibinin cevabı gelmeden göndermezsin/);
+    expect(roleTemplate('sosyal-medya').body).toMatch(/içeren gönderi ve yayın silme önce `approvalRequest`/);
+    // The writer: ordinary publishing is the system’s, the critical class (a money promise, legal, a crisis, deleting a post) goes to the owner.
+    const writer = /### Nasıl çalışırsın\n([\s\S]*?)\n### /.exec(roleTemplate('icerik-yazari').body)?.[1] ?? '';
+    expect(writer).toMatch(/olağan metnin yayını incelemeden sonra sistemce çıkar/);
+    expect(writer).toMatch(/Para sözü .*hukuki konu, kriz ya da bir yayını silmek.*`approvalRequest`/);
+    expect(writer).not.toMatch(/her yayın sahibinin onayıyla/);
   });
 });
 

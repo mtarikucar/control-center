@@ -48,7 +48,7 @@ kpis:
 - Sözleşme.
 - Toplantı daveti.
 - Ticari ileti izni (İYS) olmayan kişiye ilk tanıtım mesajı ya da araması.
-- Kapının kuralına takılan gönderim.
+- Toplu gönderim ve özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
 
 Olağan temaslar (izni olan adaya takip, toplantı hatırlatması) sistemce gider ve giden kutusuna yazılır; başkan her gün örnek okur.
 

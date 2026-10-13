@@ -45,8 +45,9 @@ kpis:
 - Hukuki konu: avukat, tüketici hakem heyeti, KVKK talebi, sözleşme.
 - Kriz: basın, olumsuz yayılan paylaşım, tehdit, ağır şikâyet.
 - Bilgi tabanında cevabı olmayan soru.
+- Ticari ileti izni (İYS) olmayan kişiye ilk tanıtım mesajı.
 - Takvim daveti gönderme ve kabul etme; e-posta silme.
-- Kapının kuralına takılan gönderim (saatlik sınır, toplu gönderim, özel kişi).
+- Toplu gönderim ve özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
 
 Olağan cevaplar (bilgi, randevu, sipariş durumu, SSS) sistemce gider ve giden kutusuna yazılır; başkan her gün örnek okur.
 

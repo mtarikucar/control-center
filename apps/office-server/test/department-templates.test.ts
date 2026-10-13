@@ -102,6 +102,15 @@ describe('Department templates — the catalog', () => {
       expect(t.routines.some((r) => r.startsWith('Giden kutusundan örnek okuma')), id).toBe(true);
     }
     expect(scopeSection(templateScope(departmentTemplate('satis')), 'Sana gelir')).toMatch(/İYS/);
+    // The first promotion without consent comes to the owner from İç-Dış İletişim too; a post is deleted only with the owner’s word.
+    expect(scopeSection(templateScope(departmentTemplate('ic-dis-iletisim')), 'Sana gelir')).toMatch(/İYS/);
+    expect(scopeSection(templateScope(departmentTemplate('pazarlama')), 'Sana gelir')).toMatch(/^- Bir yayını silmek\.$/m);
+    // Bulk and special-contact sends are asked of the owner by the one who sends, whether or not the gate is on: no list says the gate takes them.
+    for (const id of ['ic-dis-iletisim', 'pazarlama', 'satis']) {
+      const owner = scopeSection(templateScope(departmentTemplate(id)), 'Sana gelir');
+      expect(owner, id).toMatch(/özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar/);
+      expect(owner, id).not.toMatch(/Kapının kuralına takılan/);
+    }
     expect(departmentTemplate('yazilim-otomasyon').version).toBe(1);
   });
 });

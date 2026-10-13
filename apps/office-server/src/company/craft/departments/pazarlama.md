@@ -51,6 +51,7 @@ kpis:
 - Ücretli görsel üretimi.
 - Kampanya vaadi (fiyat, indirim, çekiliş) içeren yayın.
 - Kriz ya da hukuki konuya değen yayın.
-- Kapının kuralına takılan gönderim (toplu e-posta ve bülten, toplu gönderim eşiğini aşınca).
+- Bir yayını silmek.
+- Toplu e-posta ve bülten gönderimi ile özel kişi listendekilere giden mesaj: çalışan göndermeden önce sana sorar; kapı açıkken saatlik sınırı aşan gönderim de sana düşer.
 
 Olağan yayınlar sistemce çıkar ve giden kutusuna yazılır; başkan her gün örnek okur.
