@@ -97,6 +97,43 @@ describe('the rules the system keeps (spec capabilities §6)', () => {
     expect(check({ to: 'a@x.co' }, ['send'], { rules: { sendsPerHour: 0 } }).rule).toBe('saatlik gönderim sınırı (0) doldu');
     expect(check({ attendees: ['a@x.co'] }, ['calendar'], { counts: { 'send+publish': 99, call: 99 } })).toEqual({ rule: null, asked: [] });
   });
+
+  it('review I6: the order, pairwise — with both rules broken and the counters at their limits, the earlier rule is the reason', () => {
+    const six = Array.from({ length: 6 }, (_, i) => `k${i}@x.co`);
+    const full = { counts: { call: 20, 'send+publish': 30 } };
+    const late = at(21, 40);
+    // An input not read to its end, before the special contact in it.
+    let deep: unknown = 'x';
+    for (let i = 0; i < 100; i += 1) deep = [deep];
+    expect(check({ to: 'ali@firma.com', deep }, ['send'], { rules: { specialContacts: ['ali@firma.com'] } }).rule).toBe('okunamayan girdi: çok derin ya da çok büyük');
+    // Special contact before bulk.
+    expect(check({ to: [...six, 'ali@firma.com'] }, ['send'], { ...full, rules: { specialContacts: ['ali@firma.com'] } }).rule).toBe('özel kişi: ali@firma.com');
+    // Bulk before the call hours.
+    expect(check({ phones: six }, ['call'], { ...full, now: late })).toEqual({ rule: 'toplu gönderim: 6 alıcı > 5', asked: [] });
+    // The call hours before the day's calls.
+    expect(check({ phone: '0532' }, ['call'], { ...full, now: late })).toEqual({ rule: 'mesai dışı arama (21:40)', asked: [] });
+    // The day's calls before the hour's sends.
+    expect(check({ phone: '0532', to: 'a@x.co' }, ['call', 'send'], full)).toEqual({ rule: 'günlük arama sınırı (20) doldu', asked: [['call', at(0)]] });
+  });
+
+  it('a calendar invitation keeps the special contacts and the bulk threshold, and never reads a counter', () => {
+    const counts = { 'send+publish': 99, call: 99 };
+    expect(check({ attendees: ['IPEK@firma.com'] }, ['calendar'], { counts, rules: { specialContacts: ['ipek@firma.com'] } })).toEqual({ rule: 'özel kişi: ipek@firma.com', asked: [] });
+    const six = Array.from({ length: 6 }, (_, i) => ({ email: `k${i}@x.co` }));
+    expect(check({ event: { attendees: six } }, ['calendar'], { counts })).toEqual({ rule: 'toplu gönderim: 6 alıcı > 5', asked: [] });
+    expect(check({ event: { attendees: six.slice(1) } }, ['calendar'], { counts, now: at(23) })).toEqual({ rule: null, asked: [] });
+  });
+
+  it('callsPerDay 0: the system never calls, not even the day’s first', () => {
+    expect(check({ phone: '0532' }, ['call'], { rules: { callsPerDay: 0 } })).toEqual({ rule: 'günlük arama sınırı (0) doldu', asked: [['call', at(0)]] });
+  });
+
+  it('a call with a call and a send part keeps both counters: the day’s calls from midnight, then the hour’s sends', () => {
+    const both: OutwardPolicyKind[] = ['call', 'send'];
+    expect(check({ phone: '0532', to: 'a@x.co' }, both, { counts: { call: 19, 'send+publish': 29 } })).toEqual({ rule: null, asked: [['call', at(0)], ['send+publish', at(11) - 3_600_000]] });
+    expect(check({ phone: '0532', to: 'a@x.co' }, both, { counts: { call: 19, 'send+publish': 30 } }).rule).toBe('saatlik gönderim sınırı (30) doldu');
+    expect(check({ phone: '0532', to: 'a@x.co' }, both, { now: at(8) }).rule).toBe('mesai dışı arama (08:00)');
+  });
 });
 
 describe('reading a call’s input: linear, complete, never a throw (Task 7 review C1, I2–I5)', () => {
