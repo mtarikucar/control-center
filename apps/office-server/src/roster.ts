@@ -83,6 +83,27 @@ export type EmployeePatch = Partial<
   Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities' | 'departmentId'>
 >;
 
+/** What a new employee must be (the messages are the hire's). */
+function checkNewEmployee(input: NewEmployee) {
+  if (input.provider !== undefined && !(AGENT_PROVIDERS as readonly unknown[]).includes(input.provider)) throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const role = typeof input.role === 'string' ? input.role.trim() : '';
+  if (!name) throw new ValidationError('Ad boş olamaz.');
+  if (name.length > 60) throw new ValidationError('Ad en fazla 60 karakter olabilir.');
+  if (!role) throw new ValidationError('Rol tanımı boş olamaz.');
+  const model = input.model === undefined ? 'sonnet' : input.model;
+  if (!(MODEL_ALIASES as readonly unknown[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}`);
+  const characterId = typeof input.characterId === 'string' && input.characterId.trim() ? input.characterId.trim() : 'coder';
+  const title = typeof input.title === 'string' ? input.title.trim() : '';
+  if (title.length > 80) throw new ValidationError('Unvan en fazla 80 karakter olabilir.');
+  const team = typeof input.team === 'string' ? input.team.trim() : '';
+  if (team.length > 40) throw new ValidationError('Ekip adı en fazla 40 karakter olabilir.');
+  const kind = input.kind ?? 'member';
+  if (!(EMPLOYEE_KINDS as readonly unknown[]).includes(kind)) throw new ValidationError(`Bilinmeyen çalışan türü: ${String(kind)}`);
+  const reportsTo = typeof input.reportsTo === 'string' && input.reportsTo ? input.reportsTo : null;
+  return { name, role, model, characterId, title, team, kind, reportsTo };
+}
+
 export class Roster {
   readonly #db: Db;
   readonly #deskCount: number;
@@ -97,33 +118,18 @@ export class Roster {
     this.#slugTaken = slugTaken;
   }
 
-  create(input: NewEmployee): Employee {
-    if (input.provider !== undefined && !(AGENT_PROVIDERS as readonly unknown[]).includes(input.provider)) throw new ValidationError('Sağlayıcı claude veya codex olmalı.');
-    const name = typeof input.name === 'string' ? input.name.trim() : '';
-    const role = typeof input.role === 'string' ? input.role.trim() : '';
-    if (!name) throw new ValidationError('Ad boş olamaz.');
-    if (name.length > 60) throw new ValidationError('Ad en fazla 60 karakter olabilir.');
-    if (!role) throw new ValidationError('Rol tanımı boş olamaz.');
-    const model = input.model === undefined ? 'sonnet' : input.model;
-    if (!(MODEL_ALIASES as readonly unknown[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}`);
-    const characterId = typeof input.characterId === 'string' && input.characterId.trim() ? input.characterId.trim() : 'coder';
-    const title = typeof input.title === 'string' ? input.title.trim() : '';
-    if (title.length > 80) throw new ValidationError('Unvan en fazla 80 karakter olabilir.');
-    const team = typeof input.team === 'string' ? input.team.trim() : '';
-    if (team.length > 40) throw new ValidationError('Ekip adı en fazla 40 karakter olabilir.');
-    const kind = input.kind ?? 'member';
-    if (!(EMPLOYEE_KINDS as readonly unknown[]).includes(kind)) throw new ValidationError(`Bilinmeyen çalışan türü: ${String(kind)}`);
-    const reportsTo = typeof input.reportsTo === 'string' && input.reportsTo ? input.reportsTo : null;
+  /**
+   * Throws what `create` would throw for this input (a field, or no free desk) and writes nothing: for callers that must
+   * refuse a hire before they do something else for it (Company.hire opens a department only for a hire that will succeed).
+   */
+  validate(input: NewEmployee): void {
+    checkNewEmployee(input);
+    this.#freeDesk();
+  }
 
-    const used = new Set(this.list().map((e) => e.deskIndex));
-    let deskIndex = -1;
-    for (let i = 0; i < this.#deskCount; i += 1) {
-      if (!used.has(i)) {
-        deskIndex = i;
-        break;
-      }
-    }
-    if (deskIndex < 0) throw new ConflictError(`Ofis dolu: ${this.#deskCount} masanın hepsi dolu.`);
+  create(input: NewEmployee): Employee {
+    const { name, role, model, characterId, title, team, kind, reportsTo } = checkNewEmployee(input);
+    const deskIndex = this.#freeDesk();
 
     const employee: Employee = {
       ...(input.provider ? { provider: input.provider } : {}),
@@ -170,6 +176,13 @@ export class Roster {
     }
     this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
     return this.get(employee.id);
+  }
+
+  /** The lowest free desk. */
+  #freeDesk(): number {
+    const used = new Set(this.list().map((e) => e.deskIndex));
+    for (let i = 0; i < this.#deskCount; i += 1) if (!used.has(i)) return i;
+    throw new ConflictError(`Ofis dolu: ${this.#deskCount} masanın hepsi dolu.`);
   }
 
   /** Slugs are unique across archived employees too, because desk folders are never deleted. */

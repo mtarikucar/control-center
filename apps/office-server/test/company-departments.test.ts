@@ -79,6 +79,40 @@ describe('Hiring into departments (spec §5.1, §5.2, §5.5)', () => {
     expect(t.roster.list()).toHaveLength(1);
   });
 
+  it('a hire the roster would refuse opens no department: nothing is written, not even an announcement', () => {
+    const t = make();
+    const events = () => t.events.list({ limit: 1000 }).filter((e) => e.event.type === 'department.changed').length;
+    const other = t.company.hire(t.coordinator.id, { name: 'Ada', role: 'r' });
+    const before = { events: events(), last: t.events.lastSeq(), notices: t.notices.pending(other.id).length };
+    expect(() => t.company.hire(t.coordinator.id, { name: 'X', role: '', team: 'Yeni' })).toThrow(/Rol tanımı boş olamaz/);
+    expect(() => t.company.hire(t.coordinator.id, { name: 'Y'.repeat(61), role: 'r', team: 'Yeni' })).toThrow(/Ad en fazla 60 karakter/);
+    expect(() => t.company.hire(t.coordinator.id, { name: 'Z', role: 'r', team: 'Yeni', model: 'gpt' as never })).toThrow(/Bilinmeyen model/);
+    expect(() => t.company.hire(t.coordinator.id, { name: 'W', role: 'r', team: 'Yeni', title: 'T'.repeat(81) })).toThrow(/Unvan en fazla 80 karakter/);
+    expect(t.departments.list()).toEqual([]);
+    expect({ events: events(), last: t.events.lastSeq(), notices: t.notices.pending(other.id).length }).toEqual(before);
+    // The hire that is valid still opens it.
+    t.company.hire(t.coordinator.id, { name: 'X', role: 'r', team: 'Yeni' });
+    expect(t.departments.list().map((d) => d.name)).toEqual(['Yeni']);
+  });
+
+  it('no free desk is refused before a department is opened too', () => {
+    const t = make(2);
+    t.budget.setConstitution({ maxEmployees: 8 });
+    t.company.hire(t.coordinator.id, { name: 'Ada', role: 'r' });
+    expect(() => t.company.hire(t.coordinator.id, { name: 'Bora', role: 'r', team: 'Yeni' })).toThrow(/Ofis dolu/);
+    expect(t.departments.list()).toEqual([]);
+  });
+
+  it('spec §3 name rule: no one takes the name of the department their own hire opens', () => {
+    const t = make();
+    expect(() => t.company.hire(t.coordinator.id, { name: 'Keşif', role: 'r', team: 'Keşif' })).toThrow(/“Keşif” bir departmanın adı olacak; çalışana başka bir ad ver\./);
+    expect(() => t.company.hire(t.coordinator.id, { name: ' keşif ', role: 'r', team: 'KEŞİF' })).toThrow(/bir departmanın adı olacak/);
+    expect(t.departments.list()).toEqual([]);
+    expect(t.roster.list()).toHaveLength(1);
+    t.company.hire(t.coordinator.id, { name: 'Ada', role: 'r', team: 'Keşif' });
+    expect(t.departments.list().map((d) => d.name)).toEqual(['Keşif']);
+  });
+
   it('review focus 3: nobody is hired under a department’s name', () => {
     const t = make();
     t.departments.create(OWNER, { name: 'Pazarlama', mission: 'm' });
@@ -136,6 +170,23 @@ describe('Letting a head go (review focus 2)', () => {
   });
 });
 
+describe('liveStreams (what a headless department leaves)', () => {
+  it('sees the open streams of an approved plan even when more than a hundred newer plans exist', () => {
+    const s = setup(8);
+    const f = fakeEngine(s);
+    cleanups.push(f.cleanup, s.cleanup);
+    let clock = 1_000;
+    const c = companyFor(s, f, ['coder', 'designer', 'manager'], () => (clock += 1), undefined, { departments: true });
+    const coordinator = c.company.hireCoordinator('sonnet');
+    const draft = { goal: 'g', approach: 'a', people: '', steps: [], quotaPct: null, usd: null, days: null, risks: '', proposedBy: coordinator.id };
+    const old = c.plans.create({ ...draft, title: 'Eski', streams: [{ id: 'web', title: 'Site', owner: coordinator.id, dependsOn: [] }] });
+    c.plans.update(old.id, { status: 'approved' });
+    for (let i = 0; i < 105; i += 1) c.plans.create({ ...draft, title: `Yeni ${i}` });
+    expect(c.plans.list().map((p) => p.title)).not.toContain('Eski');
+    expect(c.company.liveStreams().map((x) => `${x.plan.title}/${x.stream.id}`)).toEqual(['Eski/web']);
+  });
+});
+
 describe('The role card does not rename a department’s team (controller ruling)', () => {
   it('refuses a team that differs from the current one; the same team, or none, is fine', () => {
     const t = make();
@@ -161,5 +212,19 @@ describe('The role card does not rename a department’s team (controller ruling
     const coordinator = c.company.hireCoordinator('sonnet');
     const ada = c.company.hire(coordinator.id, { name: 'Ada', role: 'r' });
     expect(c.company.editRoleCard(coordinator.id, ada.id, { team: 'Keşif' }).team).toBe('Keşif');
+  });
+
+  it('without departments setModel stays the coordinator’s: a team lead gets no say over their team', () => {
+    const s = setup(8);
+    const f = fakeEngine(s);
+    cleanups.push(f.cleanup, s.cleanup);
+    const c = companyFor(s, f);
+    const coordinator = c.company.hireCoordinator('sonnet');
+    const lead = c.company.hire(coordinator.id, { name: 'Lale', role: 'r' });
+    c.company.appointLead(coordinator.id, lead.id, { team: 'Keşif' });
+    const ada = c.company.hire(coordinator.id, { name: 'Ada', role: 'r', team: 'Keşif' });
+    expect(s.roster.get(ada.id).reportsTo).toBe(lead.id);
+    expect(() => c.company.setModel(lead.id, ada.id, 'opus')).toThrow(/Yalnız koordinatör bunu yapabilir/);
+    expect(c.company.setModel(coordinator.id, ada.id, 'opus').model).toBe('opus');
   });
 });

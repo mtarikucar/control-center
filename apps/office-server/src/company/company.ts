@@ -280,7 +280,8 @@ export class Company {
     if (deps) deps.assertFreeName(typeof input.name === 'string' ? input.name : '');
     // The room is checked before a department is resolved: a free-text team may open one, and a refused hire writes nothing.
     this.#assertRoom();
-    const department = deps ? this.#hireDepartment(by, heads, input, template?.team) : null;
+    // What the roster would refuse is refused before a department is opened for the hire (nothing may fail after that).
+    const department = deps ? this.#hireDepartment(by, heads, input, template?.team, () => this.#d.roster.validate({ ...resolved, kind: 'member', characterId })) : null;
     const lead = !deps && resolved.team ? this.#d.roster.list().find((e) => e.kind === 'lead' && e.team === resolved.team?.trim()) : undefined;
     const placement = deps ? { team: department?.name ?? '', departmentId: department?.id ?? null, reportsTo: department?.headId ?? null } : { reportsTo: lead?.id ?? input.reportsTo ?? null };
     const hired = this.#d.hire({ ...resolved, ...placement, kind: 'member', characterId, ...(o.deny?.length ? { deskDeny: o.deny } : {}) });
@@ -292,7 +293,7 @@ export class Company {
   }
 
   /** Where a hire goes (spec §5.5): a head's own department; the one given; a free-text team's (opened if need be); a template's team only if open. */
-  #hireDepartment(by: string, heads: Department | null, input: HireInput, templateTeam: string | undefined): Department | null {
+  #hireDepartment(by: string, heads: Department | null, input: HireInput, templateTeam: string | undefined, validate: () => void): Department | null {
     const deps = this.#d.departments!;
     if (heads) {
       if (input.head) throw new ForbiddenError('Başkan atamak koordinatörün işi; sen kendi departmanına üye alırsın.');
@@ -301,7 +302,15 @@ export class Company {
       return heads;
     }
     if (input.departmentId) return deps.open(input.departmentId);
-    if (input.team?.trim()) return deps.forTeam(by, input.team, { create: true });
+    if (input.team?.trim()) {
+      const found = deps.forTeam(by, input.team, { create: false });
+      if (found) return found;
+      // A department is about to open for this hire: the hire must be a valid one, and its person not named like it (spec §3).
+      const team = input.team.trim();
+      if (typeof input.name === 'string' && fold(input.name.trim()) === fold(team)) throw new ValidationError(`“${team}” bir departmanın adı olacak; çalışana başka bir ad ver.`);
+      validate();
+      return deps.forTeam(by, input.team, { create: true });
+    }
     const joined = templateTeam ? deps.forTeam(by, templateTeam, { create: false }) : null;
     if (!joined && input.head) throw new ValidationError('Başkan olarak almak için departmanı ver (departmentId ya da team).');
     return joined;
@@ -367,7 +376,10 @@ export class Company {
   }
   /** The coordinator (or the owner) moves someone to another model; their session goes on with it, memory kept. */
   setModel(by: string, id: string, model: ModelAlias): Employee {
-    if (by !== OWNER) this.#assertManages(by, id);
+    if (by !== OWNER) {
+      if (this.#d.departments) this.#assertManages(by, id);
+      else this.#assertCoordinator(by);
+    }
     if (!(MODEL_ALIASES as readonly string[]).includes(model)) throw new ValidationError(`Bilinmeyen model: ${String(model)}. Seçenekler: ${MODEL_ALIASES.join(', ')}.`);
     const current = this.#d.roster.get(id);
     if (current.lifecycle === 'archived') throw new ConflictError(`${current.name} işten çıkarıldı.`);
@@ -1779,7 +1791,7 @@ export class Company {
 
   /** Every not-done stream of a running plan, with its plan (the departments: what a headless one leaves). */
   liveStreams(): Array<{ plan: Plan; stream: PlanStreamView }> {
-    const live = this.#d.plans.list().filter((p) => p.status === 'approved');
+    const live = this.#d.plans.list(1000).filter((p) => p.status === 'approved');
     const views = this.streamsOf(live);
     return live.flatMap((plan) => (views.get(plan.id) ?? []).filter((s) => s.status !== 'done').map((stream) => ({ plan, stream })));
   }
