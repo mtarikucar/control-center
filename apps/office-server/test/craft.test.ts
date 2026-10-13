@@ -218,9 +218,12 @@ describe('the coordination craft (ships with the office)', () => {
     const known = new Set([...coordinator.map((t) => t.name), ...all.flatMap((t) => [...fieldsOf(t.inputSchema)])]);
     // Claude's own scheduler, named only to say it is closed here.
     const closed = new Set(['CronCreate']);
+    // The guides name the departments' tools before the task that adds them; they leave this list the moment the tools exist.
+    const ahead = new Set(['departmentsRead', 'departmentTemplates', 'departmentCreate', 'departmentUpdate', 'departmentMove', 'departmentClose', 'streamPlan', 'streamReport']);
     const named = [...officeGuide('coordinator').matchAll(/`([A-Za-z][A-Za-z0-9]*)`/g)].map((m) => m[1]!);
     expect(named.length).toBeGreaterThan(30);
-    expect([...new Set(named)].filter((n) => !known.has(n) && !closed.has(n))).toEqual([]);
+    expect([...ahead].filter((n) => known.has(n))).toEqual([]);
+    expect([...new Set(named)].filter((n) => !known.has(n) && !closed.has(n) && !ahead.has(n))).toEqual([]);
     for (const tool of ['cycleClose', 'planPropose', 'planRevise', 'taskCreate', 'agendaRead', 'reportToOwner', 'restUntil']) expect(named).toContain(tool);
     expect(named).toContain('streams');
     expect(named).toContain('streamId');

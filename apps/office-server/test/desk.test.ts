@@ -44,6 +44,7 @@ describe('role card', () => {
     expect(guide()).toContain('taskPass');
     expect(guide()).toContain('memorySearch');
     expect(guide()).toContain('noteWrite');
+    expect(guide()).toContain('departmentsRead');
     expect(guide()).not.toContain('planPropose');
     prepareDesk(dataDir, person({ kind: 'coordinator', title: 'Koordinatör' }));
     expect(guide()).toContain('planPropose');
@@ -64,8 +65,14 @@ describe('office guide — final review (phase 4)', () => {
     expect(guide).not.toContain('İşe alamazsın');
     expect(guide).not.toContain('escalate ile koordinatöre');
     expect(guide).toContain('escalate ile sahibine');
+    expect(guide).toContain('departmentCreate');
+    expect(guide).toContain('departman: <ad>');
+    expect(guide).not.toContain('4–5 kişiyi geçince');
     const lead = readFileSync(join(prepareDesk(dataDir, person({ id: 'e2', slug: 'can', name: 'Can', kind: 'lead' })), GUIDE_FILE), 'utf8');
-    expect(lead).toContain('İşe alamazsın');
+    expect(lead).toContain('Departman başkanısın');
+    expect(lead).toContain('streamPlan');
+    expect(lead).toContain('kendi departmanına işe alırsın');
+    expect(lead).not.toContain('İşe alamazsın');
   });
 });
 
