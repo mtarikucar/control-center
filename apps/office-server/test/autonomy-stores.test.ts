@@ -96,3 +96,18 @@ describe('OutboxStore (spec capabilities §7)', () => {
     expect(outbox.countSystem({ departmentId: '', employeeId: 'e1', kinds: ['send'], since: 0 })).toBe(2);
   });
 });
+
+describe('OutboxStore.together (hardening round 2)', () => {
+  it('when SQLite has already ended the transaction itself, the error that made it surfaces, not the rollback’s', () => {
+    const d = db();
+    const store = new OutboxStore(d);
+    expect(() =>
+      store.together(() => {
+        d.exec('ROLLBACK');
+        throw new Error('asıl hata');
+      }),
+    ).toThrow('asıl hata');
+    expect(d.isTransaction).toBe(false);
+    expect(store.together(() => 7)).toBe(7);
+  });
+});

@@ -133,75 +133,114 @@ const hasHandle = (text: string, handle: string) =>
 /** A name with spaces as whole words: "ahmet yilmaz" is not in "ahmet yilmazoglu" (text and name whitespace-collapsed). */
 const hasPhrase = (text: string, phrase: string) => standsAlone(text, phrase, (b, a) => !wordChar(text[b]) && !wordChar(text[a]));
 
-/** Between a phone's digit groups: spaces (never a newline), brackets, dots and dashes — as "+90 (532) 111-22.33" writes it. */
-const PHONE_GAP = /[\p{Zs}\t().-]/u;
+/** Between a phone's digit groups: spaces (\p{Zs}, never a newline), a tab, brackets, dots and dashes — "+90 (532) 111-22.33". */
+const phoneGap = (c: number) =>
+  c === 32 || c === 9 || c === 40 || c === 41 || c === 46 || c === 45 || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a) || c === 0x202f || c === 0x205f || c === 0x3000;
 
 /**
- * What a special phone is compared with (review I3), each line's runs of digit groups read once: for every group a
- * run ends with, the last ten digits up to it (a number with a country code or a leading 0, and one followed by
- * another number on the line, "… 22 33 2 kez", "… 22 33 14:30"), and every sequence of whole groups of 7 to 9 digits
- * (a number without its area code). A newline or any other text ends a run, so two numbers are never merged.
+ * A phone contact's key: its last ten digits as a number when it has ten (a country code or a leading 0 apart), else
+ * its 7–9 digits tagged with their count (a leading 0 counts). Ten-digit keys are below 1e10, tagged ones from 7e10.
  */
-function phoneKeys(texts: readonly string[]): Set<string> {
-  const keys = new Set<string>();
+const phoneKey = (digits: string) => (digits.length >= 10 ? Number(digits.slice(-10)) : digits.length * 1e10 + Number(digits));
+
+/**
+ * The first phone contact (its index in the owner's list) the texts have, or -1 (review I3, hardening round 2). Each
+ * line's runs of digit groups are read once, against the contacts' keys: at every group a run ends with, the last ten
+ * digits up to it ("… 22 33 2 kez", "… 22 33 14:30"), and every sequence of whole groups of 7 to 9 digits (a number
+ * without its area code). A newline or any other text ends a run, so two numbers are never merged. The candidates are
+ * numbers kept as the digits come — nothing is copied out — and the scan stops at the first contact found.
+ */
+function findPhone(texts: readonly string[], wanted: ReadonlyMap<number, number>): number {
+  // Whole-group windows still under ten digits, oldest first: at most nine, and the one a new group opens.
+  const values = new Float64Array(16);
+  const lengths = new Uint8Array(16);
   for (const text of texts) {
-    let digits = '';
-    const starts: number[] = [];
-    const end = () => {
-      for (const [g, start] of starts.entries()) {
-        const stop = g + 1 < starts.length ? starts[g + 1]! : digits.length;
-        // The group's end: its last ten when ten are there.
-        if (stop >= 10) keys.add(digits.slice(stop - 10, stop));
-        // Whole groups from this one on, while they are short of ten digits.
-        for (let h = g; h < starts.length; h += 1) {
-          const to = h + 1 < starts.length ? starts[h + 1]! : digits.length;
-          if (to - start > 9) break;
-          if (to - start >= 7) keys.add(digits.slice(start, to));
+    let last = 0;
+    let run = 0;
+    let open = 0;
+    let inGroup = false;
+    const groupEnds = (): number => {
+      if (run >= 10) {
+        const hit = wanted.get(last);
+        if (hit !== undefined) return hit;
+      }
+      for (let w = 0; w < open; w += 1) {
+        if (lengths[w]! < 7) continue;
+        const hit = wanted.get(lengths[w]! * 1e10 + values[w]!);
+        if (hit !== undefined) return hit;
+      }
+      return -1;
+    };
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c >= 48 && c <= 57) {
+        if (!inGroup) {
+          inGroup = true;
+          values[open] = 0;
+          lengths[open] = 0;
+          open += 1;
+        }
+        const d = c - 48;
+        last = (last * 10 + d) % 1e10;
+        run += 1;
+        let kept = 0;
+        for (let w = 0; w < open; w += 1) {
+          if (lengths[w]! >= 9) continue;
+          values[kept] = values[w]! * 10 + d;
+          lengths[kept] = lengths[w]! + 1;
+          kept += 1;
+        }
+        open = kept;
+      } else {
+        if (inGroup) {
+          inGroup = false;
+          const hit = groupEnds();
+          if (hit !== -1) return hit;
+        }
+        if (!phoneGap(c)) {
+          last = 0;
+          run = 0;
+          open = 0;
         }
       }
-      digits = '';
-      starts.length = 0;
-    };
-    for (let i = 0; i < text.length; ) {
-      const c = text[i]!;
-      if (c >= '0' && c <= '9') {
-        starts.push(digits.length);
-        while (i < text.length && text[i]! >= '0' && text[i]! <= '9') digits += text[i++];
-      } else {
-        if (!PHONE_GAP.test(c)) end();
-        i += 1;
-      }
     }
-    end();
+    if (inGroup) {
+      const hit = groupEnds();
+      if (hit !== -1) return hit;
+    }
   }
-  return keys;
+  return -1;
 }
 
-/** One person's number when the digits agree, or their last ten do (a country code or a leading 0 apart). */
-const phoneIn = (keys: Set<string>, phone: string) => keys.has(phone.length >= 10 ? phone.slice(-10) : phone);
-
 /**
- * The first special contact (as the owner wrote it) found anywhere in the call's input, each string on its own; null
- * when none is. Each string is folded once, and its phone groups read once, only when a contact of that kind is asked.
+ * A special contact (as the owner wrote it) found anywhere in the call's input, each string on its own; null when none
+ * is. The owner's list is tried in its order; at its first phone every phone is looked for at once, and the one the
+ * text has first is the answer. Each string is folded once, and the phones scanned once, only when a contact of that
+ * kind is asked.
  */
 export function specialContact(input: unknown, contacts: readonly string[]): string | null {
   if (contacts.length === 0) return null;
   const all = read(input).leaves.map((l) => l.text);
   let folded: string[] | null = null;
-  let phones: Set<string> | null = null;
-  for (const raw of contacts) {
-    const key = contactKey(raw);
+  let phone: number | null = null;
+  const keys = contacts.map(contactKey);
+  for (const [i, key] of keys.entries()) {
     if (!key) continue;
-    let hit: boolean;
-    if (key.kind === 'phone') hit = phoneIn((phones ??= phoneKeys(all)), key.value);
-    else {
-      folded ??= all.map((t) => fold(t).replace(/\s+/g, ' '));
-      // A name's trailing punctuation is not searched for: "ACME Ltd." is also "acme ltd".
-      const phrase = key.kind === 'handle' && key.value.includes(' ') ? key.value.replace(/[^\p{L}\p{N}]+$/u, '') : '';
-      const value = key.value;
-      hit = key.kind === 'email' ? folded.some((t) => hasEmail(t, value)) : phrase ? folded.some((t) => hasPhrase(t, phrase)) : folded.some((t) => hasHandle(t, value));
+    if (key.kind === 'phone') {
+      if (phone === null) {
+        const wanted = new Map<number, number>();
+        for (const [j, k] of keys.entries()) if (k?.kind === 'phone' && !wanted.has(phoneKey(k.value))) wanted.set(phoneKey(k.value), j);
+        phone = findPhone(all, wanted);
+      }
+      if (phone !== -1) return contacts[phone]!.trim();
+      continue;
     }
-    if (hit) return raw.trim();
+    folded ??= all.map((t) => fold(t).replace(/\s+/g, ' '));
+    // A name's trailing punctuation is not searched for: "ACME Ltd." is also "acme ltd".
+    const phrase = key.kind === 'handle' && key.value.includes(' ') ? key.value.replace(/[^\p{L}\p{N}]+$/u, '') : '';
+    const value = key.value;
+    const hit = key.kind === 'email' ? folded.some((t) => hasEmail(t, value)) : phrase ? folded.some((t) => hasPhrase(t, phrase)) : folded.some((t) => hasHandle(t, value));
+    if (hit) return contacts[i]!.trim();
   }
   return null;
 }

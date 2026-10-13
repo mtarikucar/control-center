@@ -105,21 +105,24 @@ const projectKey = (dir: string) => dir.replace(/[^A-Za-z0-9]/g, '-');
  * trusted project's .codex/config.toml (its servers, and the trust, approvals and sandbox too). A server written there
  * under a classified connector's name would be taken for that connector, and its sends for the system's.
  */
-function mcpConfigWhy(p: string, home: string): string | null {
+function mcpConfigWhy(p: string, home: string, mcpJson = true): string | null {
   const name = posix.basename(p).toLowerCase();
-  if (name === '.mcp.json') return 'MCP sunucu ayarları (.mcp.json)';
+  if (name === '.mcp.json' && mcpJson) return 'MCP sunucu ayarları (.mcp.json)';
   if (name === '.claude.json' && posix.dirname(p) === home) return 'sahibinin Claude ayarları (~/.claude.json: MCP sunucuları)';
   if (name === 'config.toml' && posix.basename(posix.dirname(p)).toLowerCase() === '.codex') return 'Codex ayarları (.codex/config.toml: MCP sunucuları, onaylar)';
   return null;
 }
 
-/** Why writing at `path` is held (§3.1), or null; `recursive`: also when it holds a protected folder (rm -r, mv). */
-export function protectedWhy(path: string, ctx: GateContext, recursive = false): string | null {
+/**
+ * Why writing at `path` is held (§3.1), or null; `recursive`: also when it holds a protected folder (rm -r, mv);
+ * `mcpJson` false: a .mcp.json there counts for nothing (one moved or linked away loads nothing; hardening round 2).
+ */
+export function protectedWhy(path: string, ctx: GateContext, recursive = false, mcpJson = true): string | null {
   const p = ctx.realpath(path);
   const { home } = ctx;
   if (under(p, `${home}/.ssh`) || under(p, `${home}/.config/gh`)) return 'kimlik dosyaları';
   // By its name wherever it is — the path as written too: a .mcp.json that is a link to elsewhere is still one.
-  const mcp = mcpConfigWhy(p, home) ?? mcpConfigWhy(path, home);
+  const mcp = mcpConfigWhy(p, home, mcpJson) ?? mcpConfigWhy(path, home, mcpJson);
   if (mcp) return mcp;
   if (under(p, `${home}/.claude`)) return under(p, `${home}/.claude/projects/${projectKey(ctx.deskDir)}`) ? null : 'sahibinin Claude ayarları';
   if (under(p, ctx.repoRoot)) return 'canlı checkout (kapının ve ofisin kodu)';
@@ -623,14 +626,14 @@ function spawnedCommands(code: string): string[] {
   return out;
 }
 
-/** A file the command writes: held when its resolved target is protected, or when it cannot be known. */
-function writeTarget(run: Run, verb: string, w: ShellWord, st: ShellState, recursive = false): void {
+/** A file the command writes: held when its resolved target is protected, or when it cannot be known (`mcpJson`: protectedWhy's). */
+function writeTarget(run: Run, verb: string, w: ShellWord, st: ShellState, recursive = false, mcpJson = true): void {
   const at = pathOf(w, st, run.ctx);
   if (!at) {
     add(run, { kind: 'self', target: `${verb} ${shown(textOf(w, st, run.ctx))}`, why: 'yazdığı yer çalışınca belli olur (temkinli: kapıda)' });
     return;
   }
-  const why = protectedWhy(at.path, run.ctx, recursive || at.partial);
+  const why = protectedWhy(at.path, run.ctx, recursive || at.partial, mcpJson);
   if (why) add(run, { kind: 'self', target: `${verb} ${at.path}`, why: `korunan yola yazar: ${why}` });
 }
 
@@ -1339,23 +1342,29 @@ function fileWrites(name: string, words: ShellWord[], env: Map<string, string | 
       if (name === 'ln' && t.slice(1).some((a) => a === '--symbolic' || /^-[a-zA-Z]*s/.test(a))) {
         for (const w of dir ? ops : ops.slice(0, -1)) {
           const at = pathOf(w, st, ctx);
-          const why = at && !at.partial ? protectedWhy(at.path, ctx, true) : null;
+          // A link to a .mcp.json is no way into a protected folder: a write through it is checked where it lands.
+          const why = at && !at.partial ? protectedWhy(at.path, ctx, true, false) : null;
           if (why) add(run, { kind: 'self', target: `ln -s ${at!.path}`, why: `korunan bir yola bağ kurar: ${why}` });
         }
       }
       if (dest) writeTarget(run, name, dest, st, name === 'mv');
-      // Into a folder a source keeps its name: `cp x/.mcp.json desk/` writes desk/.mcp.json (connector identity).
+      const sources = dir ? ops : ops.slice(0, -1);
+      // Into a folder a source keeps its name: `cp x/.mcp.json desk/` writes desk/.mcp.json (connector identity) — when
+      // the destination is known to be a folder: -t, several sources, a trailing /, .., where the shell stands (.), or
+      // the desk or a folder above it (~ among them); `cp .mcp.json /tmp/yedek.json` is a copy under another name.
       const into = dest ? pathOf(dest, st, ctx) : null;
-      if (into && !into.partial) {
-        for (const w of dir ? ops : ops.slice(0, -1)) {
+      const destText = dest ? textOf(dest, st, ctx) : '';
+      const folder = into !== null && !into.partial && (dir !== null || sources.length > 1 || destText.endsWith('/') || destText === '..' || into.path === st.cwd || under(ctx.deskDir, into.path));
+      if (folder) {
+        for (const w of sources) {
           const from = pathOf(w, st, ctx);
           const path = from && !from.partial ? posix.join(into.path, posix.basename(from.path)) : null;
           const why = path ? protectedWhy(path, ctx) : null;
           if (why) add(run, { kind: 'self', target: `${name} ${path}`, why: `korunan yola yazar: ${why}` });
         }
       }
-      // A move takes its sources away from where they were.
-      if (name === 'mv') for (const w of dir ? ops : ops.slice(0, -1)) writeTarget(run, 'mv', w, st, true);
+      // A move takes its sources away from where they were (a .mcp.json moved away loads nothing).
+      if (name === 'mv') for (const w of sources) writeTarget(run, 'mv', w, st, true, false);
       return;
     }
     case 'awk':

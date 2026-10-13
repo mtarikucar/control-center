@@ -54,8 +54,12 @@ export class OutboxStore {
       this.#db.exec('RELEASE outbox_line');
       return out;
     } catch (err) {
-      this.#db.exec('ROLLBACK TO outbox_line');
-      this.#db.exec('RELEASE outbox_line');
+      // SQLite may have ended the transaction itself (a full disk, an I/O error, a ROLLBACK): then there is no savepoint
+      // to go back to, and the error to surface is the one that ended it.
+      if (this.#db.isTransaction) {
+        this.#db.exec('ROLLBACK TO outbox_line');
+        this.#db.exec('RELEASE outbox_line');
+      }
       throw err;
     }
   }

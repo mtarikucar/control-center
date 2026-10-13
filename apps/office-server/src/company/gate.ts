@@ -144,7 +144,7 @@ export class Gate {
       if (rule) return rule;
       // Counted and written with no await between (Task 8 review M5): two calls at once never both take the last place.
       // The line and its event are one write (M1).
-      a.outbox.together(() => {
+      this.#together(() => {
         const line = this.#line(employee, tool, input, parts, 'system', []);
         if (line) this.#d.events.append(employee.id, { type: 'outbox.sent', entry: line });
       });
@@ -155,11 +155,13 @@ export class Gate {
     }
   }
 
-  /** The writes that go together (the outbox's savepoint); without an outbox there is no line to keep them with. */
+  /**
+   * The writes that go together (the outbox's savepoint; without an outbox there is no line to keep them with), their
+   * events heard only once they are kept (hardening round 2).
+   */
   #together(work: () => void): void {
     const outbox = this.#d.autonomy?.outbox;
-    if (outbox) outbox.together(work);
-    else work();
+    this.#d.events.batch(() => (outbox ? outbox.together(work) : work()));
   }
 
   /**

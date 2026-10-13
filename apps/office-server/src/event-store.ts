@@ -18,6 +18,8 @@ export class EventStore {
   readonly #db: Db;
   readonly #now: () => number;
   readonly #listeners = new Set<EventListener>();
+  /** Inside batch: the events written and not yet heard. */
+  #held: StoredEvent[] | null = null;
 
   constructor(db: Db, now: () => number = Date.now) {
     this.#db = db;
@@ -30,6 +32,33 @@ export class EventStore {
       .prepare('INSERT INTO events (employee_id, ts, type, payload) VALUES (?, ?, ?, ?)')
       .run(employeeId, ts, event.type, JSON.stringify(event));
     const stored: StoredEvent = { seq: Number(result.lastInsertRowid), employeeId, ts, event };
+    if (this.#held) this.#held.push(stored);
+    else this.#emit(stored);
+    return stored;
+  }
+
+  /**
+   * `work`'s events are written as it goes and heard only once it returns (hardening round 2): the gate's outbox line,
+   * the approval it used and the allow go into one savepoint, and one rolled back must never reach the listeners — the
+   * socket feed would show it, and the next event takes its seq. A batch that throws is never heard; one inside
+   * another is heard with the outermost.
+   */
+  batch<T>(work: () => T): T {
+    const outer = this.#held;
+    const held: StoredEvent[] = [];
+    this.#held = held;
+    let out: T;
+    try {
+      out = work();
+    } finally {
+      this.#held = outer;
+    }
+    if (outer) outer.push(...held);
+    else for (const e of held) this.#emit(e);
+    return out;
+  }
+
+  #emit(stored: StoredEvent): void {
     for (const listener of this.#listeners) {
       try {
         listener(stored);
@@ -37,7 +66,6 @@ export class EventStore {
         console.error('olay dinleyicisi hata verdi', err);
       }
     }
-    return stored;
   }
 
   list(opts: { after?: number; employeeId?: string; limit?: number; tail?: boolean } = {}): StoredEvent[] {

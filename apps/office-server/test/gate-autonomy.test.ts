@@ -219,8 +219,11 @@ describe('the gate’s writes (Task 8 review M1, M2, M4, M5)', () => {
     });
     await expect(t.mail(selin, six)).rejects.toThrow('olay yazılamadı');
     expect([t.outbox.list(), t.approvals.get(a.id).status, t.ev('gate.checked').length]).toEqual([[], 'approved', 1]);
+    // The approval's use was written before the failure and went back with it: it was never heard (hardening round 2).
+    expect(heard).toEqual([]);
     events.mockRestore();
     expect(await t.mail(selin, six)).toMatchObject({ decision: 'allow', approvalId: a.id });
+    expect(heard).toEqual(['approval.changed', 'gate.checked', 'outbox.sent']);
     expect(t.outbox.list()).toEqual([expect.objectContaining({ via: 'owner', approvalId: a.id })]);
     expect(t.ev('gate.checked').map((e) => (e.event as { decision: string }).decision)).toEqual(['deny', 'allow']);
   });

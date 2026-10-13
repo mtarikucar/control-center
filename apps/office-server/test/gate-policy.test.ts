@@ -181,6 +181,21 @@ describe('gate policy — connector identity: what defines a session’s MCP ser
     ['rm -rf ~/.codex', 'self'],
     [`python3 -c "open('.mcp.json', 'w').write('{}')"`, 'self'],
     // Reading them, and files that only look alike, are free.
+    // A .mcp.json copied, linked or moved is held only where it lands as one: into a folder it is known to keep its
+    // name in (-t, several sources, a trailing /, ., .., ~, the desk or where the shell stands); elsewhere it is a copy.
+    ['cp /tmp/x/.mcp.json ~/.control-center/desks/mert', 'self'],
+    ['cp /tmp/x/.mcp.json ~', 'self'],
+    ['cp -t . /tmp/x/.mcp.json', 'self'],
+    ['cp -t /tmp/y /tmp/x/.mcp.json', 'self'],
+    ['cp /tmp/a.json /tmp/x/.mcp.json /tmp/y', 'self'],
+    ['cp /tmp/x/.mcp.json /tmp/y/', 'self'],
+    ['cp /tmp/x/.mcp.json ..', 'self', '/tmp/a/b'],
+    ['cp /tmp/x/.mcp.json .', 'self', '/tmp/a'],
+    ['mv ~/Projects/control-center/.mcp.json /tmp/m.json', 'self'],
+    ['cp .mcp.json .mcp.json.bak && cp .mcp.json /tmp/backup.json', 'pass'],
+    ['mv .mcp.json /tmp/old.json', 'pass'],
+    ['ln -s .mcp.json /tmp/m.json', 'pass'],
+    ['cp /tmp/x/.mcp.json /tmp/y', 'pass'],
     ['cat .mcp.json ~/.claude.json ~/.codex/config.toml', 'pass'],
     ['cp /tmp/m.json mcp.json && cp /tmp/c.toml config.toml', 'pass'],
     ['cp ~/.codex/generated_images/a.png .', 'pass'],

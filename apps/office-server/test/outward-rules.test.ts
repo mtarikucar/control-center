@@ -156,6 +156,22 @@ describe('reading a call’s input: linear, complete, never a throw (Task 7 revi
     }
   });
 
+  it('hardening round 2: phones are scanned once against the contacts’ own numbers and stop at the first found — a megabyte of spaced digits in well under 300 ms', () => {
+    const contacts = Array.from({ length: 100 }, (_, i) => `+90 532 ${String(i).padStart(3, '0')} 22 33`);
+    const body = '1 '.repeat(500_000);
+    const started = performance.now();
+    expect(specialContact({ body }, [...contacts, '111 22 33'])).toBeNull();
+    // Measured at a few tens of milliseconds; 300 leaves room for a loaded machine, not for a per-candidate copy.
+    expect(performance.now() - started).toBeLessThan(300);
+    // The one found, wherever it is in the owner's list; an e-mail before the phones is still tried first.
+    expect(specialContact({ body: `${body}Ara: 0532 042 22 33` }, contacts)).toBe('+90 532 042 22 33');
+    expect(specialContact({ to: 'ali@firma.com', phone: '05320422233' }, ['ali@firma.com', ...contacts])).toBe('ali@firma.com');
+    // One number written twice in the owner's list: as it was first written.
+    expect(specialContact({ phone: '05321112233' }, ['0532 111 22 33', '+90 532 111 22 33'])).toBe('0532 111 22 33');
+    // Of two phones, the one the text has first.
+    expect(specialContact({ text: '0532 111 22 33 ve 0532 000 00 00' }, ['+90 532 000 00 00', '+90 532 111 22 33'])).toBe('+90 532 111 22 33');
+  });
+
   it('I2: an e-mail is found beside any punctuation, in a link or a query, with its own apostrophe; not inside a longer address', () => {
     const contacts = ['Ali@Firma.com', "o'brien@x.com"];
     const found = ['ali@firma.com!', 'ali@firma.com?', '[ali@firma.com]', '**ali@firma.com**', '“ali@firma.com”', 'ali@firma.com/', 'mailto:ali@firma.com?subject=x', '?to=ali@firma.com&subject=x', 'Yazın: ALI@firma.com.'];
