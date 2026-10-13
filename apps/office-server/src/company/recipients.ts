@@ -268,17 +268,27 @@ export function specialContact(input: unknown, contacts: readonly string[]): str
 const SECRET = /token|secret|password|passwd|api[_-]?key|authorization|cookie|credential|private[_-]?key/i;
 
 /**
- * The call's input as the outbox keeps it: JSON without secret-looking fields, its first `max` characters (code
- * points). Below 64 levels a value is "…": a deep input would overflow the stack (review I5).
+ * Secrets written in a text rather than under a field — a shell line's (final review minor 3): a credential header's
+ * value (to its quote or line's end), a user option's value, a URL's user info. Each pattern is linear in the text.
+ */
+const SECRET_HEADER = /\b((?:proxy-)?authorization|cookie|set-cookie)(\s*:\s*)[^'"\r\n]*/gi;
+const USER_OPTION = /(^|\s)(--(?:proxy-)?user(?![\w-])|-u)(=|\s+)?("[^"]*"|'[^']*'|[^\s'"]+)/g;
+const URL_USER = /\/\/[^\s/?#@'"]+@/g;
+const masked = (text: string) => text.replace(SECRET_HEADER, '$1$2***').replace(USER_OPTION, '$1$2$3***').replace(URL_USER, '//***@');
+
+/**
+ * The call's input as the outbox keeps it: JSON without secret-looking fields and with its texts' secrets masked,
+ * its first `max` characters (code points). Below 64 levels a value is "…": a deep input would overflow the stack
+ * (review I5).
  */
 export function callSummary(input: unknown, max = OUTBOX_SUMMARY_CHARS): string {
   const strip = (v: unknown, depth: number): unknown => {
     if (v && typeof v === 'object' && depth >= MAX_DEPTH) return '…';
     if (Array.isArray(v)) return v.map((x) => strip(x, depth + 1));
     if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => !SECRET.test(k)).map(([k, x]) => [k, strip(x, depth + 1)]));
-    return v;
+    return typeof v === 'string' ? masked(v) : v;
   };
-  const text = typeof input === 'string' ? input : (JSON.stringify(strip(input, 0)) ?? '');
+  const text = typeof input === 'string' ? masked(input) : (JSON.stringify(strip(input, 0)) ?? '');
   // A code point is at most two code units: the first 2·max hold the first max whole, without spreading a long input.
   return Array.from(text.slice(0, 2 * max)).slice(0, max).join('');
 }

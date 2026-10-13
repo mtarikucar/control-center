@@ -56,6 +56,19 @@ describe('a call’s recipients and special contacts (spec capabilities §6)', (
   });
 });
 
+describe('the outbox’s summary keeps no secret in its text (final review minor 3)', () => {
+  it('a shell line’s Authorization and Cookie header values, its user and password, a URL’s user info are masked — the rest stays', () => {
+    const command = `curl -X POST -H 'Authorization: Bearer sk-abc.def' -H "Cookie: sid=1; t=2" -u ali:parola https://ali:gizli@api.x.io/send -d to=a@x.co`;
+    expect(callSummary({ command })).toBe(`{"command":"curl -X POST -H 'Authorization: ***' -H \\"Cookie: ***\\" -u *** https://***@api.x.io/send -d to=a@x.co"}`);
+    expect(callSummary({ command: 'curl --user=ali:parola --proxy-user "p:q" -uveli:x --header=proxy-authorization:Basic\\ eA== https://x.io' })).toBe(
+      '{"command":"curl --user=*** --proxy-user *** -u*** --header=proxy-authorization:***"}',
+    );
+    // A user agent is no user; a URL without user info keeps its host.
+    expect(callSummary({ command: 'curl --user-agent bot https://api.x.io/a?b=c' })).toBe('{"command":"curl --user-agent bot https://api.x.io/a?b=c"}');
+    expect(callSummary('wget ftp://u:p@files.x.io/a')).toBe('wget ftp://***@files.x.io/a');
+  });
+});
+
 describe('the rules the system keeps (spec capabilities §6)', () => {
   const at = (h: number, m = 0) => new Date(2026, 9, 13, h, m).getTime();
   const check = (input: unknown, kinds: OutwardPolicyKind[], o: { now?: number; counts?: Record<string, number>; rules?: Partial<typeof DEFAULT_CONSTITUTION> } = {}) => {
