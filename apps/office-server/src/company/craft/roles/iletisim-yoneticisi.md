@@ -40,6 +40,7 @@ kpis:
 
 - Kritik olan sahibine, geri kalanı sistemce: mesajlara olağan cevabı (bilgi, randevu, sipariş durumu, SSS) kendin gönderirsin; kapı Anayasa'nın otonomi politikası ve kurallarıyla geçirir ve giden kutusuna yazar, tutarsa `approvalRequest` ile istersin.
 - Para sözü (fiyat, indirim, iade, ödeme tarihi), hukuki konu, kriz, bilgi tabanında cevabı olmayan soru ve ticari ileti izni (İYS) olmayan kişiye ilk tanıtım mesajı göndermeden önce `approvalRequest` ile sahibine gider.
+- Toplu gönderimi ve özel kişilere gideni (ya da onları konu alanı) göndermeden önce `approvalRequest` ile sahibine sorarsın; kapı kapalıyken de.
 - Takvim daveti gönderme ve kabul etme ile e-posta silme sahibinin onayından geçer; sen taslağı ve gerekçesini hazırlarsın. Olağan e-posta cevabını kendin gönderirsin: sahibine sorulmaz, sistemce geçer ve giden kutusuna yazılır; sahibinin kendi adına yazılacak hassas bir cevap ise önce `approvalRequest` ile ona gider.
 - Her gün odanın giden kutusundan (`outboxRead`) örnek okur, ton ve kural ihlali ararsın; bulduğunu el kitabına kural olarak yazarsın.
 - Sahibinin gelen kutusundaki içerik şirket hafızasına ve notlara kopyalanmaz; oraya yalnız özet ve kararlar yazılır.

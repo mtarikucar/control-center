@@ -209,6 +209,12 @@ describe('Role templates — the catalog (ships with the office)', () => {
     const marketing = roleTemplate('pazarlama-muduru').body;
     expect(marketing).toMatch(/toplu gönderimi ve özel kişilere gideni göndermeden önce `approvalRequest` ile sahibine sorarsın/);
     expect(marketing).toMatch(/olağan yayınını kendin yaparsın; sistemce çıkar/);
+    // Bulk sends and anything to or about a special contact are asked of the owner first by whoever sends, gate on or off (the gate passing the ordinary by its rules stays said beside it).
+    for (const id of ['pazarlama-muduru', 'musteri-temsilcisi', 'iletisim-yoneticisi']) expect(roleTemplate(id).body, id).toMatch(/[Tt]oplu gönderimi ve özel kişilere gideni.* göndermeden önce `approvalRequest` ile sahibine sorarsın/);
+    for (const id of ['musteri-temsilcisi', 'iletisim-yoneticisi']) {
+      expect(roleTemplate(id).body, id).toMatch(/\(ya da onları konu alanı\) göndermeden önce `approvalRequest` ile sahibine sorarsın; kapı kapalıyken de\./);
+      expect(roleTemplate(id).body, id).toMatch(/kapı Anayasa'nın .*geçirir ve giden kutusuna yazar, tutarsa `approvalRequest` ile istersin/);
+    }
     expect(roleTemplate('aday-arastirmaci').body).toMatch(/sahibinin cevabı gelmeden göndermezsin/);
     expect(roleTemplate('sosyal-medya').body).toMatch(/içeren gönderi ve yayın silme önce `approvalRequest`/);
     // The writer: ordinary publishing is the system’s, the critical class (a money promise, legal, a crisis, deleting a post) goes to the owner.
