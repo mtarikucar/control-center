@@ -187,6 +187,67 @@ describe('gate policy — connector identity: what defines a session’s MCP ser
   ]);
 });
 
+describe('gate policy — a nested Claude Code or Codex session is the owner’s (hardening round 2)', () => {
+  // A session started from the shell gets none of the office's hook: it would reach every connector past the gate.
+  rows([
+    ['claude -p "müşteriye e-posta at"', 'self'],
+    ['claude', 'self'],
+    ['claude mcp add -s user gmail -- node x.js', 'self'],
+    ['claude mcp --help', 'self'],
+    ['claude --version --verbose', 'self'],
+    ['codex exec "merhaba"', 'self'],
+    ['codex mcp add x -- node y.js', 'self'],
+    // By its path or a versioned binary.
+    ['~/.local/bin/claude -p hi', 'self'],
+    [`${HOME}/.local/share/claude/versions/2.1.296 -p hi`, 'self'],
+    ['claude-2.1.296 -p hi', 'self'],
+    ['/usr/lib/chatgpt/resources/codex exec hi', 'self'],
+    // Through wrappers.
+    ['env FOO=1 claude -p hi', 'self'],
+    ['nohup claude -p hi > /tmp/out.log 2>&1 &', 'self'],
+    ['timeout 60 codex exec hi', 'self'],
+    ['nice -n 5 claude -p hi', 'self'],
+    ['echo hi | xargs claude -p', 'self'],
+    ['exec claude -p hi', 'self'],
+    ['exec -a gizli claude -p hi', 'self'],
+    ['command claude -p hi', 'self'],
+    [`sh -c 'claude -p hi'`, 'self'],
+    [`bash -c 'codex exec hi'`, 'self'],
+    [`zsh -c 'claude mcp list'`, 'self'],
+    [`script -q -c 'claude -p hi' /dev/null`, 'self'],
+    ['echo "$(claude -p hi)"', 'self'],
+    // Run as a package.
+    ['npx @anthropic-ai/claude-code -p hi', 'self'],
+    ['npx -y @openai/codex exec hi', 'self'],
+    ['pnpm dlx @anthropic-ai/claude-code@latest -p hi', 'self'],
+    ['pnpm exec claude -p hi', 'self'],
+    ['bunx @openai/codex@latest exec hi', 'self'],
+    ['yarn dlx @anthropic-ai/claude-code -p hi', 'self'],
+    ['npm exec @openai/codex -- exec hi', 'self'],
+    // Started from a program.
+    [`python3 -c "import subprocess; subprocess.run(['claude', '-p', 'hi'])"`, 'self'],
+    [`node -e "require('child_process').spawn('codex', ['exec', 'hi'])"`, 'self'],
+    [`node -e "require('child_process').execSync('claude -p hi')"`, 'self'],
+    // Free: asking only its version or its help, looking it up, other names.
+    ['claude --version', 'pass'],
+    ['claude -v', 'pass'],
+    ['codex --help', 'pass'],
+    ['codex -h', 'pass'],
+    ['~/.local/bin/claude --version', 'pass'],
+    ['npx @anthropic-ai/claude-code --version', 'pass'],
+    ['command -v claude', 'pass'],
+    ['which codex && type claude', 'pass'],
+    ['claudette -p hi', 'pass'],
+    ['git log --grep claude', 'pass'],
+  ]);
+  it('the reason says why', () => {
+    expect(bash('claude -p "müşteriye yaz"').parts).toEqual([
+      { kind: 'self', target: 'claude -p müşteriye yaz', why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' },
+    ]);
+    expect(bash('npx -y @openai/codex exec hi').parts[0]).toMatchObject({ kind: 'self', target: 'codex exec hi' });
+  });
+});
+
 describe('gate policy (K1) — effective cwd, resolved target and git (review rounds 2–3)', () => {
   rows([
     // Held: the resolved target is protected, or git rewrites the live checkout's working tree.

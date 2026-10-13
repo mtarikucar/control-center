@@ -535,7 +535,7 @@ function protectedLiterals(code: string, st: ShellState, ctx: GateContext): Arra
   return out;
 }
 
-const CMD_WORDS = '(?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh)';
+const CMD_WORDS = '(?:git|gh|curl|wget|npm|pnpm|yarn|rm|stripe|vercel|netlify|scp|ssh|sqlite3|bash|sh|claude|codex)';
 
 /** The commands a program starts, as far as its text shows them: one string, perl/ruby quoting, or a list of strings. */
 function spawnedCommands(code: string): string[] {
@@ -583,6 +583,17 @@ function deleteTarget(run: Run, verb: string, w: ShellWord, st: ShellState): voi
   add(run, { kind: 'delete', target: `${verb} ${at.path}`, why: 'serbest silme alanı (masa, /tmp) dışında' });
 }
 
+/**
+ * Claude Code or Codex: by its name or a versioned one (claude-2.1.296, codex-x86_64…), a package's own name run by npx
+ * and the like (@anthropic-ai/claude-code, @openai/codex@latest), or Claude Code's versions folder (…/claude/versions/2.1.296).
+ */
+const AGENT_CLI = /^(claude|codex)([-_.@][\w.@-]*)?$/i;
+function agentCli(cmd: string): 'claude' | 'codex' | null {
+  const name = posix.basename(cmd);
+  if (AGENT_CLI.test(name)) return name.toLowerCase().startsWith('codex') ? 'codex' : 'claude';
+  return /\/claude\/versions\/[^/]+$/.test(cmd) ? 'claude' : null;
+}
+
 function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Array<{ op: string; target: ShellWord | null; body?: string }>, st: ShellState, run: Run): void {
   const { ctx } = run;
   let words = all;
@@ -619,8 +630,10 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
       while (i < t.length && flag(t[i]!)) i += /^-[ncioe]$/.test(t[i]!) ? 2 : 1;
       words = words.slice(i);
     } else if (['nohup', 'command', 'builtin', 'exec', 'setsid', 'time', 'chronic', 'unbuffer'].includes(head)) {
+      // command -v/-V only says what a name is; exec -a names the process (its value is no command).
+      if (head === 'command' && t.slice(1).some((a) => a === '-v' || a === '-V')) return;
       let i = 1;
-      while (i < t.length && flag(t[i]!)) i += 1;
+      while (i < t.length && flag(t[i]!)) i += head === 'exec' && t[i] === '-a' ? 2 : 1;
       words = words.slice(i);
     } else if (head === 'xargs') {
       let i = 1;
@@ -651,6 +664,15 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
   const cmd = t[0]!;
   const name = cmd.includes('/') ? posix.basename(cmd) : cmd;
   const args = t.slice(1);
+
+  // A nested Claude Code or Codex session (hardening round 2) runs with none of the office's hook: through it every
+  // connector of the owner is reached past the gate, and `mcp add` changes what the sessions load. Its version or its
+  // help alone is only a question.
+  const agent = agentCli(cmd);
+  if (agent) {
+    if (args.length === 1 && ['--version', '-v', '--help', '-h'].includes(args[0]!)) return;
+    return add(run, { kind: 'self', target: `${agent} ${shown(args.join(' '))}`.trim().slice(0, 80), why: 'iç içe oturum: kapı dışında çalışır (sahibinin bağlantılarına ofis kapısından geçmeden ulaşır)' });
+  }
 
   // The shell's own state.
   if (cmd === 'cd' || cmd === 'pushd') {
