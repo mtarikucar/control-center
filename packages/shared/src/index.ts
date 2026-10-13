@@ -1,4 +1,5 @@
 export * from './approval.ts';
+export * from './autonomy.ts';
 export * from './blueprint.ts';
 export * from './budget.ts';
 export * from './capability.ts';

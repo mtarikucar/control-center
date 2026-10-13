@@ -640,4 +640,29 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE employees DROP COLUMN department_id;
       DROP TABLE IF EXISTS departments;`,
   },
+  {
+    // 25 on feat/departments (after the departments' 24); renumbered at integration like the others (plan Task 13).
+    version: 25,
+    name: 'capabilities and autonomy: the company’s own capabilities and the outbox',
+    // New tables only: code from before ignores them, so rolling back is safe.
+    up: `CREATE TABLE IF NOT EXISTS custom_capabilities (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('read', 'send', 'calendar', 'call', 'publish', 'pay', 'delete')),
+        tools TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'rejected', 'retired')),
+        proposed_by TEXT NOT NULL, decided_by TEXT, note TEXT, created_at INTEGER NOT NULL, decided_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, employee_id TEXT NOT NULL, department_id TEXT, tool TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('send', 'publish', 'call', 'calendar')), target TEXT NOT NULL,
+        recipients TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '',
+        via TEXT NOT NULL CHECK (via IN ('system', 'owner')), approval_id TEXT, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS outbox_count ON outbox (via, department_id, employee_id, kind, at);
+      CREATE INDEX IF NOT EXISTS outbox_at ON outbox (at);`,
+    down: `DROP INDEX IF EXISTS outbox_at;
+      DROP INDEX IF EXISTS outbox_count;
+      DROP TABLE IF EXISTS outbox;
+      DROP TABLE IF EXISTS custom_capabilities;`,
+  },
 ];

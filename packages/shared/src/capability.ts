@@ -97,3 +97,40 @@ export interface CapabilityCoverage {
   builtin: string[];
   providers: CapabilityProvider[];
 }
+
+/** A company capability's state (spec capabilities §4): proposed, then active or rejected; an active one the owner retires. */
+export const CUSTOM_CAPABILITY_STATUSES = ['proposed', 'active', 'rejected', 'retired'] as const;
+export type CustomCapabilityStatus = (typeof CUSTOM_CAPABILITY_STATUSES)[number];
+export const CUSTOM_CAPABILITY_STATUS_LABELS: Record<CustomCapabilityStatus, string> = {
+  proposed: 'karar bekliyor', active: 'etkin', rejected: 'reddedildi', retired: 'geri alındı',
+};
+
+/** A capability the company added to the vocabulary (spec capabilities §4.1; table custom_capabilities, v25). */
+export interface CustomCapability {
+  /** `area.action`, none of the product's. */
+  id: string;
+  title: string;
+  summary: string;
+  kind: CapabilityKind;
+  /** Connector tools by full name; none of them in a product capability or in another active company one. */
+  tools: string[];
+  status: CustomCapabilityStatus;
+  /** An employee's id, or 'owner'. */
+  proposedBy: string;
+  /** The coordinator's id or 'owner'; null while proposed. */
+  decidedBy: string | null;
+  note: string | null;
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+/** What a proposal or the owner's addition gives. */
+export interface NewCustomCapability {
+  id: string;
+  title: string;
+  summary: string;
+  kind: CapabilityKind;
+  tools: string[];
+}
+
+export type CapabilityChange = 'proposed' | 'activated' | 'rejected' | 'retired' | 'kind';
