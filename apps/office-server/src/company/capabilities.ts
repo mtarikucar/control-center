@@ -267,6 +267,22 @@ export function unclassifiedTools(integrations: Integration[]): UnclassifiedTool
   return out.sort((a, b) => b.atLeast - a.atLeast || a.server.localeCompare(b.server, 'tr'));
 }
 
+/**
+ * The MCP server names the vocabulary's connectors go by — each classified tool's (mcp__<server>__…), each connector
+ * known by name only, as its tools carry it — and the office's own: a project's .mcp.json may define none of them
+ * (hardening round 2: the sessions' disabledMcpjsonServers), or its server would be taken for the connector.
+ */
+export function connectorServers(): string[] {
+  const v = capabilityVocabulary();
+  const servers = new Set(['office']);
+  for (const tool of v.capabilities.flatMap((c) => c.tools)) {
+    const cut = tool.indexOf('__', 5);
+    if (tool.startsWith('mcp__') && cut > 5) servers.add(tool.slice(5, cut));
+  }
+  for (const k of v.knownConnectors) servers.add(mcpToolPrefix(k.name).slice(5, -2));
+  return [...servers];
+}
+
 /** A connector's tool prefix the vocabulary knows: by a classified tool of it, or by its name only (knownConnectors). */
 export function knownServer(prefix: string): boolean {
   const v = capabilityVocabulary();
