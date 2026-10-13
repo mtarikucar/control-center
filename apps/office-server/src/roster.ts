@@ -77,7 +77,13 @@ function fromRow(r: Row): Employee {
  * capabilities checked against the vocabulary (never the raw list), and the deny rules the desk gets before its first
  * session (B5's closed mode; the engine writes them).
  */
-export type NewEmployee = HireInput & { templateRef?: TemplateRef | null; capabilityIds?: string[]; deskDeny?: string[] };
+export type NewEmployee = HireInput & {
+  templateRef?: TemplateRef | null;
+  capabilityIds?: string[];
+  deskDeny?: string[];
+  /** The seat the office chose (Seating, spec office rooms §3): free and one of the office's; absent: the lowest free one. */
+  deskIndex?: number;
+};
 
 export type EmployeePatch = Partial<
   Pick<Employee, 'lifecycle' | 'sessionStarted' | 'limitResetsAt' | 'lastError' | 'role' | 'title' | 'team' | 'kind' | 'reportsTo' | 'model' | 'capabilities' | 'departmentId'>
@@ -118,18 +124,23 @@ export class Roster {
     this.#slugTaken = slugTaken;
   }
 
+  /** The seats this office has (SEAT_COUNT in main.ts; a test office may have fewer). */
+  get deskCount(): number {
+    return this.#deskCount;
+  }
+
   /**
    * Throws what `create` would throw for this input (a field, or no free desk) and writes nothing: for callers that must
    * refuse a hire before they do something else for it (Company.hire opens a department only for a hire that will succeed).
    */
   validate(input: NewEmployee): void {
     checkNewEmployee(input);
-    this.#freeDesk();
+    this.#deskOf(input);
   }
 
   create(input: NewEmployee): Employee {
     const { name, role, model, characterId, title, team, kind, reportsTo } = checkNewEmployee(input);
-    const deskIndex = this.#freeDesk();
+    const deskIndex = this.#deskOf(input);
 
     const employee: Employee = {
       ...(input.provider ? { provider: input.provider } : {}),
@@ -176,6 +187,21 @@ export class Roster {
     }
     this.#db.prepare(`INSERT INTO employees (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
     return this.get(employee.id);
+  }
+
+  /** A newcomer's seat: the one the office chose (checked), else the lowest free. */
+  #deskOf(input: NewEmployee): number {
+    return input.deskIndex === undefined ? this.#freeDesk() : this.#checkDesk(input.deskIndex, null);
+  }
+
+  /** `deskIndex`, when it is one of the office's seats and nobody at work but `self` has it. */
+  #checkDesk(deskIndex: number, self: string | null): number {
+    if (!Number.isInteger(deskIndex) || deskIndex < 0 || deskIndex >= this.#deskCount) {
+      throw new ValidationError(`Masa 0 ile ${this.#deskCount - 1} arasında bir tam sayı olmalı.`);
+    }
+    const holder = this.list().find((e) => e.deskIndex === deskIndex && e.id !== self);
+    if (holder) throw new ConflictError(`Masa ${deskIndex} dolu (${holder.name}).`);
+    return deskIndex;
   }
 
   /** The lowest free desk. */
@@ -238,6 +264,14 @@ export class Roster {
     }
     // The re-read keeps the rule that an employee without a department has no departmentId key (next would carry null).
     return patch.departmentId !== undefined ? this.get(id) : next;
+  }
+
+  /** Someone to another seat (Seating): one of the office's that nobody else at work has. */
+  setDesk(id: string, deskIndex: number): Employee {
+    this.get(id);
+    this.#checkDesk(deskIndex, id);
+    this.#db.prepare('UPDATE employees SET desk_index = ? WHERE id = ?').run(deskIndex, id);
+    return this.get(id);
   }
 
   /** Save each provider's readiness independently; native transcripts remain in their own session stores. */

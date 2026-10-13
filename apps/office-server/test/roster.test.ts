@@ -1,3 +1,4 @@
+import { SEAT_COUNT } from '@cc/shared';
 import { describe, expect, it } from 'vitest';
 import { ConflictError, NotFoundError, ValidationError } from '../src/errors.ts';
 import { Roster, slugify } from '../src/roster.ts';
@@ -26,6 +27,34 @@ describe('Roster', () => {
     expect(b).toMatchObject({ model: 'opus', characterId: 'designer', deskIndex: 1 });
     expect(a.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(roster.get(a.id)).toEqual(a);
+  });
+
+  it('takes the seat the office chose when it is free and one of the office’s; without one, the lowest free as before (spec office rooms §5)', () => {
+    const { db } = setup();
+    const roster = new Roster(db, SEAT_COUNT);
+    expect(roster.deskCount).toBe(45);
+    expect(roster.create({ name: 'Ada', role: 'r', deskIndex: 37 }).deskIndex).toBe(37);
+    expect(roster.create({ name: 'Can', role: 'r' }).deskIndex).toBe(0);
+    expect(() => roster.create({ name: 'Ece', role: 'r', deskIndex: 37 })).toThrow('Masa 37 dolu (Ada).');
+    expect(() => roster.create({ name: 'Ece', role: 'r', deskIndex: 45 })).toThrow('Masa 0 ile 44 arasında bir tam sayı olmalı.');
+    expect(() => roster.create({ name: 'Ece', role: 'r', deskIndex: 1.5 })).toThrow(ValidationError);
+    expect(() => roster.validate({ name: 'Ece', role: 'r', deskIndex: 37 })).toThrow(ConflictError);
+    expect(roster.list().map((e) => e.name)).toEqual(['Can', 'Ada']);
+  });
+
+  it('moves someone to a free seat; a taken or unknown seat is refused and nothing changes; an archived one’s seat is free', () => {
+    const { db } = setup();
+    const roster = new Roster(db, SEAT_COUNT);
+    const ada = roster.create({ name: 'Ada', role: 'r' });
+    const can = roster.create({ name: 'Can', role: 'r' });
+    expect(roster.setDesk(ada.id, 13)).toMatchObject({ id: ada.id, deskIndex: 13 });
+    expect(roster.get(ada.id).deskIndex).toBe(13);
+    expect(roster.setDesk(ada.id, 13).deskIndex).toBe(13);
+    expect(() => roster.setDesk(ada.id, can.deskIndex)).toThrow(ConflictError);
+    expect(() => roster.setDesk(ada.id, -1)).toThrow(ValidationError);
+    expect(roster.get(ada.id).deskIndex).toBe(13);
+    roster.update(can.id, { lifecycle: 'archived' });
+    expect(roster.setDesk(ada.id, can.deskIndex).deskIndex).toBe(1);
   });
 
   it('validates input', () => {
