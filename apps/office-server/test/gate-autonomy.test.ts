@@ -436,6 +436,24 @@ describe('outboxRead and asking before a call (spec capabilities §7, §8)', () 
     await expect(call(ada, 'outboxRead')).rejects.toThrow(/başkanı olduğun bir departman yok/);
   });
 
+  it('final review I4.3: with the gate off outboxRead says nothing is written — not "no records" — and shows what was written while it was on', async () => {
+    const t = make();
+    const call = withTools(t);
+    const ada = t.hire('Ada');
+    t.budget.setConstitution({ gateEnabled: false });
+    const off = 'Kapı kapalı: giden kutusuna yazılmıyor (sistem adına geçen çağrılar kaydedilmez).';
+    expect(await call(t.coordinator, 'outboxRead')).toBe(off);
+    await t.mail(ada, 'kapali@x.co');
+    expect(await call(t.coordinator, 'outboxRead')).toBe(off);
+    t.budget.setConstitution({ gateEnabled: true });
+    await t.mail(ada, 'acik@x.co');
+    expect(await call(t.coordinator, 'outboxRead')).toMatch(/^Giden kutusu \(herkes\) — son 1,[\s\S]*acik@x\.co/);
+    t.budget.setConstitution({ gateEnabled: false });
+    const later = await call(t.coordinator, 'outboxRead');
+    expect(later).toMatch(/^Kapı kapalı: giden kutusuna yazılmıyor \(sistem adına geçen çağrılar kaydedilmez\)\.\nGiden kutusu \(herkes\) — son 1,[\s\S]*acik@x\.co/);
+    expect(later).not.toContain('kapali@x.co');
+  });
+
   it('asking before a call the system would let out: approvalRequest with the call’s input takes the gate’s own target; the call then passes as the owner’s', async () => {
     const t = make();
     const call = withTools(t);

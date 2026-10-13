@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS, OUTBOX_VIA_LABELS, fold, isOutwardPolicyKind, type OutboxEntry } from '@cc/shared';
+import { INTEGRATION_KINDS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, type IntegrationStatus, KPI_CADENCES, KPI_DIRECTIONS, KPI_OFFICE_METRICS, KPI_SOURCES, MEMORY_KINDS, MODEL_ALIASES, PROFILE_SECTIONS, PROFILE_SPEC, PROPOSAL_KINDS, kpiText, REVIEW_SEVERITIES, STREAM_TO_HIRE, TASK_DIFFICULTIES, WORK_TYPES, type Employee, type EmployeeKind, type ModelAlias, type Plan, type ScheduleStatus, type Task, type TaskDifficulty, APPROVAL_KIND_LABELS, APPROVAL_KINDS, APPROVAL_STATUS_LABELS, GATE_LIMIT_TEXT, type Approval, MAX_DEPARTMENTS, departmentOwner, ownerDepartment, type Department, CAPABILITY_KINDS, CAPABILITY_KIND_LABELS, OUTBOX_GATE_OFF_TEXT, OUTBOX_VIA_LABELS, fold, isOutwardPolicyKind, type OutboxEntry } from '@cc/shared';
 import type { Budget } from '../company/budget.ts';
 import type { Company } from '../company/company.ts';
 import type { ManagementCycle } from '../company/cycle.ts';
@@ -769,7 +769,7 @@ export function officeTools(o: {
     {
       name: 'outboxRead',
       description:
-        `Read the outbox: every outward call the gate let out — sent, published, called, invited — by the system on the owner’s policy or with the owner’s approval (an "allowed" record, not a "delivered" one), newest first. The coordinator reads everyone’s (department narrows it; "merkez": people without one)${deps ? '; a department’s head reads their own department’s' : ''}. For the daily sample: read the recent ones, look for tone and rule breaks, write what you find into the playbook.`,
+        `Read the outbox: every outward call the gate let out — sent, published, called, invited — by the system on the owner’s policy or with the owner’s approval (an "allowed" record, not a "delivered" one; nothing is written while the gate is off), newest first. The coordinator reads everyone’s (department narrows it; "merkez": people without one)${deps ? '; a department’s head reads their own department’s' : ''}. For the daily sample: read the recent ones, look for tone and rule breaks, write what you find into the playbook.`,
       inputSchema: object({
         since: s('How far back: days (1d, 7d) or a local date (2026-10-13); none: all.'),
         department: s('Department name or id, or "merkez" (the coordinator only).'),
@@ -799,10 +799,12 @@ export function officeTools(o: {
           label = own.name;
         }
         const list = o.outbox.list({ departmentId, since, limit });
-        if (list.length === 0) return `Giden kutusu (${label}): kayıt yok.`;
+        // With the gate off every call passes unrecorded: an empty box is no sign that nothing went (final review I4.3).
+        const off = budget.constitution().gateEnabled ? [] : [OUTBOX_GATE_OFF_TEXT];
+        if (list.length === 0) return off[0] ?? `Giden kutusu (${label}): kayıt yok.`;
         const line = (e: OutboxEntry) =>
           `• ${formatWhen(e.at, Date.now())} ${company.nameOf(e.employeeId)} — ${APPROVAL_KIND_LABELS[e.kind]} “${e.target}” (${OUTBOX_VIA_LABELS[e.via]})${e.recipients.length ? ` → ${e.recipients.join(', ')}` : ''}\n  ${e.summary}`;
-        return [`Giden kutusu (${label}) — son ${list.length}, yeniden eskiye; "izin verildi" kaydıdır, teslim değil:`, ...list.map(line)].join('\n');
+        return [...off, `Giden kutusu (${label}) — son ${list.length}, yeniden eskiye; "izin verildi" kaydıdır, teslim değil:`, ...list.map(line)].join('\n');
       },
     },
     {

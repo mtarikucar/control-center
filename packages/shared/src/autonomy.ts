@@ -20,6 +20,12 @@ export const OUTBOX_VIA = ['system', 'owner'] as const;
 export type OutboxVia = (typeof OUTBOX_VIA)[number];
 export const OUTBOX_VIA_LABELS: Record<OutboxVia, string> = { system: 'sistem', owner: 'sahibinin onayıyla' };
 
+/**
+ * With the gate off nothing is written to the outbox — every call passes unrecorded (final review I4.3): outboxRead and
+ * the outbox's readers say so rather than "no records".
+ */
+export const OUTBOX_GATE_OFF_TEXT = 'Kapı kapalı: giden kutusuna yazılmıyor (sistem adına geçen çağrılar kaydedilmez).';
+
 export const OUTBOX_MAX_RECIPIENTS = 20;
 export const OUTBOX_SUMMARY_CHARS = 300;
 
