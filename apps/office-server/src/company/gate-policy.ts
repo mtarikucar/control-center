@@ -348,6 +348,78 @@ function wgetRequests(args: string[]): Request[] {
   return urls.filter((u) => urlOf(u) || u.includes(DYN)).map((url) => ({ method, url }));
 }
 
+/** A path the gate composes (a folder and a name), as a word: what it knows of it, DYN where it is known only at run time. */
+const composed = (text: string): ShellWord => ({ parts: [{ lit: text }], tilde: false, quoted: true });
+
+/** The last part of a URL's path — the name curl -O and wget give the file; DYN when the URL is known only at run time. */
+function remoteName(url: string): string {
+  if (url.includes(DYN)) return DYN;
+  const path = (urlOf(url)?.pathname ?? url.replace(/[?#].*$/, '')).replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '');
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+const WGET_SHORT_VALUE = new Set([...'OoaPeitTwlDQUBXIAR']);
+const WGET_LONG_VALUE = new Set(['--output-document', '--output-file', '--append-output', '--directory-prefix']);
+
+/**
+ * What a downloader writes (hardening round 2), checked as any write is: curl -o/--output (in --output-dir when
+ * relative) and -O/--remote-name — the URL's last part in --output-dir or where curl stands, and with -J a name known
+ * only at run time as well —; wget -O, its logs -o/-a, and without -O each URL's last part (index.html for none) in
+ * -P's folder or where wget stands — and names known only at run time when it recurses, reads its URLs from a file or
+ * takes the server's.
+ */
+function downloads(name: 'curl' | 'wget', words: ShellWord[], st: ShellState, run: Run): void {
+  const t = texts(words, st, run.ctx);
+  const outputs: ShellWord[] = [];
+  const urls: string[] = [];
+  let dir: string | null = null;
+  let remote = name === 'wget';
+  let unknown = false;
+  for (let i = 1; i < t.length; i += 1) {
+    const a = t[i]!;
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      const opt = eq === -1 ? a : a.slice(0, eq);
+      const valued = name === 'curl' ? ['--output', '--output-dir', '--url'].includes(opt) || (!CURL_BOOL.has(opt) && !opt.startsWith('--remote-')) : WGET_LONG_VALUE.has(opt);
+      const word = !valued ? null : eq === -1 ? words[++i] : composed(a.slice(eq + 1));
+      const text = word ? textOf(word, st, run.ctx) : '';
+      if (opt === '--output' || (name === 'wget' && opt !== '--directory-prefix' && WGET_LONG_VALUE.has(opt))) {
+        if (word) outputs.push(word);
+        if (opt === '--output-document') remote = false;
+      } else if (opt === '--output-dir' || opt === '--directory-prefix') dir = text;
+      else if (opt === '--url') urls.push(text);
+      else if (opt === '--remote-name' || opt === '--remote-name-all') remote = true;
+      else if (['--remote-header-name', '--recursive', '--mirror', '--content-disposition', '--input-file'].includes(opt)) unknown = true;
+      continue;
+    }
+    if (flag(a)) {
+      for (let j = 1; j < a.length; j += 1) {
+        const c = a[j]!;
+        if (name === 'curl' && c === 'O') remote = true;
+        if ((name === 'curl' && c === 'J') || (name === 'wget' && 'rmi'.includes(c))) unknown = true;
+        if ((name === 'curl' ? CURL_SHORT_VALUE : WGET_SHORT_VALUE).has(c)) {
+          const word = a.length > j + 1 ? composed(a.slice(j + 1)) : words[++i];
+          if (word && (c === 'o' || (name === 'wget' && (c === 'O' || c === 'a')))) outputs.push(word);
+          if (name === 'wget' && c === 'O') remote = false;
+          if (word && name === 'wget' && c === 'P') dir = textOf(word, st, run.ctx);
+          break;
+        }
+      }
+      continue;
+    }
+    urls.push(a);
+  }
+  const at = (file: string) => composed(dir !== null && !file.startsWith('/') ? `${dir}/${file}` : file);
+  for (const w of outputs) {
+    const file = textOf(w, st, run.ctx);
+    if (file !== '-') writeTarget(run, `${name} -o`, file.startsWith('/') || dir === null ? w : at(file), st);
+  }
+  if (!remote) return;
+  // A name known only at run time is the folder's question; the URL's own name stays one (curl -J falls back to it).
+  const names = [...urls.map((u) => remoteName(u) || (name === 'wget' ? 'index.html' : '')).filter(Boolean), ...(unknown ? [DYN] : [])];
+  for (const file of names) writeTarget(run, `${name} -O`, at(dir === null ? `./${file}` : file), st);
+}
+
 function httpieRequests(args: string[]): Request[] {
   const positional = args.filter((t) => !flag(t));
   let method: string | null = null;
@@ -794,8 +866,10 @@ function simple(all: ShellWord[], env: Map<string, string | null>, redirects: Ar
 
   if (name === 'git') return git(words, env, st, run);
   if (name === 'gh') return gh(args, run);
-  if (name === 'curl') return void httpParts('curl', curlRequests(args), ctx).forEach((p) => add(run, p));
-  if (name === 'wget') return void httpParts('wget', wgetRequests(args), ctx).forEach((p) => add(run, p));
+  if (name === 'curl' || name === 'wget') {
+    httpParts(name, (name === 'curl' ? curlRequests : wgetRequests)(args), ctx).forEach((p) => add(run, p));
+    return downloads(name, words, st, run);
+  }
   if (['http', 'https', 'xh', 'xhs'].includes(name)) return void httpParts(name, httpieRequests(args), ctx).forEach((p) => add(run, p));
   if (['npm', 'pnpm', 'yarn', 'bun'].includes(name)) return packages(name, words, env, st, run);
   if (name === 'npx' || name === 'bunx') {
@@ -1037,6 +1111,22 @@ function git(words: ShellWord[], env: Map<string, string | null>, st: ShellState
       if (why) add(run, { kind: 'self', target: `git worktree move ${at && !at.partial ? at.path : '?'}`, why: `korunan yola taşır: ${why}` });
     }
     return;
+  }
+  // The paths a checkout or a restore writes (hardening round 2): `git checkout -- .mcp.json` brings one back as any
+  // write would. A restore's operands are all paths; a checkout's only after `--` (before it, a branch is no path). A
+  // restore of the index alone (--staged without --worktree) writes no file.
+  const indexOnly = sub === 'restore' && restT.some((a) => a === '--staged' || a === '-S') && !restT.some((a) => a === '--worktree' || a === '-W');
+  if ((sub === 'checkout' || sub === 'restore') && !indexOnly) {
+    const dash = restT.indexOf('--');
+    const paths: ShellWord[] = [];
+    if (dash !== -1) paths.push(...rest.slice(dash + 1));
+    else if (sub === 'restore') {
+      for (let k = 0; k < restT.length; k += 1) {
+        if (['-s', '--source', '--pathspec-from-file'].includes(restT[k]!)) k += 1;
+        else if (!flag(restT[k]!)) paths.push(rest[k]!);
+      }
+    }
+    for (const w of paths) writeTarget(run, `git ${sub}`, w, { ...st, cwd: repo ?? null });
   }
   if (GIT_REWRITE.has(sub) && !(sub === 'stash' && ['list', 'show'].includes(restT[0] ?? ''))) {
     if (top === ctx.repoRoot) add(run, { kind: 'self', target: `git ${sub} ${ctx.repoRoot}`, why: 'canlı checkout’un çalışma ağacını ya da dalını yeniden yazar' });

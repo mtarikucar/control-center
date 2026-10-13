@@ -248,6 +248,61 @@ describe('gate policy — a nested Claude Code or Codex session is the owner’s
   });
 });
 
+describe('gate policy — what a downloader or a git checkout writes is checked as any write (hardening round 2)', () => {
+  rows([
+    ['curl -o ~/.claude/settings.json https://x.io/s.json', 'self'],
+    ['curl -sSLo .mcp.json https://x.io/m.json', 'self'],
+    ['curl --output ~/.claude.json https://x.io/c.json', 'self'],
+    ['curl --output=.codex/config.toml https://x.io/c.toml', 'self'],
+    ['curl --output-dir ~/.claude -o settings.json https://x.io/s.json', 'self'],
+    ['curl -o ~/.control-center/office.db https://x.io/db', 'self'],
+    // -O: the URL's last part, where curl stands; with -J the name is the server's, so only the folder counts.
+    ['curl -O https://x.io/files/.mcp.json', 'self'],
+    ['curl -fsSLO https://x.io/settings.json', 'self', `${DESK}/.claude`],
+    ['curl -OJ https://x.io/dl', 'self', `${HOME}/.claude`],
+    // The server's name may be the protected one: a folder that holds one is the question (and the URL's own name).
+    ['curl -OJ https://x.io/dl', 'self', `${HOME}/.codex`],
+    ['curl -OJ https://x.io/.mcp.json', 'self'],
+    ['wget -r https://x.io/', 'self', `${HOME}/.codex`],
+    ['wget https://x.io/', 'self', `${DESK}/.claude`],
+    ['curl --remote-name --output-dir ~/.codex https://x.io/config.toml', 'self'],
+    ['wget -O ~/.claude/settings.json https://x.io/s.json', 'self'],
+    ['wget -qO .mcp.json https://x.io/m.json', 'self'],
+    ['wget --output-document=.mcp.json https://x.io/m.json', 'self'],
+    ['wget -P ~/.claude https://x.io/settings.json', 'self'],
+    ['wget https://x.io/.mcp.json', 'self'],
+    ['wget -o ~/.claude.json https://x.io/a', 'self'],
+    ['wget -r -P ~/.claude https://x.io/', 'self'],
+    ['git checkout -- .mcp.json', 'self'],
+    ['git checkout main -- .claude/settings.json', 'self'],
+    ['git restore --source main .mcp.json', 'self'],
+    ['git restore -s HEAD~1 -- .codex/config.toml', 'self'],
+    ['git -C /tmp/r checkout -- .mcp.json', 'self'],
+    // Free: anything else they write.
+    ['curl -o out.json https://x.io/a', 'pass'],
+    ['curl -o - https://x.io/a', 'pass', `${HOME}/.claude`],
+    ['wget -qO- https://x.io/a', 'pass', `${HOME}/.claude`],
+    ['wget -O out.html https://x.io/.mcp.json', 'pass'],
+    ['wget -r https://x.io/', 'pass'],
+    ['curl -O https://x.io/a.json', 'pass'],
+    ['curl -OJ https://x.io/dl', 'pass'],
+    ['curl --output-dir /tmp/dl -O https://x.io/.mcp.json.txt', 'pass'],
+    ['wget -qO- https://x.io/a | jq .', 'pass'],
+    ['wget https://x.io/a.tar.gz && wget -P /tmp/dl https://x.io/b', 'pass'],
+    ['wget -r -P /tmp/site https://x.io/', 'pass'],
+    ['git checkout -- src/a.ts', 'pass'],
+    ['git restore --staged README.md', 'pass'],
+    ['git restore --staged .mcp.json', 'pass'],
+    ['git restore --staged --worktree .mcp.json', 'self'],
+    ['git checkout feat/x', 'pass'],
+  ]);
+  it('the reason names the path', () => {
+    expect(bash('curl -o .mcp.json https://x.io/m.json').parts).toEqual([
+      { kind: 'self', target: `curl -o ${DESK}/.mcp.json`, why: 'korunan yola yazar: MCP sunucu ayarları (.mcp.json)' },
+    ]);
+  });
+});
+
 describe('gate policy (K1) — effective cwd, resolved target and git (review rounds 2–3)', () => {
   rows([
     // Held: the resolved target is protected, or git rewrites the live checkout's working tree.
