@@ -6,36 +6,33 @@ import { KIND_LABELS, TASK_STATUS_LABELS, lifecycleLabel } from './labels.ts';
 import { AgendaTab } from './AgendaTab.tsx';
 import { BudgetTab, ConstitutionTab } from './BudgetTabs.tsx';
 import { formatWhenTR } from './format.ts';
-import { GoalsTab } from './GoalsTab.tsx';
-import { ManagementTab } from './ManagementTab.tsx';
-import { DecisionsTab, NotesTab, PlaybookTab } from './MemoryTabs.tsx';
-import { DepartmentsTab } from './DepartmentsTab.tsx';
 import { ProposalCard } from './ProposalCard.tsx';
 import { streamOf } from './streams.ts';
 import { ApprovalsTab } from './ApprovalCard.tsx';
 import { CapabilitiesTab } from './CapabilitiesTab.tsx';
 import { waitingForOwner } from './capabilityWaiting.ts';
-import { OutboxTab } from './OutboxTab.tsx';
 import { useLiveRead } from './useLiveRead.ts';
 
+/**
+ * Five tabs: what one owner opens. Ekip is the chart (departments show as its groups); İşler the board and the agenda;
+ * Onaylar every decision asked of the owner; Bütçe the money; Ayarlar the seven settings. Departments, goals, the
+ * playbook, the notes, the capabilities, the outbox and the management log are the office's own: it keeps them without
+ * a page for them (the cockpit shows the goals; a capability shows up under Onaylar only while it waits for the owner).
+ */
 const TABS = [
-  ['org', 'Örgüt'],
-  ['departments', 'Departmanlar'],
-  ['goals', 'Hedefler'],
-  ['agenda', 'Ajanda'],
-  ['tasks', 'Görevler'],
-  ['management', 'Yönetim'],
-  ['proposals', 'Öneriler'],
-  ['approvals', 'Onaylar'],
-  ['capabilities', 'Yetenekler'],
-  ['outbox', 'Giden kutusu'],
-  ['decisions', 'Kararlar'],
-  ['playbook', 'El kitabı'],
-  ['notes', 'Notlar'],
+  ['team', 'Ekip'],
+  ['work', 'İşler'],
+  ['decisions', 'Onaylar'],
   ['budget', 'Bütçe'],
-  ['constitution', 'Anayasa'],
+  ['settings', 'Ayarlar'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
+/** The keys the rest of the page asks for (a top-bar figure, a cockpit link, an older note): where each lives now. */
+const TAB_OF: Record<string, Tab> = {
+  org: 'team', departments: 'team', goals: 'work', agenda: 'work', tasks: 'work', proposals: 'decisions', approvals: 'decisions', capabilities: 'decisions',
+  budget: 'budget', constitution: 'settings',
+};
+const resolveTab = (asked: string | null): Tab => (asked && (TABS.find(([key]) => key === asked)?.[0] ?? TAB_OF[asked])) || 'team';
 
 const COLUMNS: TaskStatus[] = ['waiting', 'in_progress', 'review', 'blocked', 'done'];
 /** A parked task waits too: it shows in Bekliyor (after the ones that may start), with when it comes back. */
@@ -179,7 +176,9 @@ export function CompanyView() {
   const select = useOffice((s) => s.select);
   const asked = useOffice((s) => s.companyTab);
   // The dialog mounts on opening: the tab it was asked for is where it starts.
-  const [tab, setTab] = useState<Tab>(() => TABS.find(([key]) => key === asked)?.[0] ?? 'org');
+  const [tab, setTab] = useState<Tab>(() => resolveTab(asked));
+  // İşler shows the board or the agenda; asked for the agenda (a top-bar figure), it opens on it.
+  const [workView, setWorkView] = useState<'board' | 'agenda'>(() => (asked === 'agenda' ? 'agenda' : 'board'));
   const [person, setPerson] = useState('');
   const [planFilter, setPlanFilter] = useState('');
   const people = useMemo(() => Object.values(views).map((v) => v.employee).filter((e) => e.lifecycle !== 'archived'), [views]);
@@ -231,7 +230,7 @@ export function CompanyView() {
             {TABS.map(([key, label]) => (
               <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
                 {label}
-                {key === 'capabilities' && capabilitiesWaiting > 0 && (
+                {key === 'decisions' && capabilitiesWaiting > 0 && (
                   <span className="count" aria-label={`${capabilitiesWaiting} karar bekliyor`}>
                     {capabilitiesWaiting}
                   </span>
@@ -244,7 +243,7 @@ export function CompanyView() {
           </button>
         </header>
         {!coordinator && <NoCoordinator people={people} />}
-        {tab === 'org' ? (
+        {tab === 'team' ? (
           <div className="org">
             {coordinator && (
               <section aria-label="Koordinatör" className="org-top">
@@ -262,13 +261,19 @@ export function CompanyView() {
               ))}
             </div>
           </div>
-        ) : tab === 'departments' ? (
-          <DepartmentsTab />
-        ) : tab === 'goals' ? (
-          <GoalsTab />
-        ) : tab === 'agenda' ? (
-          <AgendaTab />
-        ) : tab === 'tasks' ? (
+        ) : tab === 'work' ? (
+          <div className="company-stack">
+          <div className="segmented work-view" role="group" aria-label="İşler görünümü">
+            <button type="button" aria-pressed={workView === 'board'} onClick={() => setWorkView('board')}>
+              Pano
+            </button>
+            <button type="button" aria-pressed={workView === 'agenda'} onClick={() => setWorkView('agenda')}>
+              Ajanda
+            </button>
+          </div>
+          {workView === 'agenda' ? (
+            <AgendaTab />
+          ) : (
           <div className="board-wrap">
             <div className="row board-filters">
               <label>
@@ -314,22 +319,19 @@ export function CompanyView() {
               })}
             </div>
           </div>
-        ) : tab === 'management' ? (
-          <ManagementTab />
-        ) : tab === 'proposals' ? (
-          <ProposalsTab />
-        ) : tab === 'approvals' ? (
-          <ApprovalsTab />
-        ) : tab === 'capabilities' ? (
-          <CapabilitiesTab />
-        ) : tab === 'outbox' ? (
-          <OutboxTab />
+          )}
+          </div>
         ) : tab === 'decisions' ? (
-          <DecisionsTab />
-        ) : tab === 'playbook' ? (
-          <PlaybookTab />
-        ) : tab === 'notes' ? (
-          <NotesTab />
+          <div className="company-stack">
+            <ApprovalsTab />
+            <ProposalsTab />
+            {capabilitiesWaiting > 0 && (
+              <section aria-label="Yetenek kararları" className="proposal-list">
+                <h3>Yetenek kararları</h3>
+                <CapabilitiesTab />
+              </section>
+            )}
+          </div>
         ) : tab === 'budget' ? (
           <BudgetTab />
         ) : (

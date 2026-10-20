@@ -1,4 +1,4 @@
-import type { AgendaReport, Approval, BudgetSummary, CapabilityCoverage, CapabilityKind, CapabilityVocabulary, Constitution, CustomCapability, Decision, Department, DepartmentInput, DepartmentTemplate, Employee, EmployeeFile, Goal, HireInput, ManagementLog, NewCustomCapability, Note, OfficeMetrics, OfficeSnapshot, OutboxEntry, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, StreamNote, Task, UnclassifiedTools } from '@cc/shared';
+import type { AgendaReport, Approval, BudgetSummary, CapabilityCoverage, CapabilityKind, CapabilityVocabulary, Constitution, CustomCapability, Decision, Department, DepartmentInput, DepartmentTemplate, Employee, EmployeeFile, Goal, HireInput, ManagementLog, NewCustomCapability, Note, OfficeMetrics, OfficeSnapshot, OutboxEntry, Plan, PlaybookEntry, Proposal, Schedule, Spend, StoredEvent, StreamNote, Task, UnclassifiedTools, Integration } from '@cc/shared';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -135,4 +135,8 @@ export const api = {
   setCapabilityKind: (id: string, kind: CapabilityKind) => request<CustomCapability>('POST', `/api/custom-capabilities/${encodeURIComponent(id)}/kind`, { kind }),
   /** Spec capabilities §7: what the gate let out, the newest 200 (the tab filters them). */
   outbox: () => request<OutboxEntry[]>('GET', '/api/outbox'),
+  /** The integration registry (B3): every connector the sessions report, best status first. */
+  integrations: () => request<Integration[]>('GET', '/api/integrations'),
+  /** The owner closes (or opens) a connector: closed, every session starts again without it. */
+  setIntegration: (name: string, patch: { closed?: boolean; note?: string }) => request<Integration>('POST', `/api/integrations/${encodeURIComponent(name)}`, patch),
 };

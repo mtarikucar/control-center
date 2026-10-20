@@ -67,7 +67,10 @@ function PlanStreams({ planId, streams }: { planId: string; streams: PlanStreamV
   );
 }
 
-/** A plan the coordinator proposed, as it stands now; the owner approves or declines the latest version here. */
+/**
+ * A plan the coordinator proposed, as it stands now; the owner approves or declines the latest version here. The card is
+ * short: the steps (what will be done) under the title; goal, approach, method and streams folded under “Ayrıntı”.
+ */
 export function PlanCard({ plan }: { plan: Plan }) {
   const runtime = useOffice((s) => s.runtime);
   const live = useOffice((s) => s.plans[plan.id]) ?? plan;
@@ -76,6 +79,15 @@ export function PlanCard({ plan }: { plan: Plan }) {
   const streams = useMemo(() => streamViews(live, tasks), [live, tasks]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The owner's direction on a draft: a change request keeps the plan a draft and goes to the one who proposed it (the
+  // coordinator revises it into a new version); a note with an approval follows the approval.
+  const [note, setNote] = useState('');
+  const [sent, setSent] = useState(false);
+  const tell = async (text: string) => {
+    await api.send(live.proposedBy, text);
+    setNote('');
+    setSent(true);
+  };
   if (live.version > plan.version) {
     return (
       <div className="note">
@@ -103,70 +115,97 @@ export function PlanCard({ plan }: { plan: Plan }) {
         {live.approvedBy === 'coordinator' && <span className="badge started-by">Koordinatör başlattı</span>}
       </header>
       <span className="muted">sürüm {live.version}</span>
-      <dl>
-        <dt>Hedef</dt>
-        <dd>{live.goal}</dd>
-        <dt>Yaklaşım</dt>
-        <dd>{live.approach}</dd>
-        {live.people && (
-          <>
-            <dt>Kimler</dt>
-            <dd>{live.people}</dd>
-          </>
-        )}
-        {live.risks && (
-          <>
-            <dt>Riskler</dt>
-            <dd>{live.risks}</dd>
-          </>
-        )}
-      </dl>
-      {live.method && (
-        <section className="plan-method" aria-label="Nasıl yapılacak">
-          <h4>Nasıl yapılacak · {WORK_TYPE_LABELS[live.method.workType]}</h4>
-          <ol>
-            {live.method.stages.map((st, i) => (
-              <li key={i}>
-                {st.name} — {st.role}
-                {st.review ? ' · incelemeli' : ''}
-              </li>
-            ))}
-          </ol>
-          {live.method.checks.length > 0 && (
-            <>
-              <strong>Kalite kontrolleri</strong>
-              <ul>
-                {live.method.checks.map((c, i) => (
-                  <li key={i}>{c}</li>
-                ))}
-              </ul>
-            </>
-          )}
-        </section>
-      )}
-      {streams.length > 0 && <PlanStreams planId={live.id} streams={streams} />}
       {live.steps.length > 0 && (
-        <ol>
+        <ol className="plan-steps" aria-label="Yapılacaklar">
           {live.steps.map((step, i) => (
             <li key={i}>{step}</li>
           ))}
         </ol>
       )}
       {guess && <p className="muted">{guess}</p>}
+      <details className="plan-details">
+        <summary>Ayrıntı</summary>
+        <dl>
+          <dt>Hedef</dt>
+          <dd>{live.goal}</dd>
+          <dt>Yaklaşım</dt>
+          <dd>{live.approach}</dd>
+          {live.people && (
+            <>
+              <dt>Kimler</dt>
+              <dd>{live.people}</dd>
+            </>
+          )}
+          {live.risks && (
+            <>
+              <dt>Riskler</dt>
+              <dd>{live.risks}</dd>
+            </>
+          )}
+        </dl>
+        {live.method && (
+          <section className="plan-method" aria-label="Nasıl yapılacak">
+            <h4>Nasıl yapılacak · {WORK_TYPE_LABELS[live.method.workType]}</h4>
+            <ol>
+              {live.method.stages.map((st, i) => (
+                <li key={i}>
+                  {st.name} — {st.role}
+                  {st.review ? ' · incelemeli' : ''}
+                </li>
+              ))}
+            </ol>
+            {live.method.checks.length > 0 && (
+              <>
+                <strong>Kalite kontrolleri</strong>
+                <ul>
+                  {live.method.checks.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        )}
+        {streams.length > 0 && <PlanStreams planId={live.id} streams={streams} />}
+      </details>
       {(live.status === 'approved' || live.status === 'done') && spent && (
         <p className={`muted${live.usd !== null && spent.spentUsd > live.usd ? ' over' : ''}`}>
           {`Harcanan: $${spent.spentUsd}${live.usd !== null ? ` / $${live.usd}` : ''} · Claude ~$${spent.claudeUsd}${runtime?.costAvailable === false ? ' + Codex maliyeti bilinmiyor' : ''}`}
         </p>
       )}
       {live.status === 'draft' && (
-        <div className="row end">
-          <button type="button" disabled={busy} onClick={() => void act(() => api.declinePlan(live.id))}>
-            Vazgeç
-          </button>
-          <button type="button" className="primary" disabled={busy} onClick={() => void act(() => api.approvePlan(live.id))}>
-            Onayla
-          </button>
-        </div>
+        <>
+          <textarea
+            className="plan-note"
+            aria-label="Koordinatöre not"
+            rows={2}
+            value={note}
+            placeholder="Koordinatöre not: yön ver, değişiklik iste ya da onayla ve ekle…"
+            onChange={(ev) => setNote(ev.target.value)}
+          />
+          {sent && <p className="muted">Koordinatöre iletildi; planı düzeltince yeni sürüm burada görünür.</p>}
+          <div className="row end">
+            <button type="button" disabled={busy} onClick={() => void act(() => api.declinePlan(live.id))}>
+              Vazgeç
+            </button>
+            <button type="button" disabled={busy || !note.trim()} onClick={() => void act(() => tell(`“${live.title}” planı (sürüm ${live.version}) için değişiklik istiyorum; onaylamadan önce planRevise ile düzelt: ${note.trim()}`))}>
+              Değişiklik iste
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                void act(async () => {
+                  await api.approvePlan(live.id);
+                  if (note.trim()) await tell(`“${live.title}” planını onayladım. Not: ${note.trim()}`);
+                })
+              }
+            >
+              Onayla
+            </button>
+          </div>
+        </>
       )}
       {live.status === 'approved' && (
         <div className="row end">

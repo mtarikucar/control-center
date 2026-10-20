@@ -3,7 +3,7 @@ import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { EventItem } from './EventItem.tsx';
 import { formatCost, formatTokens, tokensOf } from './format.ts';
-import { canResume, canStop, lifecycleLabel, limitNote, modelName } from './labels.ts';
+import { KIND_LABELS, canResume, canStop, lifecycleLabel, limitNote, modelName } from './labels.ts';
 import { AgendaSection } from './AgendaTab.tsx';
 import { EmployeeFileSection } from './EmployeeFile.tsx';
 import { FireControls } from './FireControls.tsx';
@@ -74,73 +74,66 @@ export function Panel({ id }: { id: string }) {
     });
   };
 
+  const initial = e.name.trim().charAt(0).toLocaleUpperCase('tr') || '?';
   return (
-    <aside className="panel" aria-label={`${e.name} paneli`}>
-      <header className="panel-head">
-        <div>
+    <aside className="panel desk" aria-label={`${e.name} paneli`}>
+      <header className="desk-head">
+        <span className={`avatar ${e.kind}`} aria-hidden="true">
+          {initial}
+        </span>
+        <div className="desk-who">
           <h2>{e.name}</h2>
-          <span className={`badge ${e.lifecycle}`}>{lifecycleLabel(e.lifecycle)}</span>
-          {note && <span className="muted"> {note}</span>}
-          <span className="muted"> {provider === 'codex' ? modelName(e.model, 'codex') : `Claude · ${e.model}`}</span>
+          <span className="muted">
+            {e.title || KIND_LABELS[e.kind]} · <span>{provider === 'codex' ? modelName(e.model, 'codex') : `Claude · ${e.model}`}</span>
+          </span>
         </div>
-        <button type="button" className="icon" aria-label="Paneli kapat" onClick={() => select(null)}>
-          ×
-        </button>
+        <span className={`badge ${e.lifecycle}`}>{lifecycleLabel(e.lifecycle)}</span>
+        {note && <span className="muted">{note}</span>}
+        <div className="desk-actions">
+          {canStop(e.lifecycle) && (
+            <button type="button" disabled={busy} onClick={() => void run(() => api.stop(id))}>
+              Durdur
+            </button>
+          )}
+          {canResume(e.lifecycle) && (
+            <button type="button" disabled={busy} onClick={() => void run(() => api.resume(id))}>
+              Devam
+            </button>
+          )}
+          {e.lifecycle !== 'in_terminal' && e.sessionStarted && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const opened = await api.openTerminal(id);
+                  setTerminalCommand(id, opened.command);
+                })
+              }
+            >
+              Terminalde aç
+            </button>
+          )}
+          {e.lifecycle === 'in_terminal' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  await api.closeTerminal(id);
+                  setTerminalCommand(id, null);
+                })
+              }
+            >
+              Ofise geri al
+            </button>
+          )}
+          <FireControls employee={e} />
+          <button type="button" className="icon" aria-label="Paneli kapat" onClick={() => select(null)}>
+            ×
+          </button>
+        </div>
       </header>
-      <p className="role">{e.role}</p>
-      <div className="field">
-        <label htmlFor={`provider-${id}`}>{e.kind === 'coordinator' ? 'Koordinatörün sağlayıcısı' : 'Çalışanın sağlayıcısı'}</label>
-        <select id={`provider-${id}`} value={provider} disabled={busy || ['working', 'starting', 'in_terminal'].includes(e.lifecycle)} onChange={ev => void run(() => api.switchProvider(id, ev.target.value as 'claude' | 'codex'))}>
-          <option value="claude">Claude</option><option value="codex">Codex</option>
-        </select>
-        {e.lifecycle === 'working' && <small className="muted">Sağlayıcıyı değiştirmek için önce durdur.</small>}
-      </div>
-      <p className="usage">Oturum {e.sessionId}</p>
-      <p className="usage">
-        Bugün {formatTokens(tokensOf(usage?.today))}{provider === 'codex' ? '' : ` · ${formatCost(usage?.today.costUsd ?? 0)} bildirilen`} — toplam {formatTokens(tokensOf(usage?.total))}
-        {provider === 'codex' ? ' · Codex para maliyeti bildirmiyor' : ` · ${formatCost(usage?.total.costUsd ?? 0)} bildirilen`}
-      </p>
-      <div className="actions">
-        {canStop(e.lifecycle) && (
-          <button type="button" disabled={busy} onClick={() => void run(() => api.stop(id))}>
-            Durdur
-          </button>
-        )}
-        {canResume(e.lifecycle) && (
-          <button type="button" disabled={busy} onClick={() => void run(() => api.resume(id))}>
-            Devam
-          </button>
-        )}
-        {e.lifecycle !== 'in_terminal' && e.sessionStarted && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const opened = await api.openTerminal(id);
-                setTerminalCommand(id, opened.command);
-              })
-            }
-          >
-            Terminalde aç
-          </button>
-        )}
-        {e.lifecycle === 'in_terminal' && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                await api.closeTerminal(id);
-                setTerminalCommand(id, null);
-              })
-            }
-          >
-            Ofise geri al
-          </button>
-        )}
-        <FireControls employee={e} />
-      </div>
       {command && (
         <div className="terminal">
           <code>{command}</code>
@@ -150,7 +143,23 @@ export function Panel({ id }: { id: string }) {
         </div>
       )}
       {e.lastError && <p className="error">{e.lastError}</p>}
-      <EmployeeFileSection id={id} />
+      <details className="desk-more">
+        <summary>Rol, sağlayıcı ve kullanım</summary>
+        <p className="prose role-full">{e.role}</p>
+        <div className="field">
+          <label htmlFor={`provider-${id}`}>{e.kind === 'coordinator' ? 'Koordinatörün sağlayıcısı' : 'Çalışanın sağlayıcısı'}</label>
+          <select id={`provider-${id}`} value={provider} disabled={busy || ['working', 'starting', 'in_terminal'].includes(e.lifecycle)} onChange={ev => void run(() => api.switchProvider(id, ev.target.value as 'claude' | 'codex'))}>
+            <option value="claude">Claude</option><option value="codex">Codex</option>
+          </select>
+          {e.lifecycle === 'working' && <small className="muted">Sağlayıcıyı değiştirmek için önce durdur.</small>}
+        </div>
+        <p className="usage">Oturum {e.sessionId}</p>
+        <p className="usage">
+          Bugün {formatTokens(tokensOf(usage?.today))}{provider === 'codex' ? '' : ` · ${formatCost(usage?.today.costUsd ?? 0)} bildirilen`} — toplam {formatTokens(tokensOf(usage?.total))}
+          {provider === 'codex' ? ' · Codex para maliyeti bildirmiyor' : ` · ${formatCost(usage?.total.costUsd ?? 0)} bildirilen`}
+        </p>
+        <EmployeeFileSection id={id} />
+      </details>
       <AgendaSection id={id} />
       <div
         className="stream"

@@ -4,7 +4,7 @@ import type { Plan, PlanView } from '@cc/shared';
 import { useOffice } from '../store/office.ts';
 import { PlanCard } from './PlanCard.tsx';
 
-vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})), streamNotes: vi.fn(async () => []) } }));
+vi.mock('../net/api.ts', () => ({ api: { approvePlan: vi.fn(async () => ({})), declinePlan: vi.fn(async () => ({})), stopPlan: vi.fn(async () => ({})), streamNotes: vi.fn(async () => []), send: vi.fn(async () => ({ ok: true })) } }));
 const { api } = await import('../net/api.ts');
 
 const plan = (over: Partial<PlanView> = {}): PlanView => ({
@@ -46,7 +46,7 @@ describe('PlanCard', () => {
     useOffice.setState({
       plans: { p1: plan({ status: 'approved' }) },
       budget: {
-        constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20, outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: [], sendsPerHour: 30, bulkRecipients: 5, callHours: [9, 19], callsPerDay: 20 },
+        constitution: { maxEmployees: 8, ownerReservePct: 25, monthlyUsdCap: null, chainDepth: 5, tasksPerDay: 30, openTasksPerPlan: 60, idleSleepMinutes: 30, digestHours: [9, 17], coordinatorModels: { kickoff: 'fable', cycle: 'opus', routine: 'sonnet' }, cacheTtlMinutes: 5, difficultyModels: { easy: 'haiku', medium: 'sonnet', hard: 'opus', critical: 'fable' }, digestEnabled: false, modelPolicyEnabled: false, difficultyModelsEnabled: false, capabilityPrecheckEnabled: false, gateEnabled: false, autonomy: 'free', releasePolicy: 'owner', activeGoals: 10, pulseHours: 6, idleCapacityHours: 2, weeklyStopPct: 90, defaultTaskMinutes: 45, minScheduleMinutes: 60, maxSchedules: 20, outwardPolicy: { send: 'system', publish: 'system', call: 'system', calendar: 'owner' }, specialContacts: [], sendsPerHour: 30, bulkRecipients: 5, callHours: [9, 19], callsPerDay: 20 },
         reserve: { active: false, limitPct: 75, fiveHourPct: null, sevenDayPct: null }, month: { key: '2026-10', usd: 0 }, plans: { p1: { spentUsd: 30, claudeUsd: 1.5 } },
       },
     });
@@ -158,5 +158,66 @@ describe('PlanCard', () => {
     expect(await screen.findByText(/Akış planı: Yeni plan\./)).toBeTruthy();
     expect(api.streamNotes).toHaveBeenCalledTimes(2);
     expect(screen.getAllByText('Akış notları')).toHaveLength(1);
+  });
+});
+
+describe('PlanCard — short: what will be done first, the rest folded away', () => {
+  it('lists the steps under “Yapılacaklar” and keeps goal, approach, people, risks, method and streams inside a closed “Ayrıntı”', () => {
+    const method = { workType: 'content' as const, stages: [{ name: 'Taslak', role: 'yazar', review: false }], checks: ['marka dili'] };
+    const streams = [{ id: 'api', title: 'API', owner: 'ada', dependsOn: [], status: 'planned' as const }];
+    useOffice.setState({ plans: { p1: plan({ method, streams, status: 'approved' }) } });
+    render(<PlanCard plan={plan({ method, streams, status: 'approved' })} />);
+    const todo = screen.getByRole('list', { name: 'Yapılacaklar' });
+    expect(within(todo).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['senaryo', 'kurgu']);
+    const details = screen.getByText('Ayrıntı').closest('details')!;
+    expect(details.open).toBe(false);
+    expect(details.className).toBe('plan-details');
+    for (const text of ['Ürünü tanıtmak', 'Senaryo, çekim, kurgu', 'yazar + videocu', 'kota']) expect(within(details).getByText(text)).toBeTruthy();
+    expect(within(details).getByRole('region', { name: 'Nasıl yapılacak' })).toBeTruthy();
+    expect(within(details).getByRole('region', { name: 'Akışlar' })).toBeTruthy();
+    // The to-do list sits outside the fold, right under the title.
+    expect(details.contains(todo)).toBe(false);
+  });
+
+  it('a plan without steps shows no to-do list and no empty heading', () => {
+    useOffice.setState({ plans: { p1: plan({ steps: [] }) } });
+    render(<PlanCard plan={plan({ steps: [] })} />);
+    expect(screen.queryByRole('list', { name: 'Yapılacaklar' })).toBeNull();
+  });
+});
+
+describe('PlanCard — the owner gives direction, not only yes or no', () => {
+  it('“Değişiklik iste” sends the note to the one who proposed the plan and keeps the plan a draft', async () => {
+    render(<PlanCard plan={plan()} />);
+    const note = screen.getByRole('textbox', { name: 'Koordinatöre not' });
+    fireEvent.change(note, { target: { value: 'fal.ai kullanılmasın, görseli Codex üretsin' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Değişiklik iste' }));
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
+    const [to, text] = vi.mocked(api.send).mock.calls[0]!;
+    expect(to).toBe('c');
+    expect(text).toContain('“Tanıtım videosu” planı');
+    expect(text).toContain('planRevise');
+    expect(text).toContain('fal.ai kullanılmasın, görseli Codex üretsin');
+    expect(api.declinePlan).not.toHaveBeenCalled();
+    expect(api.approvePlan).not.toHaveBeenCalled();
+    expect((note as HTMLTextAreaElement).value).toBe('');
+    expect(await screen.findByText(/Koordinatöre iletildi/)).toBeTruthy();
+  });
+
+  it('“Değişiklik iste” needs a note; approving with a note approves first, then passes the note on', async () => {
+    render(<PlanCard plan={plan()} />);
+    expect((screen.getByRole('button', { name: 'Değişiklik iste' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Koordinatöre not' }), { target: { value: 'Jeeta’yı da buna göre kodlayın' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Onayla' }));
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
+    expect(api.approvePlan).toHaveBeenCalledWith('p1');
+    expect(vi.mocked(api.send).mock.calls[0]![1]).toContain('Jeeta’yı da buna göre kodlayın');
+  });
+
+  it('approving without a note sends nothing', async () => {
+    render(<PlanCard plan={plan()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Onayla' }));
+    await waitFor(() => expect(api.approvePlan).toHaveBeenCalledWith('p1'));
+    expect(api.send).not.toHaveBeenCalled();
   });
 });

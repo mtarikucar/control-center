@@ -40,14 +40,16 @@ afterEach(() => {
 });
 
 describe('CompanyView', () => {
-  it('opens on the tab it was asked for (a top-bar figure asks for the Ajanda), else on the org chart', () => {
+  it('opens on the tab it was asked for (a top-bar figure asks for the agenda: İşler, agenda view), else on the team', () => {
     useOffice.setState({ companyTab: 'agenda' });
     const { unmount } = render(<CompanyView />);
-    expect(screen.getByRole('tab', { name: 'Ajanda' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'İşler' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Ajanda' }).getAttribute('aria-pressed')).toBe('true');
     unmount();
     useOffice.setState({ companyTab: null });
     render(<CompanyView />);
-    expect(screen.getByRole('tab', { name: 'Örgüt' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Ekip' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Ekip', 'İşler', 'Onaylar', 'Bütçe', 'Ayarlar']);
   });
 
   it('without a coordinator, offers to hire one or to make an employee coordinator', async () => {
@@ -89,7 +91,6 @@ describe('CompanyView', () => {
     expect(groups).toEqual(['Yazılım', 'Pazarlama', 'Merkez']);
     const yazilim = screen.getByRole('region', { name: 'Yazılım' });
     expect(within(yazilim).getAllByRole('button').map((b) => b.textContent)[0]).toMatch(/selin/);
-    expect(screen.getByRole('tab', { name: 'Departmanlar' })).toBeTruthy();
   });
 
   it('a department named like the centre does not swallow it: two sections, each with its own people', () => {
@@ -158,7 +159,7 @@ describe('CompanyView', () => {
       [task('Bekleyen iş'), task('Süren iş', { status: 'in_progress', difficulty: 'hard' }), task('Takılan iş', { status: 'blocked', note: 'şifre yok' }), task('Biten iş', { status: 'done', finishedAt: 5 }), task('Can işi', { assignee: 'can' }), task('Ertelenen', { status: 'parked', notBefore: Date.now() + 3_600_000, parkedReason: 'bekle' })],
     );
     render(<CompanyView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Görevler' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'İşler' }));
     expect(within(screen.getByRole('region', { name: 'Bekliyor' })).getByText('Bekleyen iş')).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Sürüyor' })).getByText('Süren iş')).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Sürüyor' })).getByText('zor').className).toContain('difficulty');
@@ -172,21 +173,13 @@ describe('CompanyView', () => {
     expect(screen.getByText('Can işi')).toBeTruthy();
   });
 
-  it('has an Ajanda tab that shows the agenda', async () => {
+  it('İşler shows the agenda on its Ajanda view', async () => {
     office([person('koor', { kind: 'coordinator' })]);
     render(<CompanyView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Ajanda' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'İşler' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ajanda' }));
     await waitFor(() => expect(api.agenda).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: 'Zaman çizelgesi' })).toBeTruthy();
-  });
-
-  it('has a Yönetim tab with the coordinator’s management log', async () => {
-    office([person('koor', { kind: 'coordinator' })]);
-    render(<CompanyView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Yönetim' }));
-    await waitFor(() => expect(api.management).toHaveBeenCalled());
-    expect(await screen.findByText('Kayıt işini Can’a verdim')).toBeTruthy();
-    expect(screen.getByText('Teslim: “Giriş” (Ada)')).toBeTruthy();
   });
 
   it('management cycle §3.4: a task card names its plan’s stream', () => {
@@ -197,7 +190,7 @@ describe('CompanyView', () => {
     office([person('ada', { name: 'Ada' })], [task('Uç noktalar', { planId: 'p1', streamId: 'api' }), task('Akışsız iş', { planId: 'p1' })]);
     useOffice.setState({ plans: { p1: plan } });
     render(<CompanyView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Görevler' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'İşler' }));
     const card = screen.getByText('Uç noktalar').closest('article')!;
     expect(within(card).getByText('akış: API')).toBeTruthy();
     expect(screen.getByText('Akışsız iş').closest('article')!.textContent).not.toContain('akış');
@@ -219,7 +212,7 @@ describe('CompanyView', () => {
       },
     });
     render(<CompanyView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Öneriler' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Onaylar' }));
     const owner = screen.getByRole('region', { name: 'Senin kararını bekleyenler' });
     expect(within(owner).getByText('Telefon')).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Ekipte karar bekleyenler' })).getByText('Blog')).toBeTruthy();
@@ -234,7 +227,7 @@ describe('CompanyView', () => {
       ],
     );
     render(<CompanyView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Görevler' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'İşler' }));
     const column = screen.getByRole('region', { name: 'İncelemede' });
     expect(within(column).getByText('Tanıtım metni')).toBeTruthy();
     expect(column.textContent).toContain('İnceleyen: Can');
@@ -242,12 +235,12 @@ describe('CompanyView', () => {
     expect(within(screen.getByRole('region', { name: 'Bekliyor' })).getByText('İnceleme').className).toContain('review');
   });
 
-  it('spec capabilities §9: has a Yetenekler tab and a Giden kutusu tab', async () => {
+  it('spec capabilities §9: the capabilities show under Onaylar only while one waits for the owner; the outbox and the memory have no page', async () => {
     render(<CompanyView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Yetenekler' }));
-    expect(await screen.findByRole('region', { name: 'Ürünle gelenler' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: 'Giden kutusu' }));
-    expect(await screen.findByText(/"izin verildi" kaydıdır/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Onaylar' }));
+    await waitFor(() => expect(api.customCapabilities).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('region', { name: 'Yetenek kararları' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Hafıza|Giden kutusu|Yetenekler|Yönetim/ })).toBeNull();
   });
 
   describe('final review I2: the Yetenekler tab counts what waits for the owner', () => {
@@ -268,18 +261,20 @@ describe('CompanyView', () => {
         capability('old.send', { status: 'retired', decidedBy: 'owner' }),
       ]);
       render(<CompanyView />);
-      const tab = await screen.findByRole('tab', { name: 'Yetenekler 3 karar bekliyor' });
-      expect(tab.textContent).toBe('Yetenekler3');
+      const tab = await screen.findByRole('tab', { name: 'Onaylar 3 karar bekliyor' });
+      expect(tab.textContent).toBe('Onaylar3');
+      fireEvent.click(tab);
+      expect(await screen.findByRole('region', { name: 'Yetenek kararları' })).toBeTruthy();
     });
 
     it('shows no count when nothing waits, and the count follows a change of the capabilities', async () => {
       office([person('koord', { kind: 'coordinator', name: 'Koordinatör' })]);
       render(<CompanyView />);
       await waitFor(() => expect(api.customCapabilities).toHaveBeenCalledTimes(1));
-      expect(screen.getByRole('tab', { name: 'Yetenekler' }).textContent).toBe('Yetenekler');
+      expect(screen.getByRole('tab', { name: 'Onaylar' }).textContent).toBe('Onaylar');
       vi.mocked(api.customCapabilities).mockResolvedValueOnce([capability('active.send', {})]);
       act(() => useOffice.setState({ capabilitiesRev: useOffice.getState().capabilitiesRev + 1 }));
-      expect(await screen.findByRole('tab', { name: 'Yetenekler 1 karar bekliyor' }, { timeout: 3000 })).toBeTruthy();
+      expect(await screen.findByRole('tab', { name: 'Onaylar 1 karar bekliyor' }, { timeout: 3000 })).toBeTruthy();
     });
 
     it('does not guess when the capabilities cannot be read: no count', async () => {
@@ -287,7 +282,7 @@ describe('CompanyView', () => {
       vi.mocked(api.customCapabilities).mockRejectedValueOnce(new Error('Sunucuya ulaşılamadı.'));
       render(<CompanyView />);
       await waitFor(() => expect(api.customCapabilities).toHaveBeenCalledTimes(1));
-      expect(screen.getByRole('tab', { name: 'Yetenekler' }).textContent).toBe('Yetenekler');
+      expect(screen.getByRole('tab', { name: 'Onaylar' }).textContent).toBe('Onaylar');
     });
   });
 });

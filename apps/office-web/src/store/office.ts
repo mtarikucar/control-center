@@ -28,6 +28,20 @@ export interface OfficeStore extends OfficeData {
   setHireOpen: (open: boolean) => void;
   /** `tab`: the tab it opens on (e.g. 'agenda'); without one, its first. */
   setCompanyOpen: (open: boolean, tab?: string) => void;
+  /** The page's view: the flat cockpit (default) or the 3D office, which loads only when chosen; kept per browser. */
+  view: ViewMode;
+  setView: (view: ViewMode) => void;
+}
+
+export type ViewMode = 'flat' | 'scene';
+const VIEW_KEY = 'cc.view';
+
+function storedView(): ViewMode {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'scene' ? 'scene' : 'flat';
+  } catch {
+    return 'flat';
+  }
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,6 +73,7 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
   hireOpen: false,
   companyOpen: false,
   companyTab: null,
+  view: storedView(),
 
   receive(m) {
     if (m.type === 'snapshot') {
@@ -122,4 +137,12 @@ export const useOffice = create<OfficeStore>()((set, get) => ({
     }),
   setHireOpen: (hireOpen) => set({ hireOpen }),
   setCompanyOpen: (companyOpen, tab) => set({ companyOpen, companyTab: companyOpen ? (tab ?? null) : null }),
+  setView(view) {
+    set({ view });
+    try {
+      localStorage.setItem(VIEW_KEY, view);
+    } catch {
+      // A private window or blocked storage: the choice lasts for this page only.
+    }
+  },
 }));

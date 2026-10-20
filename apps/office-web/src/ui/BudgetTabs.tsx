@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { MODEL_ALIASES, SEAT_COUNT, type AgentProvider, type BudgetSummary, type Constitution } from '@cc/shared';
+import { MODEL_ALIASES, type AgentProvider, type BudgetSummary, type Constitution } from '@cc/shared';
 import { api } from '../net/api.ts';
 import { useOffice } from '../store/office.ts';
 import { PLAN_STATUS_LABELS, modelLabels } from './labels.ts';
@@ -136,25 +136,8 @@ interface Field {
 }
 
 const FIELDS: Field[] = [
-  { key: 'maxEmployees', label: 'Çalışan sınırı', hint: `Koordinatör dahil; en çok ${SEAT_COUNT} (ofisteki koltuk sayısı).` },
   { key: 'ownerReservePct', label: 'Sahibinin kota payı (%)', hint: 'Kullanım 100 − bu değere gelince ofis yalnız acil işleri başlatır.' },
   { key: 'monthlyUsdCap', label: 'Aylık para sınırı (USD)', hint: 'Boş: sınır yok.', nullable: true },
-  { key: 'chainDepth', label: 'Paslama zinciri', hint: 'Paslanan işten paslanan iş en çok kaç halka olabilir.' },
-  { key: 'tasksPerDay', label: 'Günlük görev sınırı', hint: 'Bir çalışanın günde açabileceği görev (koordinatör hariç).' },
-  { key: 'openTasksPerPlan', label: 'Plan başına açık görev', hint: 'Bir planda aynı anda açık en çok görev.' },
-  { key: 'idleSleepMinutes', label: 'Boşta uyuma (dk)', hint: 'İşi olmayan çalışan bu kadar sonra uyur; 0 = hiç.' },
-  { key: 'digestHours', label: 'Özet saatleri', hint: 'Karar gerektirmeyen notlar bu saatlerde tek turda gelir; sonuncusu günlük raporu getirir (ör. 9, 17).', hours: true },
-  {
-    key: 'coordinatorModels', label: 'Koordinatör modelleri',
-    hint: 'Koordinatörün turu, türüne göre. Başlangıç: süren plan yokken senin mesajın; aktif hedef yokken ya da hiçbir hedefin süren planı yokken gelen yönetim turu. Yönetim turu: diğer yönetim turları (yeniden planlama). Sıradan: geri kalan her tur (notlar, öneriler, kısa cevaplar). Daha güçlü modele hemen, daha zayıfa önbellek süresinden sonra geçer; model politikası kapalıyken de uygulanır.',
-    selects: [['kickoff', 'Başlangıç'], ['cycle', 'Yönetim turu'], ['routine', 'Sıradan']],
-  },
-  { key: 'difficultyModels', label: 'Zorluk modelleri', hint: 'Kolay / orta / zor / kritik görev (ör. haiku / sonnet / opus / fable).', models: ['easy', 'medium', 'hard', 'critical'] },
-  { key: 'cacheTtlMinutes', label: 'Önbellek süresi (dk)', hint: 'Bir oturum son turundan bu kadar sonra daha ucuz modele geçebilir; daha önce geçmez. Claude Code önbelleği yine bir saat tutar; bu ayar onu değiştirmez.' },
-  { key: 'digestEnabled', label: 'Özet açık', hint: 'Kapalıyken bilgi notları da karar notu gibi hemen gelir.', toggle: true },
-  { key: 'modelPolicyEnabled', label: 'Model politikası açık', hint: 'Kapalıyken herkes kendi modelinde çalışır; koordinatörün tur modelleri yine uygulanır.', toggle: true },
-  { key: 'difficultyModelsEnabled', label: 'Zorluk modelleri açık', hint: 'Kapalıyken görev zorluğu modeli değiştirmez (zorluk saklanır).', toggle: true },
-  { key: 'capabilityPrecheckEnabled', label: 'Yetenek ön-kontrolü açık', hint: 'Açıkken istediği yetenek masada açık olmayan görev dağıtılmaz, bloklanır ve sana yetki önerisi gelir. Kapalıyken görev eskisi gibi dağıtılır.', toggle: true },
   { key: 'gateEnabled', label: 'Geri alınamaz iş kapısı açık', hint: 'Açıkken dışa dönük işler Otonomi politikasına göre: sistemce ya da sana (Onaylar sekmesi). Ödeme, silme, tarayıcı işi ve ofisin kendisine dokunan araç çağrıları her zaman senin onayını bekler. Kapıyı kazara ve sıradan yollar için kapatır; aynı kullanıcıdaki kararlı bir atlatmayı durdurmaz.', toggle: true },
   {
     key: 'outwardPolicy', label: 'Otonomi politikası',
@@ -166,18 +149,8 @@ const FIELDS: Field[] = [
     key: 'specialContacts', label: 'Özel kişiler', list: true,
     hint: 'Satır başına bir girdi: e-posta, telefon numarası, kullanıcı adı, kişinin ya da firmanın adı ya da kişinin aday/konuşma kimliği (adlar bütün bir ifade olarak aranır; büyük-küçük harf ve telefonun yazılışı fark etmez). Kapı açıkken, girdisinde bunlardan biri geçen çağrı — o kişiye giden ya da onu anan —, politika ne olursa olsun sana gelir. Kapı yalnız çağrının girdisine bakar: kimlikle adreslenen bir çağrıda (aday ya da konuşma kimliğiyle e-posta, mesaj, arama) kişiyi ancak kimliği listedeyse görür; adresini, telefonunu ve kimliklerini birlikte yaz.',
   },
-  { key: 'sendsPerHour', label: 'Saatlik gönderim sınırı', hint: 'Bir departmanın (departmansız çalışanın kendi) son bir saatte sistemce geçen gönderim + yayın sayısı buna gelince sıradaki sana gelir; 0 = sistem hiç göndermez.' },
-  { key: 'bulkRecipients', label: 'Toplu gönderim eşiği (alıcı)', hint: 'Bundan çok alıcılı (to, cc, bcc…) çağrı sana gelir.' },
-  { key: 'callHours', label: 'Arama saatleri', hint: 'Sistem yalnız bu yerel saatler arasında arar (ör. 9, 19 = 09:00–19:00).', span: true },
-  { key: 'callsPerDay', label: 'Günlük arama sınırı', hint: 'Bir departmanın (departmansız çalışanın kendi) bugünkü sistem araması buna gelince sıradaki sana gelir; 0 = sistem hiç aramaz.' },
   { key: 'autonomy', label: 'Tam serbest', hint: 'Açıkken koordinatör hedef koyar ve planlarını sormadan başlatır; kapalıyken her plan senin onayını bekler.', toggle: true, choice: ['free', 'plans'] },
-  { key: 'activeGoals', label: 'En fazla aktif hedef', hint: 'Koordinatörün aynı anda yürüttüğü en çok hedef.' },
-  { key: 'pulseHours', label: 'Nabız aralığı (saat)', hint: 'Hiç hedef ve iş yokken koordinatöre bu aralıkla yönetim turu açılır (dinlenirken açılmaz, dinlenme bitince bir tur açılır); 0 = hiç.' },
-  { key: 'idleCapacityHours', label: 'Boşta kapasite uyarısı (saat)', hint: 'Bu kadar saattir işi olmayan çalışanlar yönetim panosunda “uzun süredir” diye işaretlenir; 0 = hiç.' },
-  { key: 'weeklyStopPct', label: 'Haftalık kota durdurma sınırı (%)', hint: 'Hesabın 7 günlük Claude kotası bu yüzdeye ulaşınca ofis kendini duraklatır (o hafta bir kez); sürdürmek sizde. 0 = kapalı.' },
-  { key: 'defaultTaskMinutes', label: 'Varsayılan görev süresi (dk)', hint: 'Geçmişi olmayan bir işin ajandadaki tahmini süresi (5–480).' },
-  { key: 'minScheduleMinutes', label: 'Rutin aralığı en az (dk)', hint: 'Bir rutin bundan daha sık çalışamaz (1–1440).' },
-  { key: 'maxSchedules', label: 'En fazla rutin', hint: 'Aynı anda en çok bu kadar rutin (durdurulanlar sayılmaz); 0 = hiç.' },
+  { key: 'releasePolicy', label: 'Canlıya alma ve birleştirme ofiste', hint: 'Açıkken birleştirme, canlıya alma, göç ve sunucu işleri sana sorulmadan yapılır (ödeme ve silme yine sana gelir); kapalıyken rol kartlarındaki “sahibinin onayıyla” kuralı geçerli.', toggle: true, choice: ['office', 'owner'] },
 ];
 
 const shown = (v: Constitution[keyof Constitution]): string =>
@@ -289,9 +262,7 @@ export function ConstitutionTab() {
       setBusy(false);
     }
   };
-  return (
-    <form className="constitution" onSubmit={(e) => void save(e)}>
-      {FIELDS.map((f) =>
+  const render = (f: Field) =>
         f.selects ? (
           <fieldset key={f.key} className="models">
             <legend>{f.label}</legend>
@@ -333,8 +304,11 @@ export function ConstitutionTab() {
             )}
             <small className="muted">{provider === 'codex' ? f.key === 'cacheTtlMinutes' ? 'Son turdan sonra daha düşük çalışma düzeyine geçmeden önce bekleme süresi; Codex önbelleğinin süresini değiştirmez.' : f.hint.replaceAll('Claude', 'Codex') : f.hint}</small>
           </label>
-        ),
-      )}
+        );
+  return (
+    <form className="constitution" onSubmit={(e) => void save(e)}>
+      <p className="muted">Senin kararın olan yedi ayar. Modelleri, sınırları ve zamanlamaları ofis kendisi ayarlar.</p>
+      {FIELDS.map(render)}
       {error && (
         <p className="error" role="alert">
           {error}

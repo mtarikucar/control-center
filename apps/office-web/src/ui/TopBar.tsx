@@ -16,6 +16,8 @@ export function TopBar() {
   const paused = useOffice((s) => s.paused);
   const company = useOffice((s) => s.budget !== null);
   const metrics = useMetrics();
+  const view = useOffice((s) => s.view);
+  const setView = useOffice((s) => s.setView);
   const waiting = useOffice(
     (s) =>
       Object.values(s.plans).filter((p) => p.status === 'draft').length +
@@ -29,6 +31,14 @@ export function TopBar() {
         {runtime && <span className="badge model">Claude + Codex</span>}
         <span className={`conn ${connected ? 'on' : 'off'}`}>{connected ? 'canlı' : 'bağlantı yok'}</span>
         <span className="muted">{count} çalışan</span>
+      </div>
+      <div className="segmented view-switch" role="group" aria-label="Görünüm">
+        <button type="button" aria-pressed={view === 'flat'} onClick={() => setView('flat')}>
+          Masaüstü
+        </button>
+        <button type="button" aria-pressed={view === 'scene'} onClick={() => setView('scene')}>
+          3D
+        </button>
       </div>
       <QuotaHud quota={quota} now={Date.now()} label={runtime?.mode === 'mixed' ? 'Claude' : undefined} />
       {codexQuota && <QuotaHud quota={codexQuota} now={Date.now()} label="Codex" />}
