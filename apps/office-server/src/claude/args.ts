@@ -62,6 +62,8 @@ export function sessionArgs(o: { model: ModelAlias; sessionId: string; resume: b
     o.model,
     '--permission-mode',
     'bypassPermissions',
+    // The owner's Chrome (Claude in Chrome) is a tool of the desk like any connector: platform sign-ins live there.
+    '--chrome',
     ...settingsArgs(o.home, o.hook),
     '--disallowedTools',
     ...DISALLOWED_TOOLS,
@@ -94,6 +96,8 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export function terminalCommand(deskPath: string, sessionId: string): string {
-  return `cd ${shellQuote(deskPath)} && claude --resume ${sessionId}`;
+/** The owner's terminal copy of a session: the same session, and with `mcpConfig` the office tools too (a token of its own). */
+export function terminalCommand(deskPath: string, sessionId: string, mcpConfig?: string): string {
+  const base = `cd ${shellQuote(deskPath)} && claude --resume ${sessionId}`;
+  return mcpConfig ? `${base} --mcp-config ${shellQuote(mcpConfig)}` : base;
 }

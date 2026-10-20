@@ -525,7 +525,8 @@ export class Engine {
       await this.#halt(id);
       const updated = this.#setLifecycle(this.#roster.get(id), 'in_terminal', 'terminalde açıldı', model);
       const cwd = deskDir(this.#dataDir, employee.slug);
-      const command = employee.provider === 'codex' ? codexTerminalCommand(cwd, codexSession(cwd)!) : terminalCommand(cwd, employee.sessionId);
+      // The terminal copy gets the office tools too, on a token of its own; coming back, #start issues a fresh one and this one dies.
+      const command = employee.provider === 'codex' ? codexTerminalCommand(cwd, codexSession(cwd)!) : terminalCommand(cwd, employee.sessionId, this.#mcpConfig(this.#mcp?.tokens.issue(id)));
       return { command, employee: updated };
     });
   }
@@ -652,19 +653,23 @@ export class Engine {
     );
   }
 
+  /** The --mcp-config a session gets: the office tools on `token`; none without the office MCP. */
+  #mcpConfig(token: string | undefined): string | undefined {
+    if (!this.#mcp || !token) return undefined;
+    return JSON.stringify({
+      mcpServers: {
+        office: { type: 'http', url: this.#mcp.url(), headers: { Authorization: `Bearer ${token}` } },
+      },
+    });
+  }
+
   #start(employee: Employee, reason: string): Employee {
     const rt = this.#runtime(employee.id);
     if (rt.proc && !rt.proc.exited) return this.#roster.get(employee.id);
     rt.expectingExit = false;
     rt.turnActive = false;
     const token = this.#mcp?.tokens.issue(employee.id);
-    const mcpConfig = this.#mcp
-      ? JSON.stringify({
-          mcpServers: {
-            office: { type: 'http', url: this.#mcp.url(), headers: { Authorization: `Bearer ${token}` } },
-          },
-        })
-      : undefined;
+    const mcpConfig = this.#mcpConfig(token);
     // The gate's hook asks the office with this session's own token (B9a).
     const gate = this.#gate && token ? this.#gate : undefined;
     if (employee.provider === 'codex') {

@@ -102,6 +102,16 @@ describe('claude args', () => {
     expect(terminalCommand("/tmp/o'k/desks/ada", 'sid-4')).toBe(`cd '/tmp/o'\\''k/desks/ada' && claude --resume sid-4`);
   });
 
+  it('turns on Claude in Chrome for every employee session', () => {
+    expect(sessionArgs({ model: 'sonnet', sessionId: 's', resume: false })).toContain('--chrome');
+  });
+
+  it('gives the terminal copy the office tools too when an MCP config is handed over', () => {
+    const config = JSON.stringify({ mcpServers: { office: { type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { Authorization: 'Bearer t' } } } });
+    expect(terminalCommand('/tmp/desks/ada', 'sid-4', config)).toBe(`cd '/tmp/desks/ada' && claude --resume sid-4 --mcp-config '${config}'`);
+    expect(terminalCommand('/tmp/desks/ada', 'sid-4', undefined)).toBe(`cd '/tmp/desks/ada' && claude --resume sid-4`);
+  });
+
   it('gives the session the office tools when asked, keeping the owner’s other connections', () => {
     const config = JSON.stringify({ mcpServers: { office: { type: 'http', url: 'http://127.0.0.1:1/mcp' } } });
     const args = sessionArgs({ model: 'fable', sessionId: 's', resume: false, mcpConfig: config });
