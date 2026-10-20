@@ -86,6 +86,8 @@ const WS_OPEN = 1;
 const DECISION_ROUTE = /^\/api\/decisions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/revert$/;
 const PROPOSAL_ROUTE = /^\/api\/proposals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|reject)$/;
 const PLAN_ROUTE = /^\/api\/plans\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(approve|decline|stop)$/;
+/** A connector by its (URL-encoded) name: the owner's close or open. */
+const INTEGRATION_ROUTE = /^\/api\/integrations\/([^/]+)$/;
 const GOAL_ROUTE = /^\/api\/goals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/;
 const TASK_ROUTE = /^\/api\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(park|release|prioritize)$/;
 const SCHEDULE_ROUTE = /^\/api\/schedules\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(pause|resume|stop)$/;
@@ -311,6 +313,17 @@ async function route(d: ApiDeps, opts: ApiOptions, guard: OwnerGuard, server: Se
     const budget = d.company.budget;
     if (method === 'GET' && url.pathname === '/api/budget') return sendJson(res, 200, budget.summary());
     if (method === 'GET' && url.pathname === '/api/integrations' && d.company.integrations) return sendJson(res, 200, d.company.integrations.list());
+    // The owner closes or opens a connector from the page (the same registry the coordinator writes): a closed one is
+    // shut in every session, which starts again (now if idle, else after its turn) — as integrationRegister does.
+    const integration = INTEGRATION_ROUTE.exec(url.pathname);
+    if (method === 'POST' && integration && d.company.integrations) {
+      const body = (await readJson(req)) as { closed?: unknown; note?: unknown } | null;
+      const name = decodeURIComponent(integration[1] ?? '');
+      const wasClosed = d.company.integrations.closedServers().includes(name);
+      const updated = d.company.integrations.register(OWNER, { name, closed: body?.closed, note: body?.note });
+      if (updated.registryClosed !== wasClosed) for (const e of d.roster.list()) if (e.lifecycle !== 'archived') d.engine.reload?.(e.id);
+      return sendJson(res, 200, updated);
+    }
     if (method === 'GET' && url.pathname === '/api/role-templates') return sendJson(res, 200, listRoleTemplates());
     // The departments (spec departments §7): reading is free; changing has passed the owner guard above.
     const departments = d.company.departments;

@@ -1,4 +1,4 @@
-import { AUTONOMY_LEVELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, RULE_RANGES, SPECIAL_CONTACT_LIMITS, TASK_DIFFICULTIES, fold, isHourWindow, type Autonomy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
+import { AUTONOMY_LEVELS, RELEASE_POLICIES, RELEASE_POLICY_LABELS, COORDINATOR_TURNS, DEFAULT_CONSTITUTION, MODEL_ALIASES, OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, RULE_RANGES, SPECIAL_CONTACT_LIMITS, TASK_DIFFICULTIES, fold, isHourWindow, type Autonomy, type ReleasePolicy, type BudgetSummary, type Constitution, type EmployeeUsage, type OfficeEvent, type OutwardPolicy, type OutwardPolicyKind, type QuotaState, type QuotaWindow, type ReserveState, type Spend, type Task, type TaskChange, type Usage } from '@cc/shared';
 import { ValidationError } from '../errors.ts';
 import type { AgentProvider } from '@cc/shared';
 import type { EventStore } from '../event-store.ts';
@@ -24,7 +24,7 @@ export interface BudgetDeps {
 
 const SWITCHES = { digestEnabled: 'Özet', modelPolicyEnabled: 'Model politikası', difficultyModelsEnabled: 'Zorluk modelleri', capabilityPrecheckEnabled: 'Yetenek ön-kontrolü', gateEnabled: 'Geri alınamaz iş kapısı' } as const;
 type SwitchKey = keyof typeof SWITCHES;
-type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | 'outwardPolicy' | 'specialContacts' | 'callHours' | SwitchKey>;
+type NumberKey = Exclude<keyof Constitution, 'digestHours' | 'coordinatorModels' | 'difficultyModels' | 'autonomy' | 'releasePolicy' | 'outwardPolicy' | 'specialContacts' | 'callHours' | SwitchKey>;
 
 const RULES: Record<NumberKey, { label: string; min: number; max: (desks: number) => number; integer: boolean; nullable?: boolean }> = {
   maxEmployees: { label: 'Çalışan sınırı', min: 1, max: (desks) => desks, integer: true },
@@ -131,6 +131,7 @@ function described(key: keyof Constitution, c: Constitution): [label: string, va
   if (key === 'ownerReservePct') return ['Ofisin kota sınırı', `%${100 - c.ownerReservePct}`];
   if (key === 'digestHours') return ['Özet saatleri', c.digestHours.join(', ')];
   if (key === 'autonomy') return ['Serbestlik', AUTONOMY_LABELS[c.autonomy]];
+  if (key === 'releasePolicy') return ['Canlıya alma ve birleştirme', RELEASE_POLICY_LABELS[c.releasePolicy]];
   if (key === 'outwardPolicy') return ['Otonomi politikası', OUTWARD_POLICY_KINDS.map((k) => `${POLICY_LABELS[k]} ${c.outwardPolicy[k] === 'system' ? 'sistem' : 'sahibine'}`).join(', ')];
   if (key === 'callHours') return ['Arama saatleri', `${c.callHours[0]}–${c.callHours[1]}`];
   if (key === 'coordinatorModels' || key === 'difficultyModels') {
@@ -233,6 +234,11 @@ export class Budget {
       if (key === 'autonomy') {
         if (!(AUTONOMY_LEVELS as readonly unknown[]).includes(value)) throw new ValidationError('Anayasa: Serbestlik free (tam serbest) ya da plans (planlar sahibine) olmalı.');
         checked.autonomy = value as Autonomy;
+        continue;
+      }
+      if (key === 'releasePolicy') {
+        if (!(RELEASE_POLICIES as readonly unknown[]).includes(value)) throw new ValidationError('Anayasa: Canlıya alma ve birleştirme owner (sahibine sorulur) ya da office (ofis halleder) olmalı.');
+        checked.releasePolicy = value as ReleasePolicy;
         continue;
       }
       if (key === 'outwardPolicy') {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Employee } from '@cc/shared';
+import { OWNER, type Employee } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
 import { IntegrationRegistry } from '../src/company/integrations.ts';
 import type { McpTool } from '../src/mcp/protocol.ts';
@@ -179,5 +179,18 @@ describe('Integration registry — reading it', () => {
   it('says so when no desk has reported anything yet', async () => {
     const t = make();
     expect(await t.call(t.coordinator, 'integrationsList')).toContain('Henüz hiçbir masa bağlantı bildirmedi ve elle kayıt yok.');
+  });
+});
+
+
+describe('the owner closes a connector from the page', () => {
+  it('OWNER may close and open one in the registry; a member still may not', () => {
+    const t = make();
+    t.session(t.ada, [['claude.ai Booking.com', 'needs-auth']]);
+    const closed = t.integrations.register(OWNER, { name: 'claude.ai Booking.com', closed: true, note: 'ofisin işi değil' });
+    expect(closed).toMatchObject({ status: 'closed', registryClosed: true, registeredBy: OWNER, note: 'ofisin işi değil' });
+    expect(t.integrations.closedServers()).toContain('claude.ai Booking.com');
+    expect(t.integrations.register(OWNER, { name: 'claude.ai Booking.com', closed: false })).toMatchObject({ registryClosed: false });
+    expect(() => t.integrations.register(t.ada.id, { name: 'claude.ai Booking.com', closed: true })).toThrow(/Yalnız koordinatör/);
   });
 });

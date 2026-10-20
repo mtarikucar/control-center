@@ -25,12 +25,24 @@ const DEPARTMENT_IMPORT = `@${DEPARTMENT_FILE}`;
 export const SPECIAL_CONTACTS_FILE = 'special-contacts.md';
 const SPECIAL_CONTACTS_IMPORT = `@${SPECIAL_CONTACTS_FILE}`;
 
+/** The owner's release policy on every desk (release-policy.ts): rewritten on every change, imported by the card once. */
+export const RELEASE_POLICY_FILE = 'release-policy.md';
+const RELEASE_POLICY_IMPORT = `@${RELEASE_POLICY_FILE}`;
+
 /** The card imports the desk's blocks it has (a card written anew, or one from before them). */
 function keepImports(dir: string): void {
   const card = join(dir, 'CLAUDE.md');
   if (!existsSync(card)) return;
   if (existsSync(join(dir, DEPARTMENT_FILE)) && !readFileSync(card, 'utf8').includes(DEPARTMENT_IMPORT)) appendFileSync(card, `\n## Departman\n\n${DEPARTMENT_IMPORT}\n`);
   if (existsSync(join(dir, SPECIAL_CONTACTS_FILE)) && !readFileSync(card, 'utf8').includes(SPECIAL_CONTACTS_IMPORT)) appendFileSync(card, `\n${SPECIAL_CONTACTS_IMPORT}\n`);
+  if (existsSync(join(dir, RELEASE_POLICY_FILE)) && !readFileSync(card, 'utf8').includes(RELEASE_POLICY_IMPORT)) appendFileSync(card, `\n${RELEASE_POLICY_IMPORT}\n`);
+}
+
+export function writeReleasePolicyFile(dataDir: string, slug: string, text: string): void {
+  const dir = deskDir(dataDir, slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, RELEASE_POLICY_FILE), text);
+  keepImports(dir);
 }
 
 export function writeDepartmentFile(dataDir: string, slug: string, text: string): void {

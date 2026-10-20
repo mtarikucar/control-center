@@ -1,4 +1,9 @@
 import { OUTWARD_DECIDERS, OUTWARD_POLICY_KINDS, type OutwardPolicy } from './autonomy.ts';
+
+/** Who decides releases (merge, deploy, migration, server work): the owner, or the office on its own. */
+export const RELEASE_POLICIES = ['owner', 'office'] as const;
+export type ReleasePolicy = (typeof RELEASE_POLICIES)[number];
+export const RELEASE_POLICY_LABELS: Record<ReleasePolicy, string> = { owner: 'sahibine sorulur', office: 'ofis halleder' };
 import type { Autonomy, TaskDifficulty } from './company.ts';
 import { MODEL_ALIASES, type ModelAlias } from './employee.ts';
 
@@ -63,6 +68,11 @@ export interface Constitution {
   gateEnabled: boolean;
   /** 'free': the coordinator sets goals and starts its plans without waiting (spec §6.2); 'plans': each plan waits for the owner. */
   autonomy: Autonomy;
+  /**
+   * Who decides a merge, a deploy, a migration or server work: 'owner' (the default) keeps the role cards' and
+   * methods' "ask the owner" rules; 'office' tells every desk to go ahead without asking (pay and delete stay the owner's).
+   */
+  releasePolicy: ReleasePolicy;
   /** Goals active at once, at most (spec §6.1). */
   activeGoals: number;
   /** With neither goals nor work, the coordinator is told at most this often, hours; 0 = never (spec §6.3). */
@@ -119,6 +129,7 @@ export const DEFAULT_CONSTITUTION: Constitution = {
   capabilityPrecheckEnabled: false,
   gateEnabled: false,
   autonomy: 'free',
+  releasePolicy: 'owner',
   activeGoals: 10,
   pulseHours: 6,
   idleCapacityHours: 2,

@@ -1,5 +1,5 @@
 import {
-  INTEGRATION_KINDS, INTEGRATION_KIND_LABELS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS,
+  INTEGRATION_KINDS, INTEGRATION_KIND_LABELS, INTEGRATION_STATUSES, INTEGRATION_STATUS_LABELS, OWNER,
   type DeskConnection, type Integration, type IntegrationDesk, type IntegrationKind, type IntegrationStatus, type OfficeEvent,
 } from '@cc/shared';
 import type { Db } from '../db.ts';
@@ -82,9 +82,9 @@ export class IntegrationRegistry {
     return found;
   }
 
-  /** The coordinator records a connector by hand; the fields given are written, the others kept. */
+  /** The coordinator (or the owner, from the page) records a connector by hand; the fields given are written, the others kept. */
   register(by: string, input: IntegrationInput): Integration {
-    if (this.#roster.get(by).kind !== 'coordinator') throw new ForbiddenError('Yalnız koordinatör bunu yapabilir.');
+    if (by !== OWNER && this.#roster.get(by).kind !== 'coordinator') throw new ForbiddenError('Yalnız koordinatör bunu yapabilir.');
     if (input.name !== undefined && typeof input.name !== 'string') throw new ValidationError('Bağlantı adı metin olmalı.');
     const name = clean(input.name as string | undefined, 'Bağlantı adı', 120, true);
     const current = this.#db.prepare('SELECT * FROM integrations WHERE name = ?').get(name) as unknown as ManualRow | undefined;
