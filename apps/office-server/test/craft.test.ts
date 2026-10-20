@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WORK_TYPES } from '@cc/shared';
 import { Agenda } from '../src/company/agenda.ts';
-import { CRAFT_VERSION, METHOD_HEADINGS, coordinationText, methodText, pmText, workingText } from '../src/company/craft.ts';
+import { CRAFT_VERSION, METHOD_HEADINGS, coordinationText, methodText, onboardingGuideText, pmText, workingText } from '../src/company/craft.ts';
 import { officeGuide } from '../src/company/roles.ts';
 import { officeTools } from '../src/mcp/tools.ts';
 import { companyFor } from './company-helpers.ts';
@@ -276,5 +276,33 @@ describe('the coordination craft (ships with the office)', () => {
     for (const tool of ['cycleClose', 'planPropose', 'planRevise', 'taskCreate', 'agendaRead', 'reportToOwner', 'restUntil']) expect(named).toContain(tool);
     expect(named).toContain('streams');
     expect(named).toContain('streamId');
+  });
+});
+
+describe('the owner is asked before the team is built, and the plan card stays short', () => {
+  it('pm: at a kickoff the coordinator reports the connections and waits for the owner before hiring or opening a plan', () => {
+    const pm = flat(pmText());
+    expect(pm).toContain('**Bağlantıları sor, cevabı bekle.**');
+    expect(pm).toContain('`integrationsList`');
+    expect(pm).toMatch(/cevap gelmeden işe alma, plan açma/);
+  });
+
+  it('onboarding: a short "devam" from the owner is not an answer; the questions are asked once more', () => {
+    const text = flat(onboardingGuideText());
+    expect(text).toMatch(/"devam"/);
+    expect(text).toContain('cevap değildir');
+  });
+
+  it('core: the plan card is short — only what will be done, in short sentences — and the plan tools say so', () => {
+    const core = flat(coordinationText());
+    expect(core).toContain('**Plan kartı kısa.**');
+    expect(core).toMatch(/kısa cümle/);
+    const all = tools();
+    for (const name of ['planPropose', 'planRevise']) {
+      const tool = all.find((t) => t.name === name)!;
+      expect(tool.description, name).toMatch(/short/i);
+      const steps = (tool.inputSchema as { properties: Record<string, { description: string }> }).properties.steps!;
+      expect(steps.description, name).toMatch(/short sentence/i);
+    }
   });
 });

@@ -259,3 +259,34 @@ describe('Onboarding — the dialog', () => {
     expect(t.events('finished')).toHaveLength(1);
   });
 });
+
+describe('Onboarding — the owner gets asked twice before a guess stands', () => {
+  it('finish is refused while a required question filled by assumption was asked fewer than twice; after the second unanswered round it goes through', async () => {
+    const t = make();
+    const c = t.coordinator.id;
+    const write = (section: never, fields: Record<string, unknown>, assumed: boolean) => t.company.profileUpdate(c, { section, fields, assumed });
+    t.company.onboardingStart(c, PILOT);
+    // Round 1 asked; the owner only says "go on": nothing answered.
+    t.company.onboardingNext(c);
+    t.ownerSays(t.coordinator);
+    write('identity' as never, { name: 'Kıvılcım', sector: 'ajans' }, true);
+    write('offer' as never, { products: ['içerik'] }, true);
+    write('customers' as never, { segments: ['KOBİ'], channels: ['Instagram'] }, true);
+    write('goals' as never, { goals: ['takvim'] }, true);
+    write('success' as never, { done: ['rapor'] }, true);
+    write('tools' as never, { social: ['Instagram'] }, true);
+    write('constraints' as never, { budget: '1000 TL', other: ['yayın'] }, true);
+    expect(() => t.company.onboardingFinish(c)).toThrow(/Varsayımla dolu sorular sahibine iki kez sorulmadı: name, sector, products, segments, channels, goals, success, tools, budget, limits\. onboardingNext ile bir kez daha sor/);
+    expect(t.company.onboarding().onboarding?.status).toBe('active');
+    // Round 2 and 3 asked, both unanswered: every required question was asked twice.
+    t.company.onboardingNext(c);
+    t.ownerSays(t.coordinator);
+    t.company.onboardingNext(c);
+    t.ownerSays(t.coordinator);
+    expect(() => t.company.onboardingFinish(c)).toThrow(/goals, success, tools, budget, limits/);
+    t.company.onboardingNext(c);
+    t.ownerSays(t.coordinator);
+    const finished = await t.call(t.coordinator, 'onboardingFinish');
+    expect(finished).toContain('10’u varsayım');
+  });
+});

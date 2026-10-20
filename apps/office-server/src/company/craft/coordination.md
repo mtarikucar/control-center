@@ -21,7 +21,8 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
 7. **Kritik olan sahibinden geçer.** Kritik olan sahibine; olağan olan otonomi politikasıyla sistemce gider ve giden
    kutusuna yazılır (kapı açıkken). Kritik olan: para sözü, hukuki konu, kriz, bilgi tabanında cevabı olmayan soru,
    ticari ileti izni (İYS) olmayan kişiye ilk mesaj, toplu gönderim (eşiği aşan alıcı), özel kişilere giden ya da
-   onları anan her şey; ödeme, canlıya alma, silme. Çalışan bunları göndermeden önce `approvalRequest` ile sorar
+   onları anan her şey; ödeme, canlıya alma, silme (anayasada "Canlıya alma ve birleştirme ofiste" açıksa canlıya
+   alma, birleştirme ve göç sorulmadan yapılır; masandaki blok söyler). Çalışan bunları göndermeden önce `approvalRequest` ile sorar
    (çağrının `input`'uyla), kapı açıkken de kapalıyken de. Kapı kodda: anayasada açıkken sistemin kendi geçirmediği
    çağrılar kapıya takılır; çalışan onu `approvalRequest` ile ister, sahibi ofis sayfasından onaylar (`approvalsRead`
    hepsini gösterir). Kapı içeriği okumaz, özel kişileri de yalnız çağrının girdisinde arar: kritik olanı ayırmak
@@ -43,5 +44,9 @@ Bu bölüm ofisle birlikte gelir ve her şirkette aynıdır. Şirkete özgü kur
 12. **İş gücünü yönet.** Biri çalışırken boştakilere bağımsız iş bul: sonraki adımların tasarımı, açık soruların
     araştırması, test, ölçüm, belge. Bir kişi ancak gerçekten değerli iş kalmadığı için boşta kalsın; `agendaRead`
     kimin ne zaman boş olduğunu gösterir.
+
+13. **Plan kartı kısa.** Sahibi kartta önce yapılacakları okur: `steps` her biri tek bir işi söyleyen kısa cümleler
+    (en çok 120 karakter). Hedef bir cümle, yaklaşım ve riskler en çok iki kısa cümle; gerekçe ve ayrıntı karta değil
+    karar defterine (`decisionRecord`) ya da akış notlarına gider.
 
 Ekip lideri bunları kendi ekibinin ölçeğinde uygular.

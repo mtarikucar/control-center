@@ -96,7 +96,8 @@ export class Blueprints {
     if (o.planId !== undefined && !this.#d.store.get(o.planId)) throw new ConflictError("Bu planın blueprint'i yok; blueprintPropose ile yeni bir kurulum planı öner.");
     this.#assertRoom(blueprint, o.planId ?? null);
     const card = this.#card(blueprint, o.planId ?? null);
-    const plan = o.planId === undefined ? this.#d.company.propose(by, { ...card, goalId: o.goalId ?? null }) : this.#d.company.revise(by, o.planId, card);
+    // An install card: every step and finding listed, on the install limits (the coordinator's own cards are short).
+    const plan = o.planId === undefined ? this.#d.company.propose(by, { ...card, goalId: o.goalId ?? null }, { install: true }) : this.#d.company.revise(by, o.planId, card, { install: true });
     this.#d.store.put(plan.id, blueprint, this.#d.company.profile().version, by);
     return { plan, blueprint };
   }

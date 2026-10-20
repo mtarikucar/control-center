@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import type { AgentProvider } from '@cc/shared';
 import { relative } from 'node:path';
 import type { CompanyProfile, Department, StoredEvent, Onboarding, OnboardingQuestionView, OnboardingRound, OnboardingView, ProfileSection, Constitution, Employee, EmployeeKind, Goal, GoalStatus, HireInput, Lifecycle, ModelAlias, Note, OfficeEvent, Plan, PlanStream, PlanStreamView, ProfileEntry, Proposal, ProposalKind, Schedule, ScheduleChange, ScheduleStatus, StreamNote, Task, TaskResult } from '@cc/shared';
-import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, ownerDepartment, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
+import { DEFAULT_CONSTITUTION, GOAL_STATUSES, MODEL_ALIASES, ONBOARDING_MAX_ASKS, OWNER, PROFILE_SPEC, PROPOSAL_KINDS, REVIEW_DECISIONS, SCHEDULE_STATUSES, TASK_DIFFICULTIES, ownerDepartment, reviewTally, streamStatus, type ReviewDecision, type TaskChange, type TaskDifficulty } from '@cc/shared';
 import { deskDir, writeRoleCard } from '../desk.ts';
 import { ConflictError, ForbiddenError, ValidationError } from '../errors.ts';
 import type { EventStore } from '../event-store.ts';
@@ -192,6 +192,22 @@ export interface StatusLine {
   kind: EmployeeKind;
   lifecycle: Lifecycle;
   task: string | null;
+}
+
+type PlanFields = Omit<Plan, 'id' | 'status' | 'version' | 'proposedBy' | 'createdAt' | 'updatedAt' | 'approvedAt'>;
+
+/**
+ * The plan card's size. The coordinator's card is short: the owner reads only what will be done, the steps one short
+ * sentence each. An install card (a blueprint's, written by the office) lists every install step and its findings.
+ */
+export const PLAN_LIMITS = {
+  short: { goal: 300, approach: 400, people: 200, risks: 300, steps: 20, step: 120 },
+  install: { goal: 2000, approach: 6000, people: 2000, risks: 2000, steps: 40, step: 300 },
+} as const;
+export type PlanCardKind = keyof typeof PLAN_LIMITS;
+/** `install`: the card is an install plan's (a blueprint's), with the larger limits. */
+export interface PlanOptions {
+  install?: boolean;
 }
 
 function amount(value: number | null | undefined, label: string): number | null {
@@ -1053,9 +1069,9 @@ export class Company {
 
   // ── plans ─────────────────────────────────────────────────────────────────
 
-  propose(by: string, draft: PlanDraft): Plan {
+  propose(by: string, draft: PlanDraft, o: PlanOptions = {}): Plan {
     this.#assertCoordinator(by);
-    const fields = this.#draft(draft);
+    const fields = this.#draft(draft, o.install ? 'install' : 'short');
     const streams = this.#streams(draft.streams);
     const goalId = this.#goalOf(draft.goalId);
     const free = this.#rules().autonomy === 'free';
@@ -1069,22 +1085,12 @@ export class Company {
     return started;
   }
 
-  revise(by: string, planId: string, draft: Partial<PlanDraft>): Plan {
+  revise(by: string, planId: string, draft: Partial<PlanDraft>, o: PlanOptions = {}): Plan {
     this.#assertCoordinator(by);
     const current = this.#d.plans.get(planId);
     if (current.status === 'declined') throw new ConflictError('Bu plandan vazgeçildi; yeni bir plan öner.');
     if (current.status === 'stopped') throw new ConflictError('Bu plan durduruldu; yeni bir plan öner.');
-    const merged = this.#draft({
-      title: draft.title ?? current.title,
-      goal: draft.goal ?? current.goal,
-      approach: draft.approach ?? current.approach,
-      people: draft.people ?? current.people,
-      steps: draft.steps ?? current.steps,
-      quotaPct: draft.quotaPct === undefined ? current.quotaPct : draft.quotaPct,
-      usd: draft.usd === undefined ? current.usd : draft.usd,
-      days: draft.days === undefined ? current.days : draft.days,
-      risks: draft.risks ?? current.risks,
-    });
+    const merged = this.#patch(draft, current, o.install ? 'install' : 'short');
     const method = draft.method === undefined ? (current.method ?? null) : planMethod(draft.method);
     // Not given (or null): kept; [] clears them.
     const streams = draft.streams === undefined || draft.streams === null ? (current.streams ?? []) : this.#streams(draft.streams);
@@ -1740,8 +1746,12 @@ export class Company {
   onboardingFinish(by: string): OnboardingView {
     this.#assertCoordinator(by);
     const active = this.#activeOnboarding();
-    const open = onboardingView(this.profile(), active).questions.filter((v) => v.required && v.state === 'open').map((v) => v.id);
+    const questions = onboardingView(this.profile(), active).questions.filter((v) => v.required);
+    const open = questions.filter((v) => v.state === 'open').map((v) => v.id);
     if (open.length) throw new ValidationError(`Zorunlu sorular cevapsız: ${open.join(', ')}. onboardingNext ile sor ya da varsayımla doldur (profileUpdate, assumed: true).`);
+    // A guess stands only once the owner had ONBOARDING_MAX_ASKS chances to answer: a short "go on" is not an answer.
+    const unasked = questions.filter((v) => v.state === 'assumed' && v.asked < ONBOARDING_MAX_ASKS).map((v) => v.id);
+    if (unasked.length) throw new ValidationError(`Varsayımla dolu sorular sahibine iki kez sorulmadı: ${unasked.join(', ')}. onboardingNext ile bir kez daha sor; sahibi cevaplamazsa varsayım kalır.`);
     const done = this.#onboarding().finish(active.id);
     this.#emit(by, { type: 'onboarding.changed', change: 'finished', onboarding: done });
     return onboardingView(this.profile(), done);
@@ -1773,17 +1783,38 @@ export class Company {
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
-  #draft(d: PlanDraft): Omit<Plan, 'id' | 'status' | 'version' | 'proposedBy' | 'createdAt' | 'updatedAt' | 'approvedAt'> {
+  /**
+   * The plan card is short (the owner reads only what will be done, in short sentences): a sentence or two per text,
+   * the steps one short sentence each. A revision checks only the fields it brings: a plan written before these limits
+   * keeps its longer text until that text is given anew.
+   */
+  #draft(d: PlanDraft, kind: PlanCardKind): PlanFields {
+    const L = PLAN_LIMITS[kind];
     return {
       title: clean(d.title, 'Plan başlığı', 120, true),
-      goal: clean(d.goal, 'Hedef', 2000, true),
-      approach: clean(d.approach, 'Yaklaşım', 6000, true),
-      people: clean(d.people, 'Kimler', 2000, false),
-      steps: lines(d.steps, 'Görev taslağı', 40, 300),
+      goal: clean(d.goal, 'Hedef', L.goal, true),
+      approach: clean(d.approach, 'Yaklaşım', L.approach, true),
+      people: clean(d.people, 'Kimler', L.people, false),
+      steps: lines(d.steps, 'Görev taslağı', L.steps, L.step),
       quotaPct: amount(d.quotaPct, 'Kota payı'),
       usd: amount(d.usd, 'Para'),
       days: amount(d.days, 'Süre'),
-      risks: clean(d.risks, 'Riskler', 2000, false),
+      risks: clean(d.risks, 'Riskler', L.risks, false),
+    };
+  }
+
+  #patch(d: Partial<PlanDraft>, current: Plan, kind: PlanCardKind): PlanFields {
+    const L = PLAN_LIMITS[kind];
+    return {
+      title: d.title === undefined ? current.title : clean(d.title, 'Plan başlığı', 120, true),
+      goal: d.goal === undefined ? current.goal : clean(d.goal, 'Hedef', L.goal, true),
+      approach: d.approach === undefined ? current.approach : clean(d.approach, 'Yaklaşım', L.approach, true),
+      people: d.people === undefined ? current.people : clean(d.people, 'Kimler', L.people, false),
+      steps: d.steps === undefined ? current.steps : lines(d.steps, 'Görev taslağı', L.steps, L.step),
+      quotaPct: d.quotaPct === undefined ? current.quotaPct : amount(d.quotaPct, 'Kota payı'),
+      usd: d.usd === undefined ? current.usd : amount(d.usd, 'Para'),
+      days: d.days === undefined ? current.days : amount(d.days, 'Süre'),
+      risks: d.risks === undefined ? current.risks : clean(d.risks, 'Riskler', L.risks, false),
     };
   }
 

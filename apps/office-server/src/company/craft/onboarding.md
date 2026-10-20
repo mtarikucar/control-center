@@ -9,6 +9,7 @@ Sahibi işini söyledi; ofisin onu tanıması gerekiyor. Amaç: zorunlu bölüml
 3. **Yaz.** Cevapları `profileUpdate(…, assumed: false)` ile yaz; `false` yalnız sahibinin gerçekten söylediği için.
    Sahibi soruları ekrandan da cevaplayabilir; o zaman sana bildirim gelir, yazılmış olur.
 4. **Bekletme.** İki kez sorulup cevapsız kalan soruyu bir daha sorma: `onboardingNext` onu "varsayımla doldur"
-   listesine koyar; en makul tahmini `assumed: true` ile yaz.
+   listesine koyar; en makul tahmini `assumed: true` ile yaz. Sahibinin "devam", "tamam" gibi kısa bir mesajı cevap
+   değildir: soruları bir kez daha sor. `onboardingFinish` yalnız bir kez sorulmuş varsayımları kabul etmez.
 5. **Bitir.** Zorunlular dolunca `onboardingFinish`; yanıtın saydığı varsayımları sahibine kısaca bildir. İsteğe bağlı
    sorular (`onboardingNext(optional: true)`) işi bekletmez; kurulum profilden çıkar.
